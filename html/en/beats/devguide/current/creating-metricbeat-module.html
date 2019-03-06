@@ -734,7 +734,43 @@ the <code class="literal">fields.yml</code> file in each metricset to generate t
       type: group
       description: &gt;
       fields:</pre></div><p>Make sure that you update at least the description of the module.</p><h4><a id="_testing_2"></a>Testing<a href="https://github.com/elastic/beats/edit/master/docs/devguide/create-module.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h4><p>It’s a common pattern to use a <code class="literal">testing.go</code> file in the module package to share some testing functionality among
-the metricsets. This file does not have <code class="literal">_test.go</code> in the name because otherwise it would not be compiled for sub packages.</p><p>To see an example of the <code class="literal">testing.go</code> file, look at the <a class="ulink" href="https://github.com/elastic/beats/tree/master/metricbeat/module/mysql" target="_top">mysql module</a>.</p><h5><a id="_run_environment_tests_for_one_module"></a>Run Environment tests for one module<a href="https://github.com/elastic/beats/edit/master/docs/devguide/create-module.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h5><p>All the environments are setup with docker. <code class="literal">make integration-tests-environment</code> and <code class="literal">make system-tests-environment</code> can be used to run tests for all modules. In case you are developing a module it is convenient to run the tests only for one module and directly run it on your machine.</p><p>First you need to start the environment for your module to test and expose the port to your local machine. For this you can run the following command inside the metricbeat directory:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-bash">MODULE=apache PORT=80 make run-module</pre></div><p>Note: The apache module with port 80 is taken here as an example. You must put the name and port for your own module here.</p><p>This will start the environment and you must wait until the service is completely started. After that you can run the test which require an environment:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-bash">MODULE=apache make test-module</pre></div><p>This will run the integration and system tests connecting to the environment in your docker container.</p></div><div class="navfooter"><span class="prev"><a href="metricset-details.html">
+the metricsets. This file does not have <code class="literal">_test.go</code> in the name because otherwise it would not be compiled for sub packages.</p><p>To see an example of the <code class="literal">testing.go</code> file, look at the <a class="ulink" href="https://github.com/elastic/beats/tree/master/metricbeat/module/mysql" target="_top">mysql module</a>.</p><h5><a id="_test_a_metricbeat_module_manually"></a>Test a Metricbeat module manually<a href="https://github.com/elastic/beats/edit/master/docs/devguide/create-module.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h5><p>To test a Metricbeat module manually, follow the steps below.</p><p>First we have to build the Docker image which is available for the modules. The Dockerfile is located inside a <code class="literal">_meta</code> folder within each module folder. As an example let’s take MySQL module.</p><p>This steps assume you have checked out the Beats repository from Github and are inside <code class="literal">beats</code> directory. First, we have to enter in the <code class="literal">_meta</code> folder mentioned above and build the Docker image called <code class="literal">metricbeat-mysql</code>:</p><p>```
+$ cd metricbeat/module/mysql/_meta/
+$ docker build -t metricbeat-mysql .
+…
+Removing intermediate container 0e58cfb7b197
+ --→ 9492074840ea
+Step 5/5 : COPY test.cnf /etc/mysql/conf.d/test.cnf
+ --→ 002969e1d810
+Successfully built 002969e1d810
+Successfully tagged metricbeat-mysql:latest
+```</p><p>Before we run the container we have just created, we also need to know which port to expose. The port is listed in the <code class="literal">metricbeat/{module}/_meta/env</code> file:</p><p>```
+$ cat env
+MYSQL_DSN=root:test@tcp(mysql:3306)/
+MYSQL_HOST=mysql
+MYSQL_PORT=3306
+```</p><p>As we see, the port is 3306. We now have all the information to start our MySQL service locally:</p><p>```
+$ docker run -p 3306:3306 -e MYSQL_ROOT_PASSWORD=secret metricbeat-mysql
+```</p><p>This starts the container and you can now use it for testing the MySQL module.</p><p>To run Metricbeat with the module we need to build the binary, enable the module first. The assumption is now that you are back in the <code class="literal">beats</code> folder path:</p><p>```
+$ cd metricbeat
+$ mage build
+$ ./metricbeat modules enable mysql
+```</p><p>This will enable the module and rename file <code class="literal">metricbeat/modules.d/mysql.yml.disabled</code> to <code class="literal">metricbeat/modules.d/mysql.yml</code>. According to our <a class="ulink" href="https://www.elastic.co/guide/en/beats/metricbeat/current/metricbeat-module-mysql.html" target="_top">documentation</a> we should specify username and password to user MySQL. It’s always a good idea to take a look at the docs to see also that a pre-built dashboard is also available. So tweaking the config a bit, this is how it looks like:</p><p>```yml
+$ cat modules.d/mysql.yml</p><p># Module: mysql
+# Docs: <a class="ulink" href="https://www.elastic.co/guide/en/beats/metricbeat/master/metricbeat-module-mysql.html" target="_top">https://www.elastic.co/guide/en/beats/metricbeat/master/metricbeat-module-mysql.html</a></p><div class="itemizedlist"><ul class="itemizedlist" type="disc"><li class="listitem">
+module: mysql
+  metricsets:
+</li><li class="listitem"><p class="simpara">
+status
+  #  - galera_status
+  period: 10s
+</p><pre class="literallayout"># Host DSN should be defined as "user:pass@tcp(127.0.0.1:3306)/"
+# The username and password can either be set in the DSN or using the username
+# and password config options. Those specified in the DSN take precedence.
+hosts: ["tcp(127.0.0.1:3306)/"]</pre><pre class="literallayout"># Username of hosts. Empty by default.
+username: root</pre><pre class="literallayout">  # Password of hosts. Empty by default.
+  password: secret
+```</pre></li></ul></div><p>It’s now sending data to your local Elasticsearch instance. If you need to modify the mysql config, adjust <code class="literal">modules.d/mysql.yml</code> and restart Metricbeat.</p><h5><a id="_run_environment_tests_for_one_module"></a>Run Environment tests for one module<a href="https://github.com/elastic/beats/edit/master/docs/devguide/create-module.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h5><p>All the environments are setup with docker. <code class="literal">make integration-tests-environment</code> and <code class="literal">make system-tests-environment</code> can be used to run tests for all modules. In case you are developing a module it is convenient to run the tests only for one module and directly run it on your machine.</p><p>First you need to start the environment for your module to test and expose the port to your local machine. For this you can run the following command inside the metricbeat directory:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-bash">MODULE=apache PORT=80 make run-module</pre></div><p>Note: The apache module with port 80 is taken here as an example. You must put the name and port for your own module here.</p><p>This will start the environment and you must wait until the service is completely started. After that you can run the test which require an environment:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-bash">MODULE=apache make test-module</pre></div><p>This will run the integration and system tests connecting to the environment in your docker container.</p></div><div class="navfooter"><span class="prev"><a href="metricset-details.html">
               « 
               Metricset Details</a>
            
