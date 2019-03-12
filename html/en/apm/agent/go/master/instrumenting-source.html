@@ -786,7 +786,7 @@ by apmgrpc.</p><div class="pre_wrapper"><pre class="programlisting prettyprint l
 ...</pre></div><p>There is currently no support for intercepting at the stream level. Please file an issue and/or
 send a pull request if this is something you need.</p></div><div class="section"><div class="titlepage"><div><div><h4 class="title"><a id="builtin-modules-apmhttp"></a>module/apmhttp<a href="https://github.com/elastic/apm-agent-go/edit/master/docs/instrumenting.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h4></div></div></div><p>Package apmhttp provides a low-level <code class="literal">net/http</code> middleware handler. Other web middleware should
 typically be based off this.</p><p>For each request, a transaction is stored in the request context, which can be obtained via
-<a class="ulink" href="https://golang.org/pkg/net/http/#Request" target="_top">http.Request</a><code class="literal">.Context()</code> in your handler.</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-go">import (
+<a class="ulink" href="https://golang.org/pkg/net/http/#Request.Context" target="_top">http.Request.Context</a> in your handler.</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-go">import (
         "go.elastic.co/apm/module/apmhttp"
 )
 
@@ -794,16 +794,30 @@ func main() {
         var myHandler http.Handler = ...
         tracedHandler := apmhttp.Wrap(myHandler)
 }</pre></div><p>The apmhttp handler will recover panics and send them to Elastic APM.</p><p>Package apmhttp also provides functions for instrumenting an <code class="literal">http.Client</code> or <code class="literal">http.RoundTripper</code>
-such that outgoing requests are traced as spans, if the request context includes a transaction.</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-go">import (
+such that outgoing requests are traced as spans, if the request context includes a transaction.
+When performing the request, the enclosing context should be propagated by using
+<a class="ulink" href="https://golang.org/pkg/net/http/#Request.WithContext" target="_top">http.Request.WithContext</a>, or a helper
+such as those provided by <a class="ulink" href="https://golang.org/x/net/context/ctxhttp" target="_top">https://golang.org/x/net/context/ctxhttp</a>.</p><p>Client spans are not ended until the response body is fully consumed or closed. If you fail to
+do either of these, then the span will not be sent. You should always close the response body
+anyway, to ensure HTTP connections can be reused; see <a class="ulink" href="https://golang.org/pkg/net/http/#Client.Do" target="_top">https://golang.org/pkg/net/http/#Client.Do</a>.</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-go">import (
         "net/http"
+
         "golang.org/x/net/context/ctxhttp"
+
         "go.elastic.co/apm/module/apmhttp"
 )
 
 var tracingClient = apmhttp.WrapClient(http.DefaultClient)
 
 func serverHandler(w http.ResponseWriter, req *http.Request) {
+        // Propagate the transaction context contained in req.Context().
         resp, err := ctxhttp.Get(req.Context(), tracingClient, "http://backend.local/foo")
+        if err != nil {
+                apm.CaptureError(req.Context()).Send()
+                http.Error(w, "failed to query backend", 500)
+                return
+        }
+        body, err := ioutil.ReadAll(resp.Body)
         ...
 }
 
