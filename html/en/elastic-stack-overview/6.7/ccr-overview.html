@@ -715,12 +715,20 @@ can directly be written into, the follower index can not directly receive
 writes.</p><p>Replication is pull-based. This means that replication is driven by the
 follower index. This simplifies state management on the leader index and means
 that cross-cluster replication does not interfere with indexing on the leader index.</p><h3><a id="_configuring_replication"></a>Configuring replication<a href="https://github.com/elastic/elasticsearch/edit/6.7/docs/reference/ccr/index.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>Replication can be configured in two ways:</p><div class="itemizedlist"><ul class="itemizedlist" type="disc"><li class="listitem">
-Manually using the
-  <a class="ulink" href="https://www.elastic.co/guide/en/elasticsearch/reference/6.7/ccr-put-follow.html" target="_top">create follower API</a>
+Manually creating specific follower indices (in Kibana or by using the
+<a class="ulink" href="https://www.elastic.co/guide/en/elasticsearch/reference/6.7/ccr-put-follow.html" target="_top">create follower API</a>)
 </li><li class="listitem">
-Automatically using
-  <a class="link" href="ccr-auto-follow.html" title="Automatically following indices">auto-follow patterns</a>
-</li></ul></div><div class="note admon"><div class="icon"><img alt="Note" src="images/icons/note.png" /></div><div class="admon_content"><p>You must also <a class="link" href="ccr-requirements.html" title="Requirements for leader indices">configure the leader index</a>.</p></div></div><h3><a id="_the_mechanics_of_replication"></a>The mechanics of replication<a href="https://github.com/elastic/elasticsearch/edit/6.7/docs/reference/ccr/index.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>While replication is managed at the index level, replication is performed at the
+Automatically creating follower indices from auto-follow patterns (in Kibana or
+by using the <a class="ulink" href="https://www.elastic.co/guide/en/elasticsearch/reference/6.7/ccr-put-auto-follow-pattern.html" target="_top">create auto-follow pattern API</a>)
+</li></ul></div><p>For more information about managing cross-cluster replication in Kibana, see
+<a class="ulink" href="https://www.elastic.co/guide/en/kibana/6.7/working-remote-clusters.html" target="_top">Working with remote clusters</a>.</p><div class="note admon"><div class="icon"><img alt="Note" src="images/icons/note.png" /></div><div class="admon_content"><p>You must also <a class="link" href="ccr-requirements.html" title="Requirements for leader indices">configure the leader index</a>.</p></div></div><p>When you initiate replication either manually or through an auto-follow pattern, the
+follower index is created on the local cluster. Once the follower index is created,
+the <a class="link" href="remote-recovery.html" title="Remote recovery">remote recovery</a> process copies all of the Lucene segment
+files from the remote cluster to the local cluster.</p><p>By default, if you initiate following manually (by using Kibana or the create follower API),
+the recovery process is asynchronous in relationship to the
+<a class="ulink" href="https://www.elastic.co/guide/en/elasticsearch/reference/6.7/ccr-put-follow.html" target="_top">create follower request</a>. The request returns before
+the <a class="link" href="remote-recovery.html" title="Remote recovery">remote recovery</a> process completes. If you would like to wait on
+the process to complete, you can use the <code class="literal">wait_for_active_shards</code> parameter.</p><h3><a id="_the_mechanics_of_replication"></a>The mechanics of replication<a href="https://github.com/elastic/elasticsearch/edit/6.7/docs/reference/ccr/index.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>While replication is managed at the index level, replication is performed at the
 shard level. When a follower index is created, it is automatically
 configured to have an identical number of shards as the leader index. A follower
 shard task in the follower index pulls from the corresponding leader shard in
@@ -740,7 +748,7 @@ avoid forceful termination by an external source (such as a firewall).</p><p>If 
 cause of the failure is deemed to be a failure that can be recovered from (for
 example, a network failure), the follower shard task enters into a retry
 loop. Otherwise, the follower shard task is paused and requires user
-intervention before the it can be resumed with the
+intervention before it can be resumed with the
 <a class="ulink" href="https://www.elastic.co/guide/en/elasticsearch/reference/6.7/ccr-post-resume-follow.html" target="_top">resume follower API</a>.</p><p>When operations are received by the follower shard task, they are placed in a
 write buffer. The follower shard task manages this write buffer and submits
 bulk write requests from this write buffer to the follower shard.  The write
@@ -749,7 +757,9 @@ established when you configured the follower index.  The write buffer serves as
 back-pressure against read requests. If the write buffer exceeds its configured
 limits, no additional read requests are sent by the follower shard task. The
 follower shard task resumes sending read requests when the write buffer no
-longer exceeds its configured limits.</p><p>Mapping updates applied to the leader index are automatically retrieved
+longer exceeds its configured limits.</p><div class="note admon"><div class="icon"><img alt="Note" src="images/icons/note.png" /></div><div class="admon_content"><p>The intricacies of how operations are replicated from the leader are
+governed by settings that you can configure when you create the follower index
+in Kibana or by using the <a class="ulink" href="https://www.elastic.co/guide/en/elasticsearch/reference/6.7/ccr-put-follow.html" target="_top">create follower API</a>.</p></div></div><p>Mapping updates applied to the leader index are automatically retrieved
 as-needed by the follower index.</p><p>Settings updates applied to the leader index that are needed by the follower
 index are automatically retried as-needed by the follower index. Not all
 settings updates are needed by the follower index. For example, changing the
@@ -766,7 +776,41 @@ user intervention.</p><h3><a id="_pausing_and_resuming_replication"></a>Pausing 
 replication with the <a class="ulink" href="https://www.elastic.co/guide/en/elasticsearch/reference/6.7/ccr-post-resume-follow.html" target="_top">resume follower API</a>.
 Using these APIs in tandem enables you to adjust the read and write parameters
 on the follower shard task if your initial configuration is not suitable for
-your use case.</p><h3><a id="_terminating_replication"></a>Terminating replication<a href="https://github.com/elastic/elasticsearch/edit/6.7/docs/reference/ccr/index.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>You can terminate replication with the
+your use case.</p><h3><a id="_leader_index_retaining_operations_for_replication"></a>Leader index retaining operations for replication<a href="https://github.com/elastic/elasticsearch/edit/6.7/docs/reference/ccr/index.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>If the follower is unable to replicate operations from a leader for a period of
+time, the following process can fail due to the leader lacking a complete history
+of operations necessary for replication.</p><p>Operations replicated to the follower are identified using a sequence number
+generated when the operation was initially performed. Lucene segment files are
+occasionally merged in order to optimize searches and save space. When these
+merges occur, it is possible for operations associated with deleted or updated
+documents to be pruned during the merge. When the follower requests the sequence
+number for a pruned operation, the process will fail due to the operation missing
+on the leader.</p><p>This scenario is not possible in an append-only workflow. As documents are never
+deleted or updated, the underlying operation will not be pruned.</p><p>Elasticsearch attempts to mitigate this potential issue for update workflows using
+a Lucene feature called soft deletes. When a document is updated or deleted, the
+underlying operation is retained in the Lucene index for a period of time. This
+period of time is governed by the <code class="literal">index.soft_deletes.retention_lease.period</code>
+setting which can be <a class="link" href="ccr-requirements.html" title="Requirements for leader indices">configured on the leader index</a>.</p><p>When a follower initiates the index following, it acquires a retention lease from
+the leader. This informs the leader that it should not allow a soft delete to be
+pruned until either the follower indicates that it has received the operation or
+the lease expires. It is valuable to have monitoring in place to detect a follower
+replication issue prior to the lease expiring so that the problem can be remedied
+before the follower falls fatally behind.</p><h3><a id="_remedying_a_follower_that_has_fallen_behind"></a>Remedying a follower that has fallen behind<a href="https://github.com/elastic/elasticsearch/edit/6.7/docs/reference/ccr/index.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>If a follower falls sufficiently behind a leader that it can no longer replicate
+operations this can be detected in Kibana or by using the
+<a class="ulink" href="https://www.elastic.co/guide/en/elasticsearch/reference/6.7/ccr-get-follow-stats.html" target="_top">get follow stats API</a>. It will be reported as a
+<code class="literal">indices[].fatal_exception</code>.</p><p>In order to restart the follower, you must pause the following process, close the
+index, and the create follower index again. For example:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-js">POST /follower_index/_ccr/pause_follow
+
+POST /follower_index/_close
+
+PUT /follower_index/_ccr/follow?wait_for_active_shards=1
+{
+  "remote_cluster" : "remote_cluster",
+  "leader_index" : "leader_index"
+}</pre></div><div class="console_widget" data-snippet="snippets/ccr-overview/1.json"></div><p>Re-creating the follower index is a destructive action. All of the existing Lucene
+segment files are deleted on the follower cluster. The
+<a class="link" href="remote-recovery.html" title="Remote recovery">remote recovery</a> process copies the Lucene segment
+files from the leader again. After the follower index initializes, the
+following process starts again.</p><h3><a id="_terminating_replication"></a>Terminating replication<a href="https://github.com/elastic/elasticsearch/edit/6.7/docs/reference/ccr/index.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>You can terminate replication with the
 <a class="ulink" href="https://www.elastic.co/guide/en/elasticsearch/reference/6.7/ccr-post-unfollow.html" target="_top">unfollow API</a>. This API converts a follower index
 to a regular (non-follower) index.</p></div><div class="navfooter"><span class="prev"><a href="xpack-ccr.html">
               « 
