@@ -803,8 +803,9 @@ We use <code class="literal">virtualenv</code> to deal with Python dependencies.
 You can simply run the command <code class="literal">make python-env</code>  and then <code class="literal">. build/python-env/bin/activate</code> .</p><p>You should use a combination of the three test types to test your metricsets because
 each method has advantages and disadvantages. To get started with your own tests, it’s best
 to look at the existing tests. You’ll find the unit and integration tests
-in the <code class="literal">_test.go</code> files under existing modules and metricsets. The system
-tests are under <code class="literal">tests/systems</code>.</p><h5><a id="_adding_a_test_environment"></a>Adding a Test Environment<a href="https://github.com/elastic/beats/edit/master/docs/devguide/metricset-details.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h5><p>Integration and system tests need an environment that’s running the service. You
+in the <code class="literal">_test.go</code> files under existing modules and metricsets.
+Integration tests usually take the form of <code class="literal">TestFetch</code> and <code class="literal">TestData</code>.
+The system tests are under <code class="literal">tests/systems</code>.</p><h5><a id="_adding_a_test_environment"></a>Adding a Test Environment<a href="https://github.com/elastic/beats/edit/master/docs/devguide/metricset-details.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h5><p>Integration and system tests need an environment that’s running the service. You
 can create this environment by using Docker and a docker-compose file. If you add a
 module that requires a service, you must add the service to the virtual environment.
 To do this, you:</p><div class="itemizedlist"><ul class="itemizedlist" type="disc"><li class="listitem">
@@ -822,9 +823,78 @@ variables in the docker-compose file and add the link to the container:</p><div 
     - REDIS_PORT=6379</pre></div><p>To make sure the service is running before the tests are started, modify the
 <code class="literal">docker-entrypoint.sh</code> script to add a check that verifies your service is
 running. For example, the check for Redis looks like this:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-shell">waitFor ${REDIS_HOST} ${REDIS_PORT} Redis</pre></div><p>The environment expects your service to be available as soon as it receives a response from
-the given address and port.</p><h5><a id="_running_the_tests"></a>Running the Tests<a href="https://github.com/elastic/beats/edit/master/docs/devguide/metricset-details.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h5><p>To run all the tests, run <code class="literal">make testsuite</code>. To only run unit tests, run
+the given address and port.</p><h5><a id="_adding_the_standard_metricset_integration_tests"></a>Adding the standard metricset integration tests<a href="https://github.com/elastic/beats/edit/master/docs/devguide/metricset-details.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h5><p>There are normally two integration tests that are part of every metricset: <code class="literal">TestFetch</code> and <code class="literal">TestData</code>.
+Both tests will start up a new instance of your metricset and fetch an event. In order to start a metricset, you need to create a configuration object:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-go">func getConfig() map[string]interface{} {
+    return map[string]interface{}{
+    "module":           "{module}",
+    "metricsets":       []string{"{metricset}"},
+    "hosts":      []string{GetEnvHost() + ":" + GetEnvPort()}, <a id="CO3-1"></a><span><img src="images/icons/callouts/1.png" alt="" /></span>
+  }
+}
+
+func GetEnvHost() string { <a id="CO3-2"></a><span><img src="images/icons/callouts/2.png" alt="" /></span>
+    host := os.Getenv("{module}_HOST")
+    if len(host) == 0 {
+    host = "127.0.0.1"
+  }
+  return host
+}
+
+func GetEnvPort() string { <a id="CO3-3"></a><span><img src="images/icons/callouts/3.png" alt="" /></span>
+    port := os.Getenv("{module}_PORT")
+
+    if len(port) == 0 {
+      port = "1234"
+    }
+  return port
+}</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO3-1"><span><img src="images/icons/callouts/1.png" alt="" /></span></a> </p></td><td valign="top" align="left"><p>
+Add any additional config options your metricset needs here.
+</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO3-2"><span><img src="images/icons/callouts/2.png" alt="" /></span></a> <a href="#CO3-3"><span><img src="images/icons/callouts/3.png" alt="" /></span></a> </p></td><td valign="top" align="left"><p>
+The endpoint used by the metricset needs to be configurable for manual and automated testing.
+Environment variables should be defined in the module under <code class="literal">_meta/env</code> and included in the <code class="literal">docker-compose.yml</code> file.
+</p></td></tr></table></div><p>The <code class="literal">TestFetch</code> integration test will return a single event from your metricset, which you can use to test the validity of the data.
+<code class="literal">TestData</code> will (re)generate the <code class="literal">_meta/data.json</code> file that documents the data reported by the metricset.</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-go">import (
+        "os"
+        "testing"
+
+        "github.com/stretchr/testify/assert"
+
+        "github.com/elastic/beats/libbeat/tests/compose"
+        mbtest "github.com/elastic/beats/metricbeat/mb/testing"
+)
+
+func TestFetch(t *testing.T) {
+        compose.EnsureUp(t, "{module}") <a id="CO4-1"></a><span><img src="images/icons/callouts/1.png" alt="" /></span>
+
+        f := mbtest.NewReportingMetricSetV2Error(t, getConfig())
+
+        events, errs := mbtest.ReportingFetchV2Error(f)
+        if len(errs) &gt; 0 {
+                t.Fatalf("Expected 0 errord, had %d. %v\n", len(errs), errs)
+        }
+
+        assert.NotEmpty(t, events) <a id="CO4-2"></a><span><img src="images/icons/callouts/2.png" alt="" /></span>
+
+}
+
+func TestData(t *testing.T) {
+
+        f := mbtest.NewReportingMetricSetV2Error(t, getConfig())
+
+        err := mbtest.WriteEventsReporterV2Error(f, t, "") <a id="CO4-3"></a><span><img src="images/icons/callouts/3.png" alt="" /></span>
+        if !assert.NoError(t, err) {
+                t.FailNow()
+        }
+}</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO4-1"><span><img src="images/icons/callouts/1.png" alt="" /></span></a> </p></td><td valign="top" align="left"><p>
+Use this to start the docker service associated with your metricset.
+</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO4-2"><span><img src="images/icons/callouts/2.png" alt="" /></span></a> </p></td><td valign="top" align="left"><p>
+Add any further validity checks to verify the metricset is working.
+</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO4-3"><span><img src="images/icons/callouts/3.png" alt="" /></span></a> </p></td><td valign="top" align="left"><p>
+<code class="literal">WriteEventsReporterV2Error</code> will take the first valid event from the metricset and write it to <code class="literal">_meta/data.json</code>
+</p></td></tr></table></div><h5><a id="_running_the_tests"></a>Running the Tests<a href="https://github.com/elastic/beats/edit/master/docs/devguide/metricset-details.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h5><p>To run all the tests, run <code class="literal">make testsuite</code>. To only run unit tests, run
 <code class="literal">make unit-tests</code> or for integration tests <code class="literal">make integration-tests-environment</code>. Be aware that
-a running Docker environment is needed for integration and system tests.</p><p>Sometimes you may want to run a single integration test, for example, to test a
+a running Docker environment is needed for integration and system tests.</p><p>To run <code class="literal">TestData</code> and generate the <code class="literal">data.json</code> file, run
+<code class="literal">go test -tags=integration -data -run TestData</code> in the directory where your test is located.</p><p>Sometimes you may want to run a single integration test, for example, to test a
 module such as the <code class="literal">apache</code> module. To do this, you can:</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem">
 Start the Docker service by running
 <code class="literal">docker-compose run -p port:port apache</code>. You can skip this step if, like the
