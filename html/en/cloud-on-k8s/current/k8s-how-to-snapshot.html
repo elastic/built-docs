@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="en-us">
   <head>
-<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title>Deploy ECK in your Kubernetes cluster
-        | Elastic Cloud on Kubernetes [0.8]
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title>How to create automated snapshots
+        | Elastic Cloud on Kubernetes [master]
       | Elastic
-    </title><meta name="generator" content="DocBook XSL Stylesheets V1.78.1" /><link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [0.8]" /><link rel="up" href="k8s-quickstart.html" title="Quickstart" /><link rel="prev" href="k8s-quickstart.html" title="Quickstart" /><link rel="next" href="k8s-deep-dive.html" title="Deep dive" /><meta name="description" content="Get started with the documentation for Elasticsearch, Kibana, Logstash, Beats, X-Pack, Elastic Cloud, Elasticsearch for Apache Hadoop, and our language clients." /><meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/0.8" /><meta name="DC.subject" content="ECK" /><meta name="DC.identifier" content="0.8" />
+    </title><meta name="generator" content="DocBook XSL Stylesheets V1.78.1" /><link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [master]" /><link rel="up" href="index.html" title="Elastic Cloud on Kubernetes [master]" /><link rel="prev" href="k8s-advanced-node-scheduling.html" title="Advanced Elasticsearch node scheduling" /><meta name="description" content="Get started with the documentation for Elasticsearch, Kibana, Logstash, Beats, X-Pack, Elastic Cloud, Elasticsearch for Apache Hadoop, and our language clients." /><meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/master" /><meta name="DC.subject" content="ECK" /><meta name="DC.identifier" content="master" />
     
 
     
@@ -696,95 +696,119 @@
             <!-- start body -->
 <div class="page_header">You are looking at documentation for an alpha release. Not what you want? See <a href="https://www.elastic.co/elasticsearch-kubernetes">Deploy Elasticsearch & Kibana on Kubernetes</a> documentation.
 </div><div class="breadcrumbs"><span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes
-      [0.8]
-    </a></span> » <span class="breadcrumb-link"><a href="k8s-quickstart.html">Quickstart</a></span> » <span class="breadcrumb-node">Deploy ECK in your Kubernetes cluster</span></div><div class="navheader"><span class="prev"><a href="k8s-quickstart.html">
+      [master]
+    </a></span> » <span class="breadcrumb-node">How to create automated snapshots</span></div><div class="navheader"><span class="prev"><a href="k8s-advanced-node-scheduling.html">
               « 
-              Quickstart</a>
+              Advanced Elasticsearch node scheduling</a>
            
         </span><span class="next">
            
-          <a href="k8s-deep-dive.html">Deep dive
-               »
-            </a></span></div><div class="chapter"><div class="titlepage"><div><div><h2 class="title"><a id="k8s-deploy-eck"></a>Deploy ECK in your Kubernetes cluster<a href="https://github.com/elastic/cloud-on-k8s/edit/0.8/docs/k8s-quickstart.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h2></div></div></div><div class="note admon"><div class="icon"><img alt="Note" src="images/icons/note.png" /></div><div class="admon_content"><p>If you are using GKE, make sure your user has <code class="literal">cluster-admin</code> permissions. For more information, see <a class="ulink" href="https://cloud.google.com/kubernetes-engine/docs/how-to/role-based-access-control#iam-rolebinding-bootstrap" target="_top">Prerequisites for using Kubernetes RBAC on GKE</a>.</p></div></div><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem"><p class="simpara">
-Install <a class="ulink" href="https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/" target="_top">custom resource definitions</a> and the operator with its RBAC rules:
-</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">kubectl apply -f https://download.elastic.co/downloads/eck/0.8.0/all-in-one.yaml</pre></div></li><li class="listitem"><p class="simpara">
-Monitor the operator logs:
-</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">kubectl -n elastic-system logs -f statefulset.apps/elastic-operator</pre></div></li></ol></div><h2><a id="k8s-deploy-elasticsearch"></a>Deploy the Elasticsearch cluster<a href="https://github.com/elastic/cloud-on-k8s/edit/0.8/docs/k8s-quickstart.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h2><p>Apply a simple <a class="ulink" href="https://www.elastic.co/guide/en/elasticsearch/reference/7.0/getting-started.html" target="_top">Elasticsearch</a> cluster specification, with one node:</p><div class="note admon"><div class="icon"><img alt="Note" src="images/icons/note.png" /></div><div class="admon_content"><p>The default resource request is 2gb memory and 100m cpu, and your pod will be <code class="literal">Pending</code> if your cluster does not have enough resources.</p></div></div><div class="pre_wrapper"><pre class="programlisting prettyprint lang-yaml">cat &lt;&lt;EOF | kubectl apply -f -
-apiVersion: elasticsearch.k8s.elastic.co/v1alpha1
+          </span></div><div class="chapter"><div class="titlepage"><div><div><h1 class="title"><a id="k8s-how-to-snapshot"></a>How to create automated snapshots<a href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/snapshots.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h1></div></div></div><p>To set up automated snapshots for Elasticsearch on Kubernetes you have to:</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem">
+Ensure you have the necessary Elasticsearch storage plugin installed.
+</li><li class="listitem">
+Add snapshot repository credentials to the Elasticsearch keystore.
+</li><li class="listitem">
+Register the snapshot repository with the Elasticsearch API.
+</li><li class="listitem">
+Set up a <a class="ulink" href="https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/" target="_top">CronJob</a> to take snapshots on a schedule.
+</li></ol></div><p>The examples below use the <a class="ulink" href="https://www.elastic.co/guide/en/elasticsearch/plugins/master/repository-gcs.html" target="_top">Google Cloud Storage Repository Plugin</a>.</p><p>For more information on Elasticsearch snapshots, see <a class="ulink" href="https://www.elastic.co/guide/en/elasticsearch/reference/current/modules-snapshots.html" target="_top">Snapshot and Restore</a>.</p><h3><a id="k8s-install-plugin"></a>Install the Storage Repository Plugin<a href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/snapshots.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>To install the storage repository plugin, you can either use a custom image or add your own init container which
+installs the plugin at pod creation time.</p><p>To use your own custom image with all necessary plugins pre-installed, use an Elasticsearch resource like the following one:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-yaml">apiVersion: elasticsearch.k8s.elastic.co/v1alpha1
 kind: Elasticsearch
 metadata:
-  name: quickstart
+  name: elasticsearch-sample
+spec:
+  version: 7.1.0
+  image: your/custom/image:7.1.0
+  nodes:
+  - nodeCount: 1</pre></div><p>Alternatively, install the plugin at pod creation time by using an init container:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-yaml">apiVersion: elasticsearch.k8s.elastic.co/v1alpha1
+kind: Elasticsearch
+metadata:
+  name: elasticsearch-sample
 spec:
   version: 7.1.0
   nodes:
-  - nodeCount: 1
-    config:
-      node.master: true
-      node.data: true
-      node.ingest: true
-EOF</pre></div><p>The operator automatically manages Pods and resources corresponding to the desired cluster. It may take up to a few minutes until the cluster is ready.</p><h3><a id="k8s-monitor_cluster_health_and_creation_progress"></a>Monitor cluster health and creation progress<a href="https://github.com/elastic/cloud-on-k8s/edit/0.8/docs/k8s-quickstart.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>Get an overview of the current Elasticsearch clusters in the Kubernetes cluster, including health, version and number of nodes:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">kubectl get elasticsearch</pre></div><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">NAME          HEALTH    NODES     VERSION   PHASE         AGE
-quickstart    green     1         7.1.0     Operational   1m</pre></div><p>When you create the cluster, there is no <code class="literal">HEALTH</code> status and the <code class="literal">PHASE</code> is <code class="literal">Pending</code>. After a while, the <code class="literal">PHASE</code> turns into <code class="literal">Operational</code>, and <code class="literal">HEALTH</code> becomes <code class="literal">green</code>.</p><p>You can see that one Pod is in the process of being started:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">kubectl get pods --selector='elasticsearch.k8s.elastic.co/cluster-name=quickstart'</pre></div><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">NAME                       READY     STATUS    RESTARTS   AGE
-quickstart-es-5zctxpn8nd   1/1       Running   0          1m</pre></div><p>Access the logs for that Pod:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">kubectl logs -f quickstart-es-5zctxpn8nd</pre></div><h3><a id="k8s-request_elasticsearch_access"></a>Request Elasticsearch access<a href="https://github.com/elastic/cloud-on-k8s/edit/0.8/docs/k8s-quickstart.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>A ClusterIP Service is automatically created for your cluster:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">kubectl get service quickstart-es</pre></div><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">NAME            TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
-quickstart-es   ClusterIP   10.15.251.145   &lt;none&gt;        9200/TCP   34m</pre></div><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem"><p class="simpara">
-Get access to Elasticsearch.
-</p><p class="simpara">From the Kubernetes cluster, use this URL:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">https://quickstart-es:9200</pre></div><p class="simpara">From your local workstation, use the following command:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">kubectl port-forward service/quickstart-es 9200</pre></div></li><li class="listitem"><p class="simpara">
-Get the credentials and request the Elasticsearch endpoint.
-</p><p class="simpara">A default user named <code class="literal">elastic</code> is automatically created. Its password is stored as a Kubernetes secret:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">PASSWORD=$(kubectl get secret quickstart-elastic-user -o=jsonpath='{.data.elastic}' | base64 --decode)</pre></div></li><li class="listitem"><p class="simpara">
-Request the Elasticsearch endpoint:
-</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">curl -u "elastic:$PASSWORD" -k "https://localhost:9200"</pre></div></li></ol></div><div class="note admon"><div class="icon"><img alt="Note" src="images/icons/note.png" /></div><div class="admon_content"><p>For testing purposes only, you can specify the <code class="literal">-k</code> option to turn off certificate verification.</p></div></div><div class="pre_wrapper"><pre class="programlisting prettyprint lang-json">{
-  "name" : "quickstart-es-r56c9dzzcr",
-  "cluster_name" : "quickstart",
-  "cluster_uuid" : "XqWg0xIiRmmEBg4NMhnYPg",
-  "version" : {
-    "number" : "7.1.0",
-    "build_flavor" : "default",
-    "build_type" : "docker",
-    "build_hash" : "04116c9",
-    "build_date" : "2019-05-08T06:20:03.781729Z",
-    "build_snapshot" : true,
-    "lucene_version" : "8.0.0",
-    "minimum_wire_compatibility_version" : "6.8.0",
-    "minimum_index_compatibility_version" : "6.0.0-beta1"
-  },
-  "tagline" : "You Know, for Search"
-}</pre></div><h2><a id="k8s-deploy-kibana"></a>Deploy the Kibana instance<a href="https://github.com/elastic/cloud-on-k8s/edit/0.8/docs/k8s-quickstart.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h2><p>To deploy your <a class="ulink" href="https://www.elastic.co/guide/en/kibana/7.0/introduction.html#introduction" target="_top">Kibana</a> instance go through the following steps.</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem"><p class="simpara">
-Specify a Kibana instance and associate it with your Elasticsearch cluster:
-</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-yaml">cat &lt;&lt;EOF | kubectl apply -f -
-apiVersion: kibana.k8s.elastic.co/v1alpha1
-kind: Kibana
-metadata:
-  name: quickstart
+  - podTemplate:
+      spec:
+        initContainers:
+        - name: install-plugins
+          command:
+          - sh
+          - -c
+          - |
+            bin/elasticsearch-plugin install --batch repository-gcs
+    nodeCount: 1</pre></div><p>Assuming you stored this in a file called <code class="literal">elasticsearch.yaml</code> you can in both cases create the Elasticsearch cluster with:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">kubectl apply -f elasticsearch.yaml</pre></div><h3><a id="k8s-secure-settings"></a>Configure GCS credentials via the Elasticsearch keystore<a href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/snapshots.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>The Elasticsearch GCS repository plugin requires a JSON file that contains service account credentials. These need to be added as secure settings to the Elasticsearch keystore. For more details, see <a class="ulink" href="https://www.elastic.co/guide/en/elasticsearch/plugins/master/repository-gcs-usage.html" target="_top">Google Cloud Storage Repository Plugin</a>.</p><p>Using ECK, you can automatically inject secure settings into a cluster node by providing them through a secret in the Elasticsearch Spec.</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem"><p class="simpara">
+Create a file containing the GCS credentials. For this example, name it <code class="literal">gcs.client.default.credentials_file</code>. The file name is important as it will be reflected in the secure setting.
+</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-json">{
+  "type": "service_account",
+  "project_id": "your-project-id",
+  "private_key_id": "...",
+  "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
+  "client_email": "service-account-for-your-repository@your-project-id.iam.gserviceaccount.com",
+  "client_id": "...",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://accounts.google.com/o/oauth2/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/your-bucket@your-project-id.iam.gserviceaccount.com"
+}</pre></div></li><li class="listitem"><p class="simpara">
+Create a Kubernetes secret from that file:
+</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">kubectl create secret generic gcs-credentials --from-file=gcs.client.default.credentials_file</pre></div></li><li class="listitem"><p class="simpara">
+Edit the <code class="literal">secureSettings</code> section of the Elasticsearch resource:
+</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-yaml">kind: Elasticsearch
 spec:
-  version: 7.1.0
-  nodeCount: 1
-  elasticsearchRef:
-    name: quickstart
-EOF</pre></div></li><li class="listitem"><p class="simpara">
-Monitor Kibana health and creation progress.
-</p><p class="simpara">Similarly to Elasticsearch, you can retrieve details about Kibana instances:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">kubectl get kibana</pre></div><p class="simpara">And the associated Pods:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">kubectl get pod --selector='kibana.k8s.elastic.co/name=quickstart'</pre></div></li><li class="listitem"><p class="simpara">
-Access Kibana.
-</p><p class="simpara">A <code class="literal">ClusterIP</code> Service is automatically created for Kibana:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">kubectl get service quickstart-kibana</pre></div><p class="simpara">Use <code class="literal">kubectl port-forward</code> to access Kibana from your local workstation:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">kubectl port-forward service/quickstart-kibana 5601</pre></div><p class="simpara">Open <code class="literal">http://localhost:5601</code> in your browser.</p><p class="simpara">Login with the <code class="literal">elastic</code> user. Retrieve its password with:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">echo $(kubectl get secret quickstart-elastic-user -o=jsonpath='{.data.elastic}' | base64 --decode)</pre></div></li></ol></div><h2><a id="k8s-upgrade-deployment"></a>Upgrade your deployment<a href="https://github.com/elastic/cloud-on-k8s/edit/0.8/docs/k8s-quickstart.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h2><p>You can apply any modification to the original cluster specification. The operator makes sure that your changes are applied to the existing cluster, while avoiding downtime.</p><p>For example, you can grow the cluster to three nodes:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-yaml">cat &lt;&lt;EOF | kubectl apply -f -
-apiVersion: elasticsearch.k8s.elastic.co/v1alpha1
-kind: Elasticsearch
+    # ...
+    # Inject secure settings into Elasticsearch nodes from a k8s secret reference
+    secureSettings:
+      secretName: "gcs-credentials"</pre></div></li><li class="listitem"><p class="simpara">
+Apply the modifications:
+</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-bash">kubectl apply -f elasticsearch.yml</pre></div></li></ol></div><p>GCS credentials are automatically propagated into each node’s keystore. It can take up to a few minutes, depending on the number of secrets in the keystore. You don’t have to restart the nodes.</p><h3><a id="k8s-create-repository"></a>Register the repository in Elasticsearch<a href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/snapshots.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem"><p class="simpara">
+Create the GCS snapshot repository in Elasticsearch following the procedure described in <a class="ulink" href="https://www.elastic.co/guide/en/elasticsearch/reference/current/modules-snapshots.html" target="_top">Snapshot and Restore</a>:
+</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">PUT /_snapshot/my_gcs_repository
+{
+  "type": "gcs",
+  "settings": {
+    "bucket": "my_bucket",
+    "client": "default"
+  }
+}</pre></div></li><li class="listitem"><p class="simpara">
+Take a snapshot with the following HTTP request:
+</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">PUT /_snapshot/my_gcs_repository/test-snapshot</pre></div></li></ol></div><h3><a id="k8s-setup-cronjob"></a>Periodic snapshots with a CronJob<a href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/snapshots.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>You can set up a simple CronJob to take a snapshot every day.</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem"><p class="simpara">
+Make an HTTP request against the appropriate endpoint, using a daily snapshot naming format. Elasticsearch credentials are mounted as a volume into the job’s pod:
+</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-yaml"># snapshotter.yml
+apiVersion: batch/v1beta1
+kind: CronJob
 metadata:
-  name: quickstart
+  name: elasticsearch-sample-snapshotter
 spec:
-  version: 7.1.0
-  nodes:
-  - nodeCount: 3
-    config:
-      node.master: true
-      node.data: true
-      node.ingest: true
-EOF</pre></div></div><div class="navfooter"><span class="prev"><a href="k8s-quickstart.html">
+  schedule: "@daily"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: snapshotter
+            image: centos:7
+            volumeMounts:
+              - name: es-basic-auth
+                mountPath: /mnt/elastic/es-basic-auth
+            command:
+            - /bin/bash
+            args:
+            - -c
+            - 'curl -s -i -k -u "elastic:$(&lt;/mnt/elastic/es-basic-auth/elastic)" -XPUT "https://elasticsearch-sample-es-http:9200/_snapshot/my_gcs_repository/%3Csnapshot-%7Bnow%2Fd%7D%3E" | tee /dev/stderr | grep "200 OK"'
+          restartPolicy: OnFailure
+          volumes:
+          - name: es-basic-auth
+            secret:
+              secretName: elasticsearch-sample-elastic-user</pre></div></li><li class="listitem"><p class="simpara">
+Apply it to the Kubernetes cluster:
+</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-sh">kubectl apply -f snapshotter.yml</pre></div></li></ol></div><p>For more details see <a class="ulink" href="https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/" target="_top">Kubernetes CronJobs</a>.</p></div><div class="navfooter"><span class="prev"><a href="k8s-advanced-node-scheduling.html">
               « 
-              Quickstart</a>
+              Advanced Elasticsearch node scheduling</a>
            
         </span><span class="next">
            
-          <a href="k8s-deep-dive.html">Deep dive
-               »
-            </a></span></div>
+          </span></div>
 <!-- end body -->
 
             </div>
