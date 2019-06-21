@@ -761,7 +761,7 @@ func main() {
 
 func main() {
 	router := mux.NewRouter()
-	router.Use(apmgorilla.Middleware())
+	apmgorilla.Instrument(router)
 	...
 }</pre></div><p>The apmgorilla middleware will recover panics and send them to Elastic APM, so you do not need to install any other recovery middleware.</p></div><div class="section"><div class="titlepage"><div><div><h4 class="title"><a id="builtin-modules-apmgrpc"></a>module/apmgrpc<a href="https://github.com/elastic/apm-agent-go/edit/1.x/docs/instrumenting.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h4></div></div></div><p>Package apmgrpc provides server and client interceptors for <a class="ulink" href="https://github.com/grpc/grpc-go" target="_top">gRPC-Go</a>.
 Server interceptors report transactions for each incoming request, while client interceptors
@@ -840,11 +840,7 @@ func main() {
 }</pre></div><p><a class="ulink" href="https://github.com/julienschmidt/httprouter/pull/139" target="_top">httprouter does not provide a means of obtaining the matched route</a>, hence the route must be passed into the wrapper.</p><p>Alternatively you can use the apmhttprouter.Router type, which wraps httprouter.Router,
 providing the same API and instrumenting added routes. To use this wrapper type, you
 should rewrite your use of <code class="literal">httprouter.New</code> to <code class="literal">apmhttprouter.New</code>; the returned type
-is <code class="literal">*apmhttprouter.Router</code>, and not <code class="literal">*httprouter.Router</code>.</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-go">import (
-	"github.com/julienschmidt/httprouter"
-
-	"go.elastic.co/apm/module/apmhttprouter"
-)
+is <code class="literal">*apmhttprouter.Router</code>, and not <code class="literal">*httprouter.Router</code>.</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-go">import "go.elastic.co/apm/module/apmhttprouter"
 
 func main() {
 	router := apmhttprouter.New()
@@ -869,7 +865,19 @@ func main() {
 	db, err := apmsql.Open("pq", "postgres://...")
 	db, err := apmsql.Open("sqlite3", ":memory:")
 }</pre></div><p>Spans will be created for queries and other statement executions if the context methods are
-used, and the context includes a transaction.</p></div><div class="section"><div class="titlepage"><div><div><h4 class="title"><a id="builtin-modules-apmgorm"></a>module/apmgorm<a href="https://github.com/elastic/apm-agent-go/edit/1.x/docs/instrumenting.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h4></div></div></div><p>Package apmgorm provides a means of instrumenting <a class="ulink" href="http://gorm.io" target="_top">GORM</a> database operations.</p><p>To trace <code class="literal">GORM</code> operations, import the appropriate <code class="literal">apmgorm/dialects</code> package (instead of the
+used, and the context includes a transaction.</p></div><div class="section"><div class="titlepage"><div><div><h4 class="title"><a id="builtin-modules-apmgopg"></a>module/apmgopg<a href="https://github.com/elastic/apm-agent-go/edit/1.x/docs/instrumenting.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h4></div></div></div><p>Package apmgopg provides a means of instrumenting <a class="ulink" href="http://github.com/go-pg/pg" target="_top">go-pg</a> database operations.</p><p>To trace <code class="literal">go-pg</code> statements, call <code class="literal">apmgopg.Instrument</code> with the database instance you plan on using and provide
+a context that contains an apm transaction.</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-go">import (
+	"github.com/go-pg/pg"
+
+	"go.elastic.co/apm/module/apmgopg"
+)
+
+func main() {
+	db := pg.Connect(&amp;pg.Options{})
+	apmgopg.Instrument(db)
+
+	db.WithContext(ctx).Model(...)
+}</pre></div></div><div class="section"><div class="titlepage"><div><div><h4 class="title"><a id="builtin-modules-apmgorm"></a>module/apmgorm<a href="https://github.com/elastic/apm-agent-go/edit/1.x/docs/instrumenting.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h4></div></div></div><p>Package apmgorm provides a means of instrumenting <a class="ulink" href="http://gorm.io" target="_top">GORM</a> database operations.</p><p>To trace <code class="literal">GORM</code> operations, import the appropriate <code class="literal">apmgorm/dialects</code> package (instead of the
 <code class="literal">gorm/dialects</code> package), and use <code class="literal">apmgorm.Open</code> (instead of <code class="literal">gorm.Open</code>). The parameters are
 exactly the same.</p><p>Once you have a <code class="literal">*gorm.DB</code> from <code class="literal">apmgorm.Open</code>, you can call <code class="literal">apmgorm.WithContext</code> to
 propagate a context containing a transaction to the operations:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-go">import (
@@ -929,6 +937,29 @@ func handleRequest(w http.ResponseWriter, req *http.Request) {
 	conn := apmredigo.Wrap(redisPool.Get()).WithContext(req.Context())
 	defer conn.Close()
 	...
+}</pre></div></div><div class="section"><div class="titlepage"><div><div><h4 class="title"><a id="builtin-modules-apmgoredis"></a>module/apmgoredis<a href="https://github.com/elastic/apm-agent-go/edit/1.x/docs/instrumenting.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h4></div></div></div><p>Package apmgoredis provides a means of instrumenting <a class="ulink" href="https://github.com/go-redis/redis" target="_top">go-redis/redis</a>
+so that Redis commands are reported as spans within the current transaction.</p><p>To report Redis commands, you can use the top-level <code class="literal">Wrap</code> function to wrap a
+<code class="literal">redis.Client</code>, <code class="literal">redis.ClusterClient</code>, or <code class="literal">redis.Ring</code>. Initially, the wrapped
+client will be associated with the background context; its <code class="literal">WithContext</code> method
+may be used to obtain a shallow copy with another context. For example, in an
+HTTP middleware you might bind a client to the request context, which would
+associate spans with the request’s APM transaction.</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-go">import (
+	"net/http"
+
+	"github.com/go-redis/redis"
+
+	"go.elastic.co/apm/module/apmgoredis"
+)
+
+var redisClient *redis.Client // initialized at program startup
+
+func handleRequest(w http.ResponseWriter, req *http.Request) {
+	// Wrap and bind redisClient to the request context. If the HTTP
+	// server is instrumented with Elastic APM (e.g. with apmhttp),
+	// Redis commands will be reported as spans within the request's
+	// transaction.
+	client := apmgoredis.Wrap(redisClient).WithContext(req.Context())
+	...
 }</pre></div></div><div class="section"><div class="titlepage"><div><div><h4 class="title"><a id="builtin-modules-apmrestful"></a>module/apmrestful<a href="https://github.com/elastic/apm-agent-go/edit/1.x/docs/instrumenting.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h4></div></div></div><p>Package apmrestful provides a <a class="ulink" href="https://github.com/emicklei/go-restful" target="_top">go-restful</a> filter
 for tracing requests, and capturing panics.</p><p>For each request, a transaction is stored in the request context, which can be obtained via
 <a class="ulink" href="https://golang.org/pkg/net/http/#Request" target="_top">http.Request</a><code class="literal">.Context()</code> in your handler.</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-go">import (
@@ -948,6 +979,19 @@ func main() {
 	ws.Route(ws.GET("/{id:[0-1]+}").To(func(req *restful.Request, resp *restful.Response) {
 		// req.Request.Context() should be propagated to downstream operations such as database queries.
 	}))
+	...
+}</pre></div></div><div class="section"><div class="titlepage"><div><div><h4 class="title"><a id="builtin-modules-apmchi"></a>module/apmchi<a href="https://github.com/elastic/apm-agent-go/edit/1.x/docs/instrumenting.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h4></div></div></div><p>Package apmchi provides middleware for <a class="ulink" href="https://github.com/go-chi/chi" target="_top">chi</a> routers,
+for tracing requests and capturing panics.</p><p>For each request, a transaction is stored in the request context, which can be obtained via
+<a class="ulink" href="https://golang.org/pkg/net/http/#Request" target="_top">http.Request</a><code class="literal">.Context()</code> in your handler.</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-go">import (
+	"github.com/go-chi/chi"
+
+	"go.elastic.co/apm/module/apmchi"
+)
+
+func main() {
+	r := chi.NewRouter()
+	r.Use(apmchi.Middleware())
+	r.Get("/route/{pattern}", routeHandler)
 	...
 }</pre></div></div><div class="section"><div class="titlepage"><div><div><h4 class="title"><a id="builtin-modules-apmlogrus"></a>module/apmlogrus<a href="https://github.com/elastic/apm-agent-go/edit/1.x/docs/instrumenting.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h4></div></div></div><p>Package apmlogrus provides a <a class="ulink" href="https://github.com/sirupsen/logrus" target="_top">logrus</a> Hook
 implementation for sending error messages to Elastic APM, as well as a function
