@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="en-us">
   <head>
-<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title>Release Notes
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title>Group definitions
         | Elastic Cloud on Kubernetes [0.9]
       | Elastic
-    </title><meta name="generator" content="DocBook XSL Stylesheets V1.78.1" /><link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [0.9]" /><link rel="up" href="index.html" title="Elastic Cloud on Kubernetes [0.9]" /><link rel="prev" href="release-highlights-0.9.0.html" title="0.9.0 Release Highlights" /><link rel="next" href="release-notes-0.9.0.html" title="Elastic Cloud on Kubernetes version 0.9.0" /><meta name="description" content="Get started with the documentation for Elasticsearch, Kibana, Logstash, Beats, X-Pack, Elastic Cloud, Elasticsearch for Apache Hadoop, and our language clients." /><meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/0.9" /><meta name="DC.subject" content="ECK" /><meta name="DC.identifier" content="0.9" />
+    </title><meta name="generator" content="DocBook XSL Stylesheets V1.78.1" /><link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [0.9]" /><link rel="up" href="k8s-elasticsearch-specification.html" title="Running Elasticsearch on ECK" /><link rel="prev" href="k8s-update-strategy.html" title="Update strategy" /><link rel="next" href="k8s-pod-disruption-budget.html" title="Pod disruption budget" /><meta name="description" content="Get started with the documentation for Elasticsearch, Kibana, Logstash, Beats, X-Pack, Elastic Cloud, Elasticsearch for Apache Hadoop, and our language clients." /><meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/0.9" /><meta name="DC.subject" content="ECK" /><meta name="DC.identifier" content="0.9" />
     
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
@@ -282,23 +282,77 @@
 <div class="page_header">You are looking at documentation for an alpha release. Not what you want? See <a href="https://www.elastic.co/elasticsearch-kubernetes">Deploy Elasticsearch & Kibana on Kubernetes</a> documentation.
 </div><div class="breadcrumbs"><span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes
       [0.9]
-    </a></span> » <span class="breadcrumb-node">Release Notes</span></div><div class="navheader"><span class="prev"><a href="release-highlights-0.9.0.html">
+    </a></span> » <span class="breadcrumb-link"><a href="k8s-elasticsearch-specification.html">Running Elasticsearch on ECK</a></span> » <span class="breadcrumb-node">Group definitions</span></div><div class="navheader"><span class="prev"><a href="k8s-update-strategy.html">
               « 
-              0.9.0 Release Highlights</a>
+              Update strategy</a>
            
         </span><span class="next">
            
-          <a href="release-notes-0.9.0.html">Elastic Cloud on Kubernetes version 0.9.0
+          <a href="k8s-pod-disruption-budget.html">Pod disruption budget
                »
-            </a></span></div><div class="part"><div class="titlepage"><div><div><h1 class="title"><a id="k8s-release-notes"></a>Release Notes<a href="https://github.com/elastic/cloud-on-k8s/edit/0.9/docs/release-notes.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h1></div></div></div><div class="partintro"><div></div><p>This section summarizes the changes in each release.</p><div class="itemizedlist"><ul class="itemizedlist" type="disc"><li class="listitem">
-<a class="xref" href="release-notes-0.9.0.html" title="Elastic Cloud on Kubernetes version 0.9.0"><em>Elastic Cloud on Kubernetes version 0.9.0</em></a>
-</li></ul></div></div></div><div class="navfooter"><span class="prev"><a href="release-highlights-0.9.0.html">
+            </a></span></div><div class="section"><div class="titlepage"><div><div><h2 class="title"><a id="k8s-group-definitions"></a>Group definitions<a href="https://github.com/elastic/cloud-on-k8s/edit/0.9/docs/elasticsearch-spec.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h2></div></div></div><p>To optimize upgrades for highly available setups, ECK can take into account arbitrary nodes grouping. It prioritizes recovery of availability zones in catastrophic scenarios.</p><p>For example, let’s create a zone-aware Elasticsearch cluster. Some nodes are created in <code class="literal">europe-west3-a</code>, and some others in <code class="literal">europe-west3-b</code>:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-yaml">apiVersion: elasticsearch.k8s.elastic.co/v1alpha1
+kind: Elasticsearch
+metadata:
+  name: quickstart
+spec:
+  version: 7.2.0
+  nodes:
+  - nodeCount: 3
+    config:
+      node.attr.zone: europe-west3-a
+      cluster.routing.allocation.awareness.attributes: zone
+    podTemplate:
+      meta:
+        labels:
+          nodesGroup: group-a
+      spec:
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: failure-domain.beta.kubernetes.io/zone
+                  operator: In
+                  values:
+                  - europe-west3-a
+  - nodeCount: 3
+    config:
+      node.attr.zone: europe-west3-b
+      cluster.routing.allocation.awareness.attributes: zone
+    podTemplate:
+      meta:
+        labels:
+          nodesGroup: group-b
+      spec:
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: failure-domain.beta.kubernetes.io/zone
+                  operator: In
+                  values:
+                  - europe-west3-b
+  updateStrategy:
+    changeBudget:
+      maxSurge: 1
+      maxUnavailable: 0
+    groups:
+    - selector:
+        matchLabels:
+          nodesGroup: group-a
+    - selector:
+        matchLabels:
+          nodesGroup: group-b</pre></div><p>If a modification is applied to the Elasticsearch configuration of these 6 nodes, ECK slowly upgrades the cluster nodes, taking the provided <code class="literal">changeBudget</code> into account.
+In this example, it will spawn one node at a time, and migrate data away from one node at a time.</p><p>Imagine a catastrophic situation occurs while the mutation is in progress: all nodes in <code class="literal">europe-west3-b</code> suddenly disappear.
+ECK detects it, and recreates the 3 missing nodes as expected. However, since a cluster upgrade is already in progress, the current <code class="literal">changeBudget</code> might already be maxed out, preventing new nodes to be created in <code class="literal">europe-west3-b</code>.</p><p>In this situation, it is preferable to first recreate the missing nodes in <code class="literal">europe-west-3b</code>, then continue the cluster upgrade.</p><p>To do so, ECK must know about the logical grouping of nodes. Since this is an arbitrary setting (can represent availability zones, but also nodes roles, hot-warm topologies, etc.), it must be specified in the <code class="literal">updateStrategy.groups</code> section of the Elasticsearch specification.
+Nodes grouping is expressed through labels on the resources. In the example above, 3 Pods are labeled with <code class="literal">group-a</code>, and the 3 Pods with <code class="literal">group-b</code>.</p></div><div class="navfooter"><span class="prev"><a href="k8s-update-strategy.html">
               « 
-              0.9.0 Release Highlights</a>
+              Update strategy</a>
            
         </span><span class="next">
            
-          <a href="release-notes-0.9.0.html">Elastic Cloud on Kubernetes version 0.9.0
+          <a href="k8s-pod-disruption-budget.html">Pod disruption budget
                »
             </a></span></div>
 <!-- end body -->
