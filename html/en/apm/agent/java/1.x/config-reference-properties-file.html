@@ -357,10 +357,12 @@
 
 # The name of the environment this service is deployed in, e.g. "production" or "staging".
 #
-# NOTE: The APM UI does not fully support the environment setting yet.
-# You can use the query bar to filter for a specific environment,
-# but by default the environments will be mixed together.
-# Also keep that in mind when creating alerts.
+# Environments allow you to easily filter data on a global level in the APM UI.
+# It's important to be consistent when naming environments across agents.
+# See {kibana-ref}/filters.html#environment-selector[environment selector] in the Kibana UI for more information.
+#
+# NOTE: This feature is fully supported in the APM UI in Kibana versions &gt;= 7.2.
+# You must use the query bar to filter for a specific environment in versions prior to 7.2.
 #
 # This setting can not be changed at runtime. Changes require a restart of the application.
 # Type: String
@@ -414,7 +416,7 @@
 # sanitize_field_names=password,passwd,pwd,secret,*key,*token*,*session*,*credit*,*card*,authorization,set-cookie
 
 # A list of instrumentations which should be disabled.
-# Valid options are `annotations`, `apache-httpclient`, `asynchttpclient`, `concurrent`, `dispatcher-servlet`, `elasticsearch-restclient`, `executor`, `http-client`, `incubating`, `jax-rs`, `jax-ws`, `jdbc`, `jms`, `jsf`, `okhttp`, `opentracing`, `public-api`, `render`, `scheduled`, `servlet-api`, `servlet-api-async`, `servlet-input-stream`, `servlet-service-name`, `spring-mvc`, `spring-resttemplate`, `spring-service-name`, `urlconnection`.
+# Valid options are `annotations`, `apache-httpclient`, `asynchttpclient`, `concurrent`, `dispatcher-servlet`, `elasticsearch-restclient`, `executor`, `http-client`, `incubating`, `jax-rs`, `jax-ws`, `jdbc`, `jms`, `jsf`, `okhttp`, `opentracing`, `public-api`, `quartz`, `render`, `scheduled`, `servlet-api`, `servlet-api-async`, `servlet-input-stream`, `servlet-service-name`, `spring-mvc`, `spring-resttemplate`, `spring-service-name`, `urlconnection`.
 # If you want to try out incubating features,
 # set the value to an empty string.
 #
@@ -515,16 +517,49 @@
 # Values to set in known environments:
 #
 # Nexus:
-# boot_delegation_packages=com.sun.*,javax.transaction,javax.transaction.*,javax.xml.crypto,javax.xml.crypto.*,sun.*,co.elastic.apm.agent.*
 #
-# Pentaho:
-# boot_delegation_packages=org.apache.karaf.jaas.boot,org.apache.karaf.jaas.boot.principal,org.apache.karaf.management.boot,sun.*,com.sun.*,javax.transaction,javax.transaction.*,javax.xml.crypto,javax.xml.crypto.*,org.apache.xerces.jaxp.datatype,org.apache.xerces.stax,org.apache.xerces.parsers,org.apache.xerces.jaxp,org.apache.xerces.jaxp.validation,org.apache.xerces.dom,co.elastic.apm.agent.*
+# ----
+# boot_delegation_packages=com.sun.*, javax.transaction, javax.transaction.*, javax.xml.crypto, javax.xml.crypto.*, sun.*,co.elastic.apm.agent.*
+# ----
+#
+# Pentaho and RedHat JBoss Fuse:
+#
+# ----
+# boot_delegation_packages=org.apache.karaf.jaas.boot, org.apache.karaf.jaas.boot.principal, org.apache.karaf.management.boot, sun.*, com.sun.*, javax.transaction, javax.transaction.*, javax.xml.crypto, javax.xml.crypto.*, org.apache.xerces.jaxp.datatype, org.apache.xerces.stax, org.apache.xerces.parsers, org.apache.xerces.jaxp, org.apache.xerces.jaxp.validation, org.apache.xerces.dom, co.elastic.apm.agent.*
+# ----
+#
 #
 # This setting can not be changed at runtime. Changes require a restart of the application.
 # Type: String
 # Default value: co.elastic.apm.agent.*
 #
 # boot_delegation_packages=co.elastic.apm.agent.*
+
+# When enabled, the agent will make periodic requests to the APM Server to fetch updated configuration.
+#
+# This setting can be changed at runtime
+# Type: Boolean
+# Default value: true
+#
+# central_config=true
+
+# Disables the collection of breakdown metrics (`span.self_time`)
+#
+# This setting can not be changed at runtime. Changes require a restart of the application.
+# Type: Boolean
+# Default value: true
+#
+# breakdown_metrics=true
+
+# Sets the path of the agent config file.
+# The special value `_AGENT_HOME_` is a placeholder for the folder the elastic-apm-agent.jar is in.
+# The location can either be in the classpath of the application or on the file system.
+#
+# This setting can not be changed at runtime. Changes require a restart of the application.
+# Type: String
+# Default value: _AGENT_HOME_/elasticapm.properties
+#
+# config_file=_AGENT_HOME_/elasticapm.properties
 
 ############################################
 # HTTP                                     #
@@ -657,6 +692,15 @@
 #
 # enable_jaxrs_annotation_inheritance=true
 
+# By default, the agent will use `ClassName#methodName` for the transaction name of JAX-RS requests.
+# If you want to use the URI template from the `@Path` annotation, set the value to `true`.
+#
+# This setting can not be changed at runtime. Changes require a restart of the application.
+# Type: Boolean
+# Default value: false
+#
+# use_jaxrs_path_as_transaction_name=false
+
 ############################################
 # Logging                                  #
 ############################################
@@ -688,16 +732,15 @@
 #
 # log_file=System.out
 
-# A boolean specifying if the agent should integrate into SLF4J's MDC to enable trace-log correlation.
-# If set to `true`, the agent will set the `spanId` and `traceId` for the currently active spans and transactions to the MDC.
+# A boolean specifying if the agent should integrate into SLF4J's https://www.slf4j.org/api/org/slf4j/MDC.html[MDC] to enable trace-log correlation.
+# If set to `true`, the agent will set the `trace.id` and `transaction.id` for the currently active spans and transactions to the MDC.
 # You can then use the pattern format of your logging implementation to write the MDC values to your log file.
+# If you are using logback or log4j, add `%X` to the format to log all MDC values or `%X{trace.id}` to only log the trace id.
 # With the help of Filebeat and Logstash or an Elasticsearch ingest pipeline,
 # you can index your log files and correlate them with APM traces.
 # With this integration you can get all logs belonging to a particular trace and vice-versa:
 # for a specific log, see in which context it has been logged and which parameters the user provided.
 # While it's allowed to enable this setting at runtime, you can't disable it without a restart.
-#
-# NOTE: This is an incubating feature and the MDC key names might change.
 #
 # This setting can be changed at runtime
 # Type: Boolean
@@ -724,9 +767,16 @@
 #
 # The URLs must be fully qualified, including protocol (http or https) and port.
 #
-# NOTE: Providing multiple URLs only works if intake API v2 is enabled.
+# Fails over to the next APM Server URL in the event of connection errors.
+# Achieves load-balancing by shuffling the list of configured URLs.
+# When multiple agents are active, they'll tend towards spreading evenly across the set of servers due to randomization.
 #
-# This setting can not be changed at runtime. Changes require a restart of the application.
+# If outgoing HTTP traffic has to go through a proxy,you can use the Java system properties `http.proxyHost` and `http.proxyPort` to set that up.
+# See also [Java's proxy documentation](https://docs.oracle.com/javase/8/docs/technotes/guides/net/proxies.html) for more information.
+#
+# NOTE: This configuration can only be reloaded dynamically as of 1.8.0
+#
+# This setting can be changed at runtime
 # Type: comma separated list
 # Default value: http://localhost:8200
 #
@@ -860,7 +910,7 @@
 
 # In its default settings, the APM agent will collect a stack trace with every recorded span.
 # While this is very helpful to find the exact place in your code that causes the span, collecting this stack trace does have some overhead.
-# When setting this option to a negative value, like `-1ms`, stack traces will be collected for all spans. Setting it to a positive value, e.g. `5ms`, will limit stack trace collection to spans with durations equal or longer than the given value, e.g. 5 milliseconds.
+# When setting this option to a negative value, like `-1ms`, stack traces will be collected for all spans. Setting it to a positive value, e.g. `5ms`, will limit stack trace collection to spans with durations equal to or longer than the given value, e.g. 5 milliseconds.
 #
 # To disable stack trace collection for spans completely, set the value to `0ms`.
 #
