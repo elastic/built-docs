@@ -302,11 +302,12 @@ parameter to indicate the paths to the required metrics. The syntax for defining
 allowing pipeline aggregations to be chained.  For example, you can chain together two derivatives to calculate the second derivative
 (i.e. a derivative of a derivative).</p><div class="note admon"><div class="icon"><img alt="Note" src="images/icons/note.png" /></div><div class="admon_content"><p>Because pipeline aggregations only add to the output, when chaining pipeline aggregations the output of each pipeline aggregation
 will be included in the final output.</p></div></div><h3><a id="buckets-path-syntax"></a><code class="literal">buckets_path</code> Syntax<a href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/aggregations/pipeline.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>Most pipeline aggregations require another aggregation as their input.  The input aggregation is defined via the <code class="literal">buckets_path</code>
-parameter, which follows a specific format:</p><div class="pre_wrapper lang-ebnf"><pre class="programlisting prettyprint lang-ebnf">AGG_SEPARATOR       =  '&gt;' ;
-METRIC_SEPARATOR    =  '.' ;
+parameter, which follows a specific format:</p><div class="pre_wrapper lang-ebnf"><pre class="programlisting prettyprint lang-ebnf">AGG_SEPARATOR       =  `&gt;` ;
+METRIC_SEPARATOR    =  `.` ;
 AGG_NAME            =  &lt;the name of the aggregation&gt; ;
 METRIC              =  &lt;the name of the metric (in case of multi-value metrics aggregation)&gt; ;
-PATH                =  &lt;AGG_NAME&gt; [ &lt;AGG_SEPARATOR&gt;, &lt;AGG_NAME&gt; ]* [ &lt;METRIC_SEPARATOR&gt;, &lt;METRIC&gt; ] ;</pre></div><p>For example, the path <code class="literal">"my_bucket&gt;my_stats.avg"</code> will path to the <code class="literal">avg</code> value in the <code class="literal">"my_stats"</code> metric, which is
+MULTIBUCKET_KEY     =  `[&lt;KEY_NAME&gt;]`
+PATH                =  &lt;AGG_NAME&gt;&lt;MULTIBUCKET_KEY&gt;? (&lt;AGG_SEPARATOR&gt;, &lt;AGG_NAME&gt; )* ( &lt;METRIC_SEPARATOR&gt;, &lt;METRIC&gt; ) ;</pre></div><p>For example, the path <code class="literal">"my_bucket&gt;my_stats.avg"</code> will path to the <code class="literal">avg</code> value in the <code class="literal">"my_stats"</code> metric, which is
 contained in the <code class="literal">"my_bucket"</code> bucket aggregation.</p><p>Paths are relative from the position of the pipeline aggregation; they are not absolute paths, and the path cannot go back "up" the
 aggregation tree. For example, this derivative is embedded inside a date_histogram and refers to a "sibling"
 metric <code class="literal">"the_sum"</code>:</p><div class="pre_wrapper lang-console"><pre class="programlisting prettyprint lang-console">POST /_search
@@ -352,7 +353,43 @@ a metric embedded inside a sibling aggregation:</p><div class="pre_wrapper lang-
         }
     }
 }</pre></div><div class="console_widget" data-snippet="snippets/272.console"></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO88-1"><span><img src="images/icons/callouts/1.png" alt="" /></span></a> </p></td><td valign="top" align="left"><p><code class="literal">buckets_path</code> instructs this max_bucket aggregation that we want the maximum value of the <code class="literal">sales</code> aggregation in the
-<code class="literal">sales_per_month</code> date histogram.</p></td></tr></table></div><h3><a id="_special_paths"></a>Special Paths<a href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/aggregations/pipeline.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>Instead of pathing to a metric, <code class="literal">buckets_path</code> can use a special <code class="literal">"_count"</code> path.  This instructs
+<code class="literal">sales_per_month</code> date histogram.</p></td></tr></table></div><p>If a Sibling pipeline agg references a multi-bucket aggregation, such as a <code class="literal">terms</code> agg, it also has the option to
+select specific keys from the multi-bucket.  For example, a <code class="literal">bucket_script</code> could select two specific buckets (via
+their bucket keys) to perform the calculation:</p><div class="pre_wrapper lang-console"><pre class="programlisting prettyprint lang-console">POST /_search
+{
+    "aggs" : {
+        "sales_per_month" : {
+            "date_histogram" : {
+                "field" : "date",
+                "calendar_interval" : "month"
+            },
+            "aggs": {
+                "sale_type": {
+                    "terms": {
+                        "field": "type"
+                    },
+                    "aggs": {
+                        "sales": {
+                            "sum": {
+                                "field": "price"
+                            }
+                        }
+                    }
+                },
+                "hat_vs_bag_ratio": {
+                    "bucket_script": {
+                        "buckets_path": {
+                            "hats": "sale_type['hat']&gt;sales", <a id="CO89-1"></a><span><img src="images/icons/callouts/1.png" alt="" /></span>
+                            "bags": "sale_type['bag']&gt;sales"  <a id="CO89-2"></a><span><img src="images/icons/callouts/2.png" alt="" /></span>
+                        },
+                        "script": "params.hats / params.bags"
+                    }
+                }
+            }
+        }
+    }
+}</pre></div><div class="console_widget" data-snippet="snippets/273.console"></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO89-1"><span><img src="images/icons/callouts/1.png" alt="" /></span></a> <a href="#CO89-2"><span><img src="images/icons/callouts/2.png" alt="" /></span></a> </p></td><td valign="top" align="left"><p><code class="literal">buckets_path</code> selects the hats and bags buckets (via <code class="literal">['hat']</code>/<code class="literal">['bag']`</code>) to use in the script specifically,
+instead of fetching all the buckets from <code class="literal">sale_type</code> aggregation</p></td></tr></table></div><h3><a id="_special_paths"></a>Special Paths<a href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/aggregations/pipeline.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>Instead of pathing to a metric, <code class="literal">buckets_path</code> can use a special <code class="literal">"_count"</code> path.  This instructs
 the pipeline aggregation to use the document count as its input.  For example, a derivative can be calculated
 on the document count of each bucket, instead of a specific metric:</p><div class="pre_wrapper lang-console"><pre class="programlisting prettyprint lang-console">POST /_search
 {
@@ -364,12 +401,12 @@ on the document count of each bucket, instead of a specific metric:</p><div clas
             },
             "aggs": {
                 "the_deriv": {
-                    "derivative": { "buckets_path": "_count" } <a id="CO89-1"></a><span><img src="images/icons/callouts/1.png" alt="" /></span>
+                    "derivative": { "buckets_path": "_count" } <a id="CO90-1"></a><span><img src="images/icons/callouts/1.png" alt="" /></span>
                 }
             }
         }
     }
-}</pre></div><div class="console_widget" data-snippet="snippets/273.console"></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO89-1"><span><img src="images/icons/callouts/1.png" alt="" /></span></a> </p></td><td valign="top" align="left"><p>By using <code class="literal">_count</code> instead of a metric name, we can calculate the derivative of document counts in the histogram</p></td></tr></table></div><p>The <code class="literal">buckets_path</code> can also use <code class="literal">"_bucket_count"</code> and path to a multi-bucket aggregation to use the number of buckets
+}</pre></div><div class="console_widget" data-snippet="snippets/274.console"></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO90-1"><span><img src="images/icons/callouts/1.png" alt="" /></span></a> </p></td><td valign="top" align="left"><p>By using <code class="literal">_count</code> instead of a metric name, we can calculate the derivative of document counts in the histogram</p></td></tr></table></div><p>The <code class="literal">buckets_path</code> can also use <code class="literal">"_bucket_count"</code> and path to a multi-bucket aggregation to use the number of buckets
 returned by that aggregation in the pipeline aggregation instead of a metric. for example a <code class="literal">bucket_selector</code> can be
 used here to filter out buckets which contain no buckets for an inner terms aggregation:</p><div class="pre_wrapper lang-console"><pre class="programlisting prettyprint lang-console">POST /sales/_search
 {
@@ -389,7 +426,7 @@ used here to filter out buckets which contain no buckets for an inner terms aggr
         "min_bucket_selector": {
           "bucket_selector": {
             "buckets_path": {
-              "count": "categories._bucket_count" <a id="CO90-1"></a><span><img src="images/icons/callouts/1.png" alt="" /></span>
+              "count": "categories._bucket_count" <a id="CO91-1"></a><span><img src="images/icons/callouts/1.png" alt="" /></span>
             },
             "script": {
               "source": "params.count != 0"
@@ -399,7 +436,7 @@ used here to filter out buckets which contain no buckets for an inner terms aggr
       }
     }
   }
-}</pre></div><div class="console_widget" data-snippet="snippets/274.console"></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO90-1"><span><img src="images/icons/callouts/1.png" alt="" /></span></a> </p></td><td valign="top" align="left"><p>By using <code class="literal">_bucket_count</code> instead of a metric name, we can filter out <code class="literal">histo</code> buckets where they contain no buckets
+}</pre></div><div class="console_widget" data-snippet="snippets/275.console"></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO91-1"><span><img src="images/icons/callouts/1.png" alt="" /></span></a> </p></td><td valign="top" align="left"><p>By using <code class="literal">_bucket_count</code> instead of a metric name, we can filter out <code class="literal">histo</code> buckets where they contain no buckets
 for the <code class="literal">categories</code> aggregation</p></td></tr></table></div><h3><a id="dots-in-agg-names"></a>Dealing with dots in agg names<a href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/aggregations/pipeline.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>An alternate syntax is supported to cope with aggregations or metrics which
 have dots in the name, such as the <code class="literal">99.9</code>th
 <a class="link" href="search-aggregations-metrics-percentile-aggregation.html" title="Percentiles Aggregation">percentile</a>. This metric
