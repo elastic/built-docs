@@ -294,7 +294,7 @@
 相邻出现的文档，但无法分辨是 <span class="emphasis"><em>Sue ate</em></span> 还是  <span class="emphasis"><em>alligator ate</em></span> 。</p><p>当单词相互结合使用的时候，表达的含义比单独使用更丰富。两个子句 <span class="emphasis"><em>I’m not happy I’m working</em></span> 和 <span class="emphasis"><em>I’m happy I’m not working</em></span> 包含相同
 的单词，也拥有相同的邻近度，但含义截然不同。</p><p>如果索引单词对而不是索引独立的单词，就能对这些单词的上下文尽可能多的保留。</p><p>对句子 <code class="literal">Sue ate the alligator</code> ，不仅要将每一个单词（或者 <span class="emphasis"><em>unigram</em></span> ）作为词项索引<a id="id-1.5.6.16.6.3" class="indexterm"></a></p><pre class="literallayout">["sue", "ate", "the", "alligator"]</pre><p>也要将每个单词 <span class="emphasis"><em>以及它的邻近词</em></span> 作为单个词项索引：</p><pre class="literallayout">["sue ate", "ate the", "the alligator"]</pre><p>这些单词对<a id="id-1.5.6.16.10.1" class="indexterm"></a>（或者 <span class="emphasis"><em>bigrams</em></span> ）被称为<a id="id-1.5.6.16.10.3" class="indexterm"></a> <span class="emphasis"><em>shingles</em></span> 。</p><div class="tip admon"><div class="icon"><img alt="提示" src="images/icons/tip.png" /></div><div class="admon_content"><p>Shingles 不限于单词对；你也可以索引三个单词（ <span class="emphasis"><em>trigrams</em></span> ）：</p><pre class="literallayout">["sue ate the", "ate the alligator"]</pre><p>Trigrams 提供了更高的精度，但是也大大增加了索引中唯一词项的数量。在大多数情况下，Bigrams 就够了。</p></div></div><p>当然，只有当用户输入的查询内容和在原始文档中顺序相同时，shingles 才是有用的；对 <code class="literal">sue alligator</code> 的查询可能会匹配到单个单词，但是不会匹配任何 shingles 。</p><p>幸运的是，用户倾向于使用和搜索数据相似的构造来表达搜索意图。但这一点很重要：只是索引 bigrams 是不够的；我们仍然需要 unigrams ，但可以将匹配 bigrams 作为增加相关度评分的信号。</p><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="_生成_shingles"></a>生成 Shingles<a href="https://github.com/elasticsearch-cn/elasticsearch-definitive-guide/edit/cn/120_Proximity_Matching/35_Shingles.asciidoc" class="edit_me" title="在 GitHub 上编辑本页" rel="nofollow">编辑</a></h3></div></div></div><p>Shingles 需要在索引时作为分析过程的一部分被创建。<a id="id-1.5.6.16.14.2.1" class="indexterm"></a>
 <a id="id-1.5.6.16.14.2.2" class="indexterm"></a>我们可以将 unigrams 和 bigrams 都索引到单个字段中，
-但将它们分开保存在能被独立查询的字段会更清晰。unigrams 字段将构成我们搜索的基础部分，而 bigrams 字段用来提高相关度。</p><p>首先，我们需要在创建分析器时使用 <code class="literal">shingle</code> 语汇单元过滤器：</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-js">DELETE /my_index
+但将它们分开保存在能被独立查询的字段会更清晰。unigrams 字段将构成我们搜索的基础部分，而 bigrams 字段用来提高相关度。</p><p>首先，我们需要在创建分析器时使用 <code class="literal">shingle</code> 语汇单元过滤器：</p><div class="pre_wrapper lang-js"><pre class="programlisting prettyprint lang-js">DELETE /my_index
 
 PUT /my_index
 {
@@ -329,14 +329,14 @@ PUT /my_index
 <code class="literal">shingle</code> 语汇单元过滤器默认输出 unigrams ，但是我们想让 unigrams 和 bigrams 分开。
 </p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO88-5"><span><img src="images/icons/callouts/5.png" alt="" /></span></a> </p></td><td valign="top" align="left"><p>
 <code class="literal">my_shingle_analyzer</code> 使用我们常规的 <code class="literal">my_shingles_filter</code> 语汇单元过滤器。
-</p></td></tr></table></div><p>首先，用 <code class="literal">analyze</code> API 测试下分析器：</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-js">GET /my_index/_analyze?analyzer=my_shingle_analyzer
+</p></td></tr></table></div><p>首先，用 <code class="literal">analyze</code> API 测试下分析器：</p><div class="pre_wrapper lang-js"><pre class="programlisting prettyprint lang-js">GET /my_index/_analyze?analyzer=my_shingle_analyzer
 Sue ate the alligator</pre></div><p>果然， 我们得到了 3 个词项：</p><div class="itemizedlist"><ul class="itemizedlist" type="disc"><li class="listitem">
 <code class="literal">sue ate</code>
 </li><li class="listitem">
 <code class="literal">ate the</code>
 </li><li class="listitem">
 <code class="literal">the alligator</code>
-</li></ul></div><p>现在我们可以继续创建一个使用新的分析器的字段。</p></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="_多字段"></a>多字段<a href="https://github.com/elasticsearch-cn/elasticsearch-definitive-guide/edit/cn/120_Proximity_Matching/35_Shingles.asciidoc" class="edit_me" title="在 GitHub 上编辑本页" rel="nofollow">编辑</a></h3></div></div></div><p>我们曾谈到将 unigrams 和 bigrams 分开索引更清晰，所以 <code class="literal">title</code> 字段<a id="id-1.5.6.16.15.2.2" class="indexterm"></a>将创建成一个多字段（参考 <a class="xref" href="multi-fields.html" title="字符串排序与多字段">字符串排序与多字段</a> ）：</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-js">PUT /my_index/_mapping/my_type
+</li></ul></div><p>现在我们可以继续创建一个使用新的分析器的字段。</p></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="_多字段"></a>多字段<a href="https://github.com/elasticsearch-cn/elasticsearch-definitive-guide/edit/cn/120_Proximity_Matching/35_Shingles.asciidoc" class="edit_me" title="在 GitHub 上编辑本页" rel="nofollow">编辑</a></h3></div></div></div><p>我们曾谈到将 unigrams 和 bigrams 分开索引更清晰，所以 <code class="literal">title</code> 字段<a id="id-1.5.6.16.15.2.2" class="indexterm"></a>将创建成一个多字段（参考 <a class="xref" href="multi-fields.html" title="字符串排序与多字段">字符串排序与多字段</a> ）：</p><div class="pre_wrapper lang-js"><pre class="programlisting prettyprint lang-js">PUT /my_index/_mapping/my_type
 {
     "my_type": {
         "properties": {
@@ -351,21 +351,21 @@ Sue ate the alligator</pre></div><p>果然， 我们得到了 3 个词项：</p>
             }
         }
     }
-}</pre></div><p>通过这个映射， JSON 文档中的 <code class="literal">title</code> 字段将会被以 unigrams (<code class="literal">title</code>)和 bigrams (<code class="literal">title.shingles</code>)被索引，这意味着可以独立地查询这些字段。</p><p>最后，我们可以索引以下示例文档:</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-js">POST /my_index/my_type/_bulk
+}</pre></div><p>通过这个映射， JSON 文档中的 <code class="literal">title</code> 字段将会被以 unigrams (<code class="literal">title</code>)和 bigrams (<code class="literal">title.shingles</code>)被索引，这意味着可以独立地查询这些字段。</p><p>最后，我们可以索引以下示例文档:</p><div class="pre_wrapper lang-js"><pre class="programlisting prettyprint lang-js">POST /my_index/my_type/_bulk
 { "index": { "_id": 1 }}
 { "title": "Sue ate the alligator" }
 { "index": { "_id": 2 }}
 { "title": "The alligator ate Sue" }
 { "index": { "_id": 3 }}
 { "title": "Sue never goes anywhere without her alligator skin purse" }</pre></div></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="_搜索_shingles"></a>搜索 Shingles<a href="https://github.com/elasticsearch-cn/elasticsearch-definitive-guide/edit/cn/120_Proximity_Matching/35_Shingles.asciidoc" class="edit_me" title="在 GitHub 上编辑本页" rel="nofollow">编辑</a></h3></div></div></div><p>为了理解添加 <code class="literal">shingles</code> 字段的好处<a id="id-1.5.6.16.16.2.2" class="indexterm"></a>
-<a id="id-1.5.6.16.16.2.3" class="indexterm"></a>，让我们首先来看 <code class="literal">The hungry alligator ate Sue</code> 进行简单 <code class="literal">match</code> 查询的结果：</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-js">GET /my_index/my_type/_search
+<a id="id-1.5.6.16.16.2.3" class="indexterm"></a>，让我们首先来看 <code class="literal">The hungry alligator ate Sue</code> 进行简单 <code class="literal">match</code> 查询的结果：</p><div class="pre_wrapper lang-js"><pre class="programlisting prettyprint lang-js">GET /my_index/my_type/_search
 {
    "query": {
         "match": {
            "title": "the hungry alligator ate sue"
         }
    }
-}</pre></div><p>这个查询返回了所有的三个文档， 但是注意文档 1 和 2 有相同的相关度评分因为他们包含了相同的单词：</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-js">{
+}</pre></div><p>这个查询返回了所有的三个文档， 但是注意文档 1 和 2 有相同的相关度评分因为他们包含了相同的单词：</p><div class="pre_wrapper lang-js"><pre class="programlisting prettyprint lang-js">{
   "hits": [
      {
         "_id": "1",
@@ -394,7 +394,7 @@ Sue ate the alligator</pre></div><p>果然， 我们得到了 3 个词项：</p>
 </p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO89-3"><span><img src="images/icons/callouts/3.png" alt="" /></span></a> </p></td><td valign="top" align="left"><p>
 我们可以通过设置 <code class="literal">minimum_should_match</code> 参数排除文档 3 ，参考 <a class="xref" href="match-multi-word.html#match-precision" title="控制精度">控制精度</a> 。
 </p></td></tr></table></div><p>现在在查询里添加 <code class="literal">shingles</code> 字段。不要忘了在 <code class="literal">shingles</code> 字段上的匹配是充当一
-种信号--为了提高相关度评分--所以我们仍然需要将基本 <code class="literal">title</code> 字段包含到查询中：</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-js">GET /my_index/my_type/_search
+种信号--为了提高相关度评分--所以我们仍然需要将基本 <code class="literal">title</code> 字段包含到查询中：</p><div class="pre_wrapper lang-js"><pre class="programlisting prettyprint lang-js">GET /my_index/my_type/_search
 {
    "query": {
       "bool": {
@@ -410,7 +410,7 @@ Sue ate the alligator</pre></div><p>果然， 我们得到了 3 个词项：</p>
          }
       }
    }
-}</pre></div><p>仍然匹配到了所有的 3 个文档， 但是文档 2 现在排到了第一名因为它匹配了 shingled 词项 <code class="literal">ate sue</code>.</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-js">{
+}</pre></div><p>仍然匹配到了所有的 3 个文档， 但是文档 2 现在排到了第一名因为它匹配了 shingled 词项 <code class="literal">ate sue</code>.</p><div class="pre_wrapper lang-js"><pre class="programlisting prettyprint lang-js">{
   "hits": [
      {
         "_id": "2",

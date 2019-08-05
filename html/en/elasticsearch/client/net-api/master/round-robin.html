@@ -297,27 +297,27 @@ round robin over the <code class="literal">live</code> nodes to evenly distribut
 knows about. Different connection pool implementations can decide on the view to return, for example,</p><div class="itemizedlist"><ul class="itemizedlist" type="disc"><li class="listitem"><code class="literal">SingleNodeConnectionPool</code> is only ever seeded with and hence only knows about one node</li><li class="listitem"><code class="literal">StickyConnectionPool</code> can return a view of live nodes with the same starting position as the last live node a request was made against</li><li class="listitem"><code class="literal">SniffingConnectionPool</code> returns a view with a changing starting position that wraps over on each call</li></ul></div><p><code class="literal">CreateView</code> is implemented in a lock free thread safe fashion, meaning each callee gets returned
 its own cursor to advance over the internal list of nodes. This to guarantee each request that needs to
 fall over tries all the nodes without suffering from noisy neighbours advancing a global cursor.</p><p>Here we have setup a Static connection pool seeded with 10 nodes. We force randomization OnStartup to false
-so that we can test the nodes being returned are in the order we expect them to be.</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-csharp">var uris = Enumerable.Range(9200, NumberOfNodes).Select(p =&gt; new Uri("http://localhost:" + p));
+so that we can test the nodes being returned are in the order we expect them to be.</p><div class="pre_wrapper lang-csharp"><pre class="programlisting prettyprint lang-csharp">var uris = Enumerable.Range(9200, NumberOfNodes).Select(p =&gt; new Uri("http://localhost:" + p));
 var staticPool = new StaticConnectionPool(uris, randomize: false);
 var sniffingPool = new SniffingConnectionPool(uris, randomize: false);
 
 this.AssertCreateView(staticPool);
 this.AssertCreateView(sniffingPool);</pre></div><p>So what order do we expect? Imagine the following:</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem">Thread A calls <code class="literal">CreateView()</code> first without a local cursor and takes the current value from the internal global cursor, which is <code class="literal">0</code></li><li class="listitem">Thread B calls <code class="literal">CreateView()</code> second without a local cursor and therefore starts at <code class="literal">1</code></li><li class="listitem">After this, each thread should walk the nodes in successive order using their local cursor. For example, Thread A might
-get 0,1,2,3,5 and thread B will get 1,2,3,4,0.</li></ol></div><div class="pre_wrapper"><pre class="programlisting prettyprint lang-csharp">var startingPositions = Enumerable.Range(0, NumberOfNodes)
+get 0,1,2,3,5 and thread B will get 1,2,3,4,0.</li></ol></div><div class="pre_wrapper lang-csharp"><pre class="programlisting prettyprint lang-csharp">var startingPositions = Enumerable.Range(0, NumberOfNodes)
     .Select(i =&gt; pool.CreateView().First())
     .Select(n =&gt; n.Uri.Port)
     .ToList();
 
 var expectedOrder = Enumerable.Range(9200, NumberOfNodes);
 startingPositions.Should().ContainInOrder(expectedOrder);</pre></div><p>What the above code just proved is that each call to <code class="literal">CreateView()</code> gets assigned the next available node.</p><p>Lets up the ante:</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem">Call <code class="literal">CreateView()</code> over <code class="literal">NumberOfNodes * 2</code> threads</li><li class="listitem">On each thread, call <code class="literal">CreateView()</code> <code class="literal">NumberOfNodes * 10</code> times using a local cursor.</li></ol></div><p>We’ll validate that each thread sees all the nodes and that they wrap over, for example, after node 9209
-comes 9200 again</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-csharp">var threadedStartPositions = new ConcurrentBag&lt;int&gt;();
+comes 9200 again</p><div class="pre_wrapper lang-csharp"><pre class="programlisting prettyprint lang-csharp">var threadedStartPositions = new ConcurrentBag&lt;int&gt;();
 var threads = Enumerable.Range(0, 20)
     .Select(i =&gt; CreateThreadCallingCreateView(pool, threadedStartPositions))
     .ToList();
 
 foreach (var t in threads) t.Start();
 foreach (var t in threads) t.Join();</pre></div><p>Each thread reported the first node it started off. Let’s make sure we see each node twice
-because we started <code class="literal">NumberOfNodes * 2</code> threads</p><div class="pre_wrapper"><pre class="programlisting prettyprint lang-csharp">var grouped = threadedStartPositions.GroupBy(p =&gt; p).ToList();
+because we started <code class="literal">NumberOfNodes * 2</code> threads</p><div class="pre_wrapper lang-csharp"><pre class="programlisting prettyprint lang-csharp">var grouped = threadedStartPositions.GroupBy(p =&gt; p).ToList();
 grouped.Count.Should().Be(NumberOfNodes);
 grouped.Select(p =&gt; p.Count()).Should().OnlyContain(p =&gt; p == 2);</pre></div></div><div class="navfooter"><span class="prev"><a href="ping-on-revival.html">
               « 
