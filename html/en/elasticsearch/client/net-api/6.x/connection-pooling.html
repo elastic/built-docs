@@ -301,7 +301,7 @@ and can be controlled by <a class="link" href="modifying-default-connection.html
 cluster to which a connection can be made and there is one instance of an <code class="literal">IConnectionPool</code> associated with an
 instance of <code class="literal">ConnectionSettings</code>. Since a <a class="link" href="lifetimes.html" title="Lifetimes">single client and connection settings instance is recommended for the
 life of the application</a>, the lifetime of a single connection pool instance will also be bound to the lifetime
-of the application.</p><p>There are four types of connection pool</p><div class="itemizedlist"><ul class="itemizedlist" type="disc"><li class="listitem"><a class="link" href="connection-pooling.html#single-node-connection-pool" title="SingleNodeConnectionPool">SingleNodeConnectionPool</a></li><li class="listitem"><a class="link" href="connection-pooling.html#static-connection-pool" title="StaticConnectionPool">StaticConnectionPool</a></li><li class="listitem"><a class="link" href="connection-pooling.html#sniffing-connection-pool" title="SniffingConnectionPool">SniffingConnectionPool</a></li><li class="listitem"><a class="link" href="connection-pooling.html#sticky-connection-pool" title="StickyConnectionPool">StickyConnectionPool</a></li></ul></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="single-node-connection-pool"></a>SingleNodeConnectionPool<a href="https://github.com/elastic/elasticsearch-net/edit/6.x/docs/client-concepts/connection-pooling/building-blocks/connection-pooling.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3></div></div></div><p>The simplest of all connection pools and the default if no connection pool is explicitly passed to the <code class="literal">ConnectionSettings</code> constructor.
+of the application.</p><p>There are five types of connection pool</p><div class="itemizedlist"><ul class="itemizedlist" type="disc"><li class="listitem"><a class="link" href="connection-pooling.html#single-node-connection-pool" title="SingleNodeConnectionPool">SingleNodeConnectionPool</a></li><li class="listitem"><a class="link" href="connection-pooling.html#cloud-connection-pool" title="CloudConnectionPool">CloudConnectionPool</a></li><li class="listitem"><a class="link" href="connection-pooling.html#static-connection-pool" title="StaticConnectionPool">StaticConnectionPool</a></li><li class="listitem"><a class="link" href="connection-pooling.html#sniffing-connection-pool" title="SniffingConnectionPool">SniffingConnectionPool</a></li><li class="listitem"><a class="link" href="connection-pooling.html#sticky-connection-pool" title="StickyConnectionPool">StickyConnectionPool</a></li></ul></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="single-node-connection-pool"></a>SingleNodeConnectionPool<a href="https://github.com/elastic/elasticsearch-net/edit/6.x/docs/client-concepts/connection-pooling/building-blocks/connection-pooling.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3></div></div></div><p>The simplest of all connection pools and the default if no connection pool is explicitly passed to the <code class="literal">ConnectionSettings</code> constructor.
 It takes a single <code class="literal">Uri</code> and uses that to connect to Elasticsearch for all the calls. Single node connection pool doesn’t opt in to
 sniffing or pinging behavior and will never mark nodes dead or alive. The one <code class="literal">Uri</code> it holds is always ready to go.</p><p>Single node connection pool is the pool to use if your cluster contains only a single node or you are interacting with
 your cluster through a single load balancer instance.</p><div class="pre_wrapper lang-csharp"><pre class="programlisting prettyprint lang-csharp">var uri = new Uri("http://localhost:9201");
@@ -316,7 +316,45 @@ client.ConnectionSettings.ConnectionPool
 client.ConnectionSettings.ConnectionPool
     .Should().BeOfType&lt;SingleNodeConnectionPool&gt;();</pre></div><p>or even better pass the connection pool explicitly</p><div class="pre_wrapper lang-csharp"><pre class="programlisting prettyprint lang-csharp">client = new ElasticClient(new ConnectionSettings(pool));
 client.ConnectionSettings.ConnectionPool
-    .Should().BeOfType&lt;SingleNodeConnectionPool&gt;();</pre></div></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="static-connection-pool"></a>StaticConnectionPool<a href="https://github.com/elastic/elasticsearch-net/edit/6.x/docs/client-concepts/connection-pooling/building-blocks/connection-pooling.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3></div></div></div><p>The static connection pool is great if you have a known small sized cluster and do no want to enable
+    .Should().BeOfType&lt;SingleNodeConnectionPool&gt;();</pre></div></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="cloud-connection-pool"></a>CloudConnectionPool<a href="https://github.com/elastic/elasticsearch-net/edit/6.x/docs/client-concepts/connection-pooling/building-blocks/connection-pooling.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3></div></div></div><p>A specialized subclass of `SingleNodeConnectionPool that accepts a Cloud Id and credentials.
+When used the client will also pick Elastic Cloud optmized defaults for the connection settings.</p><p>A Cloud Id for your cluster can be fetched from your Elastic Cloud cluster administration console.</p><p>A Cloud Id should be in the form of <code class="literal">cluster_name:base_64_data</code> where <code class="literal">base_64_data</code> are the UUIDs for the services in this cloud instance e.g</p><p><code class="literal">host_name$elasticsearch_uuid$kibana_uuid$apm_uuid</code></p><p>Out of these, only <code class="literal">host_name</code> and <code class="literal">elasticsearch_uuid</code> are always available.</p><div class="pre_wrapper lang-csharp"><pre class="programlisting prettyprint lang-csharp">string ToBase64(string s) =&gt; Convert.ToBase64String(Encoding.UTF8.GetBytes(s));
+/* Here we obviously use a ficticuous Cloud Id so lets create a fake one. */
+
+var hostName = "cloud-endpoint.example";
+var elasticsearchUuid = "3dadf823f05388497ea684236d918a1a";
+var services = $"{hostName}${elasticsearchUuid}$3f26e1609cf54a0f80137a80de560da4";
+var cloudId = $"my_cluster:{ToBase64(services)}";
+
+/*
+ * In a real scenario you would be able to copy paste `cloudId`
+ *
+ * A cloud connection pool always needs credentials as well here opt for basic auth
+ */
+var credentials = new BasicAuthenticationCredentials("username", "password");
+var pool = new CloudConnectionPool(cloudId, credentials);
+pool.UsingSsl.Should().BeTrue();
+pool.Nodes.Should().HaveCount(1);
+var node = pool.Nodes.First();
+node.Uri.Port.Should().Be(443);
+node.Uri.Host.Should().Be($"{elasticsearchUuid}.{hostName}");
+node.Uri.Scheme.Should().Be("https");</pre></div><p>This type of pool like its parent the <code class="literal">SingleNodeConnectionPool</code> is hardwired to opt out of
+reseeding (thus, sniffing) as well as pinging</p><div class="pre_wrapper lang-csharp"><pre class="programlisting prettyprint lang-csharp">pool.SupportsReseeding.Should().BeFalse();
+pool.SupportsPinging.Should().BeFalse();</pre></div><p>You can also directly create a cloud enabled connection using the clients constructor</p><div class="pre_wrapper lang-csharp"><pre class="programlisting prettyprint lang-csharp">var client = new ElasticClient(cloudId, credentials);
+client.ConnectionSettings.ConnectionPool
+    .Should()
+    .BeOfType&lt;CloudConnectionPool&gt;();</pre></div><p>However we urge that you always pass your connection settings explicitly</p><div class="pre_wrapper lang-csharp"><pre class="programlisting prettyprint lang-csharp">client = new ElasticClient(new ConnectionSettings(pool));
+client.ConnectionSettings.ConnectionPool.Should().BeOfType&lt;CloudConnectionPool&gt;();
+
+client.ConnectionSettings.EnableHttpCompression.Should().BeTrue();
+client.ConnectionSettings.BasicAuthenticationCredentials.Should().NotBeNull();
+client.ConnectionSettings.BasicAuthenticationCredentials.Username.Should().Be("username");
+foreach (var id in badCloudIds)
+{
+    Action create = () =&gt; new ElasticClient(id, credentials);
+
+    create.ShouldThrow&lt;ArgumentException&gt;()
+        .And.Message.Should().Contain("should be a string in the form of cluster_name:base_64_data");
+}</pre></div></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="static-connection-pool"></a>StaticConnectionPool<a href="https://github.com/elastic/elasticsearch-net/edit/6.x/docs/client-concepts/connection-pooling/building-blocks/connection-pooling.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3></div></div></div><p>The static connection pool is great if you have a known small sized cluster and do no want to enable
 sniffing to find out the cluster topology.</p><div class="pre_wrapper lang-csharp"><pre class="programlisting prettyprint lang-csharp">var uris = Enumerable.Range(9200, 5)
     .Select(port =&gt; new Uri($"http://localhost:{port}"));</pre></div><p>a connection pool can be seeded using an enumerable of <code class="literal">Uri</code></p><div class="pre_wrapper lang-csharp"><pre class="programlisting prettyprint lang-csharp">var pool = new StaticConnectionPool(uris);</pre></div><p>Or using an enumerable of <code class="literal">Node</code></p><div class="pre_wrapper lang-csharp"><pre class="programlisting prettyprint lang-csharp">var nodes = uris.Select(u =&gt; new Node(u));
 pool = new StaticConnectionPool(nodes);</pre></div><p>This type of pool is hardwired to opt out of reseeding
