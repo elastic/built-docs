@@ -482,31 +482,27 @@ clusters optional. By default, it is set to <code class="literal">false</code>.<
       }
     ]
   }
-}</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO316-1"><span><img src="images/icons/callouts/1.png" alt="" /></span></a> </p></td><td valign="top" align="left"><p>The <code class="literal">clusters</code> section indicates that one cluster was unavailable and got skipped</p></td></tr></table></div><h3><a id="ccs-reduction"></a>Cross-cluster search reduction phase<a href="https://github.com/elastic/elasticsearch/edit/7.3/docs/reference/modules/cross-cluster-search.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>Cross-cluster search (CCS) requests can be executed in two ways:</p><div class="itemizedlist"><ul class="itemizedlist" type="disc"><li class="listitem">the CCS coordinating node minimizes network round-trips by sending one search
-request to each cluster. Each cluster performs the search independently,
-reducing and fetching results. Once the CCS node has received all the
-responses, it performs another reduction and returns the relevant results back
-to the user. This strategy is beneficial when there is network latency between
-the CCS coordinating node and the remote clusters involved, which is typically
-the case. A single request is sent to each remote cluster, at the cost of
-retrieving <code class="literal">from</code> + <code class="literal">size</code> already fetched results. This is the default
-strategy, used whenever possible. In case a scroll is provided, or inner hits
-are requested as part of field collapsing, this strategy is not supported hence
-network round-trips cannot be minimized and the following strategy is used
-instead.</li><li class="listitem">the CCS coordinating node sends a <a class="link" href="search-shards.html" title="Search Shards API">search shards</a> request to
-each remote cluster, in order to collect information about their corresponding
-remote indices involved in the search request and the shards where their data
-is located. Once each cluster has responded to such request, the search
-executes as if all shards were part of the same cluster. The coordinating node
-sends one request to each shard involved, each shard executes the query and
-returns its own results which are then reduced (and fetched, depending on the
-<a class="link" href="search-request-body.html#request-body-search-search-type" title="Search Type">search type</a>) by the CCS coordinating node.
-This strategy may be beneficial whenever there is very low network latency
-between the CCS coordinating node and the remote clusters involved, as it
-treats all shards the same, at the cost of sending many requests to each remote
-cluster, which is problematic in presence of network latency.</li></ul></div><p>The <a class="link" href="search-request-body.html" title="Request Body Search">search API</a> supports the <code class="literal">ccs_minimize_roundtrips</code>
-parameter, which defaults to <code class="literal">true</code> and can be set to <code class="literal">false</code> in case
-minimizing network round-trips is not desirable.</p></div><div class="navfooter"><span class="prev"><a href="modules-remote-clusters.html">
+}</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO316-1"><span><img src="images/icons/callouts/1.png" alt="" /></span></a> </p></td><td valign="top" align="left"><p>The <code class="literal">clusters</code> section indicates that one cluster was unavailable and got skipped</p></td></tr></table></div><h3><a id="ccs-works"></a>How cross-cluster search works<a href="https://github.com/elastic/elasticsearch/edit/7.3/docs/reference/modules/cross-cluster-search.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>Because cross-cluster search involves sending requests to remote clusters, any network delays
+can impact search speed. To avoid slow searches, cross-cluster search offers two options for
+handling network delays:</p><div class="variablelist"><dl class="variablelist"><dt><span class="term"><a class="link" href="modules-cross-cluster-search.html#ccs-min-roundtrips" title="Minimize network roundtrips">Minimize network roundtrips</a></span></dt><dd><p class="simpara">By default, Elasticsearch reduces the number of network roundtrips between remote
+clusters. This reduces the impact of network delays on search speed. However,
+Elasticsearch can’t reduce network roundtrips for large search requests, such as those
+including a <a class="link" href="search-request-body.html#request-body-search-scroll" title="Scroll">scroll</a> or
+<a class="link" href="search-request-body.html#request-body-search-inner-hits" title="Inner hits">inner hits</a>.</p><p class="simpara">See <a class="xref" href="modules-cross-cluster-search.html#ccs-min-roundtrips" title="Minimize network roundtrips">Minimize network roundtrips</a> to learn how this option works.</p></dd><dt><span class="term"><a class="link" href="modules-cross-cluster-search.html#ccs-unmin-roundtrips" title="Don’t minimize network roundtrips">Don’t minimize network roundtrips</a></span></dt><dd><p class="simpara">For search requests that include a scroll or inner hits, Elasticsearch sends multiple
+outgoing and ingoing requests to each remote cluster. You can also choose this
+option by setting the <a class="link" href="search.html" title="Search APIs">search</a> API’s
+<a class="link" href="search-request-body.html#ccs-minimize-roundtrips"><code class="literal">ccs_minimize_roundtrips</code></a> parameter to <code class="literal">false</code>.
+While typically slower, this approach may work well for networks with low
+latency.</p><p class="simpara">See <a class="xref" href="modules-cross-cluster-search.html#ccs-unmin-roundtrips" title="Don’t minimize network roundtrips">Don’t minimize network roundtrips</a> to learn how this option works.</p></dd></dl></div><h4><a id="ccs-min-roundtrips"></a>Minimize network roundtrips<a href="https://github.com/elastic/elasticsearch/edit/7.3/docs/reference/modules/cross-cluster-search.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h4><p>Here’s how cross-cluster search works when you minimize network roundtrips.</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem"><p class="simpara">You send a cross-cluster search request to your local cluster. A coordinating node in that
+cluster receives and parses the request.</p><p class="simpara"><span class="inlinemediaobject"><img src="images/ccs/ccs-min-roundtrip-client-request.png" alt="ccs min roundtrip client request" /></span></p></li><li class="listitem"><p class="simpara">The coordinating node sends a single search request to each cluster, including
+its own. Each cluster performs the search request independently.</p><p class="simpara"><span class="inlinemediaobject"><img src="images/ccs/ccs-min-roundtrip-cluster-search.png" alt="ccs min roundtrip cluster search" /></span></p></li><li class="listitem"><p class="simpara">Each remote cluster sends its search results back to the coordinating node.</p><p class="simpara"><span class="inlinemediaobject"><img src="images/ccs/ccs-min-roundtrip-cluster-results.png" alt="ccs min roundtrip cluster results" /></span></p></li><li class="listitem"><p class="simpara">After collecting results from each cluster, the coordinating node returns the
+final results in the cross-cluster search response.</p><p class="simpara"><span class="inlinemediaobject"><img src="images/ccs/ccs-min-roundtrip-client-response.png" alt="ccs min roundtrip client response" /></span></p></li></ol></div><h4><a id="ccs-unmin-roundtrips"></a>Don’t minimize network roundtrips<a href="https://github.com/elastic/elasticsearch/edit/7.3/docs/reference/modules/cross-cluster-search.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h4><p>Here’s how cross-cluster search works when you don’t minimize network roundtrips.</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem"><p class="simpara">You send a cross-cluster search request to your local cluster. A coordinating node in that
+cluster receives and parses the request.</p><p class="simpara"><span class="inlinemediaobject"><img src="images/ccs/ccs-min-roundtrip-client-request.png" alt="ccs min roundtrip client request" /></span></p></li><li class="listitem"><p class="simpara">The coordinating node sends a <a class="link" href="search-shards.html" title="Search Shards API">search shards</a> API request to
+each remote cluster.</p><p class="simpara"><span class="inlinemediaobject"><img src="images/ccs/ccs-min-roundtrip-cluster-search.png" alt="ccs min roundtrip cluster search" /></span></p></li><li class="listitem"><p class="simpara">Each remote cluster sends its response back to the coordinating node.
+This response contains information about the indices and shards the cross-cluster search
+request will be executed on.</p><p class="simpara"><span class="inlinemediaobject"><img src="images/ccs/ccs-min-roundtrip-cluster-results.png" alt="ccs min roundtrip cluster results" /></span></p></li><li class="listitem"><p class="simpara">The coordinating node sends a search request to each shard, including those in
+its own cluster. Each shard performs the search request independently.</p><p class="simpara"><span class="inlinemediaobject"><img src="images/ccs/ccs-dont-min-roundtrip-shard-search.png" alt="ccs dont min roundtrip shard search" /></span></p></li><li class="listitem"><p class="simpara">Each shard sends its search results back to the coordinating node.</p><p class="simpara"><span class="inlinemediaobject"><img src="images/ccs/ccs-dont-min-roundtrip-shard-results.png" alt="ccs dont min roundtrip shard results" /></span></p></li><li class="listitem"><p class="simpara">After collecting results from each cluster, the coordinating node returns the
+final results in the cross-cluster search response.</p><p class="simpara"><span class="inlinemediaobject"><img src="images/ccs/ccs-min-roundtrip-client-response.png" alt="ccs min roundtrip client response" /></span></p></li></ol></div></div><div class="navfooter"><span class="prev"><a href="modules-remote-clusters.html">
               « 
               Remote clusters</a>
            
