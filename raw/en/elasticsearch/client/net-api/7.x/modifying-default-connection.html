@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title xmlns="">Modifying the default connection
+        | Elasticsearch.Net and NEST: the .NET clients [7.x]
+      | Elastic
+    </title><meta name="generator" content="DocBook XSL Stylesheets V1.78.1" /><link rel="home" href="index.html" title="Elasticsearch.Net and NEST: the .NET clients [7.x]" /><link rel="up" href="connecting.html" title="Connecting" /><link rel="prev" href="connection-pooling.html" title="Connection pools" /><link rel="next" href="working-with-certificates.html" title="Working with certificates" /><meta xmlns="" name="description" content="Get started with the documentation for Elasticsearch, Kibana, Logstash, Beats, X-Pack, Elastic Cloud, Elasticsearch for Apache Hadoop, and our language clients." /><meta xmlns="" name="DC.type" content="Learn/Docs/Clients/.Net/7.x" /><meta xmlns="" name="DC.subject" content="Clients" /><meta xmlns="" name="DC.identifier" content="7.x" /></head><body><div xmlns="" class="breadcrumbs"><span class="breadcrumb-link"><a href="index.html">Elasticsearch.Net and NEST:  the .NET clients
+      [7.x]
+    </a></span> » <span class="breadcrumb-link"><a href="nest.html">NEST - High level client</a></span> » <span class="breadcrumb-link"><a href="connecting.html">Connecting</a></span> » <span class="breadcrumb-node">Modifying the default connection</span></div><div xmlns="" class="navheader"><span class="prev"><a href="connection-pooling.html">
+              « 
+              Connection pools</a>
+           
+        </span><span class="next">
+           
+          <a href="working-with-certificates.html">Working with certificates
+               »
+            </a></span></div><div class="section"><div class="titlepage"><div><div><h2 class="title"><a id="modifying-default-connection"></a>Modifying the default connection<a xmlns="" href="https://github.com/elastic/elasticsearch-net/edit/7.x/docs/client-concepts/connection/modifying-default-connection.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h2></div></div></div><p>The client abstracts sending the request and creating a response behind <code class="literal">IConnection</code> and the default
+implementation uses <a class="ulink" href="https://msdn.microsoft.com/en-us/library/system.net.http.httpclient(v=vs.118).aspx" target="_top"><code class="literal">System.Net.Http.HttpClient</code></a>.</p><p>Why would you ever want to pass your own <code class="literal">IConnection</code>? Let’s look at a couple of examples</p><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="_using_inmemoryconnection"></a>Using InMemoryConnection<a xmlns="" href="https://github.com/elastic/elasticsearch-net/edit/7.x/docs/client-concepts/connection/modifying-default-connection.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3></div></div></div><p><code class="literal">InMemoryConnection</code> is an in-built <code class="literal">IConnection</code> that makes it easy to write unit tests against. It can be
+configured to respond with default response bytes, HTTP status code and an exception when a call is made.</p><p><code class="literal">InMemoryConnection</code> <span class="strong strong"><strong>doesn’t actually send any requests or receive any responses from Elasticsearch</strong></span>;
+requests are still serialized and the request bytes can be obtained on the response if <code class="literal">.DisableDirectStreaming</code> is
+set to <code class="literal">true</code> on the request or globally</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">var connection = new InMemoryConnection();
+var connectionPool = new SingleNodeConnectionPool(new Uri("http://localhost:9200"));
+var settings = new ConnectionSettings(connectionPool, connection);
+var client = new ElasticClient(settings);</pre></div><p>Here we create a new <code class="literal">ConnectionSettings</code> by using the overload that takes a <code class="literal">IConnectionPool</code> and an <code class="literal">IConnection</code>.
+We pass it an <code class="literal">InMemoryConnection</code> which, using the default parameterless constructor,
+will return 200 for everything and never actually perform any IO.</p><p>Let’s see a more complex example</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">var response = new
+{
+    took = 1,
+    timed_out = false,
+    _shards = new
+    {
+        total = 2,
+        successful = 2,
+        failed = 0
+    },
+    hits = new
+    {
+        total = new { value = 25 },
+        max_score = 1.0,
+        hits = Enumerable.Range(1, 25).Select(i =&gt; (object)new
+        {
+            _index = "project",
+            _type = "project",
+            _id = $"Project {i}",
+            _score = 1.0,
+            _source = new { name = $"Project {i}" }
+        }).ToArray()
+    }
+};
+
+var responseBytes = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(response));
+var connection = new InMemoryConnection(responseBytes, 200); <a id="CO36-1"></a><i xmlns="" class="conum" data-value="1"></i>
+var connectionPool = new SingleNodeConnectionPool(new Uri("http://localhost:9200"));
+var settings = new ConnectionSettings(connectionPool, connection).DefaultIndex("project");
+var client = new ElasticClient(settings);
+
+var searchResponse = client.Search&lt;Project&gt;(s =&gt; s.MatchAll());</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO36-1"><i xmlns="" class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p><code class="literal">InMemoryConnection</code> is configured to <span class="strong strong"><strong>always</strong></span> return <code class="literal">responseBytes</code> along with a 200 HTTP status code</p></td></tr></table></div><p>We can now assert that the <code class="literal">searchResponse</code> is valid and contains documents deserialized
+from our fixed <code class="literal">InMemoryConnection</code> response</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">searchResponse.ShouldBeValid();
+searchResponse.Documents.Count.Should().Be(25);</pre></div></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="_changing_httpconnection"></a>Changing HttpConnection<a xmlns="" href="https://github.com/elastic/elasticsearch-net/edit/7.x/docs/client-concepts/connection/modifying-default-connection.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3></div></div></div><p>There may be a need to change how the default <code class="literal">HttpConnection</code> works, for example, to add an X509 certificate
+to the request, change the maximum number of connections allowed to an endpoint, etc.</p><p>By deriving from <code class="literal">HttpConnection</code>, it is possible to change the behaviour of the connection. The following
+provides some examples</p><p>On .NET full framework the overrides on HttpConnection are different as they are geared towards using HttpWebRequest.
+Here are two examples for .NET full framework</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">public class MyCustomHttpConnection : HttpConnection
+{
+    protected override void AlterServicePoint(ServicePoint requestServicePoint, RequestData requestData)
+    {
+        base.AlterServicePoint(requestServicePoint, requestData);
+        requestServicePoint.ConnectionLimit = 10000;
+        requestServicePoint.UseNagleAlgorithm = true;
+    }
+}
+
+public class X509CertificateHttpConnection : HttpConnection
+{
+    protected override HttpWebRequest CreateHttpWebRequest(RequestData requestData)
+    {
+        var request = base.CreateHttpWebRequest(requestData);
+        request.ClientCertificates.Add(new X509Certificate("file_path_to_cert"));
+        return request;
+    }
+}</pre></div><p>As before, a new instance of the custom connection is passed to <code class="literal">ConnectionSettings</code> in order to
+use</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">var connection = new X509CertificateHttpConnection();
+var connectionPool = new SingleNodeConnectionPool(new Uri("http://localhost:9200"));
+var settings = new ConnectionSettings(connectionPool, connection);
+var client = new ElasticClient(settings);</pre></div><p>See <a class="link" href="working-with-certificates.html" title="Working with certificates">Working with certificates</a> for further details.</p></div></div><div xmlns="" class="navfooter"><span class="prev"><a href="connection-pooling.html">
+              « 
+              Connection pools</a>
+           
+        </span><span class="next">
+           
+          <a href="working-with-certificates.html">Working with certificates
+               »
+            </a></span></div></body></html>

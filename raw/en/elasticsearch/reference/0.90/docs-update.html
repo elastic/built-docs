@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title xmlns="">Update API
+        | Reference [0.90]
+      | Elastic
+    </title><meta name="generator" content="DocBook XSL Stylesheets V1.78.1" /><link rel="home" href="index.html" title="Reference [0.90]" /><link rel="up" href="docs.html" title="Document APIs" /><link rel="prev" href="docs-delete.html" title="Delete API" /><link rel="next" href="docs-multi-get.html" title="Multi Get API" /><meta xmlns="" name="description" content="Get started with the documentation for Elasticsearch, Kibana, Logstash, Beats, X-Pack, Elastic Cloud, Elasticsearch for Apache Hadoop, and our language clients." /><meta xmlns="" name="DC.type" content="Learn/Docs/Elasticsearch/Reference/0.90" /><meta xmlns="" name="DC.subject" content="Elasticsearch" /><meta xmlns="" name="DC.identifier" content="0.90" /></head><body><div xmlns="" class="page_header">You are looking at documentation for an older release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div><div xmlns="" class="breadcrumbs"><span class="breadcrumb-link"><a href="index.html">Reference
+      [0.90]
+    </a></span> » <span class="breadcrumb-link"><a href="docs.html">Document APIs</a></span> » <span class="breadcrumb-node">Update API</span></div><div xmlns="" class="navheader"><span class="prev"><a href="docs-delete.html">
+              « 
+              Delete API</a>
+           
+        </span><span class="next">
+           
+          <a href="docs-multi-get.html">Multi Get API
+               »
+            </a></span></div><div class="chapter"><div class="titlepage"><div><div><h2 class="title"><a id="docs-update"></a>Update API<a xmlns="" href="https://github.com/elastic/elasticsearch/edit/0.90/docs/reference/docs/update.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h2></div></div></div><p>The update API allows to update a document based on a script provided.
+The operation gets the document (collocated with the shard) from the
+index, runs the script (with optional script language and parameters),
+and index back the result (also allows to delete, or ignore the
+operation). It uses versioning to make sure no updates have happened
+during the "get" and "reindex". (available from <code class="literal">0.19</code> onwards).</p><p>Note, this operation still means full reindex of the document, it just
+removes some network roundtrips and reduces chances of version conflicts
+between the get and the index. The <code class="literal">_source</code> field need to be enabled
+for this feature to work.</p><p>For example, lets index a simple doc:</p><div xmlns="" class="pre_wrapper lang-js"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-js">curl -XPUT localhost:9200/test/type1/1 -d '{
+    "counter" : 1,
+    "tags" : ["red"]
+}'</pre></div><p>Now, we can execute a script that would increment the counter:</p><div xmlns="" class="pre_wrapper lang-js"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-js">curl -XPOST 'localhost:9200/test/type1/1/_update' -d '{
+    "script" : "ctx._source.counter += count",
+    "params" : {
+        "count" : 4
+    }
+}'</pre></div><p>We can also add a tag to the list of tags (note, if the tag exists, it
+will still add it, since its a list):</p><div xmlns="" class="pre_wrapper lang-js"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-js">curl -XPOST 'localhost:9200/test/type1/1/_update' -d '{
+    "script" : "ctx._source.tags += tag",
+    "params" : {
+        "tag" : "blue"
+    }
+}'</pre></div><p>We can also add a new field to the document:</p><div xmlns="" class="pre_wrapper lang-js"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-js">curl -XPOST 'localhost:9200/test/type1/1/_update' -d '{
+    "script" : "ctx._source.text = \"some text\""
+}'</pre></div><p>We can also remove a field from the document:</p><div xmlns="" class="pre_wrapper lang-js"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-js">curl -XPOST 'localhost:9200/test/type1/1/_update' -d '{
+    "script" : "ctx._source.remove(\"text\")"
+}'</pre></div><p>And, we can delete the doc if the tags contain blue, or ignore (noop):</p><div xmlns="" class="pre_wrapper lang-js"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-js">curl -XPOST 'localhost:9200/test/type1/1/_update' -d '{
+    "script" : "ctx._source.tags.contains(tag) ? ctx.op = \"delete\" : ctx.op = \"none\"",
+    "params" : {
+        "tag" : "blue"
+    }
+}'</pre></div><p><span class="strong strong"><strong>Note</strong></span>: Be aware of MVEL and handling of ternary operators and
+assignments. Assignment operations have lower precedence than the
+ternary operator. Compare the following statements:</p><div xmlns="" class="pre_wrapper lang-js"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-js">// Will NOT update the tags array
+ctx._source.tags.contains(tag) ? ctx.op = \"none\" : ctx._source.tags += tag
+// Will update
+ctx._source.tags.contains(tag) ? (ctx.op = \"none\") : ctx._source.tags += tag
+// Also works
+if (ctx._source.tags.contains(tag)) { ctx.op = \"none\" } else { ctx._source.tags += tag }</pre></div><p>The update API also support passing a partial document (since 0.20),
+which will be merged into the existing document (simple recursive merge,
+inner merging of objects, replacing core "keys/values" and arrays). For
+example:</p><div xmlns="" class="pre_wrapper lang-js"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-js">curl -XPOST 'localhost:9200/test/type1/1/_update' -d '{
+    "doc" : {
+        "name" : "new_name"
+    }
+}'</pre></div><p>If both <code class="literal">doc</code> and <code class="literal">script</code> is specified, then <code class="literal">doc</code> is ignored. Best is
+to put your field pairs of the partial document in the script itself.</p><p>There is also support for <code class="literal">upsert</code> (since 0.20). If the document does
+not already exists, the content of the <code class="literal">upsert</code> element will be used to
+index the fresh doc:</p><div xmlns="" class="pre_wrapper lang-js"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-js">curl -XPOST 'localhost:9200/test/type1/1/_update' -d '{
+    "script" : "ctx._source.counter += count",
+    "params" : {
+        "count" : 4
+    },
+    "upsert" : {
+        "counter" : 1
+    }
+}'</pre></div><p>Last it also supports <code class="literal">doc_as_upsert</code> (since 0.90.2). So that the
+provided document will be inserted if the document does not already
+exist. This will reduce the amount of data that needs to be sent to
+elasticsearch.</p><div xmlns="" class="pre_wrapper lang-js"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-js">curl -XPOST 'localhost:9200/test/type1/1/_update' -d '{
+    "doc" : {
+        "name" : "new_name"
+    },
+    "doc_as_upsert" : true
+}'</pre></div><p>The update operation supports similar parameters as the index API,
+including:</p><div class="informaltable"><table cellpadding="4px" border="0"><colgroup><col /><col /></colgroup><tbody valign="top"><tr><td valign="top">
+<p><code class="literal">routing</code></p>
+</td><td valign="top">
+<p>Sets the routing that will be used to route the
+document to the relevant shard.</p>
+</td></tr><tr><td valign="top">
+<p><code class="literal">parent</code></p>
+</td><td valign="top">
+<p>Simply sets the routing.</p>
+</td></tr><tr><td valign="top">
+<p><code class="literal">timeout</code></p>
+</td><td valign="top">
+<p>Timeout waiting for a shard to become available.</p>
+</td></tr><tr><td valign="top">
+<p><code class="literal">replication</code></p>
+</td><td valign="top">
+<p>The replication type for the delete/index operation
+(sync or async).</p>
+</td></tr><tr><td valign="top">
+<p><code class="literal">consistency</code></p>
+</td><td valign="top">
+<p>The write consistency of the index/delete operation.</p>
+</td></tr><tr><td valign="top">
+<p><code class="literal">percolate</code></p>
+</td><td valign="top">
+<p>Enables percolation and filters out which percolator
+queries will be executed.</p>
+</td></tr><tr><td valign="top">
+<p><code class="literal">refresh</code></p>
+</td><td valign="top">
+<p>Refresh the index immediately after the operation occurs,
+so that the updated document appears in search results
+immediately.</p>
+</td></tr><tr><td valign="top">
+<p><code class="literal">fields</code></p>
+</td><td valign="top">
+<p>return the relevant fields from the document updated
+(since 0.20). Support <code class="literal">_source</code> to return the full updated
+source.</p>
+</td></tr></tbody></table></div><p>And also support <code class="literal">retry_on_conflict</code> which controls how many times to
+retry if there is a version conflict between getting the document and
+indexing / deleting it. Defaults to <code class="literal">0</code>.</p><p>It also allows to update the <code class="literal">ttl</code> of a document using <code class="literal">ctx._ttl</code> and
+timestamp using <code class="literal">ctx._timestamp</code>. Note that if the timestamp is not
+updated and not extracted from the <code class="literal">_source</code> it will be set to the
+update date.</p></div><div xmlns="" class="navfooter"><span class="prev"><a href="docs-delete.html">
+              « 
+              Delete API</a>
+           
+        </span><span class="next">
+           
+          <a href="docs-multi-get.html">Multi Get API
+               »
+            </a></span></div></body></html>

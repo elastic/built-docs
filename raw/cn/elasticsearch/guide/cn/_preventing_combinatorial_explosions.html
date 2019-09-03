@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title xmlns="">优化聚合查询
+        | Elasticsearch: 权威指南
+      | Elastic
+    </title><meta name="generator" content="DocBook XSL Stylesheets V1.78.1" /><link rel="home" href="index.html" title="Elasticsearch: 权威指南" /><link rel="up" href="docvalues-and-fielddata.html" title="Doc Values and Fielddata" /><link rel="prev" href="preload-fielddata.html" title="预加载 fielddata" /><link rel="next" href="_closing_thoughts.html" title="总结" /><meta xmlns="" name="description" content="有关如何使用 Elasticsearch、Kibana、Logstash、Beats、X-Pack、Elastic Cloud、Elasticsearch for Apache Hadoop 及我们各种语言的客户端的文档。" /><meta xmlns="" name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide" /><meta xmlns="" name="DC.subject" content="Elasticsearch" /><meta xmlns="" name="DC.identifier" content="cn" /></head><body><div xmlns="" class="page_header"><b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div><div xmlns="" class="breadcrumbs"><span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span> » <span class="breadcrumb-link"><a href="aggregations.html">聚合</a></span> » <span class="breadcrumb-link"><a href="docvalues-and-fielddata.html">Doc Values and Fielddata</a></span> » <span class="breadcrumb-node">优化聚合查询</span></div><div xmlns="" class="navheader"><span class="prev"><a href="preload-fielddata.html">
+              « 
+              预加载 fielddata</a>
+           
+        </span><span class="next">
+           
+          <a href="_closing_thoughts.html">总结
+               »
+            </a></span></div><div class="section"><div class="titlepage"><div><div><h2 class="title"><a id="_preventing_combinatorial_explosions"></a>优化聚合查询<a xmlns="" href="https://github.com/elasticsearch-cn/elasticsearch-definitive-guide/edit/cn/300_Aggregations/120_breadth_vs_depth.asciidoc" class="edit_me" title="在 GitHub 上编辑本页" rel="nofollow">编辑</a></h2></div></div></div><p>“elasticsearch 里面桶的叫法和 SQL 里面分组的概念是类似的，一个桶就类似 SQL 里面的一个 group，多级嵌套的 aggregation，
+类似 SQL 里面的多字段分组（group by field1,field2, …..），注意这里仅仅是概念类似，底层的实现原理是不一样的。 －译者注”</p><p><code class="literal">terms</code> 桶基于我们的数据动态构建桶；它并不知道到底生成了多少桶。<a id="id-1.7.12.8.3.2" class="indexterm"></a><a id="id-1.7.12.8.3.3" class="indexterm"></a>
+<a id="id-1.7.12.8.3.4" class="indexterm"></a> 大多数时候对单个字段的聚合查询还是非常快的，
+但是当需要同时聚合多个字段时，就可能会产生大量的分组，最终结果就是占用 es 大量内存，从而导致 OOM 的情况发生。</p><p>假设我们现在有一些关于电影的数据集，每条数据里面会有一个数组类型的字段存储表演该电影的所有演员的名字。</p><div xmlns="" class="pre_wrapper lang-js"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-js">{
+  "actors" : [
+    "Fred Jones",
+    "Mary Jane",
+    "Elizabeth Worthing"
+  ]
+}</pre></div><p>如果我们想要查询出演影片最多的十个演员以及与他们合作最多的演员，使用聚合是非常简单的：</p><div xmlns="" class="pre_wrapper lang-js"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-js">{
+  "aggs" : {
+    "actors" : {
+      "terms" : {
+         "field" : "actors",
+         "size" :  10
+      },
+      "aggs" : {
+        "costars" : {
+          "terms" : {
+            "field" : "actors",
+            "size" :  5
+          }
+        }
+      }
+    }
+  }
+}</pre></div><p>这会返回前十位出演最多的演员，以及与他们合作最多的五位演员。这看起来是一个简单的聚合查询，最终只返回 50 条数据！</p><p>但是，<a id="id-1.7.12.8.9.1" class="indexterm"></a>
+<a id="id-1.7.12.8.9.2" class="indexterm"></a>
+<a id="id-1.7.12.8.9.3" class="indexterm"></a> 这个看上去简单的查询可以轻而易举地消耗大量内存，我们可以通过在内存中构建一个树来查看这个 <code class="literal">terms</code> 聚合。
+ <code class="literal">actors</code> 聚合会构建树的第一层，每个演员都有一个桶。然后，内套在第一层的每个节点之下， <code class="literal">costar</code> 聚合会构建第二层，每个联合出演一个桶，请参见 <a class="xref" href="_preventing_combinatorial_explosions.html#depth-first-1" title="图 42. Build full depth tree">图 42 “Build full depth tree”</a> 所示。这意味着每部影片会生成 n<sup>2</sup> 个桶！</p><div class="figure"><a id="depth-first-1"></a><p class="title"><strong>图 42. Build full depth tree</strong></p><div class="figure-contents"><div class="mediaobject"><img src="images/300_120_depth_first_1.svg" alt="Build full depth tree" /></div></div></div><p>用真实点的数据，设想平均每部影片有 10 名演员，每部影片就会生成 10<sup>2</sup> == 100 个桶。如果总共有 20，000 部影片，粗率计算就会生成 2，000，000 个桶。</p><p>现在，记住，聚合只是简单的希望得到前十位演员和与他们联合出演者，总共 50 条数据。为了得到最终的结果，我们创建了一个有 2，000，000 桶的树，然后对其排序，取 top10。
+图 <a class="xref" href="_preventing_combinatorial_explosions.html#depth-first-2" title="图 43. Sort tree">图 43 “Sort tree”</a> 和图 <a class="xref" href="_preventing_combinatorial_explosions.html#depth-first-3" title="图 44. Prune tree">图 44 “Prune tree”</a> 对这个过程进行了阐述。</p><div class="figure"><a id="depth-first-2"></a><p class="title"><strong>图 43. Sort tree</strong></p><div class="figure-contents"><div class="mediaobject"><img src="images/300_120_depth_first_2.svg" alt="Sort tree" /></div></div></div><div class="figure"><a id="depth-first-3"></a><p class="title"><strong>图 44. Prune tree</strong></p><div class="figure-contents"><div class="mediaobject"><img src="images/300_120_depth_first_3.svg" alt="Prune tree" /></div></div></div><p>这时我们一定非常抓狂，在 2 万条数据下执行任何聚合查询都是毫无压力的。如果我们有 2 亿文档，想要得到前 100 位演员以及与他们合作最多的 20 位演员，作为查询的最终结果会出现什么情况呢？</p><p>可以推测聚合出来的分组数非常大，会使这种策略难以维持。世界上并不存在足够的内存来支持这种不受控制的聚合查询。</p><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="_深度优先与广度优先_depth_first_versus_breadth_first"></a>深度优先与广度优先（Depth-First Versus Breadth-First）<a xmlns="" href="https://github.com/elasticsearch-cn/elasticsearch-definitive-guide/edit/cn/300_Aggregations/120_breadth_vs_depth.asciidoc" class="edit_me" title="在 GitHub 上编辑本页" rel="nofollow">编辑</a></h3></div></div></div><p>Elasticsearch 允许我们改变聚合的 <span class="emphasis"><em>集合模式</em></span> ，就是为了应对这种状况。<a id="id-1.7.12.8.17.2.2" class="indexterm"></a> <a id="id-1.7.12.8.17.2.3" class="indexterm"></a>
+<a id="id-1.7.12.8.17.2.4" class="indexterm"></a>
+<a id="id-1.7.12.8.17.2.5" class="indexterm"></a>
+我们之前展示的策略叫做 <span class="emphasis"><em>深度优先</em></span> ，它是默认设置，<a id="id-1.7.12.8.17.2.7" class="indexterm"></a> 先构建完整的树，然后修剪无用节点。 <span class="emphasis"><em>深度优先</em></span> 的方式对于大多数聚合都能正常工作，但对于如我们演员和联合演员这样例子的情形就不太适用。</p><p>为了应对这些特殊的应用场景，我们应该使用另一种集合策略叫做 <span class="emphasis"><em>广度优先</em></span> 。<a id="id-1.7.12.8.17.3.2" class="indexterm"></a>这种策略的工作方式有些不同，它先执行第一层聚合， <span class="emphasis"><em>再</em></span> 继续下一层聚合之前会先做修剪。
+图 <a class="xref" href="_preventing_combinatorial_explosions.html#breadth-first-1" title="图 45. Build first level">图 45 “Build first level”</a> 和图 <a class="xref" href="_preventing_combinatorial_explosions.html#breadth-first-3" title="图 47. Prune first level">图 47 “Prune first level”</a> 对这个过程进行了阐述。</p><p>在我们的示例中， <code class="literal">actors</code> 聚合会首先执行，在这个时候，我们的树只有一层，但我们已经知道了前 10 位的演员！这就没有必要保留其他的演员信息，因为它们无论如何都不会出现在前十位中。</p><div class="figure"><a id="breadth-first-1"></a><p class="title"><strong>图 45. Build first level</strong></p><div class="figure-contents"><div class="mediaobject"><img src="images/300_120_breadth_first_1.svg" alt="Build first level" /></div></div></div><div class="figure"><a id="breadth-first-2"></a><p class="title"><strong>图 46. Sort first level</strong></p><div class="figure-contents"><div class="mediaobject"><img src="images/300_120_breadth_first_2.svg" alt="Sort first level" /></div></div></div><div class="figure"><a id="breadth-first-3"></a><p class="title"><strong>图 47. Prune first level</strong></p><div class="figure-contents"><div class="mediaobject"><img src="images/300_120_breadth_first_3.svg" alt="Prune first level" /></div></div></div><p>因为我们已经知道了前十名演员，我们可以安全的修剪其他节点。修剪后，下一层是基于 <span class="emphasis"><em>它的</em></span> 执行模式读入的，重复执行这个过程直到聚合完成，如图 <a class="xref" href="_preventing_combinatorial_explosions.html#breadth-first-4" title="图 48. Populate full depth for remaining nodes">图 48 “Populate full depth for remaining nodes”</a> 所示。
+这种场景下，广度优先可以大幅度节省内存。</p><div class="figure"><a id="breadth-first-4"></a><p class="title"><strong>图 48. Populate full depth for remaining nodes</strong></p><div class="figure-contents"><div class="mediaobject"><img src="images/300_120_breadth_first_4.svg" alt="Step 4: populate full depth for remaining nodes" /></div></div></div><p>要使用广度优先，只需简单 <a id="id-1.7.12.8.17.10.1" class="indexterm"></a> 的通过参数 <code class="literal">collect</code> 开启：</p><div xmlns="" class="pre_wrapper lang-js"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-js">{
+  "aggs" : {
+    "actors" : {
+      "terms" : {
+         "field" :        "actors",
+         "size" :         10,
+         "collect_mode" : "breadth_first" <a id="CO225-1"></a><i xmlns="" class="conum" data-value="1"></i>
+      },
+      "aggs" : {
+        "costars" : {
+          "terms" : {
+            "field" : "actors",
+            "size" :  5
+          }
+        }
+      }
+    }
+  }
+}</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO225-1"><i xmlns="" class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p>
+按聚合来开启 <code class="literal">breadth_first</code> 。
+</p></td></tr></table></div><p>广度优先仅仅适用于每个组的聚合数量远远小于当前总组数的情况下，因为广度优先会在内存中缓存裁剪后的仅仅需要缓存的每个组的所有数据，以便于它的子聚合分组查询可以复用上级聚合的数据。</p><p>广度优先的内存使用情况与裁剪后的缓存分组数据量是成线性的。对于很多聚合来说，每个桶内的文档数量是相当大的。
+想象一种按月分组的直方图，总组数肯定是固定的，因为每年只有12个月，这个时候每个月下的数据量可能非常大。这使广度优先不是一个好的选择，这也是为什么深度优先作为默认策略的原因。</p><p>针对上面演员的例子，如果数据量越大，那么默认的使用深度优先的聚合模式生成的总分组数就会非常多，但是预估二级的聚合字段分组后的数据量相比总的分组数会小很多所以这种情况下使用广度优先的模式能大大节省内存，从而通过优化聚合模式来大大提高了在某些特定场景下聚合查询的成功率。</p></div></div><div xmlns="" class="navfooter"><span class="prev"><a href="preload-fielddata.html">
+              « 
+              预加载 fielddata</a>
+           
+        </span><span class="next">
+           
+          <a href="_closing_thoughts.html">总结
+               »
+            </a></span></div></body></html>

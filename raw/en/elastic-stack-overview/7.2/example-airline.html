@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title xmlns="">Finding air carriers with the most delays
+        | Elastic Stack Overview [7.2]
+      | Elastic
+    </title><meta name="generator" content="DocBook XSL Stylesheets V1.78.1" /><link rel="home" href="index.html" title="Elastic Stack Overview [7.2]" /><link rel="up" href="dataframe-examples.html" title="Data frame transform examples" /><link rel="prev" href="example-best-customers.html" title="Finding your best customers" /><link rel="next" href="example-clientips.html" title="Finding suspicious client IPs by using scripted metrics" /><meta xmlns="" name="description" content="Get started with the documentation for Elasticsearch, Kibana, Logstash, Beats, X-Pack, Elastic Cloud, Elasticsearch for Apache Hadoop, and our language clients." /><meta xmlns="" name="DC.type" content="Learn/Docs/Elastic Stack/Overview/7.2" /><meta xmlns="" name="DC.subject" content="Elastic Stack" /><meta xmlns="" name="DC.identifier" content="7.2" /></head><body><div xmlns="" class="page_header">You are looking at documentation for an older release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div><div xmlns="" class="breadcrumbs"><span class="breadcrumb-link"><a href="index.html">Elastic Stack Overview
+      [7.2]
+    </a></span> » <span class="breadcrumb-link"><a href="ml-dataframes.html">Data frame transforms</a></span> » <span class="breadcrumb-link"><a href="dataframe-examples.html">Data frame transform examples</a></span> » <span class="breadcrumb-node">Finding air carriers with the most delays</span></div><div xmlns="" class="navheader"><span class="prev"><a href="example-best-customers.html">
+              « 
+              Finding your best customers</a>
+           
+        </span><span class="next">
+           
+          <a href="example-clientips.html">Finding suspicious client IPs by using scripted metrics
+               »
+            </a></span></div><div class="section"><div class="titlepage"><div><div><h2 class="title"><a id="example-airline"></a>Finding air carriers with the most delays<a xmlns="" href="https://github.com/elastic/stack-docs/edit/7.2/docs/en/stack/data-frames/dataframe-examples.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h2></div></div></div><p>In this example, we use the Flights sample dataset to find out which air carrier
+had the most delays. First, we filter the source data such that it excludes all
+the cancelled flights by using a query filter. Then we transform the data to
+contain the distinct number of flights, the sum of delayed minutes, and the sum
+of the flight minutes by air carrier. Finally, we use a
+<a class="ulink" href="https://www.elastic.co/guide/en/elasticsearch/reference/7.2/search-aggregations-pipeline-bucket-script-aggregation.html" target="_top"><code class="literal">bucket_script</code></a>
+to determine what percentage of the flight time was actually delay.</p><div xmlns="" class="pre_wrapper lang-console"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-console">POST _data_frame/transforms/_preview
+{
+  "source": {
+    "index": "kibana_sample_data_flights",
+    "query": { <a id="CO67-1"></a><i xmlns="" class="conum" data-value="1"></i>
+      "bool": {
+        "filter": [
+          { "term":  { "Cancelled": false } }
+        ]
+      }
+    }
+  },
+  "dest" : { <a id="CO67-2"></a><i xmlns="" class="conum" data-value="2"></i>
+    "index" : "sample_flight_delays_by_carrier"
+  },
+  "pivot": {
+    "group_by": { <a id="CO67-3"></a><i xmlns="" class="conum" data-value="3"></i>
+      "carrier": { "terms": { "field": "Carrier" }}
+    },
+    "aggregations": {
+      "flights_count": { "value_count": { "field": "FlightNum" }},
+      "delay_mins_total": { "sum": { "field": "FlightDelayMin" }},
+      "flight_mins_total": { "sum": { "field": "FlightTimeMin" }},
+      "delay_time_percentage": { <a id="CO67-4"></a><i xmlns="" class="conum" data-value="4"></i>
+        "bucket_script": {
+          "buckets_path": {
+            "delay_time": "delay_mins_total.value",
+            "flight_time": "flight_mins_total.value"
+          },
+          "script": "(params.delay_time / params.flight_time) * 100"
+        }
+      }
+    }
+  }
+}</pre></div><div xmlns="" class="console_widget" data-snippet="snippets/114.console"></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO67-1"><i xmlns="" class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p>Filter the source data to select only flights that were not cancelled.</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO67-2"><i xmlns="" class="conum" data-value="2"></i></a> </p></td><td valign="top" align="left"><p>This is the destination index for the data frame. It is ignored by
+<code class="literal">_preview</code>.</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO67-3"><i xmlns="" class="conum" data-value="3"></i></a> </p></td><td valign="top" align="left"><p>The data is grouped by the <code class="literal">Carrier</code> field which contains the airline name.</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO67-4"><i xmlns="" class="conum" data-value="4"></i></a> </p></td><td valign="top" align="left"><p>This <code class="literal">bucket_script</code> performs calculations on the results that are returned
+by the aggregation. In this particular example, it calculates what percentage of
+travel time was taken up by delays.</p></td></tr></table></div><p>The preview shows you that the new index would contain data like this for each
+carrier:</p><div xmlns="" class="pre_wrapper lang-console"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-console">{
+  "preview" : [
+    {
+      "carrier" : "ES-Air",
+      "flights_count" : 2802.0,
+      "flight_mins_total" : 1436927.5130677223,
+      "delay_time_percentage" : 9.335543983955839,
+      "delay_mins_total" : 134145.0
+    },
+    ...
+  ]
+}</pre></div><div xmlns="" class="console_widget" data-snippet="snippets/115.console"></div><p>This data frame makes it easier to answer questions such as:</p><div class="itemizedlist"><ul class="itemizedlist" type="disc"><li class="listitem">Which air carrier has the most delays as a percentage of flight time?</li></ul></div><div xmlns="" class="note admon"><div class="icon"><img alt="Note" src="images/icons/note.png" /></div><div class="admon_content"><p xmlns="http://www.w3.org/1999/xhtml">This data is fictional and does not reflect actual delays
+or flight stats for any of the featured destination or origin airports.</p></div></div></div><div xmlns="" class="navfooter"><span class="prev"><a href="example-best-customers.html">
+              « 
+              Finding your best customers</a>
+           
+        </span><span class="next">
+           
+          <a href="example-clientips.html">Finding suspicious client IPs by using scripted metrics
+               »
+            </a></span></div></body></html>

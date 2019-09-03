@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title xmlns="">Disable sniffing and pinging per request
+        | Elasticsearch.Net and NEST: the .NET clients [7.x]
+      | Elastic
+    </title><meta name="generator" content="DocBook XSL Stylesheets V1.78.1" /><link rel="home" href="index.html" title="Elasticsearch.Net and NEST: the .NET clients [7.x]" /><link rel="up" href="request-overrides.html" title="Request overrides" /><link rel="prev" href="request-overrides.html" title="Request overrides" /><link rel="next" href="request-timeout.html" title="Request timeouts" /><meta xmlns="" name="description" content="Get started with the documentation for Elasticsearch, Kibana, Logstash, Beats, X-Pack, Elastic Cloud, Elasticsearch for Apache Hadoop, and our language clients." /><meta xmlns="" name="DC.type" content="Learn/Docs/Clients/.Net/7.x" /><meta xmlns="" name="DC.subject" content="Clients" /><meta xmlns="" name="DC.identifier" content="7.x" /></head><body><div xmlns="" class="breadcrumbs"><span class="breadcrumb-link"><a href="index.html">Elasticsearch.Net and NEST:  the .NET clients
+      [7.x]
+    </a></span> » <span class="breadcrumb-link"><a href="api-conventions.html">API Conventions</a></span> » <span class="breadcrumb-link"><a href="request-overrides.html">Request overrides</a></span> » <span class="breadcrumb-node">Disable sniffing and pinging per request</span></div><div xmlns="" class="navheader"><span class="prev"><a href="request-overrides.html">
+              « 
+              Request overrides</a>
+           
+        </span><span class="next">
+           
+          <a href="request-timeout.html">Request timeouts
+               »
+            </a></span></div><div class="section"><div class="titlepage"><div><div><h2 class="title"><a id="disable-sniff-ping-per-request"></a>Disable sniffing and pinging per request<a xmlns="" href="https://github.com/elastic/elasticsearch-net/edit/7.x/docs/client-concepts/connection-pooling/request-overrides/disable-sniff-ping-per-request.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h2></div></div></div><p>Even if you are using a sniffing connection pool thats set up to sniff on start/failure
+and pinging enabled, you can opt out of this behaviour on a <span class="emphasis"><em>per request</em></span> basis.</p><p>In our first test we set up a cluster that pings and sniffs on startup
+but we disable the sniffing on our first request so we only see the ping and the response</p><p>Let’s set up the cluster and configure clients to <span class="strong strong"><strong>always</strong></span> sniff on startup</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">var audit = new Auditor(() =&gt; VirtualClusterWith
+    .Nodes(10)
+    .ClientCalls(r =&gt; r.SucceedAlways())
+    .SniffingConnectionPool()
+    .Settings(s =&gt; s.SniffOnStartup()) <a id="CO26-1"></a><i xmlns="" class="conum" data-value="1"></i>
+);</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO26-1"><i xmlns="" class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p>sniff on startup</p></td></tr></table></div><p>Now We disable sniffing on the request so even though it’s our first call,
+we do not want to sniff on startup.</p><p>Instead, the sniff on startup is deferred to the second call into the cluster that
+does not disable sniffing on a per request basis.</p><p>And after that no sniff on startup will happen again</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">audit = await audit.TraceCalls(
+    new ClientCall(r =&gt; r.DisableSniffing()) <a id="CO27-1"></a><i xmlns="" class="conum" data-value="1"></i>
+    {
+        { PingSuccess, 9200 }, <a id="CO27-2"></a><i xmlns="" class="conum" data-value="2"></i>
+        { HealthyResponse, 9200 }
+    },
+    new ClientCall()
+    {
+        { SniffOnStartup }, <a id="CO27-3"></a><i xmlns="" class="conum" data-value="3"></i>
+        { SniffSuccess, 9200 },
+        { PingSuccess, 9200 },
+        { HealthyResponse, 9200 }
+    },
+    new ClientCall()
+    {
+        { PingSuccess, 9201 }, <a id="CO27-4"></a><i xmlns="" class="conum" data-value="4"></i>
+        { HealthyResponse, 9201 }
+    }
+);</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO27-1"><i xmlns="" class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p>disable sniffing</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO27-2"><i xmlns="" class="conum" data-value="2"></i></a> </p></td><td valign="top" align="left"><p>first call is a successful ping</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO27-3"><i xmlns="" class="conum" data-value="3"></i></a> </p></td><td valign="top" align="left"><p>sniff on startup call happens here, on the second call</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO27-4"><i xmlns="" class="conum" data-value="4"></i></a> </p></td><td valign="top" align="left"><p>No sniff on startup again</p></td></tr></table></div><p>Now, let’s disable pinging on the request</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">var audit = new Auditor(() =&gt; VirtualClusterWith
+    .Nodes(10)
+    .ClientCalls(r =&gt; r.SucceedAlways())
+    .SniffingConnectionPool()
+    .Settings(s =&gt; s.SniffOnStartup())
+);
+
+audit = await audit.TraceCall(
+    new ClientCall(r =&gt; r.DisablePing()) <a id="CO28-1"></a><i xmlns="" class="conum" data-value="1"></i>
+    {
+        { SniffOnStartup },
+        { SniffSuccess, 9200 }, <a id="CO28-2"></a><i xmlns="" class="conum" data-value="2"></i>
+        { HealthyResponse, 9200 }
+    }
+);</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO28-1"><i xmlns="" class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p>disable ping</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO28-2"><i xmlns="" class="conum" data-value="2"></i></a> </p></td><td valign="top" align="left"><p>No ping after sniffing</p></td></tr></table></div><p>Finally, let’s demonstrate disabling both sniff and ping on the request</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">var audit = new Auditor(() =&gt; VirtualClusterWith
+    .Nodes(10)
+    .ClientCalls(r =&gt; r.SucceedAlways())
+    .SniffingConnectionPool()
+    .Settings(s =&gt; s.SniffOnStartup())
+);
+
+audit = await audit.TraceCall(
+    new ClientCall(r=&gt;r.DisableSniffing().DisablePing()) <a id="CO29-1"></a><i xmlns="" class="conum" data-value="1"></i>
+    {
+        { HealthyResponse, 9200 } <a id="CO29-2"></a><i xmlns="" class="conum" data-value="2"></i>
+    }
+);</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO29-1"><i xmlns="" class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p>diable ping and sniff</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO29-2"><i xmlns="" class="conum" data-value="2"></i></a> </p></td><td valign="top" align="left"><p>no ping or sniff before the call</p></td></tr></table></div></div><div xmlns="" class="navfooter"><span class="prev"><a href="request-overrides.html">
+              « 
+              Request overrides</a>
+           
+        </span><span class="next">
+           
+          <a href="request-timeout.html">Request timeouts
+               »
+            </a></span></div></body></html>

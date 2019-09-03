@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title xmlns="">Sniffing role detection
+        | Elasticsearch.Net and NEST: the .NET clients [master]
+      | Elastic
+    </title><meta name="generator" content="DocBook XSL Stylesheets V1.78.1" /><link rel="home" href="index.html" title="Elasticsearch.Net and NEST: the .NET clients [master]" /><link rel="up" href="sniffing-behaviour.html" title="Sniffing behaviour" /><link rel="prev" href="sniffing-periodically.html" title="Sniffing periodically" /><link rel="next" href="pinging-behaviour.html" title="Pinging behaviour" /><meta xmlns="" name="description" content="Get started with the documentation for Elasticsearch, Kibana, Logstash, Beats, X-Pack, Elastic Cloud, Elasticsearch for Apache Hadoop, and our language clients." /><meta xmlns="" name="DC.type" content="Learn/Docs/Clients/.Net/master" /><meta xmlns="" name="DC.subject" content="Clients" /><meta xmlns="" name="DC.identifier" content="master" /></head><body><div xmlns="" class="page_header">You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div><div xmlns="" class="breadcrumbs"><span class="breadcrumb-link"><a href="index.html">Elasticsearch.Net and NEST:  the .NET clients
+      [master]
+    </a></span> » <span class="breadcrumb-link"><a href="api-conventions.html">API Conventions</a></span> » <span class="breadcrumb-link"><a href="sniffing-behaviour.html">Sniffing behaviour</a></span> » <span class="breadcrumb-node">Sniffing role detection</span></div><div xmlns="" class="navheader"><span class="prev"><a href="sniffing-periodically.html">
+              « 
+              Sniffing periodically</a>
+           
+        </span><span class="next">
+           
+          <a href="pinging-behaviour.html">Pinging behaviour
+               »
+            </a></span></div><div class="section"><div class="titlepage"><div><div><h2 class="title"><a id="sniffing-role-detection"></a>Sniffing role detection<a xmlns="" href="https://github.com/elastic/elasticsearch-net/edit/master/docs/client-concepts/connection-pooling/sniffing/role-detection.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h2></div></div></div><p>When we sniff the cluster state, we detect the role of each node, for example,
+whether it’s master eligible, a node that holds data, etc.
+We can then use this information when selecting a node to perform an API call on.</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">var audit = new Auditor(() =&gt; VirtualClusterWith
+    .Nodes(10)
+    .Sniff(s =&gt; s.Fails(Always))
+    .Sniff(s =&gt; s.OnPort(9202)
+        .Succeeds(Always, VirtualClusterWith.Nodes(8).MasterEligible(9200, 9201, 9202))
+    )
+    .SniffingConnectionPool()
+    .AllDefaults()
+)
+{
+    AssertPoolBeforeStartup = (pool) =&gt;
+    {
+        pool.Should().NotBeNull();
+        pool.Nodes.Should().HaveCount(10);
+        pool.Nodes.Where(n =&gt; n.MasterEligible).Should().HaveCount(10);
+    },
+    AssertPoolAfterStartup = (pool) =&gt;
+    {
+        pool.Should().NotBeNull();
+        pool.Nodes.Should().HaveCount(8);
+        pool.Nodes.Where(n =&gt; n.MasterEligible).Should().HaveCount(3);
+    }
+};
+
+await audit.TraceStartup();
+
+var audit = new Auditor(() =&gt; VirtualClusterWith
+    .Nodes(10)
+    .Sniff(s =&gt; s.Fails(Always))
+    .Sniff(s =&gt; s.OnPort(9202)
+        .Succeeds(Always, VirtualClusterWith.Nodes(8).StoresNoData(9200, 9201, 9202))
+    )
+    .SniffingConnectionPool()
+    .AllDefaults()
+)
+{
+    AssertPoolBeforeStartup = (pool) =&gt;
+    {
+        pool.Should().NotBeNull();
+        pool.Nodes.Should().HaveCount(10);
+        pool.Nodes.Where(n =&gt; n.HoldsData).Should().HaveCount(10);
+    },
+
+    AssertPoolAfterStartup = (pool) =&gt;
+    {
+        pool.Should().NotBeNull();
+        pool.Nodes.Should().HaveCount(8);
+        pool.Nodes.Where(n =&gt; n.HoldsData).Should().HaveCount(5);
+    }
+};
+await audit.TraceStartup();
+
+var audit = new Auditor(() =&gt; VirtualClusterWith
+    .Nodes(10)
+    .Sniff(s =&gt; s.SucceedAlways()
+        .Succeeds(Always, VirtualClusterWith.Nodes(8).StoresNoData(9200, 9201, 9202).HttpDisabled(9201))
+    )
+    .SniffingConnectionPool()
+    .AllDefaults()
+)
+{
+    AssertPoolBeforeStartup = (pool) =&gt;
+    {
+        pool.Should().NotBeNull();
+        pool.Nodes.Should().HaveCount(10);
+        pool.Nodes.Where(n =&gt; n.HoldsData).Should().HaveCount(10);
+        pool.Nodes.Where(n =&gt; n.HttpEnabled).Should().HaveCount(10);
+        pool.Nodes.Should().OnlyContain(n =&gt; n.Uri.Host == "localhost");
+    },
+
+    AssertPoolAfterStartup = (pool) =&gt;
+    {
+        pool.Should().NotBeNull();
+        pool.Nodes.Should().HaveCount(7, "we filtered the node that has no http enabled");
+        pool.Nodes.Should().NotContain(n=&gt;n.Uri.Port == 9201);
+        pool.Nodes.Where(n =&gt; n.HoldsData).Should().HaveCount(5);
+    }
+};
+await audit.TraceStartup();</pre></div><p>In this example, We create a Virtual cluster with a Sniffing connection pool that seeds all the known master nodes.
+When the client sniffs on startup, we see that the cluster is 20 nodes in total, with the master eligible nodes
+storing no data.</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">var masterNodes = new[] {9200, 9201, 9202};
+var totalNodesInTheCluster = 20;
+//
+var audit = new Auditor(() =&gt; VirtualClusterWith
+    .MasterOnlyNodes(masterNodes.Length)
+    .Sniff(s =&gt; s.SucceedAlways()
+        .Succeeds(Always, VirtualClusterWith
+            .Nodes(totalNodesInTheCluster)
+            .StoresNoData(masterNodes)
+            .MasterEligible(masterNodes))
+    )
+    .SniffingConnectionPool()
+    .Settings(s=&gt;s.DisablePing())
+)
+{
+    AssertPoolBeforeStartup = pool =&gt; <a id="CO15-1"></a><i xmlns="" class="conum" data-value="1"></i>
+    {
+        pool.Should().NotBeNull();
+        pool.Nodes.Should().HaveCount(3, "we seeded 3 master only nodes at the start of the application");
+        pool.Nodes.Where(n =&gt; n.HoldsData).Should().HaveCount(0, "none of which hold data");
+    },
+    AssertPoolAfterStartup = (pool) =&gt; <a id="CO15-2"></a><i xmlns="" class="conum" data-value="2"></i>
+    {
+        pool.Should().NotBeNull();
+        var nodes = pool.CreateView().ToList();
+        nodes.Count().Should().Be(20, "Master nodes are included in the registration of nodes since we still favor sniffing on them");
+    }
+};</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO15-1"><i xmlns="" class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p>Before the sniff, assert we only see three master only nodes</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO15-2"><i xmlns="" class="conum" data-value="2"></i></a> </p></td><td valign="top" align="left"><p>After the sniff, assert we now know about the existence of 20 nodes.</p></td></tr></table></div><p>After the sniff has happened on 9200 before the first API call, assert that the subsequent API
+call hits the first non master eligible node</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">audit = await audit.TraceStartup(new ClientCall
+{
+    { SniffSuccess, 9200},
+    { HealthyResponse, 9203} <a id="CO16-1"></a><i xmlns="" class="conum" data-value="1"></i>
+});</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO16-1"><i xmlns="" class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p>Healthy response from 9203, not a master eligible node</p></td></tr></table></div><p>To verify that the client behaves as we expect when making requests to the virtual cluster, make 1000 different
+client calls and assert that each is not sent to any of the known master only nodes</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">var seenNodes = new HashSet&lt;int&gt;();
+foreach (var _ in Enumerable.Range(0, 1000))
+{
+    audit = await audit.TraceCalls(
+        new ClientCall {{HealthyResponse, (a) =&gt;
+        {
+            var port = a.Node.Uri.Port;
+            masterNodes.Should().NotContain(port);
+            seenNodes.Add(port);
+        }}}
+    );
+}
+
+seenNodes.Should().HaveCount(totalNodesInTheCluster - masterNodes.Length); <a id="CO17-1"></a><i xmlns="" class="conum" data-value="1"></i></pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO17-1"><i xmlns="" class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p><code class="literal">seenNodes</code> is a hash set of all the ports we hit. assert that this is equal to <code class="literal">known total nodes - known master only nodes</code></p></td></tr></table></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="_node_predicates"></a>Node predicates<a xmlns="" href="https://github.com/elastic/elasticsearch-net/edit/master/docs/client-concepts/connection-pooling/sniffing/role-detection.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3></div></div></div><p>A predicate can be specified on <code class="literal">ConnectionSettings</code> that can be used to determine which nodes in the cluster API calls
+can be executed on.</p><p>As an example, Let’s create a Virtual cluster with a Sniffing connection pool that seeds all 20 nodes to begin. When the client
+sniffs on startup, we see the cluster is still 20 nodes in total, however we are now aware of the
+actual configured settings for the nodes from the cluster response.</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">var totalNodesInTheCluster = 20;
+var setting = "node.attr.rack_id";
+var value = "rack_one";
+var nodesInRackOne = new[] {9204, 9210, 9213};
+
+var audit = new Auditor(() =&gt; VirtualClusterWith
+    .Nodes(totalNodesInTheCluster)
+    //
+    .Sniff(s =&gt; s.SucceedAlways()
+        .Succeeds(Always, VirtualClusterWith
+            .Nodes(totalNodesInTheCluster)
+            .HasSetting(setting, value, nodesInRackOne))
+    )
+    .SniffingConnectionPool()
+    .Settings(s=&gt;s
+        .DisablePing() <a id="CO18-1"></a><i xmlns="" class="conum" data-value="1"></i>
+        .NodePredicate(node =&gt; <a id="CO18-2"></a><i xmlns="" class="conum" data-value="2"></i>
+            node.Settings.ContainsKey(setting) &amp;&amp;
+            node.Settings[setting].ToString() == value
+        )
+    )
+)
+{
+    AssertPoolAfterStartup = pool =&gt; <a id="CO18-3"></a><i xmlns="" class="conum" data-value="3"></i>
+    {
+        pool.Should().NotBeNull();
+        var nodes = pool.CreateView().ToList();
+        nodes.Count(n =&gt; n.Settings.ContainsKey(setting)).Should().Be(3, "only three nodes are in rack_one");
+    }
+};</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO18-1"><i xmlns="" class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p>for testing simplicity, disable pings</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO18-2"><i xmlns="" class="conum" data-value="2"></i></a> </p></td><td valign="top" align="left"><p>We only want to execute API calls to nodes in rack_one</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO18-3"><i xmlns="" class="conum" data-value="3"></i></a> </p></td><td valign="top" align="left"><p>After sniffing on startup, assert that the pool of nodes that the client will execute API calls against only contains the three nodes that are in <code class="literal">rack_one</code></p></td></tr></table></div><p>With the cluster set up, assert that the sniff happens on 9200 before the first API call
+and that API call hits the first node in <code class="literal">rack_one</code></p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">audit = await audit.TraceStartup(new ClientCall
+{
+    { SniffSuccess, 9200},
+    { HealthyResponse, 9204}
+});</pre></div><p>To prove that the client is working as expected, do a 1000 different client calls and
+assert that each is sent to a node in <code class="literal">rack_one</code> only,
+respecting the node predicate on connection settings</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">var seenNodes = new HashSet&lt;int&gt;();
+foreach (var _ in Enumerable.Range(0, 1000))
+{
+    audit = await audit.TraceCalls(
+        new ClientCall {{HealthyResponse, (a) =&gt;
+        {
+            var port = a.Node.Uri.Port;
+            nodesInRackOne.Should().Contain(port);
+            seenNodes.Add(port);
+        }}}
+    );
+}
+
+seenNodes.Should().HaveCount(nodesInRackOne.Length);</pre></div><p>As another example of node predicates, let’s set up a Virtual cluster with a <span class="emphasis"><em>bad</em></span> node predicate, i.e.
+predicate that filters out <span class="strong strong"><strong>all</strong></span> nodes from being the targets of API calls from the client</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">var totalNodesInTheCluster = 20;
+
+var audit = new Auditor(() =&gt; VirtualClusterWith
+    .Nodes(totalNodesInTheCluster)
+    .Sniff(s =&gt; s.SucceedAlways()
+        .Succeeds(Always, VirtualClusterWith.Nodes(totalNodesInTheCluster))
+    )
+    .SniffingConnectionPool()
+    .Settings(s =&gt; s
+        .DisablePing()
+        .NodePredicate(node =&gt; false) <a id="CO19-1"></a><i xmlns="" class="conum" data-value="1"></i>
+    )
+);</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO19-1"><i xmlns="" class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p>A <span class="emphasis"><em>bad</em></span> predicate that declines <span class="strong strong"><strong>all</strong></span> nodes</p></td></tr></table></div><p>Now when making the client calls, the audit trail indicates that a sniff on startup succeeds, but the subsequent
+API call fails because the node predicate filters out all nodes as targets on which to execute API calls</p><div xmlns="" class="pre_wrapper lang-csharp"><pre xmlns="http://www.w3.org/1999/xhtml" class="programlisting prettyprint lang-csharp">await audit.TraceUnexpectedElasticsearchException(new ClientCall
+{
+    { SniffOnStartup }, <a id="CO20-1"></a><i xmlns="" class="conum" data-value="1"></i>
+    { SniffSuccess }, <a id="CO20-2"></a><i xmlns="" class="conum" data-value="2"></i>
+    { NoNodesAttempted } <a id="CO20-3"></a><i xmlns="" class="conum" data-value="3"></i>
+}, e =&gt;
+{
+    e.FailureReason.Should().Be(PipelineFailure.Unexpected);
+
+    Func&lt;string&gt; debug = () =&gt; e.DebugInformation;
+    debug.Invoking(s =&gt; s.Invoke()).Should().NotThrow();
+});</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO20-1"><i xmlns="" class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p>The audit trail indicates a sniff for the very first time on startup</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO20-2"><i xmlns="" class="conum" data-value="2"></i></a> </p></td><td valign="top" align="left"><p>The sniff succeeds because the node predicate is ignored when sniffing</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO20-3"><i xmlns="" class="conum" data-value="3"></i></a> </p></td><td valign="top" align="left"><p>when trying to do an actual API call however, the predicate prevents any nodes from being attempted</p></td></tr></table></div></div></div><div xmlns="" class="navfooter"><span class="prev"><a href="sniffing-periodically.html">
+              « 
+              Sniffing periodically</a>
+           
+        </span><span class="next">
+           
+          <a href="pinging-behaviour.html">Pinging behaviour
+               »
+            </a></span></div></body></html>
