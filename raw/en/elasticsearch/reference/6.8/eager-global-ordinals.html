@@ -15,29 +15,34 @@ Not what you want? See the
            
           <a href="fielddata.html"><code class="literal">fielddata</code>
                »
-            </a></span></div><div class="section"><div class="titlepage"><div><div><h2 class="title"><a id="eager-global-ordinals"></a><code class="literal">eager_global_ordinals</code><a href="https://github.com/elastic/elasticsearch/edit/6.8/docs/reference/mapping/params/eager-global-ordinals.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h2></div></div></div><p>Global ordinals is a data-structure on top of doc values, that maintains an
-incremental numbering for each unique term in a lexicographic order. Each
-term has a unique number and the number of term <span class="emphasis"><em>A</em></span> is lower than the
-number of term <span class="emphasis"><em>B</em></span>. Global ordinals are only supported with
-<a class="link" href="keyword.html" title="Keyword datatype"><code class="literal">keyword</code></a> and <a class="link" href="text.html" title="Text datatype"><code class="literal">text</code></a> fields. In <code class="literal">keyword</code> fields, they
-are available by default but <code class="literal">text</code> fields can only use them when <code class="literal">fielddata</code>,
-with all of its associated baggage, is enabled.</p><p>Doc values (and fielddata) also have ordinals, which is a unique numbering for
-all terms in a particular segment and field. Global ordinals just build on top
-of this, by providing a mapping between the segment ordinals and the global
-ordinals, the latter being unique across the entire shard. Given that global
-ordinals for a specific field are tied to <span class="emphasis"><em>all the segments of a shard</em></span>, they
-need to be entirely rebuilt whenever a once new segment becomes visible.</p><p>Global ordinals are used for features that use segment ordinals, such as
-the <a class="link" href="search-aggregations-bucket-terms-aggregation.html" title="Terms Aggregation"><code class="literal">terms</code> aggregation</a>,
-to improve the execution time. A terms aggregation relies purely on global
-ordinals to perform the aggregation at the shard level, then converts global
-ordinals to the real term only for the final reduce phase, which combines
-results from different shards.</p><p>The loading time of global ordinals depends on the number of terms in a field,
-but in general it is low, since it source field data has already been loaded.
-The memory overhead of global ordinals is a small because it is very
-efficiently compressed.</p><p>By default, global ordinals are loaded at search-time, which is the right
-trade-off if you are optimizing for indexing speed. However, if you are more
-interested in search speed, it could be interesting to set
-<code class="literal">eager_global_ordinals: true</code> on fields that you plan to use in terms
+            </a></span></div><div class="section"><div class="titlepage"><div><div><h2 class="title"><a id="eager-global-ordinals"></a><code class="literal">eager_global_ordinals</code><a href="https://github.com/elastic/elasticsearch/edit/6.8/docs/reference/mapping/params/eager-global-ordinals.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h2></div></div></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="_what_are_global_ordinals"></a>What are global ordinals?<a href="https://github.com/elastic/elasticsearch/edit/6.8/docs/reference/mapping/params/eager-global-ordinals.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3></div></div></div><p>To support aggregations and other operations that require looking up field
+values on a per-document basis, Elasticsearch uses a data structure called
+<a class="link" href="doc-values.html" title="doc_values">doc values</a>. Term-based field types such as <code class="literal">keyword</code> store
+their doc values using an ordinal mapping for a more compact representation.
+This mapping works by assigning each term an incremental integer or <span class="emphasis"><em>ordinal</em></span>
+based on its lexicographic order. The field’s doc values store only the
+ordinals for each document instead of the original terms, with a separate
+lookup structure to convert between ordinals and terms.</p><p>When used during aggregations, ordinals can greatly improve performance. As an
+example, the <code class="literal">terms</code> aggregation relies only on ordinals to collect documents
+into buckets at the shard-level, then converts the ordinals back to their
+original term values when combining results across shards.</p><p>Each index segment defines its own ordinal mapping, but aggregations collect
+data across an entire shard. So to be able to use ordinals for shard-level
+operations like aggregations, Elasticsearch creates a unified mapping called
+<span class="emphasis"><em>global ordinals</em></span>. The global ordinal mapping is built on top of segment
+ordinals, and works by maintaining a map from global ordinal to the local
+ordinal for each segment.</p><p>Global ordinals are used if a search contains any of the following components:</p><div class="itemizedlist"><ul class="itemizedlist" type="disc"><li class="listitem">Bucket aggregations on <code class="literal">keyword</code> and <code class="literal">flattened</code> fields. This includes
+<code class="literal">terms</code> aggregations as mentioned above, as well as <code class="literal">composite</code>, <code class="literal">sampler</code>,
+and <code class="literal">significant_terms</code>.</li><li class="listitem">Bucket aggregations on <code class="literal">text</code> fields that require <a class="link" href="fielddata.html" title="fielddata"><code class="literal">fielddata</code></a>
+to be enabled.</li><li class="listitem">Operations on parent and child documents from a <code class="literal">join</code> field, including
+<code class="literal">has_child</code> queries and <code class="literal">parent</code> aggregations.</li></ul></div><div class="note admon"><div class="icon"><img alt="Note" src="images/icons/note.png" /></div><div class="admon_content"><p>The global ordinal mapping is an on-heap data structure. When measuring
+memory usage, Elasticsearch counts the memory from global ordinals as
+<span class="emphasis"><em>fielddata</em></span>. Global ordinals memory is included in the
+<a class="link" href="circuit-breaker.html#fielddata-circuit-breaker" title="Field data circuit breaker">fielddata circuit breaker</a>, and is returned
+under <code class="literal">fielddata</code> in the <a class="link" href="cluster-nodes-stats.html" title="Nodes Stats">node stats</a> response.</p></div></div></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="_loading_global_ordinals"></a>Loading global ordinals<a href="https://github.com/elastic/elasticsearch/edit/6.8/docs/reference/mapping/params/eager-global-ordinals.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3></div></div></div><p>The global ordinal mapping must be built before ordinals can be used during a
+search. By default, the mapping is loaded during search on the first time that
+global ordinals are needed. This is is the right approach if you are optimizing
+for indexing speed, but if search performance is a priority, it’s recommended
+to eagerly load global ordinals eagerly on fields that will be used in
 aggregations:</p><div class="pre_wrapper lang-console"><pre class="programlisting prettyprint lang-console">PUT my_index/_mapping/_doc
 {
   "properties": {
@@ -46,11 +51,12 @@ aggregations:</p><div class="pre_wrapper lang-console"><pre class="programlistin
       "eager_global_ordinals": true
     }
   }
-}</pre></div><div class="console_widget" data-snippet="snippets/1083.console"></div><p>This will shift the cost from search-time to refresh-time. Elasticsearch will
-make sure that global ordinals are built before publishing updates to the
-content of the index.</p><p>If you ever decide that you do not need to run <code class="literal">terms</code> aggregations on this
-field anymore, then you can disable eager loading of global ordinals at any
-time:</p><div class="pre_wrapper lang-console"><pre class="programlisting prettyprint lang-console">PUT my_index/_mapping/_doc
+}</pre></div><div class="console_widget" data-snippet="snippets/1083.console"></div><p>When <code class="literal">eager_global_ordinals</code> is enabled, global ordinals are built when a shard
+is <a class="link" href="indices-refresh.html" title="Refresh">refreshed</a> — Elasticsearch always loads them before
+exposing changes to the content of the index. This shifts the cost of building
+global ordinals from search to index-time. Elasticsearch will also eagerly
+build global ordinals when creating a new copy of a shard, as can occur when
+increasing the number of replicas or relocating a shard onto a new node.</p><p>Eager loading can be disabled at any time by updating the <code class="literal">eager_global_ordinals</code> setting:</p><div class="pre_wrapper lang-console"><pre class="programlisting prettyprint lang-console">PUT my_index/_mapping/_doc
 {
   "properties": {
     "tags": {
@@ -58,7 +64,26 @@ time:</p><div class="pre_wrapper lang-console"><pre class="programlisting pretty
       "eager_global_ordinals": false
     }
   }
-}</pre></div><div class="console_widget" data-snippet="snippets/1084.console"></div></div><div class="navfooter"><span class="prev"><a href="enabled.html">
+}</pre></div><div class="console_widget" data-snippet="snippets/1084.console"></div><div class="important admon"><div class="icon"><img alt="Important" src="images/icons/important.png" /></div><div class="admon_content"><p>On a <a class="link" href="frozen-indices.html" title="Frozen indices">frozen index</a>, global ordinals are discarded
+after each search and rebuilt again when they’re requested. This means that
+<code class="literal">eager_global_ordinals</code> should not be used on frozen indices: it would
+cause global ordinals to be reloaded on every search. Instead, the index should
+be force-merged to a single segment before being frozen. This avoids building
+global ordinals altogether (more details can be found in the next section).</p></div></div></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="_avoiding_global_ordinal_loading"></a>Avoiding global ordinal loading<a href="https://github.com/elastic/elasticsearch/edit/6.8/docs/reference/mapping/params/eager-global-ordinals.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3></div></div></div><p>Usually, global ordinals do not present a large overhead in terms of their
+loading time and memory usage. However, loading global ordinals can be
+expensive on indices with large shards, or if the fields contain a large
+number of unique term values. Because global ordinals provide a unified mapping
+for all segments on the shard, they also need to be rebuilt entirely when a new
+segment becomes visible.</p><p>In some cases it is possible to avoid global ordinal loading altogether:</p><div class="itemizedlist"><ul class="itemizedlist" type="disc"><li class="listitem">The <code class="literal">terms</code>, <code class="literal">sampler</code>, and <code class="literal">significant_terms</code> aggregations support a
+parameter
+<a class="link" href="search-aggregations-bucket-terms-aggregation.html#search-aggregations-bucket-terms-aggregation-execution-hint" title="Execution hint"><code class="literal">execution_hint</code></a>
+that helps control how buckets are collected. It defaults to <code class="literal">global_ordinals</code>,
+but can be set to <code class="literal">map</code> to instead use the term values directly.</li><li class="listitem">If a shard has been <a class="link" href="indices-forcemerge.html" title="Force Merge">force-merged</a> down to a single
+segment, then its segment ordinals are already <span class="emphasis"><em>global</em></span> to the shard. In this
+case, Elasticsearch does not need to build a global ordinal mapping and there
+is no additional overhead from using global ordinals. Note that for performance
+reasons you should only force-merge an index to which you will never write to
+again.</li></ul></div></div></div><div class="navfooter"><span class="prev"><a href="enabled.html">
               « 
               <code class="literal">enabled</code></a>
            
