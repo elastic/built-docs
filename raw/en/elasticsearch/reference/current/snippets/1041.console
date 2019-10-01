@@ -1,92 +1,34 @@
-PUT _watcher/watch/meetup
+POST _data_frame/transforms/_preview
 {
-  "trigger": {
-    "schedule": {
-      "interval": "1h"
+  "source": {
+    "index": "kibana_sample_data_flights",
+    "query": {
+      "bool": {
+        "filter": [
+          { "term":  { "Cancelled": false } }
+        ]
+      }
     }
   },
-  "input": {
-    "search": {
-      "request": {
-        "indices": [
-          "<logstash-{now-1h}>",
-          "<logstash-{now}>"
-        ],
-        "body": {
-          "size": 0,
-          "query": {
-            "bool": {
-              "filter": [
-                {
-                  "range": {
-                    "@timestamp": {
-                      "gte": "now-3h"
-                    }
-                  }
-                },
-                {
-                  "match": {
-                    "group.group_topics.topic_name": "Open Source"
-                  }
-                }
-              ]
-            }
+  "dest" : {
+    "index" : "sample_flight_delays_by_carrier"
+  },
+  "pivot": {
+    "group_by": {
+      "carrier": { "terms": { "field": "Carrier" }}
+    },
+    "aggregations": {
+      "flights_count": { "value_count": { "field": "FlightNum" }},
+      "delay_mins_total": { "sum": { "field": "FlightDelayMin" }},
+      "flight_mins_total": { "sum": { "field": "FlightTimeMin" }},
+      "delay_time_percentage": {
+        "bucket_script": {
+          "buckets_path": {
+            "delay_time": "delay_mins_total.value",
+            "flight_time": "flight_mins_total.value"
           },
-          "aggs": {
-            "group_by_city": {
-              "terms": {
-                "field": "group.group_city.raw",
-                "size": 5
-              },
-              "aggs": {
-                "group_by_event": {
-                  "terms": {
-                    "field": "event.event_url.raw",
-                    "size": 5
-                  },
-                  "aggs": {
-                    "get_latest": {
-                      "terms": {
-                        "field": "@timestamp",
-                        "size": 1,
-                        "order": {
-                          "_key": "desc"
-                        }
-                      },
-                      "aggs": {
-                        "group_by_event_name": {
-                          "terms": {
-                            "field": "event.event_name.raw"
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
+          "script": "(params.delay_time / params.flight_time) * 100"
         }
-      }
-    }
-  },
-  "condition": {
-    "compare": {
-      "ctx.payload.hits.total.value": {
-        "gt": 0
-      }
-    }
-  },
-  "actions": { 
-    "email_me": {
-      "throttle_period": "10m",
-      "email": {
-        "from": "username@example.org", 
-        "to": "recipient@example.org",  
-        "subject": "Open Source events",
-        "body": {
-          "html": "Found events matching Open Source: <ul>{{#ctx.payload.aggregations.group_by_city.buckets}}<li>{{key}} ({{doc_count}})<ul>{{#group_by_event.buckets}}<li><a href=\"{{key}}\">{{get_latest.buckets.0.group_by_event_name.buckets.0.key}}</a> ({{doc_count}})</li>{{/group_by_event.buckets}}</ul></li>{{/ctx.payload.aggregations.group_by_city.buckets}}</ul>"
-         }
       }
     }
   }
