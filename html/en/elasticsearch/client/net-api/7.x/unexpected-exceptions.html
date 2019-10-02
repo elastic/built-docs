@@ -128,8 +128,12 @@ in the pipeline the exception happened is not lost.</p><p>In this next example, 
 The call then rolls over to retry on 9201, which throws an hard exception from within <code class="literal">IConnection</code>.
 Finally, we assert that we can still see the audit trail for the whole coordinated request.</p><div class="pre_wrapper lang-csharp"><pre class="programlisting prettyprint lang-csharp">var audit = new Auditor(() =&gt; VirtualClusterWith
     .Nodes(10)
+#if DOTNETCORE
     .ClientCalls(r =&gt; r.OnPort(9200).FailAlways(new System.Net.Http.HttpRequestException("recover"))) <a id="CO3-1"></a><i class="conum" data-value="1"></i>
-    .ClientCalls(r =&gt; r.OnPort(9201).FailAlways(new Exception("boom!"))) <a id="CO3-2"></a><i class="conum" data-value="2"></i>
+#else
+    .ClientCalls(r =&gt; r.OnPort(9200).FailAlways(new System.Net.WebException("recover"))) <a id="CO3-2"></a><i class="conum" data-value="2"></i>
+#endif
+    .ClientCalls(r =&gt; r.OnPort(9201).FailAlways(new Exception("boom!"))) <a id="CO3-3"></a><i class="conum" data-value="3"></i>
     .StaticConnectionPool()
     .Settings(s =&gt; s.DisablePing())
 );
@@ -137,7 +141,7 @@ Finally, we assert that we can still see the audit trail for the whole coordinat
 audit = await audit.TraceUnexpectedException(
     new ClientCall {
         { AuditEvent.BadResponse, 9200 },
-        { AuditEvent.BadResponse, 9201 }, <a id="CO3-3"></a><i class="conum" data-value="3"></i>
+        { AuditEvent.BadResponse, 9201 }, <a id="CO3-4"></a><i class="conum" data-value="4"></i>
     },
     (e) =&gt;
     {
@@ -145,7 +149,7 @@ audit = await audit.TraceUnexpectedException(
         e.InnerException.Should().NotBeNull();
         e.InnerException.Message.Should().Be("boom!");
     }
-);</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO3-1"><i class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p>calls on 9200 set up to throw a <code class="literal">HttpRequestException</code></p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO3-2"><i class="conum" data-value="2"></i></a> </p></td><td valign="top" align="left"><p>calls on 9201 set up to throw an <code class="literal">Exception</code></p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO3-3"><i class="conum" data-value="3"></i></a> </p></td><td valign="top" align="left"><p>Assert that the audit trail for the client call includes the bad response from 9200 and 9201</p></td></tr></table></div><p>An unexpected hard exception on ping and sniff is something we <span class="strong strong"><strong>do</strong></span> try to recover from and failover to retrying on the next node.</p><p>Here, pinging nodes on first use is enabled and the node on port 9200 throws an exception on ping; when this happens,
+);</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO3-1"><i class="conum" data-value="1"></i></a> <a href="#CO3-2"><i class="conum" data-value="2"></i></a> </p></td><td valign="top" align="left"><p>calls on 9200 set up to throw a <code class="literal">HttpRequestException</code> or a <code class="literal">WebException</code></p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO3-3"><i class="conum" data-value="3"></i></a> </p></td><td valign="top" align="left"><p>calls on 9201 set up to throw an <code class="literal">Exception</code></p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO3-4"><i class="conum" data-value="4"></i></a> </p></td><td valign="top" align="left"><p>Assert that the audit trail for the client call includes the bad response from 9200 and 9201</p></td></tr></table></div><p>An unexpected hard exception on ping and sniff is something we <span class="strong strong"><strong>do</strong></span> try to recover from and failover to retrying on the next node.</p><p>Here, pinging nodes on first use is enabled and the node on port 9200 throws an exception on ping; when this happens,
 we still fallover to retry the ping on node on port 9201, where it succeeds.
 Following this, the client call on 9201 throws a hard exception that we are not able to recover from</p><div class="pre_wrapper lang-csharp"><pre class="programlisting prettyprint lang-csharp">var audit = new Auditor(() =&gt; VirtualClusterWith
     .Nodes(10)
