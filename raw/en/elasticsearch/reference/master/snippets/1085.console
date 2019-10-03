@@ -1,9 +1,47 @@
-# GET /<logstash-{now/d-2d}>,<logstash-{now/d-1d}>,<logstash-{now/d}>/_search
-GET /%3Clogstash-%7Bnow%2Fd-2d%7D%3E%2C%3Clogstash-%7Bnow%2Fd-1d%7D%3E%2C%3Clogstash-%7Bnow%2Fd%7D%3E/_search
+PUT _watcher/watch/log_event_watch
 {
-  "query" : {
-    "match": {
-      "test": "data"
+  "trigger" : {
+    "schedule" : { "interval" : "5m" }
+  },
+  "input" : {
+    "search" : {
+      "request" : {
+        "indices" : "log-events",
+        "body" : {
+          "size" : 0,
+          "query" : { "match" : { "status" : "error" } }
+        }
+      }
+    }
+  },
+  "condition" : {
+    "compare" : { "ctx.payload.hits.total.value" : { "gt" : 5 }}
+  },
+  "throttle_period" : "15m",
+  "actions" : {
+    "email_administrator" : {
+      "email" : {
+        "to" : "sys.admino@host.domain",
+        "subject" : "Encountered {{ctx.payload.hits.total.value}} errors",
+        "body" : "Too many error in the system, see attached data",
+        "attachments" : {
+          "attached_data" : {
+            "data" : {
+              "format" : "json"
+            }
+          }
+        },
+        "priority" : "high"
+      }
+    },
+    "notify_pager" : {
+      "webhook" : {
+        "method" : "POST",
+        "host" : "pager.service.domain",
+        "port" : 1234,
+        "path" : "/{{watch_id}}",
+        "body" : "Encountered {{ctx.payload.hits.total.value}} errors"
+      }
     }
   }
 }
