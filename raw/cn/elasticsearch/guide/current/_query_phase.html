@@ -11,20 +11,16 @@
            
           <a href="_fetch_phase.html">取回阶段
                »
-            </a></span></div><div class="section"><div class="titlepage"><div><div><h2 class="title"><a id="_query_phase"></a>查询阶段<a href="https://github.com/elasticsearch-cn/elasticsearch-definitive-guide/edit/cn/060_Distributed_Search/05_Query_phase.asciidoc" class="edit_me" title="在 GitHub 上编辑本页" rel="nofollow">编辑</a></h2></div></div></div><p>在初始 <span class="emphasis"><em>查询阶段</em></span> 时，<a id="id-1.4.11.7.2.2" class="indexterm"></a>
-<a id="id-1.4.11.7.2.3" class="indexterm"></a> <a id="id-1.4.11.7.2.4" class="indexterm"></a>查询会广播到索引中每一个分片拷贝（主分片或者副本分片）。
+            </a></span></div><div class="section"><div class="titlepage"><div><div><h2 class="title"><a id="_query_phase"></a>查询阶段<a href="https://github.com/elasticsearch-cn/elasticsearch-definitive-guide/edit/cn/060_Distributed_Search/05_Query_phase.asciidoc" class="edit_me" title="在 GitHub 上编辑本页" rel="nofollow">编辑</a></h2></div></div></div><p>在初始 <span class="emphasis"><em>查询阶段</em></span> 时，<a id="id-1.4.11.7.2.2" class="indexterm"></a> <a id="id-1.4.11.7.2.3" class="indexterm"></a>查询会广播到索引中每一个分片拷贝（主分片或者副本分片）。
 每个分片在本地执行搜索并构建一个匹配文档的 <span class="emphasis"><em>优先队列</em></span>。</p><div class="sidebar"><div class="titlepage"><div><div><p class="title"><strong>优先队列</strong></p></div></div></div><p>一个 <span class="emphasis"><em>优先队列</em></span> 仅仅是一个存有 <span class="emphasis"><em>top-n</em></span> 匹配文档的有序列表。优先队列的大小取决于分页参数 <code class="literal">from</code> 和 <code class="literal">size</code> 。例如，如下搜索请求将需要足够大的优先队列来放入100条文档。</p><div class="pre_wrapper lang-js"><pre class="programlisting prettyprint lang-js">GET /_search
 {
     "from": 90,
     "size": 10
 }</pre></div></div><p>这个查询阶段的过程如图 <a class="xref" href="_query_phase.html#img-distrib-search" title="图 14. 查询过程分布式搜索">图 14 “查询过程分布式搜索”</a> 所示。</p><div class="figure"><a id="img-distrib-search"></a><p class="title"><strong>图 14. 查询过程分布式搜索</strong></p><div class="figure-contents"><div class="mediaobject"><img src="images/elas_0901.png" alt="查询过程分布式搜索" /></div></div></div><p>查询阶段包含以下三个步骤:</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem">客户端发送一个 <code class="literal">search</code> 请求到 <code class="literal">Node 3</code> ， <code class="literal">Node 3</code> 会创建一个大小为 <code class="literal">from + size</code> 的空优先队列。</li><li class="listitem"><code class="literal">Node 3</code> 将查询请求转发到索引的每个主分片或副本分片中。每个分片在本地执行查询并添加结果到大小为 <code class="literal">from + size</code> 的本地有序优先队列中。</li><li class="listitem">每个分片返回各自优先队列中所有文档的 ID 和排序值给协调节点，也就是 <code class="literal">Node 3</code> ，它合并这些值到自己的优先队列中来产生一个全局排序后的结果列表。</li></ol></div><p>当一个搜索请求被发送到某个节点时，这个节点就变成了协调节点。 <a id="id-1.4.11.7.8.1" class="indexterm"></a>
-<a id="id-1.4.11.7.8.2" class="indexterm"></a>
 这个节点的任务是广播查询请求到所有相关分片并将它们的响应整合成全局排序后的结果集合，这个结果集合会返回给客户端。</p><p>第一步是广播请求到索引中每一个节点的分片拷贝。就像 <a class="link" href="distrib-read.html" title="取回一个文档">document <code class="literal">GET</code> requests</a> 所描述的，
-查询请求可以被某个主分片或某个副本分片处理， <a id="id-1.4.11.7.9.2" class="indexterm"></a>
-<a id="id-1.4.11.7.9.3" class="indexterm"></a>这就是为什么更多的副本（当结合更多的硬件）能够增加搜索吞吐率。
+查询请求可以被某个主分片或某个副本分片处理， <a id="id-1.4.11.7.9.2" class="indexterm"></a>这就是为什么更多的副本（当结合更多的硬件）能够增加搜索吞吐率。
 协调节点将在之后的请求中轮询所有的分片拷贝来分摊负载。</p><p>每个分片在本地执行查询请求并且创建一个长度为 <code class="literal">from + size</code> 的优先队列—也就是说，每个分片创建的结果集足够大，均可以满足全局的搜索请求。
-分片返回一个轻量级的结果列表到协调节点，它仅包含文档 ID 集合以及任何排序需要用到的值，例如 <code class="literal">_score</code> 。</p><p>协调节点将这些分片级的结果合并到自己的有序优先队列里，它代表了全局排序结果集合。至此查询过程结束。</p><div class="note admon"><div class="icon"><img alt="注意" src="images/icons/note.png" /></div><div class="admon_content"><p>一个索引可以由一个或几个主分片组成， <a id="id-1.4.11.7.12.1.1" class="indexterm"></a>
-<a id="id-1.4.11.7.12.1.2" class="indexterm"></a>所以一个针对单个索引的搜索请求需要能够把来自多个分片的结果组合起来。
+分片返回一个轻量级的结果列表到协调节点，它仅包含文档 ID 集合以及任何排序需要用到的值，例如 <code class="literal">_score</code> 。</p><p>协调节点将这些分片级的结果合并到自己的有序优先队列里，它代表了全局排序结果集合。至此查询过程结束。</p><div class="note admon"><div class="icon"></div><div class="admon_content"><p>一个索引可以由一个或几个主分片组成， <a id="id-1.4.11.7.12.1.1" class="indexterm"></a>所以一个针对单个索引的搜索请求需要能够把来自多个分片的结果组合起来。
 针对 <span class="emphasis"><em>multiple</em></span> 或者 <span class="emphasis"><em>all</em></span> 索引的搜索工作方式也是完全一致的—​仅仅是包含了更多的分片而已。</p></div></div></div><div class="navfooter"><span class="prev"><a href="distributed-search.html">
               « 
               执行分布式检索</a>
