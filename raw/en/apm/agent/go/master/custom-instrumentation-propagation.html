@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title>Context propagation
+        | APM Go Agent Reference [master]
+      | Elastic
+    </title><link rel="home" href="index.html" title="APM Go Agent Reference [master]" /><link rel="up" href="getting-started.html" title="Set up the Agent" /><link rel="prev" href="custom-instrumentation.html" title="Custom instrumentation" /><link rel="next" href="supported-tech.html" title="Supported Technologies" /><meta name="DC.type" content="Learn/Docs/APM Go Agent/Reference/master" /><meta name="DC.subject" content="APM" /><meta name="DC.identifier" content="master" /></head><body><div class="page_header">You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div><div class="breadcrumbs"><span class="breadcrumb-link"><a href="index.html">APM Go Agent Reference
+      [master]
+    </a></span> » <span class="breadcrumb-link"><a href="getting-started.html">Set up the Agent</a></span> » <span class="breadcrumb-node">Context propagation</span></div><div class="navheader"><span class="prev"><a href="custom-instrumentation.html">
+              « 
+              Custom instrumentation</a>
+           
+        </span><span class="next">
+           
+          <a href="supported-tech.html">Supported Technologies
+               »
+            </a></span></div><div class="section"><div class="titlepage"><div><div><h2 class="title"><a id="custom-instrumentation-propagation"></a>Context propagation<a href="https://github.com/elastic/apm-agent-go/edit/master/docs/context-propagation.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h2></div></div></div><p>In Go, <a class="ulink" href="https://golang.org/pkg/context/" target="_top">context</a> is used to propagate request-scoped values along a call
+chain, potentially crossing between goroutines and between processes. For servers based on <code class="literal">net/http</code>,
+each request contains an independent context object, which allows adding values specific to that particular
+request.</p><p>When you start a transaction, you can add it to a context object using
+<a class="link" href="api.html#apm-context-with-transaction" title="func ContextWithTransaction(context.Context, *Transaction) context.Context">apm.ContextWithTransaction</a>. This context object can be
+later passed to <a class="link" href="api.html#apm-transaction-from-context" title="func TransactionFromContext(context.Context) *Transaction">apm.TransactionFromContext</a> to obtain
+the transaction, or into <a class="link" href="api.html#apm-start-span" title="func StartSpan(ctx context.Context, name, spanType string) (*Span, context.Context)">apm.StartSpan</a> to start a span.</p><p>The simplest way to create and propagate a span is by using <a class="link" href="api.html#apm-start-span" title="func StartSpan(ctx context.Context, name, spanType string) (*Span, context.Context)">apm.StartSpan</a>,
+which takes a context and returns a span. The span will be created as a child of the span most recently
+added to this context, or a transaction added to the context as described above. If the context contains
+neither a transaction nor a span, then the span will be dropped (i.e. will not be reported to the APM Server.)</p><p>For example, take a simple CRUD-type web service, which accepts requests over HTTP and then makes
+corresponding database queries. For each incoming request, a transaction will be started and added to the
+request context automatically. This context needs to be passed into method calls within the handler manually
+in order to create spans within that transaction, e.g. to measure the duration of SQL queries.</p><div class="pre_wrapper lang-go"><pre class="programlisting prettyprint lang-go">import (
+	"net/http"
+
+	"go.elastic.co/apm"
+	"go.elastic.co/apm/module/apmhttp"
+	"go.elastic.co/apm/module/apmsql"
+	_ "go.elastic.co/apm/module/apmsql/pq"
+)
+
+var db *sql.DB
+
+func init() {
+	// apmsql.Open wraps sql.Open, in order
+	// to add tracing to database operations.
+	db, _ = apmsql.Open("postgres", "")
+}
+
+func main() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handleList)
+
+	// apmhttp.Wrap instruments an http.Handler, in order
+	// to report any request to this handler as a transaction,
+	// and to store the transaction in the request's context.
+	handler := apmhttp.Wrap(mux)
+	http.ListenAndServe(":8080", handler)
+}
+
+func handleList(w http.ResponseWriter, req *http.Request) {
+	// By passing the request context down to getList, getList can add spans to it.
+	ctx := req.Context()
+	getList(ctx)
+	...
+}
+
+func getList(ctx context.Context) (
+	// When getList is called with a context containing a transaction or span,
+	// StartSpan creates a child span. In this example, getList is always called
+	// with a context containing a transaction for the handler, so we should
+	// expect to see something like:
+	//
+	//     Transaction: handleList
+	//         Span: getList
+	//             Span: SELECT FROM items
+	//
+	span, ctx := apm.StartSpan(ctx, "getList", "custom")
+	defer span.End()
+
+	// NOTE: The context object ctx returned by StartSpan above contains
+	// the current span now, so subsequent calls to StartSpan create new
+	// child spans.
+
+	// db was opened with apmsql, so queries will be reported as
+	// spans when using the context methods.
+	rows, err := db.QueryContext(ctx, "SELECT * FROM items")
+	...
+	rows.Close()
+}</pre></div><p>Contexts can have deadlines associated, and can be explicitly canceled. In some cases you may
+wish to propagate the trace context (parent transaction/span) to some code without propagating
+the cancellation. For example, an HTTP request’s context will be canceled when the client’s
+connection closes. You may want to perform some operation in the request handler without it
+being canceled due to the client connection closing, such as in a fire-and-forget operation.
+To handle scenarios like this, we provide the function <a class="link" href="api.html#apm-detached-context" title="func DetachedContext(context.Context) context.Context">apm.DetachedContext</a>.</p><div class="pre_wrapper lang-go"><pre class="programlisting prettyprint lang-go">func handleRequest(w http.ResponseWriter, req *http.Request) {
+	go fireAndForget(apm.DetachedContext(req.Context()))
+
+	// After handleRequest returns, req.Context() will be canceled,
+	// but the "detached context" passed into fireAndForget will not.
+	// Any spans created by fireAndForget will still be joined to
+	// the handleRequest transaction.
+}</pre></div></div><div class="navfooter"><span class="prev"><a href="custom-instrumentation.html">
+              « 
+              Custom instrumentation</a>
+           
+        </span><span class="next">
+           
+          <a href="supported-tech.html">Supported Technologies
+               »
+            </a></span></div></body></html>
