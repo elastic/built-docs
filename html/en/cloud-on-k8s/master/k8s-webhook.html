@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="en-us">
   <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title>Managing licenses in ECK
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title>Validating webhook
         | Elastic Cloud on Kubernetes [master]
       | Elastic
-    </title><link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [master]" /><link rel="up" href="index.html" title="Elastic Cloud on Kubernetes [master]" /><link rel="prev" href="k8s-webhook.html" title="Validating webhook" /><link rel="next" href="k8s-troubleshooting.html" title="Troubleshooting" /><meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/master" /><meta name="DC.subject" content="ECK" /><meta name="DC.identifier" content="master" />
+    </title><link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [master]" /><link rel="up" href="k8s-operator-config.html" title="Configuring ECK" /><link rel="prev" href="k8s-ns-config.html" title="Namespace and role configuration" /><link rel="next" href="k8s-licensing.html" title="Managing licenses in ECK" /><meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/master" /><meta name="DC.subject" content="ECK" /><meta name="DC.identifier" content="master" />
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -99,47 +99,96 @@
                   <div class="page_header">You are looking at the documentation for a beta release.
 </div><div class="breadcrumbs"><span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes
       [master]
-    </a></span> » <span class="breadcrumb-node">Managing licenses in ECK</span></div><div class="navheader"><span class="prev"><a href="k8s-webhook.html">
+    </a></span> » <span class="breadcrumb-link"><a href="k8s-operator-config.html">Configuring ECK</a></span> » <span class="breadcrumb-node">Validating webhook</span></div><div class="navheader"><span class="prev"><a href="k8s-ns-config.html">
               « 
-              Validating webhook</a>
+              Namespace and role configuration</a>
            
         </span><span class="next">
            
-          <a href="k8s-troubleshooting.html">Troubleshooting
+          <a href="k8s-licensing.html">Managing licenses in ECK
                »
-            </a></span></div><div class="chapter"><div class="titlepage"><div><div><h1 class="title"><a id="k8s-licensing"></a>Managing licenses in ECK<a href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/licensing.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h1></div></div></div><p>When you install the default distribution of ECK, you receive a basic license. Any Elastic stack application you manage through
-ECK will also be basic licensed. For the full list of free features that are included in the basic license, see: <a class="ulink" href="/subscriptions" target="_top">https://www.elastic.co/subscriptions</a>.</p><h3><a id="k8s_starting_a_trial"></a>Starting a trial<a href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/licensing.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>If you want to try the features included in the Enterprise subscription, you can start a 30-day trial. To start a trial create
-a Kubernetes secret as shown below:</p><div class="pre_wrapper lang-yaml"><pre class="programlisting prettyprint lang-yaml">cat &lt;&lt;EOF | kubectl apply -f -
-apiVersion: v1
-kind: Secret
+            </a></span></div><div class="section"><div class="titlepage"><div><div><h2 class="title"><a id="k8s-webhook"></a>Validating webhook<a href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/webhook.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h2></div></div></div><p>A validating webhook provides additional validation of Elasticsearch resources: it provides immediate feedback on the Elasticsearch manifests you submit, allowing you to catch errors right away before ECK even tries to fulfill your request.</p><h3><a id="k8s_architecture"></a>Architecture<a href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/webhook.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>The webhook is composed of 4 main components. Here is a brief description of each of them to understand how they interact, their naming, and how they are managed.</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem">A <code class="literal">ValidatingWebhookConfiguration</code> object that defines the validating webhook, named <code class="literal">elastic-es-validation.k8s.elastic.co</code>. It must be created before starting the operator. The <code class="literal">caBundle</code> field can be automatically managed as part of the automatic certificate management <span class="emphasis"><em>(see below)</em></span>.</li><li class="listitem">A Kubernetes Service is used to expose the validating server, named <code class="literal">elastic-webhook-server</code>. It is in the same Namespace as the webhook server.</li><li class="listitem">A webhook server that actually validates the submitted resources. In ECK it is the operator itself when it is configured with the <code class="literal">webhook</code> role. See <a class="link" href="k8s-operator-config.html" title="Configuring ECK">Configuring ECK</a> for more information about the <code class="literal">operator-roles</code> flag.</li><li class="listitem">A Secret containing the required certificates to secure the connection between the API server and the webhook server.
+Like the ValidatingWebhookConfiguration, it must be created before starting the operator, even if it is empty. By default its name is <code class="literal">elastic-webhook-server-cert</code>.
+The content of this Secret and the lifecycle of the certificates are automatically managed for you. ECK generates a dedicated and separate certificate authority and ensures that all components are rotated before the expiration date. The certificate authority is also used to configure the <code class="literal">caBundle</code> field of the <code class="literal">ValidatingWebhookConfiguration</code>. You can disable this feature if you want to manage the certificates yourself or with <a class="ulink" href="https://github.com/jetstack/cert-manager" target="_top">cert-manager</a>. See an example of the latter below.</li></ol></div><h3><a id="k8s_managing_the_webhook_certificate_with_cert_manager"></a>Managing the webhook certificate with cert-manager<a href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/webhook.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>If ECK is currently running you first must ensure that the automatic certificate management feature is disabled. This can be done by updating the operator deployment manifest and adding the <code class="literal">--manage-webhook-certs=false</code> flag.</p><p>Then, cert-manager v0.11+ must be installed as described in the <a class="ulink" href="https://docs.cert-manager.io/en/latest/getting-started/install/" target="_top">cert-manager documentation</a>.</p><p>The following example shows how to create all the resources that a webhook requires to function.</p><div class="pre_wrapper lang-yaml"><pre class="programlisting prettyprint lang-yaml">cat &lt;&lt;EOF | kubectl apply -f -
+---
+# this configures
+# - a self signed cert-manager issuer
+# - a service to point to the webhook
+# - a self signed certificate for the webhook service
+# - a validating webhook configuration
+apiVersion: cert-manager.io/v1alpha2
+kind: Issuer
 metadata:
-  name: eck-trial-license
+  name: selfsigned-issuer
   namespace: elastic-system
-  labels:
-    license.k8s.elastic.co/type: enterprise-trial
-  annotations:
-    elastic.co/eula: accepted <a id="CO2-1"></a><i class="conum" data-value="1"></i>
-EOF</pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO2-1"><i class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p>By setting this annotation to <code class="literal">accepted</code> you are expressing that you have accepted the Elastic EULA which can be found at <a class="ulink" href="/eula" target="_top">https://www.elastic.co/eula</a>.</p></td></tr></table></div><div class="note admon"><div class="icon"></div><div class="admon_content"><p>You can initiate a trial only if a trial has not previously been activated.</p></div></div><p>At the end of the trial period, the platinum and enterprise features operate in a <a class="ulink" href="/guide/en/elastic-stack-overview/current/license-expiration.html" target="_top">degraded mode</a>. You can revert to a basic license, extend the trial, or purchase an enterprise subscription.</p><h3><a id="k8s_adding_a_license"></a>Adding a license<a href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/licensing.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>If you have a valid enterprise subscription you will receive a license as a JSON file.
-To add the license to your ECK installation, create a Kubernetes secret of the following form:</p><div class="pre_wrapper lang-yaml"><pre class="programlisting prettyprint lang-yaml">apiVersion: v1
-kind: Secret
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1alpha2
+kind: Certificate
 metadata:
-  labels:
-    license.k8s.elastic.co/scope: operator <a id="CO3-1"></a><i class="conum" data-value="1"></i>
-  name: eck-license
-type: Opaque
-data:
-  license: "JSON license in base64 format"  <a id="CO3-2"></a><i class="conum" data-value="2"></i></pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO3-1"><i class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p>this label is required for ECK to identify your license secret</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO3-2"><i class="conum" data-value="2"></i></a> </p></td><td valign="top" align="left"><p>the license file can have any name</p></td></tr></table></div><p>An easy way to create this secret is to rely on <code class="literal">kubectl</code> 's built-in support for secrets:</p><div class="pre_wrapper lang-shell script"><pre class="programlisting prettyprint lang-shell script">kubectl create secret generic eck-license --from-file=my-license-file.json -n elastic-system
-kubectl label secret eck-license "license.k8s.elastic.co/scope"=operator -n elastic-system</pre></div><div class="note admon"><div class="icon"></div><div class="admon_content"><p>Once you have installed a license into ECK new Elastic stack applications you manage with ECK will have all platinum and enterprise features enabled.
-Applications that were created before you installed the license will be upgraded to platinum or enterprise features without interruption of service after a short delay.</p></div></div><h3><a id="k8s_updating_your_license"></a>Updating your license<a href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/licensing.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>Once your current enterprise license expires you will receive a new enterprise license from Elastic as long as you  have
-a valid enterprise subscription.</p><p>To avoid any unintended downgrade of individual Elasticsearch clusters to a basic license while installing the new license
-we recommend you install the new enterprise license as a new Kubernetes secret next to your existing enterprise license.
-Just replace <code class="literal">eck-license</code> with a different name in the examples above. ECK will pick the right license automatically.</p><p>As soon as you have installed the new license you can safely delete the old license if you want.</p></div><div class="navfooter"><span class="prev"><a href="k8s-webhook.html">
+  name: elastic-webhook
+  namespace: elastic-system
+spec:
+  commonName: elastic-webhook.elastic-system.svc
+  dnsNames:
+  - elastic-webhook.elastic-system.svc.cluster.local
+  - elastic-webhook.elastic-system.svc
+  issuerRef:
+    kind: Issuer
+    name: selfsigned-issuer
+  secretName: elastic-webhook-server-cert
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elastic-webhook-server
+  namespace: elastic-system
+spec:
+  ports:
+  - port: 443
+    protocol: TCP
+    targetPort: 9443
+  selector:
+    control-plane: elastic-operator
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: admissionregistration.k8s.io/v1beta1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: elastic-webhook.k8s.elastic.co
+  annotations:
+    cert-manager.io/inject-ca-from: elastic-system/elastic-webhook
+webhooks:
+- clientConfig:
+    caBundle: Cg==
+    service:
+      name: elastic-webhook
+      namespace: elastic-system
+      # this is the path controller-runtime automatically generates
+      path: /validate-elasticsearch-k8s-elastic-co-v1-elasticsearch
+  failurePolicy: Ignore
+  name: elastic-es-validation.k8s.elastic.co
+  sideEffects: None
+  rules:
+  - apiGroups:
+    - elasticsearch.k8s.elastic.co
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - elasticsearches
+EOF</pre></div><div class="note admon"><div class="icon"></div><div class="admon_content"><p>This example assumes that you have installed the operator in the <code class="literal">elastic-system</code> namespace.</p></div></div><h3><a id="k8s_troubleshooting"></a>Troubleshooting<a href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/webhook.asciidoc" class="edit_me" title="Edit this page on GitHub" rel="nofollow">edit</a></h3><p>Webhooks require network connectivity between the Kubernetes API server and the operator.
+See <a class="link" href="k8s-troubleshooting.html#k8s-webhook-troubleshooting" title="Webhook troubleshooting">Webhook troubleshooting</a> for more information about some known problems with some Kubernetes providers.</p></div><div class="navfooter"><span class="prev"><a href="k8s-ns-config.html">
               « 
-              Validating webhook</a>
+              Namespace and role configuration</a>
            
         </span><span class="next">
            
-          <a href="k8s-troubleshooting.html">Troubleshooting
+          <a href="k8s-licensing.html">Managing licenses in ECK
                »
             </a></span></div>
                   <!-- end body -->
