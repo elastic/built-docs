@@ -1,75 +1,229 @@
 <!DOCTYPE html>
-<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title>Making Changes Persistent
-        | Elasticsearch: The Definitive Guide [master]
-      | Elastic
-    </title><link rel="home" href="index.html" title="Elasticsearch: The Definitive Guide [master]" /><link rel="up" href="inside-a-shard.html" title="Inside a Shard" /><link rel="prev" href="near-real-time.html" title="Near Real-Time Search" /><link rel="next" href="merge-process.html" title="Segment Merging" /><meta name="DC.type" content="Learn/Docs/Legacy/Elasticsearch/Definitive Guide/master" /><meta name="DC.subject" content="Elasticsearch" /><meta name="DC.identifier" content="master" /><meta name="robots" content="noindex,nofollow" /></head><body><div class="page_header">This information may not apply to the latest version of Elasticsearch.
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Making Changes Persistent | Elasticsearch: The Definitive Guide [master] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: The Definitive Guide [master]"/>
+<link rel="up" href="inside-a-shard.html" title="Inside a Shard"/>
+<link rel="prev" href="near-real-time.html" title="Near Real-Time Search"/>
+<link rel="next" href="merge-process.html" title="Segment Merging"/>
+<meta name="DC.type" content="Learn/Docs/Legacy/Elasticsearch/Definitive Guide/master"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="master"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+This information may not apply to the latest version of Elasticsearch.
 For the most up to date information, see the current version of the
 <a href="https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html">
 Elasticsearch Reference</a>.
-</div><div class="breadcrumbs"><span class="breadcrumb-link"><a href="index.html">Elasticsearch: The Definitive Guide
-      [master]
-    </a></span> » <span class="breadcrumb-link"><a href="getting-started.html">Getting Started</a></span> » <span class="breadcrumb-link"><a href="inside-a-shard.html">Inside a Shard</a></span> » <span class="breadcrumb-node">Making Changes Persistent</span></div><div class="navheader"><span class="prev"><a href="near-real-time.html">
-              « 
-              Near Real-Time Search</a>
-           
-        </span><span class="next">
-           
-          <a href="merge-process.html">Segment Merging
-               »
-            </a></span></div><div class="section"><div class="titlepage"><div><div><h2 class="title"><a id="translog"></a>Making Changes Persistent</h2></div></div></div><p>Without an <code class="literal">fsync</code> to flush data in the filesystem cache to disk, we cannot
-be sure that the data will still <a id="id-1.4.13.9.2.2" class="indexterm"></a><a id="id-1.4.13.9.2.3" class="indexterm"></a>be there after a power failure, or even after
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: The Definitive Guide [master]</a></span>
+»
+<span class="breadcrumb-link"><a href="getting-started.html">Getting Started</a></span>
+»
+<span class="breadcrumb-link"><a href="inside-a-shard.html">Inside a Shard</a></span>
+»
+<span class="breadcrumb-node">Making Changes Persistent</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="near-real-time.html">« Near Real-Time Search</a>
+</span>
+<span class="next">
+<a href="merge-process.html">Segment Merging »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="translog"></a>Making Changes Persistent</h2>
+</div></div></div>
+<p>Without an <code class="literal">fsync</code> to flush data in the filesystem cache to disk, we cannot
+be sure that the data will still be there after a power failure, or even after
 exiting the application normally.  For Elasticsearch to be reliable, it needs
-to ensure that changes are persisted to disk.</p><p>In <a class="xref" href="dynamic-indices.html" title="Dynamically Updatable Indices">Dynamically Updatable Indices</a>, we said that a full commit flushes segments to disk and
-writes a commit point, which lists all known segments.<a id="id-1.4.13.9.3.2" class="indexterm"></a>  Elasticsearch uses
+to ensure that changes are persisted to disk.</p>
+<p>In <a class="xref" href="dynamic-indices.html" title="Dynamically Updatable Indices">Dynamically Updatable Indices</a>, we said that a full commit flushes segments to disk and
+writes a commit point, which lists all known segments.  Elasticsearch uses
 this commit point during startup or when reopening an index to decide which
-segments belong to the current shard.</p><p>While we refresh once every second to achieve near real-time search, we still
+segments belong to the current shard.</p>
+<p>While we refresh once every second to achieve near real-time search, we still
 need to do full commits regularly to make sure that we can recover from
 failure.  But what about the document changes that happen between commits?  We
-don’t want to lose those either.</p><p>Elasticsearch added a <span class="emphasis"><em>translog</em></span>, or transaction log,<a id="id-1.4.13.9.5.2" class="indexterm"></a> which records every
+don&#8217;t want to lose those either.</p>
+<p>Elasticsearch added a <em>translog</em>, or transaction log, which records every
 operation in Elasticsearch as it happens.  With the translog, the process now
-looks like this:</p><div class="orderedlist"><ol class="orderedlist" type="1"><li class="listitem"><p class="simpara">When a document is indexed, it is added to the in-memory buffer <span class="emphasis"><em>and</em></span>
-appended to the translog, as shown in <a class="xref" href="translog.html#img-xlog-pre-refresh" title="Figure 21. New documents are added to the in-memory buffer and appended to the transaction log">Figure 21, “New documents are added to the in-memory buffer and appended to the transaction log”</a>.</p><div class="figure"><a id="img-xlog-pre-refresh"></a><p class="title"><strong>Figure 21. New documents are added to the in-memory buffer and appended to the transaction log</strong></p><div class="figure-contents"><div class="mediaobject"><img src="images/elas_1106.png" alt="New documents are added to the in-memory buffer and appended to the transaction log" /></div></div></div></li><li class="listitem"><p class="simpara">The refresh leaves the shard in the state depicted in <a class="xref" href="translog.html#img-xlog-post-refresh" title="Figure 22. After a refresh, the buffer is cleared but the transaction log is not">Figure 22, “After a refresh, the buffer is cleared but the transaction log is not”</a>. Once every second, the shard is refreshed:</p><div class="itemizedlist"><ul class="itemizedlist" type="disc"><li class="listitem">The docs in the in-memory buffer are written to a new segment,
-without an <code class="literal">fsync</code>.</li><li class="listitem">The segment is opened to make it visible to search.</li><li class="listitem">The in-memory buffer is cleared.</li></ul></div><div class="figure"><a id="img-xlog-post-refresh"></a><p class="title"><strong>Figure 22. After a refresh, the buffer is cleared but the transaction log is not</strong></p><div class="figure-contents"><div class="mediaobject"><img src="images/elas_1107.png" alt="After a refresh, the buffer is cleared but the transaction log is not" /></div></div></div></li><li class="listitem"><p class="simpara">This process continues with more documents being added to the in-memory
-buffer and appended to the transaction log (see <a class="xref" href="translog.html#img-xlog-pre-flush" title="Figure 23. The transaction log keeps accumulating documents">Figure 23, “The transaction log keeps accumulating documents”</a>).</p><div class="figure"><a id="img-xlog-pre-flush"></a><p class="title"><strong>Figure 23. The transaction log keeps accumulating documents</strong></p><div class="figure-contents"><div class="mediaobject"><img src="images/elas_1108.png" alt="The transaction log keeps accumulating documents" /></div></div></div></li><li class="listitem"><p class="simpara">Every so often—​such as when the translog is getting too big—​the index
-is flushed; a new translog is created, and a full commit is performed (see <a class="xref" href="translog.html#img-xlog-post-flush" title="Figure 24. After a flush, the segments are fully commited and the transaction log is cleared">Figure 24, “After a flush, the segments are fully commited and the transaction log is cleared”</a>):</p><div class="itemizedlist"><ul class="itemizedlist" type="disc"><li class="listitem">Any docs in the in-memory buffer are written to a new segment.</li><li class="listitem">The buffer is cleared.</li><li class="listitem">A commit point is written to disk.</li><li class="listitem">The filesystem cache is flushed with an <code class="literal">fsync</code>.</li><li class="listitem">The old translog is deleted.</li></ul></div></li></ol></div><p>The translog provides a persistent record of all operations that have not yet
+looks like this:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>When a document is indexed, it is added to the in-memory buffer <em>and</em>
+appended to the translog, as shown in <a class="xref" href="translog.html#img-xlog-pre-refresh" title="New documents are added to the in-memory buffer and appended to the transaction log">Figure 21, &#8220;New documents are added to the in-memory buffer and appended to the transaction log&#8221;</a>.</p>
+<div id="img-xlog-pre-refresh" class="imageblock">
+<div class="content">
+<img src="images/elas_1106.png" alt="New documents are added to the in-memory buffer and appended to the transaction log">
+</div>
+<div class="title">Figure 21. New documents are added to the in-memory buffer and appended to the transaction log</div>
+</div>
+</li>
+<li class="listitem">
+<p>The refresh leaves the shard in the state depicted in <a class="xref" href="translog.html#img-xlog-post-refresh" title="After a refresh, the buffer is cleared but the transaction log is not">Figure 22, &#8220;After a refresh, the buffer is cleared but the transaction log is not&#8221;</a>. Once every second, the shard is refreshed:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+The docs in the in-memory buffer are written to a new segment,
+without an <code class="literal">fsync</code>.
+</li>
+<li class="listitem">
+The segment is opened to make it visible to search.
+</li>
+<li class="listitem">
+The in-memory buffer is cleared.
+</li>
+</ul>
+</div>
+<div id="img-xlog-post-refresh" class="imageblock">
+<div class="content">
+<img src="images/elas_1107.png" alt="After a refresh, the buffer is cleared but the transaction log is not">
+</div>
+<div class="title">Figure 22. After a refresh, the buffer is cleared but the transaction log is not</div>
+</div>
+</li>
+<li class="listitem">
+<p>This process continues with more documents being added to the in-memory
+buffer and appended to the transaction log (see <a class="xref" href="translog.html#img-xlog-pre-flush" title="The transaction log keeps accumulating documents">Figure 23, &#8220;The transaction log keeps accumulating documents&#8221;</a>).</p>
+<div id="img-xlog-pre-flush" class="imageblock">
+<div class="content">
+<img src="images/elas_1108.png" alt="The transaction log keeps accumulating documents">
+</div>
+<div class="title">Figure 23. The transaction log keeps accumulating documents</div>
+</div>
+</li>
+<li class="listitem">
+<p>Every so often&#8212;&#8203;such as when the translog is getting too big&#8212;&#8203;the index
+is flushed; a new translog is created, and a full commit is performed (see <a class="xref" href="translog.html#img-xlog-post-flush" title="After a flush, the segments are fully commited and the transaction log is cleared">Figure 24, &#8220;After a flush, the segments are fully commited and the transaction log is cleared&#8221;</a>):</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Any docs in the in-memory buffer are written to a new segment.
+</li>
+<li class="listitem">
+The buffer is cleared.
+</li>
+<li class="listitem">
+A commit point is written to disk.
+</li>
+<li class="listitem">
+The filesystem cache is flushed with an <code class="literal">fsync</code>.
+</li>
+<li class="listitem">
+The old translog is deleted.
+</li>
+</ul>
+</div>
+</li>
+</ol>
+</div>
+<p>The translog provides a persistent record of all operations that have not yet
 been flushed to disk. When starting up, Elasticsearch will use the last commit
 point to recover known segments from disk, and will then replay all operations
-in the translog to add the changes that happened after the last commit.</p><p>The translog is also used to provide real-time CRUD.  When you try to
+in the translog to add the changes that happened after the last commit.</p>
+<p>The translog is also used to provide real-time CRUD.  When you try to
 retrieve, update, or delete a document by ID, it first checks the translog for
 any recent changes before trying to retrieve the document from the relevant
 segment. This means that it always has access to the latest known version of
-the document, in real-time.</p><div class="figure"><a id="img-xlog-post-flush"></a><p class="title"><strong>Figure 24. After a flush, the segments are fully commited and the transaction log is cleared</strong></p><div class="figure-contents"><div class="mediaobject"><img src="images/elas_1109.png" alt="After a flush, the segments are fully commited and the transaction log is cleared" /></div></div></div><div class="section"><div class="titlepage"><div><div><h3 class="title"><a id="flush-api"></a>flush API</h3></div></div></div><p>The action of performing a commit and truncating the translog is known in
-Elasticsearch as a <span class="emphasis"><em>flush</em></span>. <a id="id-1.4.13.9.10.2.2" class="indexterm"></a> Shards are flushed automatically every 30
+the document, in real-time.</p>
+<div id="img-xlog-post-flush" class="imageblock">
+<div class="content">
+<img src="images/elas_1109.png" alt="After a flush, the segments are fully commited and the transaction log is cleared">
+</div>
+<div class="title">Figure 24. After a flush, the segments are fully commited and the transaction log is cleared</div>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="flush-api"></a>flush API</h3>
+</div></div></div>
+<p>The action of performing a commit and truncating the translog is known in
+Elasticsearch as a <em>flush</em>.  Shards are flushed automatically every 30
 minutes, or when the translog becomes too big. See the
-<a class="ulink" href="/guide/en/elasticsearch/reference/2.4/index-modules-translog.html" target="_top"><code class="literal">translog</code> documentation</a> for settings
-that can be used<a id="id-1.4.13.9.10.2.4" class="indexterm"></a> to control these thresholds:</p><p>The <a class="ulink" href="/guide/en/elasticsearch/reference/2.4/indices-flush.html" target="_top"><code class="literal">flush</code> API</a> can <a id="id-1.4.13.9.10.3.2" class="indexterm"></a><a id="id-1.4.13.9.10.3.3" class="indexterm"></a>be used to perform a manual flush:</p><div class="pre_wrapper lang-json"><pre class="programlisting prettyprint lang-json">POST /blogs/_flush <a id="CO40-1"></a><i class="conum" data-value="1"></i>
+<a href="/guide/en/elasticsearch/reference/2.4/index-modules-translog.html" class="ulink" target="_top"><code class="literal">translog</code> documentation</a> for settings
+that can be used to control these thresholds:</p>
+<p>The <a href="/guide/en/elasticsearch/reference/2.4/indices-flush.html" class="ulink" target="_top"><code class="literal">flush</code> API</a> can be used to perform a manual flush:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">POST /blogs/_flush <a id="CO40-1"></a><i class="conum" data-value="1"></i>
 
-POST /_flush?wait_for_ongoing <a id="CO40-2"></a><i class="conum" data-value="2"></i></pre></div><div class="calloutlist"><table border="0" summary="Callout list"><tr><td width="5%" valign="top" align="left"><p><a href="#CO40-1"><i class="conum" data-value="1"></i></a> </p></td><td valign="top" align="left"><p>Flush the <code class="literal">blogs</code> index.</p></td></tr><tr><td width="5%" valign="top" align="left"><p><a href="#CO40-2"><i class="conum" data-value="2"></i></a> </p></td><td valign="top" align="left"><p>Flush all indices and wait until all flushes have completed before
-returning.</p></td></tr></table></div><p>You seldom need to issue a manual <code class="literal">flush</code> yourself; usually, automatic
-flushing is all that is required.</p><p>That said, it is beneficial to <a class="link" href="translog.html#flush-api" title="flush API">flush</a> your indices before restarting a node or closing an index. When Elasticsearch tries to recover or reopen an index, it has to replay all of the operations in the translog, so the shorter the log, the faster the recovery.</p><div class="sidebar"><a id="how-safe-is-the-translog"></a><div class="titlepage"><div><div><p class="title"><strong>How Safe Is the Translog?</strong></p></div></div></div><p>The purpose of the translog is to ensure that operations are not lost.  This
-begs the question: how safe<a id="id-1.4.13.9.10.8.2.1" class="indexterm"></a> is the translog?</p><p>Writes to a file will not survive a reboot until the file has been
+POST /_flush?wait_for_ongoing <a id="CO40-2"></a><i class="conum" data-value="2"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO40-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Flush the <code class="literal">blogs</code> index.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO40-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Flush all indices and wait until all flushes have completed before
+returning.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>You seldom need to issue a manual <code class="literal">flush</code> yourself; usually, automatic
+flushing is all that is required.</p>
+<p>That said, it is beneficial to <a class="xref" href="translog.html#flush-api" title="flush API">flush</a> your indices before restarting a node or closing an index. When Elasticsearch tries to recover or reopen an index, it has to replay all of the operations in the translog, so the shorter the log, the faster the recovery.</p>
+<div class="sidebar">
+<a id="how-safe-is-the-translog"></a>
+<div class="titlepage"><div><div>
+<p class="title"><strong>How Safe Is the Translog?</strong></p>
+</div></div></div>
+<p>The purpose of the translog is to ensure that operations are not lost.  This
+begs the question: how safe is the translog?</p>
+<p>Writes to a file will not survive a reboot until the file has been
 <code class="literal">fsync</code>'ed to disk.  By default, the translog is <code class="literal">fsync</code>'ed every 5
-seconds <span class="emphasis"><em>and</em></span> after a write request completes (e.g. index, delete, update, bulk).
+seconds <em>and</em> after a write request completes (e.g. index, delete, update, bulk).
 This process occurs on both the primary and replica shards. Ultimately, that means
-your client won’t receive a <code class="literal">200 OK</code> response until the entire request has been
-<code class="literal">fsync</code>'ed in the translog of the primary and all replicas.</p><p>Executing an fsync after every request does come with some performance cost,
+your client won&#8217;t receive a <code class="literal">200 OK</code> response until the entire request has been
+<code class="literal">fsync</code>'ed in the translog of the primary and all replicas.</p>
+<p>Executing an fsync after every request does come with some performance cost,
 although in practice it is relatively small (especially for bulk ingestion, which
-amortizes the cost over many documents in the single request).</p><p>But for some high-volume clusters where losing a few seconds of data is not
-critical, it can be advantageous to fsync <span class="emphasis"><em>asynchronously</em></span>.  E.g. writes are
-buffered in memory and <code class="literal">fsync</code>'ed together every 5s.</p><p>This behavior can be enabled by setting the <code class="literal">durability</code> parameter to <code class="literal">async</code>:</p><div class="pre_wrapper lang-js"><pre class="programlisting prettyprint lang-js">PUT /my_index/_settings
+amortizes the cost over many documents in the single request).</p>
+<p>But for some high-volume clusters where losing a few seconds of data is not
+critical, it can be advantageous to fsync <em>asynchronously</em>.  E.g. writes are
+buffered in memory and <code class="literal">fsync</code>'ed together every 5s.</p>
+<p>This behavior can be enabled by setting the <code class="literal">durability</code> parameter to <code class="literal">async</code>:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT /my_index/_settings
 {
     "index.translog.durability": "async",
     "index.translog.sync_interval": "5s"
-}</pre></div><p>This setting can be configured per-index and is dynamically updatable. If
-you decide to enable async translog behavior, you are <span class="emphasis"><em>guaranteed</em></span> to lose
+}</pre>
+</div>
+<p>This setting can be configured per-index and is dynamically updatable. If
+you decide to enable async translog behavior, you are <em>guaranteed</em> to lose
 <code class="literal">sync_interval</code>'s worth of data if a crash happens.  Please be aware of this
-characteristic before deciding!</p><p>If you are unsure the ramifications of this action, it is best to use the default
-(<code class="literal">"index.translog.durability": "request"</code>) to avoid data-loss.</p></div></div></div><div class="navfooter"><span class="prev"><a href="near-real-time.html">
-              « 
-              Near Real-Time Search</a>
-           
-        </span><span class="next">
-           
-          <a href="merge-process.html">Segment Merging
-               »
-            </a></span></div></body></html>
+characteristic before deciding!</p>
+<p>If you are unsure the ramifications of this action, it is best to use the default
+(<code class="literal">"index.translog.durability": "request"</code>) to avoid data-loss.</p>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="near-real-time.html">« Near Real-Time Search</a>
+</span>
+<span class="next">
+<a href="merge-process.html">Segment Merging »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
