@@ -129,13 +129,13 @@
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Plugin version: v10.2.1
+Plugin version: v10.2.3
 </li>
 <li class="listitem">
-Released on: 2019-10-09
+Released on: 2019-11-20
 </li>
 <li class="listitem">
-<a href="https://github.com/logstash-plugins/logstash-output-elasticsearch/blob/v10.2.1/CHANGELOG.md" class="ulink" target="_top">Changelog</a>
+<a href="https://github.com/logstash-plugins/logstash-output-elasticsearch/blob/v10.2.3/CHANGELOG.md" class="ulink" target="_top">Changelog</a>
 </li>
 </ul>
 </div>
@@ -196,6 +196,70 @@ behavior.</p>
 <p>LS will not force upgrade the template, if <code class="literal">logstash</code> template already exists. This means you will still use
 <code class="literal">.raw</code> for sub-fields coming from 2.x. If you choose to use the new template, you will have to reindex your data after
 the new template is installed.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_writing_to_different_indices_best_practices"></a>Writing to different indices: best practices<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-output-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>You cannot use dynamic variable substitution when <code class="literal">ilm_enabled</code> is <code class="literal">true</code> and
+when using <code class="literal">ilm_rollover_pattern</code>.</p>
+</div>
+</div>
+<p>If you&#8217;re sending events to the same Elasticsearch cluster but you&#8217;re targeting different indices you can:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+use different Elasticsearch outputs, each one with a different value for the <code class="literal">index</code> parameter
+</li>
+<li class="listitem">
+use one Elasticsearch output and use the dynamic variable substitution for the <code class="literal">index</code> parameter
+</li>
+</ul>
+</div>
+<p>Each Elasticsearch output is a new client connected to the cluster:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+it has to initialize the client and connect to Elasticsearch (restart time is longer if you have more clients)
+</li>
+<li class="listitem">
+it has an associated connection pool
+</li>
+</ul>
+</div>
+<p>In order to minimize the number of open connections to Elasticsearch, maximize the bulk size and reduce the number of "small" bulk requests (which could easily fill up the queue), it is usually more efficient to have a single Elasticsearch output.</p>
+<p>Example:</p>
+<div class="pre_wrapper lang-ruby">
+<pre class="programlisting prettyprint lang-ruby">    output {
+      elasticsearch {
+        index =&gt; "%{[some_field][sub_field]}-%{+YYYY.MM.dd}"
+      }
+    }</pre>
+</div>
+<p><span class="strong strong"><strong>What to do in case there is no field in the event containing the destination index prefix?</strong></span></p>
+<p>You can use the <code class="literal">mutate</code> filter and conditionals to add a <code class="literal">[@metadata]</code> field (see <a href="/guide/en/logstash/current/event-dependent-configuration.html#metadata" class="ulink" target="_top">https://www.elastic.co/guide/en/logstash/current/event-dependent-configuration.html#metadata</a>) to set
+the destination index for each event. The <code class="literal">[@metadata]</code> fields will not be sent to Elasticsearch.</p>
+<p>Example:</p>
+<div class="pre_wrapper lang-ruby">
+<pre class="programlisting prettyprint lang-ruby">    filter {
+      if [log_type] in [ "test", "staging" ] {
+        mutate { add_field =&gt; { "[@metadata][target_index]" =&gt; "test-%{+YYYY.MM}" } }
+      } else if [log_type] == "production" {
+        mutate { add_field =&gt; { "[@metadata][target_index]" =&gt; "prod-%{+YYYY.MM.dd}" } }
+      } else {
+        mutate { add_field =&gt; { "[@metadata][target_index]" =&gt; "unknown-%{+YYYY}" } }
+      }
+    }
+    output {
+      elasticsearch {
+        index =&gt; "%{[@metadata][target_index]}"
+      }
+    }</pre>
+</div>
 </div>
 
 <div class="section">
@@ -748,15 +812,32 @@ This option is deprecated
 </li>
 </ul>
 </div>
-<p>Note: This option is deprecated due to the <a href="/guide/en/elasticsearch/reference/6.0/removal-of-types.html" class="ulink" target="_top">removal of types in Elasticsearch 6.0</a>.
-It will be removed in the next major version of Logstash.
-This sets the document type to write events to. Generally you should try to write only
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This option is deprecated due to the <a href="/guide/en/elasticsearch/reference/6.0/removal-of-types.html" class="ulink" target="_top">removal of types in Elasticsearch 6.0</a>.
+It will be removed in the next major version of Logstash.</p>
+</div>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This value is ignored and has no effect for Elasticsearch clusters <code class="literal">8.x</code>.</p>
+</div>
+</div>
+<p>This sets the document type to write events to. Generally you should try to write only
 similar events to the same <em>type</em>. String expansion <code class="literal">%{foo}</code> works here.
 If you don&#8217;t set a value for this option:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-for elasticsearch clusters 6.x and above: the value of <em>doc</em> will be used;
+for elasticsearch clusters 8.x: no value will be used;
+</li>
+<li class="listitem">
+for elasticsearch clusters 7.x: the value of <em>_doc</em> will be used;
+</li>
+<li class="listitem">
+for elasticsearch clusters 6.x: the value of <em>doc</em> will be used;
 </li>
 <li class="listitem">
 for elasticsearch clusters 5.x and below: the event&#8217;s <em>type</em> field will be used, if the field is not present the value of <em>doc</em> will be used.
@@ -974,6 +1055,12 @@ Default value is <code class="literal">logstash</code>
 <div class="icon"></div>
 <div class="admon_content">
 <p>Updating the rollover alias will require the index template to be rewritten</p>
+</div>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><code class="literal">ilm_rollover_alias</code> does NOT support dynamic variable substitution as <code class="literal">index</code> does.</p>
 </div>
 </div>
 </div>
