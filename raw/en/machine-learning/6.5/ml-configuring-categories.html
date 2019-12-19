@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Categorizing log messages | Machine Learning in the Elastic Stack [6.5] | Elastic</title>
+<link rel="home" href="index.html" title="Machine Learning in the Elastic Stack [6.5]"/>
+<link rel="up" href="ml-configuring.html" title="Configuring machine learning"/>
+<link rel="prev" href="ml-configuring-aggregation.html" title="Aggregating data for faster performance"/>
+<link rel="next" href="ml-configuring-pop.html" title="Performing population analysis"/>
+<meta name="DC.type" content="Learn/Docs/Elastic Stack/Machine learning/6.5"/>
+<meta name="DC.subject" content="Machine learning"/>
+<meta name="DC.identifier" content="6.5"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+<strong>IMPORTANT</strong>: No additional bug fixes or documentation updates 
+will be released for this version. For the latest information, see the 
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Machine Learning in the Elastic Stack [6.5]</a></span>
+»
+<span class="breadcrumb-link"><a href="xpack-ml.html">Machine learning in the Elastic Stack</a></span>
+»
+<span class="breadcrumb-link"><a href="ml-configuring.html">Configuring machine learning</a></span>
+»
+<span class="breadcrumb-node">Categorizing log messages</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="ml-configuring-aggregation.html">« Aggregating data for faster performance</a>
+</span>
+<span class="next">
+<a href="ml-configuring-pop.html">Performing population analysis »</a>
+</span>
+</div>
+<div class="section xpack">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="ml-configuring-categories"></a>Categorizing log messages<a class="xpack_tag" href="/subscriptions"></a></h2>
+</div></div></div>
+<p>Application log events are often unstructured and contain variable data. For
+example:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{"time":1454516381000,"message":"org.jdbi.v2.exceptions.UnableToExecuteStatementException: com.mysql.jdbc.exceptions.MySQLTimeoutException: Statement cancelled due to timeout or client request [statement:\"SELECT id, customer_id, name, force_disabled, enabled FROM customers\"]","type":"logs"}</pre>
+</div>
+<p>You can use machine learning to observe the static parts of the message, cluster similar
+messages together, and classify them into message categories.</p>
+<p>The machine learning model learns what volume and pattern is normal for each category over
+time. You can then detect anomalies and surface rare events or unusual types of
+messages by using count or rare functions. For example:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _xpack/ml/anomaly_detectors/it_ops_new_logs
+{
+  "description" : "IT Ops Application Logs",
+  "analysis_config" : {
+    "categorization_field_name": "message", <a id="CO1-1"></a><i class="conum" data-value="1"></i>
+    "bucket_span":"30m",
+    "detectors" :[{
+      "function":"count",
+      "by_field_name": "mlcategory", <a id="CO1-2"></a><i class="conum" data-value="2"></i>
+      "detector_description": "Unusual message counts"
+    }],
+    "categorization_filters":[ "\\[statement:.*\\]"]
+  },
+  "analysis_limits":{
+    "categorization_examples_limit": 5
+  },
+  "data_description" : {
+    "time_field":"time",
+    "time_format": "epoch_ms"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/7.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO1-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">categorization_field_name</code> property indicates which field will be
+categorized.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO1-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The resulting categories are used in a detector by setting <code class="literal">by_field_name</code>,
+<code class="literal">over_field_name</code>, or <code class="literal">partition_field_name</code> to the keyword <code class="literal">mlcategory</code>. If you
+do not specify this keyword in one of those properties, the API request fails.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The optional <code class="literal">categorization_examples_limit</code> property specifies the
+maximum number of examples that are stored in memory and in the results data
+store for each category. The default value is <code class="literal">4</code>. Note that this setting does
+not affect the categorization; it just affects the list of visible examples. If
+you increase this value, more examples are available, but you must have more
+storage available. If you set this value to <code class="literal">0</code>, no examples are stored.</p>
+<p>The optional <code class="literal">categorization_filters</code> property can contain an array of regular
+expressions. If a categorization field value matches the regular expression, the
+portion of the field that is matched is not taken into consideration when
+defining categories. The categorization filters are applied in the order they
+are listed in the job configuration, which allows you to disregard multiple
+sections of the categorization field value. In this example, we have decided that
+we do not want the detailed SQL to be considered in the message categorization.
+This particular categorization filter removes the SQL statement from the categorization
+algorithm.</p>
+<p>If your data is stored in Elasticsearch, you can create an advanced job with these same
+properties:</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/ml-category-advanced.jpg" alt="Advanced job configuration options related to categorization">
+</div>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>To add the <code class="literal">categorization_examples_limit</code> property, you must use the
+<span class="strong strong"><strong>Edit JSON</strong></span> tab and copy the <code class="literal">analysis_limits</code> object from the API example.</p>
+</div>
+</div>
+<h4><a id="ml-configuring-analyzer"></a>Customizing the categorization analyzer</h4>
+<p>Categorization uses English dictionary words to identify log message categories.
+By default, it also uses English tokenization rules. For this reason, if you use
+the default categorization analyzer, only English language log messages are
+supported, as described in the <a class="xref" href="ml-limitations.html" title="Machine learning limitations"><em>Machine learning limitations</em></a>.</p>
+<p>You can, however, change the tokenization rules by customizing the way the
+categorization field values are interpreted. For example:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _xpack/ml/anomaly_detectors/it_ops_new_logs2
+{
+  "description" : "IT Ops Application Logs",
+  "analysis_config" : {
+    "categorization_field_name": "message",
+    "bucket_span":"30m",
+    "detectors" :[{
+      "function":"count",
+      "by_field_name": "mlcategory",
+      "detector_description": "Unusual message counts"
+    }],
+    "categorization_analyzer":{
+      "char_filter": [
+        { "type": "pattern_replace", "pattern": "\\[statement:.*\\]" } <a id="CO2-1"></a><i class="conum" data-value="1"></i>
+      ],
+      "tokenizer": "ml_classic", <a id="CO2-2"></a><i class="conum" data-value="2"></i>
+      "filter": [
+        { "type" : "stop", "stopwords": [
+          "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+          "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun",
+          "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December",
+          "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+          "GMT", "UTC"
+        ] } <a id="CO2-3"></a><i class="conum" data-value="3"></i>
+      ]
+    }
+  },
+  "analysis_limits":{
+    "categorization_examples_limit": 5
+  },
+  "data_description" : {
+    "time_field":"time",
+    "time_format": "epoch_ms"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/8.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO2-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The
+<a href="/guide/en/elasticsearch/reference/6.5/analysis-pattern-replace-charfilter.html" class="ulink" target="_top"><code class="literal">pattern_replace</code> character filter</a>
+here achieves exactly the same as the <code class="literal">categorization_filters</code> in the first
+example.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO2-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">ml_classic</code> tokenizer works like the non-customizable tokenization
+that was used for categorization in older versions of machine learning. If you
+want the same categorization behavior as older versions, use this property value.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO2-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>By default, English day or month words are filtered from log messages before
+categorization. If your logs are in a different language and contain
+dates, you might get better results by filtering the day or month words in your
+language.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The optional <code class="literal">categorization_analyzer</code> property allows even greater customization
+of how categorization interprets the categorization field value. It can refer to
+a built-in Elasticsearch analyzer or a combination of zero or more character filters,
+a tokenizer, and zero or more token filters.</p>
+<p>The <code class="literal">ml_classic</code> tokenizer and the day and month stopword filter are more or less
+equivalent to the following analyzer, which is defined using only built-in Elasticsearch
+<a href="/guide/en/elasticsearch/reference/6.5/analysis-tokenizers.html" class="ulink" target="_top">tokenizers</a> and
+<a href="/guide/en/elasticsearch/reference/6.5/analysis-tokenfilters.html" class="ulink" target="_top">token filters</a>:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _xpack/ml/anomaly_detectors/it_ops_new_logs3
+{
+  "description" : "IT Ops Application Logs",
+  "analysis_config" : {
+    "categorization_field_name": "message",
+    "bucket_span":"30m",
+    "detectors" :[{
+      "function":"count",
+      "by_field_name": "mlcategory",
+      "detector_description": "Unusual message counts"
+    }],
+    "categorization_analyzer":{
+      "tokenizer": {
+        "type" : "simple_pattern_split",
+        "pattern" : "[^-0-9A-Za-z_.]+" <a id="CO3-1"></a><i class="conum" data-value="1"></i>
+      },
+      "filter": [
+        { "type" : "pattern_replace", "pattern": "^[0-9].*" }, <a id="CO3-2"></a><i class="conum" data-value="2"></i>
+        { "type" : "pattern_replace", "pattern": "^[-0-9A-Fa-f.]+$" }, <a id="CO3-3"></a><i class="conum" data-value="3"></i>
+        { "type" : "pattern_replace", "pattern": "^[^0-9A-Za-z]+" }, <a id="CO3-4"></a><i class="conum" data-value="4"></i>
+        { "type" : "pattern_replace", "pattern": "[^0-9A-Za-z]+$" }, <a id="CO3-5"></a><i class="conum" data-value="5"></i>
+        { "type" : "stop", "stopwords": [
+          "",
+          "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+          "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun",
+          "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December",
+          "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+          "GMT", "UTC"
+        ] }
+      ]
+    }
+  },
+  "analysis_limits":{
+    "categorization_examples_limit": 5
+  },
+  "data_description" : {
+    "time_field":"time",
+    "time_format": "epoch_ms"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/9.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO3-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Tokens basically consist of hyphens, digits, letters, underscores and dots.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO3-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>By default, categorization ignores tokens that begin with a digit.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO3-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>By default, categorization also ignores tokens that are hexadecimal numbers.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO3-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Underscores, hyphens, and dots are removed from the beginning of tokens.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO3-5"><i class="conum" data-value="5"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Underscores, hyphens, and dots are also removed from the end of tokens.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The key difference between the default <code class="literal">categorization_analyzer</code> and this example
+analyzer is that using the <code class="literal">ml_classic</code> tokenizer is several times faster. The
+difference in behavior is that this custom analyzer does not include accented
+letters in tokens whereas the <code class="literal">ml_classic</code> tokenizer does, although that could
+be fixed by using more complex regular expressions.</p>
+<p>For more information about the <code class="literal">categorization_analyzer</code> property, see
+<a href="/guide/en/elasticsearch/reference/6.5/ml-job-resource.html#ml-categorizationanalyzer" class="ulink" target="_top">Categorization Analyzer</a>.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>To add the <code class="literal">categorization_analyzer</code> property in Kibana, you must use the
+<span class="strong strong"><strong>Edit JSON</strong></span> tab and copy the <code class="literal">categorization_analyzer</code> object from one of the
+API examples above.</p>
+</div>
+</div>
+<h4><a id="ml-viewing-categories"></a>Viewing categorization results</h4>
+<p>After you open the job and start the datafeed or supply data to the job, you can
+view the categorization results in Kibana. For example:</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/ml-category-anomalies.jpg" alt="Categorization example in the Anomaly Explorer">
+</div>
+</div>
+<p>For this type of job, the <span class="strong strong"><strong>Anomaly Explorer</strong></span> contains extra information for
+each anomaly: the name of the category (for example, <code class="literal">mlcategory 11</code>) and
+examples of the messages in that category. In this case, you can use these
+details to investigate occurrences of unusually high message counts for specific
+message categories.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="ml-configuring-aggregation.html">« Aggregating data for faster performance</a>
+</span>
+<span class="next">
+<a href="ml-configuring-pop.html">Performing population analysis »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
