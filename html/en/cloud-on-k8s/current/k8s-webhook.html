@@ -3,14 +3,14 @@
   <head>
     
 <meta charset="UTF-8">
-<title>Namespace and role configuration | Elastic Cloud on Kubernetes [1.0-beta] | Elastic</title>
-<link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [1.0-beta]"/>
+<title>Validating webhook | Elastic Cloud on Kubernetes [1.0] | Elastic</title>
+<link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [1.0]"/>
 <link rel="up" href="k8s-operator-config.html" title="Configuring ECK"/>
 <link rel="prev" href="k8s-operator-config.html" title="Configuring ECK"/>
-<link rel="next" href="k8s-troubleshooting.html" title="Troubleshooting"/>
-<meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/1.0-beta"/>
+<link rel="next" href="k8s-licensing.html" title="Managing licenses in ECK"/>
+<meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/1.0"/>
 <meta name="DC.subject" content="ECK"/>
-<meta name="DC.identifier" content="1.0-beta"/>
+<meta name="DC.identifier" content="1.0"/>
 
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
@@ -104,38 +104,143 @@
               <div class="row">
                 <div class="col-xs-12 col-sm-8 col-md-8 guide-section">
                   <!-- start body -->
-                  <div class="page_header">
-You are looking at the documentation for a beta release.
-</div>
+                  
 <div id="content">
 <div class="breadcrumbs">
-<span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes [1.0-beta]</a></span>
+<span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes [1.0]</a></span>
 »
 <span class="breadcrumb-link"><a href="k8s-operator-config.html">Configuring ECK</a></span>
 »
-<span class="breadcrumb-node">Namespace and role configuration</span>
+<span class="breadcrumb-node">Validating webhook</span>
 </div>
 <div class="navheader">
 <span class="prev">
 <a href="k8s-operator-config.html">« Configuring ECK</a>
 </span>
 <span class="next">
-<a href="k8s-troubleshooting.html">Troubleshooting »</a>
+<a href="k8s-licensing.html">Managing licenses in ECK »</a>
 </span>
 </div>
 <div class="section">
 <div class="titlepage"><div><div>
-<h2 class="title"><a id="k8s-ns-config"></a>Namespace and role configuration<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.0-beta/docs/operator-config.asciidoc">edit</a></h2>
+<h2 class="title"><a id="k8s-webhook"></a>Validating webhook<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.0/docs/webhook.asciidoc">edit</a></h2>
 </div></div></div>
-<p>The <code class="literal">operator-roles</code> and <code class="literal">namespace</code> flags have some intricacies that are worth discussing. A fully functioning operator will <span class="strong strong"><strong>require</strong></span> both <code class="literal">global</code> and <code class="literal">namespace</code> roles running in the cluster (though potentially in different operator deployments). That is to say, with <code class="literal">--operator-roles=global,namespace</code> (or <code class="literal">--operator-roles=all</code>). If you want to limit the operator to a single namespace, you must set the <code class="literal">namespace</code> flag as well. For example <code class="literal">--operator-roles=global,namespace --namespace=my-namespace</code>. To have it listen on the entire cluster, you can simply omit the <code class="literal">namespace</code> flag.</p>
-<p>The global role acts across namespaces and is not related to a specific deployment of the Elastic stack. The global operator deployed cluster-wide is responsible for high-level cross-cluster features.</p>
+<p>A validating webhook provides additional validation of Elasticsearch resources: it provides immediate feedback on the Elasticsearch manifests you submit, allowing you to catch errors right away before ECK even tries to fulfill your request.</p>
+<h3><a id="k8s_architecture"></a>Architecture<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.0/docs/webhook.asciidoc">edit</a></h3>
+<p>The webhook is composed of 4 main components. Here is a brief description of each of them to understand how they interact, their naming, and how they are managed.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+A <code class="literal">ValidatingWebhookConfiguration</code> object that defines the validating webhook, targeting the right webhook path and resource. It must be created before starting the operator. The <code class="literal">caBundle</code> field can be automatically managed as part of the automatic certificate management <em>(see below)</em>.
+</li>
+<li class="listitem">
+A Kubernetes Service is used to expose the validating server, named <code class="literal">elastic-webhook-server</code>. It is in the same Namespace as the webhook server.
+</li>
+<li class="listitem">
+A webhook server that actually validates the submitted resources. In ECK it is the operator itself when it is configured with the <code class="literal">webhook</code> role. See <a class="xref" href="k8s-operator-config.html" title="Configuring ECK">Configuring ECK</a> for more information about the <code class="literal">operator-roles</code> flag.
+</li>
+<li class="listitem">
+A Secret containing the required certificates to secure the connection between the API server and the webhook server.
+Like the ValidatingWebhookConfiguration, it must be created before starting the operator, even if it is empty. By default its name is <code class="literal">elastic-webhook-server-cert</code>.
+The content of this Secret and the lifecycle of the certificates are automatically managed for you. ECK generates a dedicated and separate certificate authority and ensures that all components are rotated before the expiration date. The certificate authority is also used to configure the <code class="literal">caBundle</code> field of the <code class="literal">ValidatingWebhookConfiguration</code>. You can disable this feature if you want to manage the certificates yourself or with <a href="https://github.com/jetstack/cert-manager" class="ulink" target="_top">cert-manager</a>. See an example of the latter below.
+</li>
+</ol>
+</div>
+<h3><a id="k8s_managing_the_webhook_certificate_with_cert_manager"></a>Managing the webhook certificate with cert-manager<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.0/docs/webhook.asciidoc">edit</a></h3>
+<p>If ECK is currently running you first must ensure that the automatic certificate management feature is disabled. This can be done by updating the operator deployment manifest and adding the <code class="literal">--manage-webhook-certs=false</code> flag.</p>
+<p>Then, cert-manager v0.11+ must be installed as described in the <a href="https://docs.cert-manager.io/en/latest/getting-started/install/" class="ulink" target="_top">cert-manager documentation</a>.</p>
+<p>The following example shows how to create all the resources that a webhook requires to function.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">cat &lt;&lt;EOF | kubectl apply -f -
+---
+# this configures
+# - a self signed cert-manager issuer
+# - a service to point to the webhook
+# - a self signed certificate for the webhook service
+# - a validating webhook configuration
+apiVersion: cert-manager.io/v1alpha2
+kind: Issuer
+metadata:
+  name: selfsigned-issuer
+  namespace: elastic-system
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1alpha2
+kind: Certificate
+metadata:
+  name: elastic-webhook
+  namespace: elastic-system
+spec:
+  commonName: elastic-webhook.elastic-system.svc
+  dnsNames:
+  - elastic-webhook.elastic-system.svc.cluster.local
+  - elastic-webhook.elastic-system.svc
+  issuerRef:
+    kind: Issuer
+    name: selfsigned-issuer
+  secretName: elastic-webhook-server-cert
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elastic-webhook-server
+  namespace: elastic-system
+spec:
+  ports:
+  - port: 443
+    protocol: TCP
+    targetPort: 9443
+  selector:
+    control-plane: elastic-operator
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: admissionregistration.k8s.io/v1beta1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: elastic-webhook.k8s.elastic.co
+  annotations:
+    cert-manager.io/inject-ca-from: elastic-system/elastic-webhook
+webhooks:
+- clientConfig:
+    caBundle: Cg==
+    service:
+      name: elastic-webhook
+      namespace: elastic-system
+      # this is the path controller-runtime automatically generates
+      path: /validate-elasticsearch-k8s-elastic-co-v1-elasticsearch
+  failurePolicy: Ignore
+  name: elastic-es-validation-v1.k8s.elastic.co
+  sideEffects: None
+  rules:
+  - apiGroups:
+    - elasticsearch.k8s.elastic.co
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - elasticsearches
+EOF</pre>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This example assumes that you have installed the operator in the <code class="literal">elastic-system</code> namespace.</p>
+</div>
+</div>
+<h3><a id="k8s_troubleshooting"></a>Troubleshooting<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.0/docs/webhook.asciidoc">edit</a></h3>
+<p>Webhooks require network connectivity between the Kubernetes API server and the operator.
+See <a class="xref" href="k8s-troubleshooting.html#k8s-webhook-troubleshooting" title="Webhook troubleshooting">Webhook troubleshooting</a> for more information about some known problems with some Kubernetes providers.</p>
 </div>
 <div class="navfooter">
 <span class="prev">
 <a href="k8s-operator-config.html">« Configuring ECK</a>
 </span>
 <span class="next">
-<a href="k8s-troubleshooting.html">Troubleshooting »</a>
+<a href="k8s-licensing.html">Managing licenses in ECK »</a>
 </span>
 </div>
 </div>
