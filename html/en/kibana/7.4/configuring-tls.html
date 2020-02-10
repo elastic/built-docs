@@ -133,113 +133,147 @@ will be released for this version. For the latest information, see the
 <h2 class="title"><a id="configuring-tls"></a>Encrypting communications in Kibana<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/kibana/edit/7.4/docs/user/security/securing-communications/index.asciidoc">edit</a></h2>
 </div></div></div>
 
-<p>Kibana supports Transport Layer Security (TLS/SSL) encryption for client
-requests.</p>
-<p>If you are using X-Pack security or a proxy that provides an HTTPS endpoint for Elasticsearch,
-you can configure Kibana to access Elasticsearch via HTTPS. Thus, communications between
-Kibana and Elasticsearch are also encrypted.</p>
-<div class="olist orderedlist">
-<ol class="orderedlist">
-<li class="listitem">
-<p>Configure Kibana to encrypt communications between the browser and the Kibana
-server:</p>
+<p>Secure Sockets Layer (SSL) and Transport Layer Security (TLS) provide encryption for data-in-transit. While these terms are often used
+interchangeably, Kibana supports only TLS, which supersedes the old SSL protocols.</p>
+<p>Browsers send traffic to Kibana and Kibana sends traffic to Elasticsearch. These communication channels are configured separately to use TLS.</p>
+<p>TLS requires X.509 certificates to authenticate the communicating parties and perform encryption of data-in-transit. Each certificate
+contains a public key and has an associated&#8201;&#8212;&#8201;but separate&#8201;&#8212;&#8201;private key; these keys are used for cryptographic operations. Kibana
+supports certificates and private keys in PEM format.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="configuring-tls-browser-kib"></a>Encrypting traffic between the browser and Kibana<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/kibana/edit/7.4/docs/user/security/securing-communications/index.asciidoc">edit</a></h3>
+</div></div></div>
 <div class="note admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>You do not need to enable X-Pack security for this type of encryption.</p>
+<p>You do not need to enable the Elasticsearch security features for this type of encryption.</p>
 </div>
 </div>
 <div class="olist orderedlist">
 <ol class="orderedlist">
 <li class="listitem">
-<p>Generate a server certificate for Kibana.</p>
-<p>You must either set the certificate&#8217;s
-<code class="literal">subjectAltName</code> to the hostname, fully-qualified domain name (FQDN), or IP
-address of the Kibana server, or set the CN to the Kibana server&#8217;s hostname
-or FQDN. Using the server&#8217;s IP address as the CN does not work.</p>
+<p>Obtain a server certificate and private key for Kibana.</p>
+<p>Kibana will need to use this "server certificate" and corresponding private key when receiving connections from web browsers.</p>
+<p>When you obtain a server certificate, you must set its subject alternative name (SAN) correctly to ensure that modern web browsers with
+hostname verification will trust it. You can set one or more SANs to the Kibana server&#8217;s fully-qualified domain name (FQDN), hostname, or IP
+address. When choosing the SAN, you should pick whichever attribute you will be using to connect to Kibana in your browser, which is likely
+the FQDN.</p>
+<p>You may choose to generate a certificate signing request (CSR) and private key using the <a href="/guide/en/elasticsearch/reference/7.4/certutil.html" class="ulink" target="_top"><code class="literal">elasticsearch-certutil</code></a> tool.</p>
+<p>For example:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">bin/elasticsearch-certutil csr -name kibana-server -dns some-website.com,www.some-website.com</pre>
+</div>
+<p>This will produce a ZIP archive named <code class="literal">kibana-server.zip</code>. Extract that archive to obtain the PEM-formatted CSR (<code class="literal">kibana-server.csr</code>) and
+unencrypted private key (<code class="literal">kibana-server.key</code>). In this example, the CSR has a common name (CN) of <code class="literal">kibana-server</code>, a SAN of
+<code class="literal">some-website.com</code>, and another SAN of <code class="literal">www.some-website.com</code>.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>You will need to use a certificate authority (CA) to sign your CSR to obtain your server certificate. This certificate&#8217;s signature
+will be verified by web browsers that are configured to trust the CA.</p>
+</div>
+</div>
 </li>
 <li class="listitem">
-<p>Set the <code class="literal">server.ssl.enabled</code>, <code class="literal">server.ssl.key</code>, and <code class="literal">server.ssl.certificate</code>
-properties in <code class="literal">kibana.yml</code>:</p>
+<p>Configure Kibana to access the server certificate and private key.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>If your server certificate and private key are in PEM format:</p>
+<p>Specify your server certificate and private key in <code class="literal">kibana.yml</code>:</p>
 <div class="pre_wrapper lang-yaml">
-<pre class="programlisting prettyprint lang-yaml">server.ssl.enabled: true
-server.ssl.key: /path/to/your/server.key
-server.ssl.certificate: /path/to/your/server.crt</pre>
+<pre class="programlisting prettyprint lang-yaml">server.ssl.certificate: "/path/to/kibana-server.crt"
+server.ssl.key: "/path/to/kibana-server.key"</pre>
 </div>
-<p>After making these changes, you must always access Kibana via HTTPS. For example,
-<a href="https://localhost:5601" class="ulink" target="_top">https://localhost:5601</a>.</p>
-<p>For more information, see <a class="xref" href="settings.html" title="Configuring Kibana">Kibana configuration settings</a>.</p>
+<p>If your private key is encrypted, add the decryption password to your <a class="xref" href="secure-settings.html" title="Secure settings">Kibana keystore</a>:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">bin/kibana-keystore add server.ssl.keyPassphrase</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Otherwise, if your server certificate and private key are contained in a PKCS#12 file:</p>
+<p>You will need to extract the server certificate and private key in PEM format.</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">openssl pkcs12 -in kibana-server.p12 -clcerts -nokeys -out kibana-server.crt
+openssl pkcs12 -in kibana-server.p12 -nocerts -nodes -out kibana-server.key</pre>
+</div>
+<p>This will produce a PEM-formatted server certificate (<code class="literal">kibana-server.crt</code>) and unencrypted private key (<code class="literal">kibana-server.key</code>). Then, specify
+these files in <code class="literal">kibana.yml</code> as described above.</p>
+<p>For more information about settings for certificates and keys, see <a class="xref" href="settings.html" title="Configuring Kibana">Kibana configuration settings</a>.</p>
 </li>
 </ol>
 </div>
 </li>
 <li class="listitem">
-<p>Configure Kibana to connect to Elasticsearch via HTTPS:</p>
+<p>Configure Kibana to enable TLS for inbound connections.</p>
+<p>Specify that TLS is used in <code class="literal">kibana.yml</code>:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">server.ssl.enabled: true</pre>
+</div>
+</li>
+<li class="listitem">
+Restart Kibana.
+After making these changes, you must always access Kibana via HTTPS. For example, <code class="literal">https://&lt;your_kibana_host&gt;.com</code>.
+</li>
+</ol>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="configuring-tls-kib-es"></a>Encrypting traffic between Kibana and Elasticsearch<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/kibana/edit/7.4/docs/user/security/securing-communications/index.asciidoc">edit</a></h3>
+</div></div></div>
 <div class="note admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>To perform this step, you must
-<a href="/guide/en/elasticsearch/reference/7.4/configuring-security.html" class="ulink" target="_top">enable the Elasticsearch security features</a> or you
-must have a proxy that provides an HTTPS endpoint for Elasticsearch.</p>
+<p>To perform this step, you must <a href="/guide/en/elasticsearch/reference/7.4/configuring-security.html" class="ulink" target="_top">enable the Elasticsearch security features</a> or you must have a proxy that
+provides an HTTPS endpoint for Elasticsearch.</p>
 </div>
 </div>
 <div class="olist orderedlist">
 <ol class="orderedlist">
 <li class="listitem">
-<p>Specify the HTTPS protocol in the <code class="literal">elasticsearch.hosts</code> setting in the Kibana
-configuration file, <code class="literal">kibana.yml</code>:</p>
+<a href="/guide/en/elasticsearch/reference/7.4/configuring-tls.html#tls-http" class="ulink" target="_top">Enable TLS on the HTTP layer in Elasticsearch</a>.
+</li>
+<li class="listitem">
+<p>Obtain the certificate authority (CA) certificate chain for Elasticsearch.</p>
+<p>Kibana needs the appropriate CA certificate chain to properly establish trust when connecting to Elasticsearch.
+If you followed the Elasticsearch documentation for <a href="/guide/en/elasticsearch/reference/7.4/configuring-tls.html#node-certificates" class="ulink" target="_top">generating node certificates</a>, you likely have a
+PKCS#12 file for each of your Elasticsearch nodes. You can extract the CA certificate chain from one of these files.</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">openssl pkcs12 -in elastic-certificates.p12 -cacerts -nokeys -out elasticsearch-ca.pem</pre>
+</div>
+<p>This will produce a PEM-formatted file named <code class="literal">elasticsearch-ca.pem</code> that contains all CA certificates from the PKCS#12 file.</p>
+</li>
+<li class="listitem">
+<p>Configure Kibana to trust the Elasticsearch CA certificate chain for the HTTP layer.</p>
+<p>Specify one or more PEM-formatted CA certificates in <code class="literal">kibana.yml</code>:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">elasticsearch.ssl.certificateAuthorities: ["/path/to/elasticsearch-ca.pem"]</pre>
+</div>
+<p>For more information about settings for certificates and keys, see <a class="xref" href="settings.html" title="Configuring Kibana">Kibana configuration settings</a>.</p>
+</li>
+<li class="listitem">
+<p>Configure Kibana to enable TLS for outbound connections to Elasticsearch.</p>
+<p>Specify the HTTPS URL for Elasticsearch in <code class="literal">kibana.yml</code>:</p>
 <div class="pre_wrapper lang-yaml">
 <pre class="programlisting prettyprint lang-yaml">elasticsearch.hosts: ["https://&lt;your_elasticsearch_host&gt;.com:9200"]</pre>
 </div>
-</li>
-<li class="listitem">
-<p>If you are using your own CA to sign certificates for Elasticsearch, set the
-<code class="literal">elasticsearch.ssl.certificateAuthorities</code> setting in <code class="literal">kibana.yml</code> to specify
-the location of the PEM file.</p>
-<div class="pre_wrapper lang-yaml">
-<pre class="programlisting prettyprint lang-yaml">elasticsearch.ssl.certificateAuthorities: /path/to/your/cacert.pem</pre>
-</div>
-<p>Setting the <code class="literal">certificateAuthorities</code> property lets you use the default
-<code class="literal">verificationMode</code> option of <code class="literal">full</code>.</p>
-<p>For more information, see <a class="xref" href="settings.html" title="Configuring Kibana">Kibana configuration settings</a>.</p>
-</li>
-</ol>
-</div>
-</li>
-<li class="listitem">
-<p>(Optional) If the Elastic monitoring features are enabled, configure Kibana to
-connect to the Elasticsearch monitoring cluster via HTTPS:</p>
 <div class="note admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>To perform this step, you must
-<a href="/guide/en/elasticsearch/reference/7.4/configuring-security.html" class="ulink" target="_top">enable the Elasticsearch security features</a> or you
-must have a proxy that provides an HTTPS endpoint for Elasticsearch.</p>
+<p>Using the HTTPS protocol results in a default <code class="literal">elasticsearch.ssl.verificationMode</code> option of <code class="literal">full</code>, which utilizes hostname
+verification. For more information about this setting, see <a class="xref" href="settings.html" title="Configuring Kibana">Kibana configuration settings</a>.</p>
 </div>
 </div>
-<div class="olist orderedlist">
-<ol class="orderedlist">
-<li class="listitem">
-<p>Specify the HTTPS URL in the <code class="literal">xpack.monitoring.elasticsearch.hosts</code> setting in
-the Kibana configuration file, <code class="literal">kibana.yml</code></p>
-<div class="pre_wrapper lang-yaml">
-<pre class="programlisting prettyprint lang-yaml">xpack.monitoring.elasticsearch.hosts: ["https://&lt;your_monitoring_cluster&gt;:9200"]</pre>
-</div>
-</li>
-<li class="listitem">
-<p>Specify the <code class="literal">xpack.monitoring.elasticsearch.ssl.*</code> settings in the
-<code class="literal">kibana.yml</code> file.</p>
-<p>For example, if you are using your own certificate authority to sign
-certificates, specify the location of the PEM file in the <code class="literal">kibana.yml</code> file:</p>
-<div class="pre_wrapper lang-yaml">
-<pre class="programlisting prettyprint lang-yaml">xpack.monitoring.elasticsearch.ssl.certificateAuthorities: /path/to/your/cacert.pem</pre>
-</div>
+<p>If the Elastic monitoring features are enabled and you have set up a separate Elasticsearch monitoring cluster, you can also configure Kibana to
+connect to the monitoring cluster via HTTPS. The steps are the same as above, but each setting is prefixed by <code class="literal">xpack.monitoring.</code>. For
+example, <code class="literal">xpack.monitoring.elasticsearch.hosts</code>, <code class="literal">xpack.monitoring.elasticsearch.ssl.certificateAuthorities</code>, etc.</p>
 </li>
 </ol>
 </div>
-</li>
-</ol>
 </div>
+
 </div>
 <div class="navfooter">
 <span class="prev">
