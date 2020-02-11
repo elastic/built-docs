@@ -2,27 +2,27 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Getting started with index lifecycle management | Elasticsearch Reference [7.5] | Elastic</title>
-<link rel="home" href="index.html" title="Elasticsearch Reference [7.5]"/>
-<link rel="up" href="index-lifecycle-management.html" title="Managing the index lifecycle"/>
-<link rel="prev" href="index-lifecycle-management.html" title="Managing the index lifecycle"/>
+<title>Get started: Automate rollover with ILM | Elasticsearch Reference [7.6] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.6]"/>
+<link rel="up" href="index-lifecycle-management.html" title="Manage the index lifecycle"/>
+<link rel="prev" href="overview-index-lifecycle-management.html" title="Index lifecycle management overview"/>
 <link rel="next" href="ilm-policy-definition.html" title="Policy phases and actions"/>
-<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.5"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.6"/>
 <meta name="DC.subject" content="Elasticsearch"/>
-<meta name="DC.identifier" content="7.5"/>
+<meta name="DC.identifier" content="7.6"/>
 </head>
 <body>
 <div id="content">
 <div class="breadcrumbs">
-<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.5]</a></span>
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.6]</a></span>
 »
-<span class="breadcrumb-link"><a href="index-lifecycle-management.html">Managing the index lifecycle</a></span>
+<span class="breadcrumb-link"><a href="index-lifecycle-management.html">Manage the index lifecycle</a></span>
 »
-<span class="breadcrumb-node">Getting started with index lifecycle management</span>
+<span class="breadcrumb-node">Get started: Automate rollover with ILM</span>
 </div>
 <div class="navheader">
 <span class="prev">
-<a href="index-lifecycle-management.html">« Managing the index lifecycle</a>
+<a href="overview-index-lifecycle-management.html">« Index lifecycle management overview</a>
 </span>
 <span class="next">
 <a href="ilm-policy-definition.html">Policy phases and actions »</a>
@@ -30,163 +30,181 @@
 </div>
 <div class="chapter xpack">
 <div class="titlepage"><div><div>
-<h2 class="title"><a id="getting-started-index-lifecycle-management"></a>Getting started with index lifecycle management<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.5/docs/reference/ilm/getting-started-ilm.asciidoc">edit</a><a class="xpack_tag" href="/subscriptions"></a></h2>
+<h2 class="title"><a id="getting-started-index-lifecycle-management"></a>Get started: Automate rollover with ILM<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.6/docs/reference/ilm/getting-started-ilm.asciidoc">edit</a><a class="xpack_tag" href="/subscriptions"></a></h2>
 </div></div></div>
-<p>Let&#8217;s jump into index lifecycle management (ILM) by working through a hands-on scenario.
-This section will leverage many new concepts unique to ILM that
-you may not be familiar with. The following sections will explore
-these in more details.</p>
-<p>The goal of this example is to set up a set of indices that will encapsulate
-the data from a time series data source. We can imagine there is a system
-like <a href="/guide/en/beats/filebeat/7.5" class="ulink" target="_top">Filebeat</a> that continuously indexes documents into
-our writing index. We wish to roll over the index after it reaches a size
-of 50 gigabytes, or has been created 30 days ago, and then delete the index
-after 90 days.</p>
-<h3><a id="ilm-gs-create-policy"></a>Setting up a policy<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.5/docs/reference/ilm/getting-started-ilm.asciidoc">edit</a></h3>
-<p>There are many new features introduced by ILM, but we will only focus on
-a few that are needed for our example. For starters, we will use the
-<a class="xref" href="ilm-put-lifecycle.html" title="Create lifecycle policy API">Put Policy</a> API to define our first policy. Lifecycle
-policies are defined in JSON and include specific
-<a class="xref" href="ilm-policy-definition.html" title="Policy phases and actions">phases and actions</a>.</p>
+
+<p>This tutorial demonstrates how to use index lifecycle management (ILM)
+to manage indices that contain time-series data.</p>
+<p>When you continuously index timestamped documents into Elasticsearch using
+Filebeat, Logstash, or some other mechanism,
+you typically use an index alias so you can periodically roll over to a new index.
+This enables you to implement a hot-warm-cold architecture to meet your performance
+requirements for your newest data, control costs over time, enforce retention policies,
+and still get the most out of your data.</p>
+<p>To automate rollover and management of time-series indices with ILM, you:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<a class="xref" href="getting-started-index-lifecycle-management.html#ilm-gs-create-policy" title="Create a lifecycle policy">Create a lifecycle policy</a> with the ILM put policy API.
+</li>
+<li class="listitem">
+<a class="xref" href="getting-started-index-lifecycle-management.html#ilm-gs-apply-policy" title="Create an index template to apply the lifecycle policy">Create an index template</a> to apply the policy to each new index.
+</li>
+<li class="listitem">
+<a class="xref" href="getting-started-index-lifecycle-management.html#ilm-gs-bootstrap" title="Bootstrap the initial time-series index">Bootstrap an index</a> as the initial write index.
+</li>
+<li class="listitem">
+<a class="xref" href="getting-started-index-lifecycle-management.html#ilm-gs-check-progress" title="Checking progress">Verify indices are moving through the lifecycle phases</a>
+as expected with the ILM explain API.
+</li>
+</ol>
+</div>
+<h3><a id="ilm-gs-create-policy"></a>Create a lifecycle policy<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.6/docs/reference/ilm/getting-started-ilm.asciidoc">edit</a></h3>
+<p>A lifecycle policy specifies the phases in the index lifecycle
+and the actions to perform in each phase. A lifecycle can have up to four phases:
+<code class="literal">hot</code>, <code class="literal">warm</code>, <code class="literal">cold</code>, and <code class="literal">delete</code>. Policies are defined in JSON
+and added through the ILM put policy API.</p>
+<p>For example, the following request creates a <code class="literal">datastream_policy</code> with two phases:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+The <code class="literal">hot</code> phase defines a <code class="literal">rollover</code> action to specify that an index rolls over when it
+reaches either a <code class="literal">max_size</code> of 50 gigabytes or a <code class="literal">max_age</code> of 30 days.
+</li>
+<li class="listitem">
+The <code class="literal">delete</code> phase uses <code class="literal">min_age</code> to remove the index 90 days after rollover.
+Note that this value is relative to the rollover time, not the index creation time.
+</li>
+</ul>
+</div>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">PUT _ilm/policy/datastream_policy   <a id="CO302-1"></a><i class="conum" data-value="1"></i>
+<pre class="programlisting prettyprint lang-console">PUT _ilm/policy/datastream_policy
 {
-  "policy": {                       <a id="CO302-2"></a><i class="conum" data-value="2"></i>
+  "policy": {
     "phases": {
-      "hot": {                      <a id="CO302-3"></a><i class="conum" data-value="3"></i>
+      "hot": {                      <a id="CO309-1"></a><i class="conum" data-value="1"></i>
         "actions": {
-          "rollover": {             <a id="CO302-4"></a><i class="conum" data-value="4"></i>
-            "max_size": "50GB",
+          "rollover": {
+            "max_size": "50GB",     <a id="CO309-2"></a><i class="conum" data-value="2"></i>
             "max_age": "30d"
           }
         }
       },
       "delete": {
-        "min_age": "90d",           <a id="CO302-5"></a><i class="conum" data-value="5"></i>
+        "min_age": "90d",           <a id="CO309-3"></a><i class="conum" data-value="3"></i>
         "actions": {
-          "delete": {}              <a id="CO302-6"></a><i class="conum" data-value="6"></i>
+          "delete": {}              <a id="CO309-4"></a><i class="conum" data-value="4"></i>
         }
       }
     }
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/992.console"></div>
+<div class="console_widget" data-snippet="snippets/1013.console"></div>
 <div class="calloutlist">
 <table border="0" summary="Callout list">
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO302-1"><i class="conum" data-value="1"></i></a></p>
+<p><a href="#CO309-1"><i class="conum" data-value="1"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>call to the <a class="xref" href="ilm-put-lifecycle.html" title="Create lifecycle policy API">put lifecycle API</a> endpoint to create
-a new policy named "datastream_policy"</p>
+<p>The <code class="literal">min_age</code> defaults to <code class="literal">0ms</code>, so new indices enter the <code class="literal">hot</code> phase immediately.</p>
 </td>
 </tr>
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO302-2"><i class="conum" data-value="2"></i></a></p>
+<p><a href="#CO309-2"><i class="conum" data-value="2"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>policy definition sub-object</p>
+<p>Trigger the <code class="literal">rollover</code> action when either of the conditions are met.</p>
 </td>
 </tr>
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO302-3"><i class="conum" data-value="3"></i></a></p>
+<p><a href="#CO309-3"><i class="conum" data-value="3"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>the hot phase defined in the "phases" section. Optional <code class="literal">min_age</code> field
-not defined&#8201;&#8212;&#8201;defaults to <code class="literal">0ms</code></p>
+<p>Move the index into the <code class="literal">delete</code> phase 90 days after rollover.</p>
 </td>
 </tr>
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO302-4"><i class="conum" data-value="4"></i></a></p>
+<p><a href="#CO309-4"><i class="conum" data-value="4"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>rollover action definition</p>
-</td>
-</tr>
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO302-5"><i class="conum" data-value="5"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>delete phase begins after 90 days</p>
-</td>
-</tr>
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO302-6"><i class="conum" data-value="6"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>delete action definition</p>
+<p>Trigger the <code class="literal">delete</code> action when the index enters the delete phase.</p>
 </td>
 </tr>
 </table>
 </div>
-<p>Here we created the policy called <code class="literal">datastream_policy</code> which rolls over
-the index being written to after it reaches 50 gigabytes, or it is 30
-days old. The rollover will occur when either of these conditions is true.
-The index will be deleted 90 days after it is rolled over.</p>
-<h3><a id="ilm-gs-apply-policy"></a>Applying a policy to our index<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.5/docs/reference/ilm/getting-started-ilm.asciidoc">edit</a></h3>
-<p>There are <a class="xref" href="set-up-lifecycle-policy.html" title="Set up index lifecycle management policy">a few ways</a> to associate a
-policy to an index. Since we wish specific settings to be applied to
-the new index created from Rollover, we will set the policy via
-index templates.</p>
+<p>See <a class="xref" href="_actions.html" title="Actions">Actions</a> for the complete list of actions available in each phase.</p>
+<h3><a id="ilm-gs-apply-policy"></a>Create an index template to apply the lifecycle policy<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.6/docs/reference/ilm/getting-started-ilm.asciidoc">edit</a></h3>
+<p>To automaticaly apply a lifecycle policy to the new write index on rollover,
+specify the policy in the index template used to create new indices.</p>
+<p>For example, the following request creates a <code class="literal">datastream_template</code> that is applied to new indices
+whose names match the <code class="literal">datastream-*</code> index pattern.
+The template configures two ILM settings:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">index.lifecycle.name</code> specifies the name of the lifecycle policy to apply to all new indices that match
+the index pattern.
+</li>
+<li class="listitem">
+<code class="literal">index.lifecycle.rollover_alias</code> specifies the index alias to be rolled over
+when the rollover action is triggered for an index.
+</li>
+</ul>
+</div>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">PUT _template/datastream_template
 {
-  "index_patterns": ["datastream-*"],                 <a id="CO303-1"></a><i class="conum" data-value="1"></i>
+  "index_patterns": ["datastream-*"],                 <a id="CO310-1"></a><i class="conum" data-value="1"></i>
   "settings": {
     "number_of_shards": 1,
     "number_of_replicas": 1,
-    "index.lifecycle.name": "datastream_policy",      <a id="CO303-2"></a><i class="conum" data-value="2"></i>
-    "index.lifecycle.rollover_alias": "datastream"    <a id="CO303-3"></a><i class="conum" data-value="3"></i>
+    "index.lifecycle.name": "datastream_policy",      <a id="CO310-2"></a><i class="conum" data-value="2"></i>
+    "index.lifecycle.rollover_alias": "datastream"    <a id="CO310-3"></a><i class="conum" data-value="3"></i>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/993.console"></div>
+<div class="console_widget" data-snippet="snippets/1014.console"></div>
 <div class="calloutlist">
 <table border="0" summary="Callout list">
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO303-1"><i class="conum" data-value="1"></i></a></p>
+<p><a href="#CO310-1"><i class="conum" data-value="1"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>match all indices starting with "datastream-". These will include all
-newly created indices from actions like rollover</p>
+<p>Apply the template to a new index if its name starts with <code class="literal">datastream-</code>.</p>
 </td>
 </tr>
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO303-2"><i class="conum" data-value="2"></i></a></p>
+<p><a href="#CO310-2"><i class="conum" data-value="2"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>the name of the lifecycle policy managing the index</p>
+<p>The name of the lifecycle policy to apply to each new index.</p>
 </td>
 </tr>
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO303-3"><i class="conum" data-value="3"></i></a></p>
+<p><a href="#CO310-3"><i class="conum" data-value="3"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>alias to use for the rollover action, required since a rollover action is
-defined in the policy.</p>
+<p>The name of the alias used to reference these indices.
+Required for policies that use the rollover action.</p>
 </td>
 </tr>
 </table>
 </div>
-<p>The above index template introduces a few new settings specific to ILM.
-The first being <code class="literal">index.lifecycle.name</code>. This setting will configure
-the "datastream_policy" to the index applying this template. This means
-that all newly created indices prefixed "datastream-" will be managed by
-our policy. The other setting used here is <code class="literal">index.lifecycle.rollover_alias</code>.
-This setting is required when using a policy containing the rollover
-action and specifies which alias to rollover on behalf of this index.
-The intention here is that the rollover alias is also defined on the index.</p>
-<p>To begin, we will want to bootstrap our first index to write to.</p>
+<h3><a id="ilm-gs-bootstrap"></a>Bootstrap the initial time-series index<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.6/docs/reference/ilm/getting-started-ilm.asciidoc">edit</a></h3>
+<p>To get things started, you need to bootstrap an initial index and
+designate it as the write index for the rollover alias specified in your index template.
+The name of this index must match the template&#8217;s index pattern and end with a number.
+On rollover, this value is incremented to generate a name for the new index.</p>
+<p>For example, the following request creates an index called <code class="literal">datastream-000001</code>
+and makes it the write index for the <code class="literal">datastream</code> alias.</p>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">PUT datastream-000001
 {
@@ -197,54 +215,66 @@ The intention here is that the rollover alias is also defined on the index.</p>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/994.console"></div>
-<p>When creating our index, we have to consider a few important configurations
-that tie our index and our policy together correctly. We need to make sure
-that our index name matches our index template pattern of "datastream-*",
-which it does. We are using the <a class="xref" href="_actions.html#ilm-rollover-action" title="Rollover">Rollover Action</a> in our policy, which
-requires that our index name ends with a number. In our case, we used
-<code class="literal">000001</code>. This is important so that Rollover can increment this number when
-naming the new index created from rolling over.</p>
-<p>Our index creation request leverages its template to apply our settings,
-but we must also configure our rollover alias: "datastream". To do this,
-we take advantage of <a class="xref" href="indices-aliases.html#aliases-write-index" title="Write index">write indices</a>. This is a way
-to define an alias to be used for both reading and writing, with only one
-index being the index that is being written to at a time. Rollover swaps
-the write index to be the new index created from rollover, and sets the
-alias to be read-only for the source index.</p>
-<h3><a id="ilm-gs-check-progress"></a>Checking progress<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.5/docs/reference/ilm/getting-started-ilm.asciidoc">edit</a></h3>
-<p>Now that we have an index managed by our policy, how do we tell what is going
-on? Which phase are we in? Is something broken? This section will go over a
-few APIs and their responses to help us inspect our indices with respect
-to ILM.</p>
-<p>With the help of the <a class="xref" href="ilm-explain-lifecycle.html" title="Explain lifecycle API">Explain API</a>, we can know
-things like which phase we&#8217;re in and when we entered that phase. The API
-will also provide further info if errors occurred, or if we are blocked on
-certain checks within actions.</p>
+<div class="console_widget" data-snippet="snippets/1015.console"></div>
+<p>When the rollover conditions are met, the <code class="literal">rollover</code> action:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Creates a new index called <code class="literal">datastream-000002</code>.
+This matches the <code class="literal">datastream-*</code> pattern, so the settings from <code class="literal">datastream_template</code> are applied to the new index.
+</li>
+<li class="listitem">
+Designates the new index as the write index and makes the bootstrap index read-only.
+</li>
+</ul>
+</div>
+<p>This process repeats each time rollover conditions are met.
+You can search across all of the indices managed by the <code class="literal">datastream_policy</code> with the <code class="literal">datastream</code> alias.
+Write operations are routed to the current write index.</p>
+<p>For more information about write indices and rollover, see the <a class="xref" href="indices-rollover-index.html#rollover-index-api-desc" title="Description">rollover API</a>.</p>
+<h3><a id="ilm-gs-check-progress"></a>Checking progress<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.6/docs/reference/ilm/getting-started-ilm.asciidoc">edit</a></h3>
+<p>To get status information for managed indices, you use the ILM explain API.
+This lets you find out things like:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+What phase an index is in and when it entered that phase.
+</li>
+<li class="listitem">
+The current action and what step is being performed.
+</li>
+<li class="listitem">
+If any errors have occurred or progress is blocked.
+</li>
+</ul>
+</div>
+<p>For example, the following request gets information about the <code class="literal">datastream</code> indices:</p>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">GET datastream-*/_ilm/explain</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/995.console"></div>
-<p>The above request will retrieve ILM execution information for all our
-managed indices.</p>
+<div class="console_widget" data-snippet="snippets/1016.console"></div>
+<p>The response below shows that the bootstrap index is waiting in the <code class="literal">hot</code> phase&#8217;s <code class="literal">rollover</code> action.
+It remains in this state and ILM continues to call <code class="literal">attempt-rollover</code>
+until the rollover conditions are met.</p>
+<p>[[36818c6d9f434d387819c30bd9addb14]]</p>
 <div class="pre_wrapper lang-console-result">
 <pre class="programlisting prettyprint lang-console-result">{
   "indices": {
     "datastream-000001": {
       "index": "datastream-000001",
-      "managed": true,                           <a id="CO304-1"></a><i class="conum" data-value="1"></i>
-      "policy": "datastream_policy",             <a id="CO304-2"></a><i class="conum" data-value="2"></i>
+      "managed": true,
+      "policy": "datastream_policy",             <a id="CO311-1"></a><i class="conum" data-value="1"></i>
       "lifecycle_date_millis": 1538475653281,
-      "age": "30s",                              <a id="CO304-3"></a><i class="conum" data-value="3"></i>
-      "phase": "hot",                            <a id="CO304-4"></a><i class="conum" data-value="4"></i>
+      "age": "30s",                              <a id="CO311-2"></a><i class="conum" data-value="2"></i>
+      "phase": "hot",
       "phase_time_millis": 1538475653317,
-      "action": "rollover",                      <a id="CO304-5"></a><i class="conum" data-value="5"></i>
+      "action": "rollover",
       "action_time_millis": 1538475653317,
-      "step": "attempt-rollover",                <a id="CO304-6"></a><i class="conum" data-value="6"></i>
+      "step": "attempt-rollover",                <a id="CO311-3"></a><i class="conum" data-value="3"></i>
       "step_time_millis": 1538475653317,
       "phase_execution": {
         "policy": "datastream_policy",
-        "phase_definition": {                    <a id="CO304-7"></a><i class="conum" data-value="7"></i>
+        "phase_definition": {                    <a id="CO311-4"></a><i class="conum" data-value="4"></i>
           "min_age": "0ms",
           "actions": {
             "rollover": {
@@ -253,7 +283,7 @@ managed indices.</p>
             }
           }
         },
-        "version": 1,                            <a id="CO304-8"></a><i class="conum" data-value="8"></i>
+        "version": 1,
         "modified_date_in_millis": 1539609701576
       }
     }
@@ -264,91 +294,43 @@ managed indices.</p>
 <table border="0" summary="Callout list">
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO304-1"><i class="conum" data-value="1"></i></a></p>
+<p><a href="#CO311-1"><i class="conum" data-value="1"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>this index is managed by ILM</p>
+<p>The policy used to manage the index</p>
 </td>
 </tr>
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO304-2"><i class="conum" data-value="2"></i></a></p>
+<p><a href="#CO311-2"><i class="conum" data-value="2"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>the policy in question, in this case, "datastream_policy"</p>
+<p>The age of the index</p>
 </td>
 </tr>
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO304-3"><i class="conum" data-value="3"></i></a></p>
+<p><a href="#CO311-3"><i class="conum" data-value="3"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>the current age of the index</p>
+<p>The step ILM is performing on the index</p>
 </td>
 </tr>
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO304-4"><i class="conum" data-value="4"></i></a></p>
+<p><a href="#CO311-4"><i class="conum" data-value="4"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>what phase the index is currently in</p>
-</td>
-</tr>
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO304-5"><i class="conum" data-value="5"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>what action the index is currently on</p>
-</td>
-</tr>
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO304-6"><i class="conum" data-value="6"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>what step the index is currently on</p>
-</td>
-</tr>
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO304-7"><i class="conum" data-value="7"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>the definition of the phase
-(in this case, the "hot" phase) that the index is currently on</p>
-</td>
-</tr>
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO304-8"><i class="conum" data-value="8"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>the version of the policy being used to execute the current phase</p>
+<p>The definition of the current phase (the <code class="literal">hot</code> phase)</p>
 </td>
 </tr>
 </table>
 </div>
-<p>You can read about the full details of this response in the
-<a class="xref" href="ilm-explain-lifecycle.html" title="Explain lifecycle API">explain API docs</a>. For now, let&#8217;s focus on how
-the response details which phase, action, and step we&#8217;re in. We are in the
-"hot" phase, and "rollover" action. Rollover will continue to be called
-by ILM until its conditions are met and it rolls over the index.
-Afterwards, the original index will stay in the hot phase until 90 more
-days pass and it is deleted in the delete phase.
-As time goes on, new indices will be created and deleted.
-With <code class="literal">datastream-000002</code> being created when the index mets the rollover
-conditions and <code class="literal">datastream-000003</code> created after that. We will be able
-to search across all of our managed indices using the "datastream" alias,
-and we will be able to write to our to-be-rolled-over write indices using
-that same alias.</p>
-<p>That&#8217;s it! We have our first use-case managed by ILM.</p>
-<p>To learn more about all our APIs,
-check out <a class="xref" href="index-lifecycle-management-api.html" title="Index lifecycle management API">ILM APIs</a>.</p>
+<p>See the <a class="xref" href="index-lifecycle-management-api.html" title="Index lifecycle management API">ILM APIs</a> for more information.</p>
 </div>
 <div class="navfooter">
 <span class="prev">
-<a href="index-lifecycle-management.html">« Managing the index lifecycle</a>
+<a href="overview-index-lifecycle-management.html">« Index lifecycle management overview</a>
 </span>
 <span class="next">
 <a href="ilm-policy-definition.html">Policy phases and actions »</a>
