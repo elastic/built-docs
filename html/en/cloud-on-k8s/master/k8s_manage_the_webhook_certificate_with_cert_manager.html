@@ -3,11 +3,11 @@
   <head>
     
 <meta charset="UTF-8">
-<title>Connect to an Elasticsearch cluster not managed by ECK | Elastic Cloud on Kubernetes [master] | Elastic</title>
+<title>Manage the webhook certificate with cert-manager | Elastic Cloud on Kubernetes [master] | Elastic</title>
 <link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [master]"/>
-<link rel="up" href="k8s-kibana.html" title="Run Kibana on ECK"/>
-<link rel="prev" href="k8s-kibana-eck-managed-es.html" title="Use an Elasticsearch cluster managed by ECK"/>
-<link rel="next" href="k8s-kibana-advanced-configuration.html" title="Advanced configuration"/>
+<link rel="up" href="k8s-webhook.html" title="Configure validating webhook"/>
+<link rel="prev" href="k8s-webhook.html" title="Configure validating webhook"/>
+<link rel="next" href="k8s-webhook-network-policies.html" title="Network policies"/>
 <meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/master"/>
 <meta name="DC.subject" content="ECK"/>
 <meta name="DC.identifier" content="master"/>
@@ -113,80 +113,115 @@ Not what you want? See the
 <div class="breadcrumbs">
 <span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes [master]</a></span>
 »
-<span class="breadcrumb-link"><a href="k8s-orchestrating-elastic-stack-applications.html">Orchestrating Elastic Stack applications</a></span>
+<span class="breadcrumb-link"><a href="k8s-operating-eck.html">Operating ECK</a></span>
 »
-<span class="breadcrumb-link"><a href="k8s-kibana.html">Run Kibana on ECK</a></span>
+<span class="breadcrumb-link"><a href="k8s-webhook.html">Configure validating webhook</a></span>
 »
-<span class="breadcrumb-node">Connect to an Elasticsearch cluster not managed by ECK</span>
+<span class="breadcrumb-node">Manage the webhook certificate with cert-manager</span>
 </div>
 <div class="navheader">
 <span class="prev">
-<a href="k8s-kibana-eck-managed-es.html">« Use an Elasticsearch cluster managed by ECK</a>
+<a href="k8s-webhook.html">« Configure validating webhook</a>
 </span>
 <span class="next">
-<a href="k8s-kibana-advanced-configuration.html">Advanced configuration »</a>
+<a href="k8s-webhook-network-policies.html">Network policies »</a>
 </span>
 </div>
 <div class="section">
 <div class="titlepage"><div><div>
-<h2 class="title"><a id="k8s-kibana-external-es"></a>Connect to an Elasticsearch cluster not managed by ECK<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/orchestrating-elastic-stack-applications/kibana.asciidoc">edit</a></h2>
+<h2 class="title"><a id="k8s_manage_the_webhook_certificate_with_cert_manager"></a>Manage the webhook certificate with cert-manager<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/operating-eck/webhook.asciidoc">edit</a></h2>
 </div></div></div>
-<p>It is also possible to configure Kibana to connect to an Elasticsearch cluster that is being managed by a different installation of ECK or running outside the Kubernetes cluster. In this case, you need to know the IP address or URL of the Elasticsearch cluster and a valid username and password pair to access the cluster.</p>
-<p>Use the <a class="xref" href="k8s-kibana-secure-settings.html" title="Secure Settings">secure settings</a> mechanism to securely store the credentials of the external Elasticsearch cluster:</p>
-<div class="pre_wrapper lang-shell">
-<pre class="programlisting prettyprint lang-shell">kubectl create secret generic kibana-elasticsearch-credentials --from-literal=elasticsearch.password=$PASSWORD</pre>
-</div>
+<p>If ECK is currently running you first must ensure that the automatic certificate management feature is disabled. This can be done by updating the operator deployment manifest and adding the <code class="literal">--manage-webhook-certs=false</code> flag.</p>
+<p>Then, cert-manager v0.11+ must be installed as described in the <a href="https://docs.cert-manager.io/en/latest/getting-started/install/" class="ulink" target="_top">cert-manager documentation</a>.</p>
+<p>The following example shows how to create all the resources that a webhook requires to function.</p>
 <div class="pre_wrapper lang-yaml">
-<pre class="programlisting prettyprint lang-yaml">apiVersion: kibana.k8s.elastic.co/v1
-kind: Kibana
+<pre class="programlisting prettyprint lang-yaml">cat &lt;&lt;EOF | kubectl apply -f -
+---
+# this configures
+# - a self signed cert-manager issuer
+# - a service to point to the webhook
+# - a self signed certificate for the webhook service
+# - a validating webhook configuration
+apiVersion: cert-manager.io/v1alpha2
+kind: Issuer
 metadata:
-  name: kibana-sample
+  name: selfsigned-issuer
+  namespace: elastic-system
 spec:
-  version: 7.6.0
-  count: 1
-  config:
-    elasticsearch.hosts:
-      - https://elasticsearch.example.com:9200
-    elasticsearch.username: elastic
-  secureSettings:
-    - secretName: kibana-elasticsearch-credentials</pre>
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1alpha2
+kind: Certificate
+metadata:
+  name: elastic-webhook
+  namespace: elastic-system
+spec:
+  commonName: elastic-webhook.elastic-system.svc
+  dnsNames:
+  - elastic-webhook.elastic-system.svc.cluster.local
+  - elastic-webhook.elastic-system.svc
+  issuerRef:
+    kind: Issuer
+    name: selfsigned-issuer
+  secretName: elastic-webhook-server-cert
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elastic-webhook-server
+  namespace: elastic-system
+spec:
+  ports:
+  - port: 443
+    protocol: TCP
+    targetPort: 9443
+  selector:
+    control-plane: elastic-operator
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: admissionregistration.k8s.io/v1beta1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: elastic-webhook.k8s.elastic.co
+  annotations:
+    cert-manager.io/inject-ca-from: elastic-system/elastic-webhook
+webhooks:
+- clientConfig:
+    caBundle: Cg==
+    service:
+      name: elastic-webhook
+      namespace: elastic-system
+      # this is the path controller-runtime automatically generates
+      path: /validate-elasticsearch-k8s-elastic-co-v1-elasticsearch
+  failurePolicy: Ignore
+  name: elastic-es-validation-v1.k8s.elastic.co
+  sideEffects: None
+  rules:
+  - apiGroups:
+    - elasticsearch.k8s.elastic.co
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - elasticsearches
+EOF</pre>
 </div>
-<p>If the external Elasticsearch cluster is using a self-signed certificate, create a Kubernetes secret containing the CA certificate and mount it to the Kibana container as follows:</p>
-<div class="pre_wrapper lang-yaml">
-<pre class="programlisting prettyprint lang-yaml">apiVersion: kibana.k8s.elastic.co/v1
-kind: Kibana
-metadata:
-  name: kibana-sample
-spec:
-  version: 7.6.0
-  count: 1
-  config:
-    elasticsearch.hosts:
-      - https://elasticsearch-sample-es-http:9200
-    elasticsearch.username: elastic
-    elasticsearch.ssl.certificateAuthorities: /etc/certs/ca.crt
-  secureSettings:
-    - secretName: kibana-elasticsearch-credentials
-  podTemplate:
-    spec:
-      volumes:
-        - name: elasticsearch-certs
-          secret:
-            secretName: elasticsearch-certs-secret
-      containers:
-        - name: kibana
-          volumeMounts:
-            - name: elasticsearch-certs
-              mountPath: /etc/certs
-              readOnly: true</pre>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This example assumes that you have installed the operator in the <code class="literal">elastic-system</code> namespace.</p>
+</div>
 </div>
 </div>
 <div class="navfooter">
 <span class="prev">
-<a href="k8s-kibana-eck-managed-es.html">« Use an Elasticsearch cluster managed by ECK</a>
+<a href="k8s-webhook.html">« Configure validating webhook</a>
 </span>
 <span class="next">
-<a href="k8s-kibana-advanced-configuration.html">Advanced configuration »</a>
+<a href="k8s-webhook-network-policies.html">Network policies »</a>
 </span>
 </div>
 </div>
