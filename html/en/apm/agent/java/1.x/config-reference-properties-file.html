@@ -128,6 +128,90 @@
 <p><strong>elasticapm.properties.</strong></p>
 <div class="pre_wrapper lang-properties">
 <pre class="programlisting prettyprint lang-properties">############################################
+# Circuit-Breaker                          #
+############################################
+
+# A boolean specifying whether the circuit breaker should be enabled or not.
+# When enabled, the agent periodically polls stress monitors to detect system/process/JVM stress state.
+# If ANY of the monitors detects a stress indication, the agent will become inactive, as if the
+# &lt;&lt;config-active&gt;&gt; configuration option has been set to `false`, thus reducing resource consumption to a minimum.
+# When inactive, the agent continues polling the same monitors in order to detect whether the stress state
+# has been relieved. If ALL monitors approve that the system/process/JVM is not under stress anymore, the
+# agent will resume and become fully functional.
+#
+# This setting can be changed at runtime
+# Type: Boolean
+# Default value: false
+#
+# circuit_breaker_enabled=false
+
+# The interval at which the agent polls the stress monitors. Must be at least `1s`.
+#
+# This setting can not be changed at runtime. Changes require a restart of the application.
+# Type: TimeDuration
+# Supports the duration suffixes ms, s and m. Example: 5s.
+# The default unit for this option is s.
+# Default value: 5s
+#
+# stress_monitoring_interval=5s
+
+# The threshold used by the GC monitor to rely on for identifying heap stress.
+# The same threshold will be used for all heap pools, so that if ANY has a usage percentage that crosses it,
+# the agent will consider it as a heap stress. The GC monitor relies only on memory consumption measured
+# after a recent GC.
+#
+# This setting can be changed at runtime
+# Type: Double
+# Default value: 0.95
+#
+# stress_monitor_gc_stress_threshold=0.95
+
+# The threshold used by the GC monitor to rely on for identifying when the heap is not under stress .
+# If `stress_monitor_gc_stress_threshold` has been crossed, the agent will consider it a heap-stress state.
+# In order to determine that the stress state is over, percentage of occupied memory in ALL heap pools should
+# be lower than this threshold. The GC monitor relies only on memory consumption measured after a recent GC.
+#
+# This setting can be changed at runtime
+# Type: Double
+# Default value: 0.75
+#
+# stress_monitor_gc_relief_threshold=0.75
+
+# The minimal time required in order to determine whether the system is
+# either currently under stress, or that the stress detected previously has been relieved.
+# All measurements during this time must be consistent in comparison to the relevant threshold in
+# order to detect a change of stress state. Must be at least `1m`.
+#
+# This setting can be changed at runtime
+# Type: TimeDuration
+# Supports the duration suffixes ms, s and m. Example: 1m.
+# The default unit for this option is m.
+# Default value: 1m
+#
+# stress_monitor_cpu_duration_threshold=1m
+
+# The threshold used by the system CPU monitor to detect system CPU stress.
+# If the system CPU crosses this threshold at least `stress_monitor_cpu_num_measurements` consecutive
+# measurements, the monitor considers this as a stress state.
+#
+# This setting can be changed at runtime
+# Type: Double
+# Default value: 0.95
+#
+# stress_monitor_system_cpu_stress_threshold=0.95
+
+# The threshold used by the system CPU monitor to determine that the system is
+# not under CPU stress. If the monitor detected a CPU stress, the measured system CPU needs to be below
+# this threshold at least `stress_monitor_cpu_num_measurements` consecutive times in order for the
+# monitor to decide that the CPU stress has been relieved.
+#
+# This setting can be changed at runtime
+# Type: Double
+# Default value: 0.8
+#
+# stress_monitor_system_cpu_relief_threshold=0.8
+
+############################################
 # Core                                     #
 ############################################
 
@@ -379,15 +463,29 @@
 
 # A list of methods for which to create a transaction or span.
 #
-# The syntax is `modifier @fully.qualified.annotation.Name fully.qualified.class.Name#methodName(fully.qualified.parameter.Type)`.
-# You can use wildcards for the class name, the annotation name, the method name and the parameter types.
-# The `*` wildcard matches zero or more characters.
-# That means that a wildcard in a package name also matches sub-packages
-# Specifying an annotation is optional.
-# When matching for annotations, only classes that are annotated with the specified annotation are considered.
-# You can also match for meta-annotations by specifying the annotation with an @@ prefix. This will match classes that are annotated with an annotation that is itself annotated with the given meta-annotation.
-# Specifying the parameter types is optional.
-# The `modifier` can be omitted or one of `public`, `protected`, `private` or `*`.
+# If you want to monitor a large number of methods,
+# use  &lt;&lt;config-profiling-spans-enabled, `profiling_spans_enabled`&gt;&gt; instead.
+#
+# This works by instrumenting each matching method to include code that creates a span for the method.
+# While creating a span is quite cheap in terms of performance,
+# instrumenting a whole code base or a method which is executed in a tight loop leads to significant overhead.
+#
+# Using a pointcut-like syntax, you can match based on
+#
+#  - Method modifier (optional) +
+#    Example: `public`, `protected`, `private` or `*`
+#  - Package and class name (wildcards include sub-packages) +
+#    Example: `org.example.*`
+#  - Method name (optional since 1.4.0) +
+#    Example: `myMeth*d`
+#  - Method argument types (optional) +
+#    Example: `(*lang.String, int[])`
+#  - Classes with a specific annotation (optional) +
+#    Example: `@*ApplicationScoped`
+#  - Classes with a specific annotation that is itself annotated with the given meta-annotation (optional) +
+#    Example: `@@javax.enterpr*se.context.NormalScope`
+#
+# The syntax is `modifier @fully.qualified.AnnotationName fully.qualified.ClassName#methodName(fully.qualified.ParameterType)`.
 #
 # A few examples:
 #
@@ -439,9 +537,11 @@
 #  - A "forcibly-traced method" (e.g. DB queries, HTTP exits, custom) was executed during the execution of this method.
 # Set to 0 to disable.
 #
-# NOTE: Transaction are never discarded, regardless of their duration. This configuration affects only spans.
-# In order not to break span references, all spans leading to an async operations are never discarded, regardless
-# of their duration.
+# NOTE: Transactions are never discarded, regardless of their duration.
+# This configuration affects only spans.
+# In order not to break span references,
+# all spans leading to an async operation or an exit span (such as a HTTP request or a DB query) are never discarded,
+# regardless of their duration.
 #
 #
 # This setting can not be changed at runtime. Changes require a restart of the application.
@@ -503,6 +603,20 @@
 # Default value: _AGENT_HOME_/elasticapm.properties
 #
 # config_file=_AGENT_HOME_/elasticapm.properties
+
+# To enable {apm-overview-ref-v}/distributed-tracing.html[distributed tracing], the agent
+# adds trace context headers to outgoing requests (like HTTP requests, Kafka records, gRPC requests etc.).
+# These headers (`traceparent` and `tracestate`) are defined in the
+# https://www.w3.org/TR/trace-context-1/[W3C Trace Context] specification.
+#
+# When this setting is `true`, the agent will also add the header `elastic-apm-traceparent`
+# for backwards compatibility with older versions of Elastic APM agents.
+#
+# This setting can be changed at runtime
+# Type: Boolean
+# Default value: true
+#
+# use_elastic_traceparent_header=true
 
 ############################################
 # HTTP                                     #
@@ -786,6 +900,113 @@
 # Default value:
 #
 # ignore_message_queues=
+
+############################################
+# Profiling                                #
+############################################
+
+# Set to `true` to make the agent create spans for method executions based on
+# https://github.com/jvm-profiling-tools/async-profiler[async-profiler], a sampling aka statistical profiler.
+#
+# If this is enabled, the agent will start a profiling session every
+# &lt;&lt;config-profiling-interval, `profiling_interval`&gt;&gt; which lasts for &lt;&lt;config-profiling-duration, `profiling_duration`&gt;&gt;.
+# If a transaction happens within a profiling session,
+# the agent creates spans for slow methods.
+#
+# Due to the nature of how sampling profilers work,
+# the duration of the inferred spans are not exact, but only estimations.
+# The &lt;&lt;config-profiling-sampling-interval, `profiling_sampling_interval`&gt;&gt; lets you fine tune the trade-off between accuracy and overhead.
+#
+# The inferred spans are created after a profiling session has ended.
+# This means there is a delay between the regular and the inferred spans being visible in the UI.
+#
+# NOTE: This feature is not available on Windows
+#
+# This setting can be changed at runtime
+# Type: Boolean
+# Default value: false
+#
+# profiling_spans_enabled=false
+
+# The frequency at which stack traces are gathered within a profiling session.
+# The lower you set it, the more accurate the durations will be.
+# This comes at the expense of higher overhead and more spans for potentially irrelevant operations.
+# The minimal duration of a profiling-inferred span is the same as the value of this setting.
+#
+# This setting can be changed at runtime
+# Type: TimeDuration
+# Supports the duration suffixes ms, s and m. Example: 20ms.
+# The default unit for this option is ms.
+# Default value: 20ms
+#
+# profiling_sampling_interval=20ms
+
+# The minimum duration of an inferred span.
+# Note that the min duration is also implicitly set by the sampling interval.
+# However, increasing the sampling interval also decreases the accuracy of the duration of inferred spans.
+#
+# This setting can be changed at runtime
+# Type: TimeDuration
+# Supports the duration suffixes ms, s and m. Example: 0ms.
+# The default unit for this option is ms.
+# Default value: 0ms
+#
+# profiling_spans_min_duration=0ms
+
+# If set, the agent will only create inferred spans for methods which match this list.
+# Setting a value may slightly increase performance and can reduce clutter by only creating spans for the classes you are interested in.
+# Example: `org.example.myapp.*`
+#
+# This option supports the wildcard `*`, which matches zero or more characters.
+# Examples: `/foo/*/bar/*/baz*`, `*foo*`.
+# Matching is case insensitive by default.
+# Prepending an element with `(?-i)` makes the matching case sensitive.
+#
+# This setting can be changed at runtime
+# Type: comma separated list
+# Default value: *
+#
+# profiling_included_classes=*
+
+# Excludes classes for which no profiler-inferred spans should be created.
+#
+# This option supports the wildcard `*`, which matches zero or more characters.
+# Examples: `/foo/*/bar/*/baz*`, `*foo*`.
+# Matching is case insensitive by default.
+# Prepending an element with `(?-i)` makes the matching case sensitive.
+#
+# This setting can be changed at runtime
+# Type: comma separated list
+# Default value: (?-i)java.*,(?-i)javax.*,(?-i)sun.*,(?-i)com.sun.*,(?-i)jdk.*,(?-i)org.apache.tomcat.*,(?-i)org.apache.catalina.*,(?-i)org.apache.coyote.*,(?-i)org.jboss.as.*,(?-i)org.glassfish.*,(?-i)org.eclipse.jetty.*,(?-i)com.ibm.websphere.*
+#
+# profiling_excluded_classes=(?-i)java.*,(?-i)javax.*,(?-i)sun.*,(?-i)com.sun.*,(?-i)jdk.*,(?-i)org.apache.tomcat.*,(?-i)org.apache.catalina.*,(?-i)org.apache.coyote.*,(?-i)org.jboss.as.*,(?-i)org.glassfish.*,(?-i)org.eclipse.jetty.*,(?-i)com.ibm.websphere.*
+
+# The interval at which profiling sessions should be started.
+#
+# This setting can be changed at runtime
+# Type: TimeDuration
+# Supports the duration suffixes ms, s and m. Example: 61s.
+# The default unit for this option is s.
+# Default value: 61s
+#
+# profiling_interval=61s
+
+# The duration of a profiling session.
+# For sampled transactions which fall within a profiling session (they start after and end before the session),
+# so-called inferred spans will be created.
+# They appear in the trace waterfall view like regular spans.
+#
+# NOTE: It is not recommended to set much higher durations as it may fill the activation events file and async-profiler's frame buffer.
+# Warnings will be logged if the activation events file is full.
+# If you want to have more profiling coverage, try decreasing &lt;&lt;config-profiling-interval, `profiling_interval`&gt;&gt;.
+#
+# This setting can be changed at runtime
+# Type: TimeDuration
+# Supports the duration suffixes ms, s and m. Example: 10s.
+# The default unit for this option is s.
+# Default value: 10s
+#
+# profiling_duration=10s
 
 ############################################
 # Reporter                                 #
