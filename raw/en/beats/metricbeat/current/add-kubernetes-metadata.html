@@ -69,17 +69,30 @@ Matchers
 </li>
 </ul>
 </div>
-<p>Indexers take in a pod&#8217;s metadata and builds indices based on the pod metadata.
-For example, the <code class="literal">ip_port</code> indexer can take a Kubernetes pod and index the pod
-metadata based on all <code class="literal">pod_ip:container_port</code> combinations.</p>
-<p>Matchers are used to construct lookup keys for querying indices. For example,
-when the <code class="literal">fields</code> matcher takes <code class="literal">["metricset.host"]</code> as a lookup field, it would
-construct a lookup key with the value of the field <code class="literal">metricset.host</code>.</p>
-<p>Each Beat can define its own default indexers and matchers which are enabled by
-default. For example, FileBeat enables the <code class="literal">container</code> indexer, which indexes
-pod metadata based on all container IDs, and a <code class="literal">logs_path</code> matcher, which takes
-the <code class="literal">log.file.path</code> field, extracts the container ID, and uses it to retrieve
-metadata.</p>
+<p>Indexers use pods metadata to create unique identifiers for each one of the
+pods, these identifiers help to correlate the metadata of the observed pods with
+actual events. For example, the <code class="literal">ip_port</code> indexer can take a Kubernetes pod and
+create identifiers for it based on all its <code class="literal">pod_ip:container_port</code> combinations.</p>
+<p>Matchers use information in events to construct lookup keys that match the
+identifiers created by the indexers. For example, when the <code class="literal">fields</code> matcher takes
+<code class="literal">["metricset.host"]</code> as a lookup field, it would construct a lookup key with the
+value of the field <code class="literal">metricset.host</code>. When one of this lookup keys match with one
+of the identifiers, the event is enriched with the metadata of the identified
+pod.</p>
+<p>When <code class="literal">add_kubernetes_metadata</code> is used with Metricbeat, it uses the <code class="literal">ip_port</code>
+indexer and the <code class="literal">fields</code> matcher with the <code class="literal">metricset.host</code> field. So events that
+contain a <code class="literal">metricset.host</code> field are enriched with metadata of the pods that
+exposes the same port in the same IP.</p>
+<p>This behaviour can be disabled by disabling default indexers and matchers in the
+configuration:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">processors:
+- add_kubernetes_metadata:
+    default_indexers.enabled: false
+    default_matchers.enabled: false</pre>
+</div>
+<p>You can find more information about the available indexers and matchers, and some
+examples in <a class="xref" href="add-kubernetes-metadata.html#kubernetes-indexers-and-matchers" title="Indexers and matchers">Indexers and matchers</a>.</p>
 <p>The configuration below enables the processor when metricbeat is run as a pod in
 Kubernetes.</p>
 <div class="pre_wrapper lang-yaml">
@@ -165,6 +178,113 @@ case you want to specify your own.
 </dd>
 </dl>
 </div>
+<h3><a id="kubernetes-indexers-and-matchers"></a>Indexers and matchers<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.6/libbeat/processors/add_kubernetes_metadata/docs/indexers_and_matchers.asciidoc">edit</a></h3>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_indexers"></a>Indexers<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.6/libbeat/processors/add_kubernetes_metadata/docs/indexers_and_matchers.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Indexers use pods metadata to create unique identifiers for each one of the
+pods.</p>
+<p>Available indexers are:</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">container</code>
+</span>
+</dt>
+<dd>
+Identifies the pod metadata using the IDs of its containers.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">ip_port</code>
+</span>
+</dt>
+<dd>
+Identifies the pod metadata using combinations of its IP and its exposed ports.
+When using this indexer metadata is identified using the IP of the pods, and the
+combination if <code class="literal">ip:port</code> for each one of the ports exposed by its containers.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">pod_name</code>
+</span>
+</dt>
+<dd>
+Identifies the pod metadata using its namespace and its name as
+<code class="literal">namespace/pod_name</code>.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">pod_uid</code>
+</span>
+</dt>
+<dd>
+Identifies the pod metadata using the UID of the pod.
+</dd>
+</dl>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_matchers"></a>Matchers<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.6/libbeat/processors/add_kubernetes_metadata/docs/indexers_and_matchers.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Matchers are used to construct the lookup keys that match with the identifiers
+created by indexes.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_field_format"></a><code class="literal">field_format</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.6/libbeat/processors/add_kubernetes_metadata/docs/indexers_and_matchers.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Looks up pod metadata using a key created with a string format that can include
+event fields.</p>
+<p>This matcher has an option <code class="literal">format</code> to define the string format. This string
+format can contain placeholders for any field in the event.</p>
+<p>For example, the following configuration uses the <code class="literal">ip_port</code> indexer to identify
+the pod metadata by combinations of the pod IP and its exposed ports, and uses
+the destination IP and port in events as match keys:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">processors:
+- add_kubernetes_metadata:
+    ...
+    default_indexers.enabled: false
+    default_matchers.enabled: false
+    indexers:
+      - ip_port:
+    matchers:
+      - field_format:
+          format: '%{[destination.ip]}:%{[destination.port]}'</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_fields_2"></a><code class="literal">fields</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.6/libbeat/processors/add_kubernetes_metadata/docs/indexers_and_matchers.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Looks up pod metadata using as key the value of some specific fields. When
+multiple fields are defined, the first one included in the event is used.</p>
+<p>This matcher has an option <code class="literal">lookup_fields</code> to define the files whose value will
+be used for lookup.</p>
+<p>For example, the following configuration uses the <code class="literal">ip_port</code> indexer to identify
+pods, and defines a matcher that uses the destination IP or the server IP for the
+lookup, the first it finds in the event:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">processors:
+- add_kubernetes_metadata:
+    ...
+    default_indexers.enabled: false
+    default_matchers.enabled: false
+    indexers:
+      - ip_port:
+    matchers:
+      - fields:
+          lookup_fields: ['destination.ip', 'server.ip']</pre>
+</div>
+</div>
+
+</div>
+
 </div>
 <div class="navfooter">
 <span class="prev">
