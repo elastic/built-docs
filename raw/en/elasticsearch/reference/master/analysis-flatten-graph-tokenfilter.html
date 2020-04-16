@@ -39,19 +39,123 @@ Not what you want? See the
 <h2 class="title"><a id="analysis-flatten-graph-tokenfilter"></a>Flatten graph token filter<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/analysis/tokenfilters/flatten-graph-tokenfilter.asciidoc">edit</a></h2>
 </div></div></div>
 
-<p>The <code class="literal">flatten_graph</code> token filter accepts an arbitrary graph token
-stream, such as that produced by
-<a class="xref" href="analysis-synonym-graph-tokenfilter.html" title="Synonym graph token filter">Synonym graph</a>, and flattens it into a single
-linear chain of tokens suitable for indexing.</p>
-<p>This is a lossy process, as separate side paths are squashed on top of
-one another, but it is necessary if you use a graph token stream
-during indexing because a Lucene index cannot currently represent a
-graph.  For this reason, it&#8217;s best to apply graph analyzers only at
-search time because that preserves the full graph structure and gives
-correct matches for proximity queries.</p>
-<p>For more information on this topic and its various complexities,
-please read the <a href="http://blog.mikemccandless.com/2012/04/lucenes-tokenstreams-are-actually.html" class="ulink" target="_top">Lucene&#8217;s
-TokenStreams are actually graphs</a> blog post.</p>
+<p>Flattens a <a class="xref" href="token-graphs.html" title="Token graphs">token graph</a> produced by a graph token filter, such
+as <a class="xref" href="analysis-synonym-graph-tokenfilter.html" title="Synonym graph token filter"><code class="literal">synonym_graph</code></a> or
+<a class="xref" href="analysis-word-delimiter-graph-tokenfilter.html" title="Word delimiter graph token filter"><code class="literal">word_delimiter_graph</code></a>.</p>
+<p>Flattening a token graph containing
+<a class="xref" href="token-graphs.html#token-graphs-multi-position-tokens" title="Multi-position tokens">multi-position tokens</a> makes the graph
+suitable for <a class="xref" href="analysis-index-search-time.html" title="Index and search analysis">indexing</a>. Otherwise, indexing does
+not support token graphs containing multi-position tokens.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Flattening graphs is a lossy process.</p>
+<p>If possible, avoid using the <code class="literal">flatten_graph</code> filter. Instead, use graph token
+filters in <a class="xref" href="analysis-index-search-time.html" title="Index and search analysis">search analyzers</a> only. This eliminates
+the need for the <code class="literal">flatten_graph</code> filter.</p>
+</div>
+</div>
+<p>The <code class="literal">flatten_graph</code> filter uses Lucene&#8217;s
+<a href="https://lucene.apache.org/core/8_5_1/analyzers-common/org/apache/lucene/analysis/core/FlattenGraphFilter.html" class="ulink" target="_top">FlattenGraphFilter</a>.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="analysis-flatten-graph-tokenfilter-analyze-ex"></a>Example<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/analysis/tokenfilters/flatten-graph-tokenfilter.asciidoc">edit</a></h3>
+</div></div></div>
+<p>To see how the <code class="literal">flatten_graph</code> filter works, you first need to produce a token
+graph containing multi-position tokens.</p>
+<p>The following <a class="xref" href="indices-analyze.html" title="Analyze API">analyze API</a> request uses the <code class="literal">synonym_graph</code>
+filter to add <code class="literal">dns</code> as a multi-position synonym for <code class="literal">domain name system</code> in the
+text <code class="literal">domain name system is fragile</code>:</p>
+<a id="2c27a8eb6528126f37a843d434cd88b6"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /_analyze
+{
+  "tokenizer": "standard",
+  "filter": [
+    {
+      "type": "synonym_graph",
+      "synonyms": [ "dns, domain name system" ]
+    }
+  ],
+  "text": "domain name system is fragile"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/845.console"></div>
+<p>The filter produces the following token graph with <code class="literal">dns</code> as a multi-position
+token.</p>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/analysis/token-graph-dns-synonym-ex.svg" alt="token graph dns synonym ex">
+</div>
+</div>
+<p>Indexing does not support token graphs containing multi-position tokens. To make
+this token graph suitable for indexing, it needs to be flattened.</p>
+<p>To flatten the token graph, add the <code class="literal">flatten_graph</code> filter after the
+<code class="literal">synonym_graph</code> filter in the previous analyze API request.</p>
+<a id="ef10e8d07d9fae945e035d5dee1e9754"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /_analyze
+{
+  "tokenizer": "standard",
+  "filter": [
+    {
+      "type": "synonym_graph",
+      "synonyms": [ "dns, domain name system" ]
+    },
+    "flatten_graph"
+  ],
+  "text": "domain name system is fragile"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/846.console"></div>
+<p>The filter produces the following flattened token graph, which is suitable for
+indexing.</p>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/analysis/token-graph-dns-invalid-ex.svg" alt="token graph dns invalid ex">
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="analysis-keyword-marker-tokenfilter-analyzer-ex"></a>Add to an analyzer<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/analysis/tokenfilters/flatten-graph-tokenfilter.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The following <a class="xref" href="indices-create-index.html" title="Create index API">create index API</a> request uses the
+<code class="literal">flatten_graph</code> token filter to configure a new
+<a class="xref" href="analysis-custom-analyzer.html" title="Create a custom analyzer">custom analyzer</a>.</p>
+<p>In this analyzer, a custom <code class="literal">word_delimiter_graph</code> filter produces token graphs
+containing catenated, multi-position tokens. The <code class="literal">flatten_graph</code> filter flattens
+these token graphs, making them suitable for indexing.</p>
+<a id="4b6312348785cb57de3467f82ec252a5"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT /my_index
+{
+  "settings": {
+    "analysis": {
+      "analyzer": {
+        "my_custom_index_analyzer": {
+          "type": "custom",
+          "tokenizer": "standard",
+          "filter": [
+            "my_custom_word_delimiter_graph_filter",
+            "flatten_graph"
+          ]
+        }
+      },
+      "filter": {
+        "my_custom_word_delimiter_graph_filter": {
+          "type": "word_delimiter_graph",
+          "catenate_all": true
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/847.console"></div>
+</div>
+
 </div>
 <div class="navfooter">
 <span class="prev">
