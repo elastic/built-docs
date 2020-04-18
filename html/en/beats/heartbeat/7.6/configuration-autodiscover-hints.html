@@ -127,35 +127,73 @@
 <div class="titlepage"><div><div>
 <h2 class="title"><a id="configuration-autodiscover-hints"></a>Hints based autodiscover<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.6/libbeat/docs/shared-autodiscover.asciidoc">edit</a></h2>
 </div></div></div>
-<p>Heartbeat supports autodiscover based on hints from the both Docker and Kubernetes. The hints system looks for
+<p>Heartbeat supports autodiscover based on hints from the provider. The hints system looks for
 hints in Kubernetes Pod annotations or Docker labels that have the prefix <code class="literal">co.elastic.monitor</code>. As soon as
 the container starts, Heartbeat will check if it contains any hints and launch the proper config for
-it. Hints tell Heartbeat how to get logs for the given container.</p>
-<p>Hints for Heartbeat take the form <code class="literal">co.elastic.monitor/MONITOR_INDEX.CONFIG_OPTION=VALUE</code>, where <code class="literal">MONITOR_INDEX</code> represents
-the index of monitor, and <code class="literal">CONFIG_OPTION</code> is any of the <a class="xref" href="configuration-heartbeat-options.html" title="Configure Heartbeat monitors"><em>Monitors</em></a> options, with <code class="literal">VALUE</code> being the value
-you&#8217;d like to set that option to.</p>
-<p>As an example let&#8217;s convert the regular syntax Heartbeat monitors below into autodiscover hints.</p>
-<div class="pre_wrapper lang-yml">
-<pre class="programlisting prettyprint lang-yml">-- heartbeat.monitors:
-- type: tcp
-  hosts: '${data.host}:6379'
-  schedule: @every 10s
-- type: icmp
-  hosts: '${data.host}'
-  schedule: @every 10s</pre>
+it. Hints tell Heartbeat how to get logs for the given container. By default monitors will be created
+for the container that exposes the port being requested to be monitored. You can use hints to modify this behavior. This is the full
+list of supported hints:</p>
+<h5><a id="_co_elastic_monitortype"></a><code class="literal">co.elastic.monitor/type</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.6/heartbeat/docs/autodiscover-hints.asciidoc">edit</a></h5>
+<p>Define the monitor type to use. Ex: http, tcp, icmp</p>
+<h5><a id="_co_elastic_monitorhosts"></a><code class="literal">co.elastic.monitor/hosts</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.6/heartbeat/docs/autodiscover-hints.asciidoc">edit</a></h5>
+<p>The URIs to monitor. Example:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">co.elastic.monitor/type: icmp
+co.elastic.monitor/hosts: ${data.host}</pre>
 </div>
-<p>To configure this with autodiscover, add the following line to your Dockerfile to add the requisite labels.</p>
+<p>This would ensure that each host has an ICMP monitor enabled on it.</p>
+<h5><a id="_co_elastic_monitorschedule"></a><code class="literal">co.elastic.monitor/schedule</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.6/heartbeat/docs/autodiscover-hints.asciidoc">edit</a></h5>
+<p>Define the schedule on which the monitor should be executed.</p>
+<pre class="screen">co.elastic.monitor/schedule: "@every 5s"</pre>
+<h5><a id="_co_elastic_monitorprocessors"></a><code class="literal">co.elastic.monitor/processors</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.6/heartbeat/docs/autodiscover-hints.asciidoc">edit</a></h5>
+<p>Define a processor to be added to the Heartbeat monitor configuration. See <a class="xref" href="filtering-and-enhancing-data.html" title="Filter and enhance data with processors"><em>Processors</em></a> for the list
+of supported processors.</p>
+<p>In order to provide ordering of the processor definition, numbers can be provided. If not, the hints builder will do
+arbitrary ordering:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">co.elastic.monitor/processors.1.drop_fields.fields: "field1, field2"
+co.elastic.monitor/processors.drop_fields.fields: "field3"</pre>
+</div>
+<p>In the above sample the processor definition tagged with <code class="literal">1</code> would be executed first.</p>
+<h4><a id="_kubernetes_2"></a>Kubernetes<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.6/heartbeat/docs/autodiscover-hints.asciidoc">edit</a></h4>
+<p>Kubernetes autodiscover provider supports hints in Pod annotations. To enable it just set <code class="literal">hints.enabled</code>:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">heartbeat.autodiscover:
+  providers:
+    - type: kubernetes
+      hints.enabled: true</pre>
+</div>
+<p>You can annotate Kubernetes Pods with useful info to spin up Heartbeat monitors:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">annotations:
+  co.elastic.monitor/type: icmp
+  co.elastic.monitor/hosts: ${data.host}
+  co.elastic.monitor/schedule: "@every 5s"</pre>
+</div>
+<h5><a id="_multiple_containers"></a>Multiple containers<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.6/heartbeat/docs/autodiscover-hints.asciidoc">edit</a></h5>
+<p>When a pod has multiple containers, the settings are shared unless you add the container name in the
+hint. For example, these hints configure the container exposing port 8080 to do a HTTP check and have the <code class="literal">sidecar</code>
+container to have an TCP check.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">annotations:
+  co.elastic.monitor/type: http
+  co.elastic.monitor/hosts: ${data.host}:8080/healtlz
+  co.elastic.monitor/schedule: "@every 5s"
+  co.elastic.monitor.sidecar/type: tcp
+  co.elastic.monitor.sidecar/hosts: ${data.host}:8081
+  co.elastic.monitor.sidecar/schedule: "@every 5s"</pre>
+</div>
+<h4><a id="_docker_3"></a>Docker<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.6/heartbeat/docs/autodiscover-hints.asciidoc">edit</a></h4>
+<p>Docker autodiscover provider supports hints in labels. To enable it just set <code class="literal">hints.enabled</code>:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">heartbeat.autodiscover:
+  providers:
+    - type: docker
+      hints.enabled: true</pre>
+</div>
+<p>You can label Docker containers with useful info to spin up Heartbeat monitors similar to the Kubernetes example:</p>
 <pre class="screen">LABEL co.elastic.monitor/1.type=tcp co.elastic.monitor/1.hosts='${data.host}:6379' co.elastic.monitor/1.schedule='@every 10s'
 LABEL co.elastic.monitor/2.type=icmp co.elastic.monitor/2.hosts='${data.host}' co.elastic.monitor/2.schedule='@every 10s'</pre>
-<p>Then, add the following to <code class="literal">heartbeat.yml</code>:</p>
-<div class="pre_wrapper lang-yml">
-<pre class="programlisting prettyprint lang-yml">heartbeat.autodiscover:
-  providers:
-  - type: docker
-    hints.enabled: true</pre>
-</div>
-<p>Then, start Heartbeat. This should discover the container you built and ping it once with ICMP, another time with TCP.</p>
-<p>For a full list of variables available, see the provider-specific docs in <a class="xref" href="configuration-autodiscover.html" title="Autodiscover"><em>Autodiscover</em></a>.</p>
 </div>
 <div class="navfooter">
 <span class="prev">
