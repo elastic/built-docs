@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Performance tuning | APM Ruby Agent Reference [master] | Elastic</title>
+<link rel="home" href="index.html" title="APM Ruby Agent Reference [master]"/>
+<link rel="up" href="index.html" title="APM Ruby Agent Reference [master]"/>
+<link rel="prev" href="log-correlation.html" title="Log correlation"/>
+<link rel="next" href="debugging.html" title="Troubleshooting"/>
+<meta name="DC.type" content="Learn/Docs/APM Ruby Agent/Reference/master"/>
+<meta name="DC.subject" content="APM"/>
+<meta name="DC.identifier" content="master"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">APM Ruby Agent Reference [master]</a></span>
+»
+<span class="breadcrumb-node">Performance tuning</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="log-correlation.html">« Log correlation</a>
+</span>
+<span class="next">
+<a href="debugging.html">Troubleshooting »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h1 class="title"><a id="tuning-and-overhead"></a>Performance tuning<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-ruby/edit/master/docs/performance-tuning.asciidoc">edit</a></h1>
+</div></div></div>
+<p>Using any APM solution comes with trade-offs, and the Elastic APM Ruby Agent is no different.
+Instrumenting your code, using timers, recording context data, etc., uses resources—for example:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+CPU time
+</li>
+<li class="listitem">
+Memory
+</li>
+<li class="listitem">
+Bandwidth
+</li>
+<li class="listitem">
+Elasticsearch storage
+</li>
+</ul>
+</div>
+<p>We invest a lot of effort to ensure that the Ruby Agent is suitable for production code
+and that its overhead remains as low as possible.
+However, because every application is different, there are some knobs you can turn and tweak to adapt the Agent to your specific needs.</p>
+<h3><a id="tuning-sample-rate"></a>Transaction sample rate<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-ruby/edit/master/docs/performance-tuning.asciidoc">edit</a></h3>
+<p>By default, the Agent samples every transaction.
+The easiest way to reduce both the overhead of the agent and storage requirements,
+is to tell it to do less, i.e., sample fewer transactions.
+To do this, set the <a class="xref" href="configuration.html#config-transaction-sample-rate" title="transaction_sample_rate"><code class="literal">transaction_sample_rate</code></a>
+to a value between <code class="literal">0.0</code> and <code class="literal">1.0</code>—the percentage of transactions you&#8217;d like to randomly sample.
+The Agent will still record the overall time and result of unsampled transactions,
+but not context information, tags, or spans.</p>
+<h3><a id="tuning-frame-context"></a>Collecting frame context<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-ruby/edit/master/docs/performance-tuning.asciidoc">edit</a></h3>
+<p>The Agent automatically captures several lines of source code around each frame location in the stack trace.
+This enables the APM app to provide greater insight into exactly where an error or span is occurring in your code.
+This insight does come at a cost—in terms of performance, stack trace collection is the most expensive thing the Agent does.</p>
+<p>There are settings you can modify to control this behavior:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Disable stack trace frame collection for short-duration spans by setting
+<a class="xref" href="configuration.html#config-span-frames-min-duration-ms" title="span_frames_min_duration"><code class="literal">span_frames_min_duration</code></a> to <code class="literal">0</code>.
+</li>
+<li class="listitem">
+<p>Modify the number of source code lines collected.
+These settings are divided between app frames, which represent your application code,
+and library frames, which represent the code of your dependencies.
+Each of these categories are further split into separate error and span settings.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="configuration.html#config-source-lines-error-app-frames" title="source_lines_error_app_frames"><code class="literal">source_lines_error_app_frames</code></a>
+</li>
+<li class="listitem">
+<a class="xref" href="configuration.html#config-source-lines-error-library-frames" title="source_lines_error_library_frames"><code class="literal">source_lines_error_library_frames</code></a>
+</li>
+<li class="listitem">
+<a class="xref" href="configuration.html#config-source-lines-span-app-frames" title="source_lines_span_app_frames"><code class="literal">source_lines_span_app_frames</code></a>
+</li>
+<li class="listitem">
+<a class="xref" href="configuration.html#config-source-lines-span-library-frames" title="source_lines_span_library_frames"><code class="literal">source_lines_span_library_frames</code></a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+If you&#8217;re using the API to create a custom span, you can disable stack trace collection with the
+<a class="xref" href="api.html#api-agent-start_span" title="ElasticAPM.start_span"><code class="literal">include_stacktrace</code> argument</a>.
+</li>
+</ol>
+</div>
+<p>Reading source files inside a running application can cause a lot of disk I/O,
+and sending up source lines for each frame will have a network and storage cost that is quite high.
+Turning these limits down will prevent storing excessive amounts of data in Elasticsearch.</p>
+<h3><a id="tuning-queue"></a>Transaction queue<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-ruby/edit/master/docs/performance-tuning.asciidoc">edit</a></h3>
+<p>The Agent does not send every transaction as it happens.
+Instead, to reduce load on the APM Server, the Agent uses a queue.
+The queue is flushed periodically, or when it reaches a maximum size.</p>
+<p>While this reduces the load on the APM Server, holding on to transaction data in a queue uses memory.
+If you notice a large increase in memory use, try adjusting these settings:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="configuration.html#config-api-request-time" title="api_request_time"><code class="literal">api_request_time</code></a> to reduce the duration of a single streaming request.
+This setting is helpful if you have a sustained high number of transactions.
+</li>
+<li class="listitem">
+<a class="xref" href="configuration.html#config-api-request-size" title="api_request_size"><code class="literal">api_request_size</code></a> to reduce the maximum size of one request.
+This setting can help if you experience transaction peaks (a large number in a short period of time).
+</li>
+</ul>
+</div>
+<p>Keep in mind that reducing the value of either setting will cause the agent to send more HTTP requests to the APM Server,
+potentially causing a higher load.</p>
+<h3><a id="tuning-max-spans"></a>Spans per transaction<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-ruby/edit/master/docs/performance-tuning.asciidoc">edit</a></h3>
+<p>The number of spans per transaction will influence both how much time the agent spends in each transaction collecting contextual data,
+and how much storage space is needed in Elasticsearch.
+In our experience, most <em>usual</em> transactions should have well below 100 spans.
+In some cases, however, the number of spans can explode—for example:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Long-running transactions
+</li>
+<li class="listitem">
+Unoptimized code, e.g., doing hundreds of SQL queries in a loop
+</li>
+</ul>
+</div>
+<p>To avoid these edge cases which overload both the Agent and the APM Server,
+the Agent will stop recording spans when a specified limit is reached.
+This limit is configurable with <a class="xref" href="configuration.html#config-transaction-max-spans" title="transaction_max_spans"><code class="literal">transaction_max_spans</code></a>.</p>
+<h3><a id="tuning-body-headers"></a>Capturing headers and request body<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-ruby/edit/master/docs/performance-tuning.asciidoc">edit</a></h3>
+<p>You can configure the Agent to capture headers and request bodies with
+<a class="xref" href="configuration.html#config-capture-headers" title="capture_headers"><code class="literal">capture_headers</code></a> and <a class="xref" href="configuration.html#config-capture-body" title="capture_body"><code class="literal">capture_body</code></a>.
+By default, headers are captured and request bodies are not.</p>
+<p>Depending on the nature of your POST requests, capturing request bodies for transactions may introduce noticeable overhead,
+as well as increased storage use.
+In most scenarios, we advise against enabling request body capturing for transactions, and only enabling it if necessary for errors.</p>
+<p>Capturing request/response headers has less overhead on the agent than capturing request bodies,
+but can have an impact on storage use.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="log-correlation.html">« Log correlation</a>
+</span>
+<span class="next">
+<a href="debugging.html">Troubleshooting »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
