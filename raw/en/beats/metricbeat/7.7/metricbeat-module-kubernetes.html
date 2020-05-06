@@ -36,7 +36,7 @@ Not what you want? See the
 <div class="titlepage"><div><div>
 <h2 class="title"><a id="metricbeat-module-kubernetes"></a>Kubernetes module<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.7/metricbeat/docs/modules/kubernetes.asciidoc">edit</a></h2>
 </div></div></div>
-<p>This module fetches metrics from Kubernetes several components:</p>
+<p>As one of the main pieces provided for Kubernetes monitoring, this module is capable of fetching metrics from several components:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
@@ -59,10 +59,35 @@ Not what you want? See the
 </li>
 </ul>
 </div>
-<p>All metricsets with the <code class="literal">state_</code> prefix require <code class="literal">hosts</code> field pointing to kube-state-metrics
-service within the cluster, while the rest should be pointed to kubelet service. Check the
-example configuration on how to do it.</p>
-<p>The default metricsets are <code class="literal">container</code>, <code class="literal">node</code>, <code class="literal">pod</code>, <code class="literal">system</code> and <code class="literal">volume</code>.</p>
+<p>Some of the previous components are running on each of the Kubernetes nodes (like <code class="literal">kubelet</code> or <code class="literal">proxy</code>) while others provide a single cluster-wide endpoint. This is important to determine the optimal configuration and running strategy for the different metricsets included in the module.</p>
+<p>For a complete reference on how to configure and run this module on Kubernetes as part of a <code class="literal">DaemonSet</code> and a <code class="literal">Deployment</code>, there&#8217;s a complete example manifest available in <a class="xref" href="running-on-kubernetes.html" title="Run Metricbeat on Kubernetes">Running Metricbeat on Kubernetes</a> document.</p>
+<h3><a id="_kubernetes_endpoints_and_metricsets"></a>Kubernetes endpoints and metricsets<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.7/metricbeat/docs/modules/kubernetes.asciidoc">edit</a></h3>
+<p>Kubernetes module is a bit complex as its internal metricsets require access to a wide variety of endpoints.</p>
+<p>This section highlights and introduces some groups of metricsets with similar endpoint access needs. For more details on the metricsets see <code class="literal">configuration example</code> and the <code class="literal">metricsets</code> sections below.</p>
+<h4><a id="_node_system_pod_container_module"></a>node / system / pod / container / module<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.7/metricbeat/docs/modules/kubernetes.asciidoc">edit</a></h4>
+<p>The default metricsets <code class="literal">container</code>, <code class="literal">node</code>, <code class="literal">pod</code>, <code class="literal">system</code> and <code class="literal">volume</code> require access to the <code class="literal">kubelet endpoint</code> in each of the Kubernetes nodes, hence it&#8217;s recommended to include them as part of a <code class="literal">Metricbeat DaemonSet</code> or standalone Metricbeats running on the hosts.</p>
+<p>Depending on the version and configuration of Kubernetes nodes, <code class="literal">kubelet</code> might provide a read only http port (typically 10255), which is used in some configuration examples. But in general, and lately, this endpoint requires SSL (<code class="literal">https</code>) access (to port 10250 by default) and token based authentication.</p>
+<h4><a id="_state_and_event"></a>state_* and event<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.7/metricbeat/docs/modules/kubernetes.asciidoc">edit</a></h4>
+<p>All metricsets with the <code class="literal">state_</code> prefix require <code class="literal">hosts</code> field pointing to <code class="literal">kube-state-metrics
+service</code> within the cluster. As the service provides cluster-wide metrics, there&#8217;s no need to fetch them per node, hence the recommendation is to run these metricsets as part of a <code class="literal">Metricbeat Deployment</code> with one only replica.</p>
+<p>Note: Kube-state-metrics is not deployed by default in Kubernetes. For these cases the instructions for its deployment are available <a href="https://github.com/kubernetes/kube-state-metrics#kubernetes-deployment" class="ulink" target="_top">here</a>. Generally <code class="literal">kube-state-metrics</code> runs a <code class="literal">Deployment</code> and is accessible via a service called <code class="literal">kube-state-metrics</code> on <code class="literal">kube-system</code> namespace, which will be the service to use in our configuration.</p>
+<h4><a id="_apiserver"></a>apiserver<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.7/metricbeat/docs/modules/kubernetes.asciidoc">edit</a></h4>
+<p>The apiserver metricset requires access to the Kubernetes API, which should be easily available in all Kubernetes environments. Depending on the Kubernetes configuration, the API access might require SSL (<code class="literal">https</code>) and token based authentication.</p>
+<h4><a id="_proxy"></a>proxy<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.7/metricbeat/docs/modules/kubernetes.asciidoc">edit</a></h4>
+<p>The proxy metricset requires access to the proxy endpoint in each of Kubernetes nodes, hence it&#8217;s recommended to configure it as a part of a <code class="literal">Metricbeat DaemonSet</code>.</p>
+<h4><a id="_scheduler_and_controllermanager"></a>scheduler and controllermanager<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.7/metricbeat/docs/modules/kubernetes.asciidoc">edit</a></h4>
+<p>These metricsets require access to the Kubernetes <code class="literal">controller-manager</code> and <code class="literal">scheduler</code> endpoints. By default, these pods run only on master nodes, and they are not exposed via a Service, but there are different strategies available for its configuration:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Create <code class="literal">Kubernetes Services</code> to make <code class="literal">kube-controller-manager</code> and <code class="literal">kube-scheduler</code> available and configure the metricsets to point to these services as part of a Metricbeat <code class="literal">Deployment</code>.
+</li>
+<li class="listitem">
+Use <code class="literal">Autodiscovery</code> functionality as part of a Metricbeat DaemonSet and include the metricsets in a conditional template applied for the specific pods.
+</li>
+</ul>
+</div>
+<p>Note: In some "As a Service" Kubernetes implementations, like <code class="literal">GKE</code>, the master nodes or even the pods running on the masters won&#8217;t be visible. In these cases it won&#8217;t be possible to use <code class="literal">scheduler</code> and <code class="literal">controllermanager</code> metricsets.</p>
 <h3><a id="_kubernetes_rbac"></a>Kubernetes RBAC<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.7/metricbeat/docs/modules/kubernetes.asciidoc">edit</a></h3>
 <p>Metricbeat requires certain cluster level privileges in order to fetch the metrics. The following example creates a <code class="literal">ServiceAcount</code> named <code class="literal">metricbeat</code> with the necessary permissions to run all the metricsets from the module. A <code class="literal">ClusterRole</code> and a <code class="literal">ClusterRoleBinding</code> are created for this purpose:</p>
 <div class="pre_wrapper lang-yaml">
@@ -122,8 +147,7 @@ subjects:
 roleRef:
   kind: ClusterRole
   name: metricbeat
-  apiGroup: rbac.authorization.k8s.io
-[source,yaml]</pre>
+  apiGroup: rbac.authorization.k8s.io</pre>
 </div>
 <h3><a id="_compatibility_28"></a>Compatibility<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.7/metricbeat/docs/modules/kubernetes.asciidoc">edit</a></h3>
 <p>The Kubernetes module is tested with Kubernetes 1.13.x and 1.14.x</p>
@@ -196,7 +220,8 @@ in <a class="xref" href="configuration-metricbeat.html" title="Configure modules
     - state_persistentvolume
     - state_persistentvolumeclaim
     - state_storageclass
-  period: 10s
+    # Uncomment this to get k8s events:
+    #- event  period: 10s
   hosts: ["kube-state-metrics:8080"]
 
   # Enriching parameters:
@@ -207,19 +232,19 @@ in <a class="xref" href="configuration-metricbeat.html" title="Configure modules
   # and if not present it will fall back to InCluster
   #kube_config: ~/.kube/config
 
-# Kubernetes events
-- module: kubernetes
-  enabled: true
-  metricsets:
-    - event
-
 # Kubernetes API server
-# (when running metricbeat as a pod)
+# (when running metricbeat as a deployment)
 - module: kubernetes
   enabled: true
   metricsets:
     - apiserver
   hosts: ["https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}"]
+  bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+  ssl.certificate_authorities:
+    - /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+  period: 30s
+
+
 
 # Kubernetes proxy server
 # (when running metricbeat locally at hosts or as a daemonset + host network)
@@ -231,7 +256,7 @@ in <a class="xref" href="configuration-metricbeat.html" title="Configure modules
   period: 10s
 
 # Kubernetes controller manager
-# (URL and deployment will need to be modified to match the controller manager deployment)
+# (URL and deployment method should be adapted to match the controller manager deployment / service / endpoint)
 - module: kubernetes
   enabled: true
   metricsets:
@@ -240,7 +265,7 @@ in <a class="xref" href="configuration-metricbeat.html" title="Configure modules
   period: 10s
 
 # Kubernetes scheduler
-# (URL and deployment method will need to be adapted to match scheduler deployment)
+# (URL and deployment method should be adapted to match scheduler deployment / service / endpoint)
 - module: kubernetes
   enabled: true
   metricsets:
