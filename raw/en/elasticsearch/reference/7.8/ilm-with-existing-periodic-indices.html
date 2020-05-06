@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Managing existing periodic indices with ILM | Elasticsearch Reference [7.8] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.8]"/>
+<link rel="up" href="ilm-with-existing-indices.html" title="Manage existing indices"/>
+<link rel="prev" href="ilm-with-existing-indices.html" title="Manage existing indices"/>
+<link rel="next" href="ilm-reindexing-into-rollover.html" title="Reindexing via ILM"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.8"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.8"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.8]</a></span>
+»
+<span class="breadcrumb-link"><a href="index-lifecycle-management.html">ILM: Manage the index lifecycle</a></span>
+»
+<span class="breadcrumb-link"><a href="ilm-with-existing-indices.html">Manage existing indices</a></span>
+»
+<span class="breadcrumb-node">Managing existing periodic indices with ILM</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="ilm-with-existing-indices.html">« Manage existing indices</a>
+</span>
+<span class="next">
+<a href="ilm-reindexing-into-rollover.html">Reindexing via ILM »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="ilm-with-existing-periodic-indices"></a>Managing existing periodic indices with ILM<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.8/docs/reference/ilm/ilm-with-existing-indices.asciidoc">edit</a></h2>
+</div></div></div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The examples in this section assume daily indices as set up in
+<a class="xref" href="ilm-with-existing-indices.html" title="Manage existing indices">the previous section</a>.</p>
+</div>
+</div>
+<p>The simplest way to manage existing indices while transitioning to fully
+ILM-managed indices is to allow all new indices to be fully managed by
+ILM before attaching ILM policies to existing indices. To do this,
+all new documents should be directed to ILM-managed indices - if you are
+using Beats or Logstash data shippers, upgrading all of those shippers to
+version 7.0.0 or higher will take care of that part for you. If you are not
+using Beats or Logstash, you may need to set up ILM for new indices yourself as
+demonstrated in the <a class="xref" href="getting-started-index-lifecycle-management.html" title="Tutorial: Automate rollover with ILM">ILM tutorial</a>.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If you are using Beats through Logstash, you may need to change your
+Logstash output configuration and invoke the Beats setup to use ILM for new
+data.</p>
+</div>
+</div>
+<p>Once all new documents are being written to fully ILM-managed indices, it
+is easy to add an ILM policy to existing indices. However, there are two
+things to keep in mind when doing this, and a trick that makes those two things
+much easier to handle.</p>
+<p>The two biggest things to keep in mind are:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Existing periodic indices shouldn&#8217;t use policies with rollover, because
+rollover is used to manage where new data goes. Since existing indices should no
+longer be receiving new documents, there is no point to using rollover for them.
+</li>
+<li class="listitem">
+ILM policies attached to existing indices will compare the <code class="literal">min_age</code>
+for each phase to the original creation date of the index, and so might proceed
+through multiple phases immediately.
+</li>
+</ol>
+</div>
+<p>The first one is the most important, because it makes it difficult to use the
+same policy for new and existing periodic indices. But that&#8217;s easy to solve
+with one simple trick: Create a second policy for existing indices, in addition
+to the one for new indices. ILM policies are cheap to create, so don&#8217;t be
+afraid to have more than one. Modifying a policy designed for new indices to be
+used on existing indices is generally very simple: just remove the <code class="literal">rollover</code>
+action.</p>
+<p>For example, if you created a policy for your new indices with each phase
+like so:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ilm/policy/mylogs_policy
+{
+  "policy": {
+    "phases": {
+      "hot": {
+        "actions": {
+          "rollover": {
+            "max_size": "25GB"
+          }
+        }
+      },
+      "warm": {
+        "min_age": "1d",
+        "actions": {
+          "forcemerge": {
+            "max_num_segments": 1
+          }
+        }
+      },
+      "cold": {
+        "min_age": "7d",
+        "actions": {
+          "freeze": {}
+        }
+      },
+      "delete": {
+        "min_age": "30d",
+        "actions": {
+          "delete": {}
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1101.console"></div>
+<p>You can create a policy for pre-existing indices by removing the <code class="literal">rollover</code>
+action, and in this case, the <code class="literal">hot</code> phase is now empty so we can remove that
+too:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ilm/policy/mylogs_policy_existing
+{
+  "policy": {
+    "phases": {
+      "warm": {
+        "min_age": "1d",
+        "actions": {
+          "forcemerge": {
+            "max_num_segments": 1
+          }
+        }
+      },
+      "cold": {
+        "min_age": "7d",
+        "actions": {
+          "freeze": {}
+        }
+      },
+      "delete": {
+        "min_age": "30d",
+        "actions": {
+          "delete": {}
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1102.console"></div>
+<p>Creating a separate policy for existing indices will also allow using different
+<code class="literal">min_age</code> values. You may want to use higher values to prevent many indices from
+running through the policy at once, which may be important if your policy
+includes potentially resource-intensive operations like force merge.</p>
+<p>You can configure the lifecycle for many indices at once by using wildcards in
+the index name when calling the <a class="xref" href="indices-update-settings.html" title="Update index settings API">Update Settings API</a>
+to set the policy name, but be careful that you don&#8217;t include any indices that
+you don&#8217;t want to change the policy for:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT mylogs-pre-ilm*/_settings <a id="CO322-1"></a><i class="conum" data-value="1"></i>
+{
+  "index": {
+    "lifecycle": {
+      "name": "mylogs_policy_existing"
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1103.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO322-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This pattern will match all indices with names that start with
+<code class="literal">mylogs-pre-ilm</code></p>
+</td>
+</tr>
+</table>
+</div>
+<p>Once all pre-ILM indices have aged out and been deleted, the policy for
+older periodic indices can be deleted.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="ilm-with-existing-indices.html">« Manage existing indices</a>
+</span>
+<span class="next">
+<a href="ilm-reindexing-into-rollover.html">Reindexing via ILM »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

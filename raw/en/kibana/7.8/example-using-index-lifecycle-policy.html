@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Tutorial: Use ILM to manage Filebeat time-based indices | Kibana Guide [7.8] | Elastic</title>
+<link rel="home" href="index.html" title="Kibana Guide [7.8]"/>
+<link rel="up" href="index-lifecycle-policies.html" title="Index Lifecycle Policies"/>
+<link rel="prev" href="adding-policy-to-index.html" title="Adding a policy to an index"/>
+<link rel="next" href="managing-indices.html" title="Index Management"/>
+<meta name="DC.type" content="Learn/Docs/Kibana/Reference/7.8"/>
+<meta name="DC.subject" content="Kibana"/>
+<meta name="DC.identifier" content="7.8"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Kibana Guide [7.8]</a></span>
+»
+<span class="breadcrumb-link"><a href="management.html">Management</a></span>
+»
+<span class="breadcrumb-link"><a href="index-lifecycle-policies.html">Index Lifecycle Policies</a></span>
+»
+<span class="breadcrumb-node">Tutorial: Use ILM to manage Filebeat time-based indices</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="adding-policy-to-index.html">« Adding a policy to an index</a>
+</span>
+<span class="next">
+<a href="managing-indices.html">Index Management »</a>
+</span>
+</div>
+<div class="section xpack">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="example-using-index-lifecycle-policy"></a>Tutorial: Use ILM to manage Filebeat time-based indices<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.8/docs/management/index-lifecycle-policies/example-index-lifecycle-policy.asciidoc">edit</a><a class="xpack_tag" href="/subscriptions"></a></h2>
+</div></div></div>
+<p>With index lifecycle management (ILM), you can create policies that perform actions automatically
+on indices as they age and grow. ILM policies help you to manage
+performance, resilience, and retention of your data during its lifecycle. This tutorial shows
+you how to use Kibana’s <span class="strong strong"><strong>Index Lifecycle Policies</strong></span> to modify and create ILM
+policies. You can learn more about all of the actions, benefits, and lifecycle
+phases in the <a href="/guide/en/elasticsearch/reference/7.8/overview-index-lifecycle-management.html" class="ulink" target="_top">ILM overview</a>.</p>
+<h4><a id="example-using-index-lifecycle-policy-scenario"></a>Scenario<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.8/docs/management/index-lifecycle-policies/example-index-lifecycle-policy.asciidoc">edit</a></h4>
+<p>You’re tasked with sending syslog files to an Elasticsearch cluster. This
+log data has the following data retention guidelines:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Keep logs on hot data nodes for 30 days
+</li>
+<li class="listitem">
+Roll over to a new index if the size reaches 50GB
+</li>
+<li class="listitem">
+<p>After 30 days:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Move the logs to warm data nodes
+</li>
+<li class="listitem">
+Set <a href="/guide/en/elasticsearch/reference/7.8/glossary.html#glossary-replica-shard" class="ulink" target="_top">replica shards</a> to 1
+</li>
+<li class="listitem">
+<a href="/guide/en/elasticsearch/reference/7.8/indices-forcemerge.html" class="ulink" target="_top">Force merge</a> multiple index segments to free up the space used by deleted documents
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+Delete logs after 90 days
+</li>
+</ul>
+</div>
+<h4><a id="example-using-index-lifecycle-policy-prerequisites"></a>Prerequisites<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.8/docs/management/index-lifecycle-policies/example-index-lifecycle-policy.asciidoc">edit</a></h4>
+<p>To complete this tutorial, you&#8217;ll need:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>An Elasticsearch cluster with hot and warm nodes configured for shard allocation
+awareness. If you’re using <a href="/guide/en/cloud/current/ec-getting-started-templates-hot-warm.html" class="ulink" target="_top">Elasticsearch Service</a>,
+choose the hot-warm architecture deployment template.</p>
+<p>For a self-managed cluster, add node attributes as described for <a href="/guide/en/elasticsearch/reference/7.8/shard-allocation-filtering.html" class="ulink" target="_top">shard allocation filtering</a>
+to label data nodes as hot or warm. This step is required to migrate shards between
+nodes configured with specific hardware for the hot or warm phases.</p>
+<p>For example, you can set this in your <code class="literal">elasticsearch.yml</code> for each data node:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">node.attr.data: "warm"</pre>
+</div>
+</li>
+<li class="listitem">
+A server with Filebeat installed and configured to send logs to the <code class="literal">elasticsearch</code>
+output as described in <a href="/guide/en/beats/filebeat/7.8/filebeat-getting-started.html" class="ulink" target="_top">Getting Started with Filebeat</a>.
+</li>
+</ul>
+</div>
+<h4><a id="example-using-index-lifecycle-policy-view-fb-ilm-policy"></a>View the Filebeat ILM policy<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.8/docs/management/index-lifecycle-policies/example-index-lifecycle-policy.asciidoc">edit</a></h4>
+<p>Filebeat includes a default ILM policy that enables rollover. ILM
+is enabled automatically if you’re using the default <code class="literal">filebeat.yml</code> and index template.</p>
+<p>To view the default policy in Kibana, go to <span class="strong strong"><strong>Management &gt; Index Lifecycle Policies</strong></span>,
+search for <em>filebeat</em>, and choose the <em>filebeat-version</em> policy.</p>
+<p>This policy initiates the rollover action when the index size reaches 50GB or
+becomes 30 days old.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/tutorial-ilm-hotphaserollover-default.png" alt="Default policy">
+</div>
+</div>
+<h4><a id="_modify_the_policy"></a>Modify the policy<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.8/docs/management/index-lifecycle-policies/example-index-lifecycle-policy.asciidoc">edit</a></h4>
+<p>The default policy is enough to prevent the creation of many tiny daily indices.
+You can modify the policy to meet more complex requirements.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Activate the warm phase.
+</li>
+<li class="listitem">
+<p>Set either of the following options to control when the index moves to the warm phase:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Provide a value for <span class="strong strong"><strong>Timing for warm phase</strong></span>. Setting this to <span class="strong strong"><strong>15</strong></span> keeps the
+indices on hot nodes for a range of  15-45 days, depending on when the initial
+rollover occurred.
+</li>
+<li class="listitem">
+Enable <span class="strong strong"><strong>Move to warm phase on rollover</strong></span>. The index might move to the warm phase
+more quickly than intended if it reaches the <span class="strong strong"><strong>Maximum index size</strong></span> before the
+the <span class="strong strong"><strong>Maximum age</strong></span>.
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+In the <span class="strong strong"><strong>Select a node attribute to control shard allocation</strong></span> dropdown, select
+<span class="strong strong"><strong>data:warm(2)</strong></span> to migrate shards to warm data nodes.
+</li>
+<li class="listitem">
+Change <span class="strong strong"><strong>Number of replicas</strong></span> to <span class="strong strong"><strong>1</strong></span>.
+</li>
+<li class="listitem">
+<p>Enable <span class="strong strong"><strong>Force merge data</strong></span> and set <span class="strong strong"><strong>Number of segments</strong></span> to <span class="strong strong"><strong>1</strong></span>.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>When rollover is enabled in the hot phase, action timing in the other phases
+is based on the rollover date.</p>
+</div>
+</div>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/tutorial-ilm-modify-default-warm-phase-rollover.png" alt="Modify to add warm phase">
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Activate the delete phase and set <span class="strong strong"><strong>Timing for delete phase</strong></span> to <span class="strong strong"><strong>90</strong></span> days.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/tutorial-ilm-delete-rollover.png" alt="Add a delete phase">
+</div>
+</div>
+</li>
+</ol>
+</div>
+<h4><a id="_create_a_custom_policy"></a>Create a custom policy<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.8/docs/management/index-lifecycle-policies/example-index-lifecycle-policy.asciidoc">edit</a></h4>
+<p>If meeting a specific retention time period is most important, you can create a
+custom policy.  For this option, you will use Filebeat daily indices without
+rollover.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Create a custom policy in Kibana, go to <span class="strong strong"><strong>Management &gt; Index Lifecycle Policies &gt;
+Create Policy</strong></span>.
+</li>
+<li class="listitem">
+<p>Activate the warm phase and configure it as follows:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top"><span class="strong strong"><strong>Setting</strong></span></th>
+<th align="left" valign="top"><span class="strong strong"><strong>Value</strong></span></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>Timing for warm phase</p></td>
+<td align="left" valign="top"><p>30 days from index creation</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>Node attribute</p></td>
+<td align="left" valign="top"><p><code class="literal">data:warm</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>Number of replicas</p></td>
+<td align="left" valign="top"><p>1</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>Force merge data</p></td>
+<td align="left" valign="top"><p>enable</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>Number of segments</p></td>
+<td align="left" valign="top"><p>1</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/tutorial-ilm-custom-policy.png" alt="Modify the custom policy to add a warm phase">
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Activate the delete phase and set the timing.</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Setting</strong></span></p></td>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Value</strong></span></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>Timing for delete phase</p></td>
+<td align="left" valign="top"><p>90</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/tutorial-ilm-delete-phase-creation.png" alt="Delete phase">
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Configure the index to use the new policy in <span class="strong strong"><strong>Kibana &gt; Management &gt; Index Lifecycle
+Policies</strong></span></p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Find your ILM policy.
+</li>
+<li class="listitem">
+Click the <span class="strong strong"><strong>Actions</strong></span> link next to your policy name.
+</li>
+<li class="listitem">
+Choose <span class="strong strong"><strong>Add policy to index template</strong></span>.
+</li>
+<li class="listitem">
+Select your Filebeat index template name from the <span class="strong strong"><strong>Index template</strong></span> list. For example, <code class="literal">filebeat-7.5.x</code>.
+</li>
+<li class="listitem">
+<p>Click <span class="strong strong"><strong>Add Policy</strong></span> to save the changes.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If you initially used the default Filebeat ILM policy, you will
+see a notice that the template already has a policy associated with it. Confirm
+that you want to overwrite that configuration.</p>
+</div>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>When you change the policy associated with the index template, the active
+index will continue to use the policy it was associated with at index creation
+unless you manually update it. The next new index will use the updated policy.
+For more reasons that your ILM policy changes might be delayed, see
+<a href="/guide/en/elasticsearch/reference/7.8/update-lifecycle-policy.html#update-lifecycle-policy" class="ulink" target="_top">Update Lifecycle Policy</a>.</p>
+</div>
+</div>
+</li>
+</ol>
+</div>
+</li>
+</ol>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="adding-policy-to-index.html">« Adding a policy to an index</a>
+</span>
+<span class="next">
+<a href="managing-indices.html">Index Management »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
