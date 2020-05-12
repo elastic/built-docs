@@ -6,7 +6,7 @@
 <link rel="home" href="index.html" title="APM .NET Agent Reference [master]"/>
 <link rel="up" href="index.html" title="APM .NET Agent Reference [master]"/>
 <link rel="prev" href="performance-tuning.html" title="Performance tuning"/>
-<link rel="next" href="_collecting_agent_logs.html" title="Collecting agent logs"/>
+<link rel="next" href="upgrading.html" title="Upgrading"/>
 <meta name="DC.type" content="Learn/Docs/APM .NET Agent/Reference/master"/>
 <meta name="DC.subject" content="APM"/>
 <meta name="DC.identifier" content="master"/>
@@ -27,7 +27,7 @@ Not what you want? See the
 <a href="performance-tuning.html">« Performance tuning</a>
 </span>
 <span class="next">
-<a href="_collecting_agent_logs.html">Collecting agent logs »</a>
+<a href="upgrading.html">Upgrading »</a>
 </span>
 </div>
 <div class="chapter">
@@ -53,14 +53,67 @@ The logs should include everything from the application startup up until the fir
 <p>If neither errors nor performance metrics are being sent to the APM Server,
 it&#8217;s a good idea to first check your logs and look for output just as the app starts.</p>
 <p>If you don&#8217;t see anything suspicious in the agent logs (no warning or error), it&#8217;s recommended to turn the log level to <code class="literal">Trace</code> for further investigation.</p>
+<h3><a id="collect-agent-logs"></a>Collecting agent logs<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-dotnet/edit/master/docs/troubleshooting.asciidoc">edit</a></h3>
+<p>The way to collect logs depends on the setup of your application.</p>
+<h4><a id="collect-logs-core"></a>ASP.NET Core<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-dotnet/edit/master/docs/troubleshooting.asciidoc">edit</a></h4>
+<p>When the Agent is activated with <code class="literal">UseAllElasticApm</code> or <code class="literal">UseElasticApm</code>, it will integrate with the
+<a href="https://docs.microsoft.com/en-us/aspnet/core/fundamentals/logging/?view=aspnetcore-3.1" class="ulink" target="_top">ASP.NET Core logging infrastructure</a>.
+This means the Agent will pick up the configured logging provider and log as any other component logs.</p>
+<h4><a id="collect-logs-classic"></a>ASP.NET Classic<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-dotnet/edit/master/docs/troubleshooting.asciidoc">edit</a></h4>
+<p>Unlike ASP.NET Core, ASP.NET (classic) does not have a predefined logging system.
+However, if you have a logging system in place, like NLog, Serilog, or similar, you can direct the agent logs into your
+logging system by creating a bridge between the agent&#8217;s internal logger and your logging system.</p>
+<p>First implement the <code class="literal">IApmLogger</code> interface from the <code class="literal">Elastic.Apm.Logging</code> namespace:</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">internal class ApmLoggerBridge : IApmLogger
+{
+	private readonly Lazy&lt;Logger&gt; _logger;
+	public bool IsEnabled(ApmLogLevel level)
+	{
+		// Check for log level here.
+		// Typically you just compare the configured log level of your logger
+		// to the input parameter of this method and return if it's the same/higher or not
+	}
 
+	public void Log&lt;TState&gt;(ApmLogLevel apmLogLevel, TState state, Exception e, Func&lt;TState, Exception, string&gt; formatter)
+	{
+		// You can log the given log into your logging system here.
+	}
+}</pre>
+</div>
+<p>An example implementation for NLog can be seen <a href="https://github.com/elastic/apm-agent-dotnet/blob/master/sample/AspNetFullFrameworkSampleApp/App_Start/ApmLoggerToNLog.cs" class="ulink" target="_top">in our GitHub repository</a>.</p>
+<p>Then tell the agent to use the <code class="literal">ApmLoggerBridge</code>.</p>
+<p>For this in ASP.NET (classic) you need to place the following code into the <code class="literal">Application_Start</code> method in the <code class="literal">HttpApplication</code> implementation of your app which is typically in the <code class="literal">Global.asx.cs</code> file:</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">AgentDependencies.Logger = new ApmLoggerBridge();</pre>
+</div>
+<p>The <code class="literal">AgentDependencies</code> class lives in the <code class="literal">Elastic.Apm.AspNetFullFramework</code> namespace.
+During initialization, the agent checks if an additional logger was configured&#8212;&#8203;the agent only does this once, so it&#8217;s important to set it as early in the process as possible (typically in the <code class="literal">Application_Start</code> method).</p>
+<h4><a id="collect-logs-general"></a>General .NET applications<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-dotnet/edit/master/docs/troubleshooting.asciidoc">edit</a></h4>
+<p>If none of the above cases apply to your application, you can still use a bridge and redirect agent logs into a .NET logging system (like NLog, Serilog, or similar).</p>
+<p>For this you&#8217;ll need an <code class="literal">IApmLogger</code> implementation (see above) which you need to pass to the <code class="literal">Setup</code> method during agent setup:</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">Agent.Setup(new AgentComponents(logger: new ApmLoggerBridge()));</pre>
+</div>
+<h3><a id="double-agent-initialization"></a>An <code class="literal">InstanceAlreadyCreatedException</code> exception is thrown<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-dotnet/edit/master/docs/troubleshooting.asciidoc">edit</a></h3>
+<p>In the early stage of a monitored process, the Agent might throw an <code class="literal">InstanceAlreadyCreatedException</code> exception with the following message: "The singleton APM agent has already been instantiated and can no longer be configured." This happens when you attempt to initialize the Agent multiple times, which is prohibited. Allowing multiple Agent instances per process would open up problems, like capturing events and metrics multiple times for each instance, or having multiple background threads for event serialization and transfer to the APM Server.</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Take a look at the initialization section of the <a class="xref" href="public-api.html" title="Public API">Public Agent API</a> for more information on how agent initialization works.</p>
+</div>
+</div>
+<p>As an example, this issue can happen if you call the <code class="literal">Elastic.Apm.Agent.Setup</code> method multiple times, or if you call another method on <code class="literal">Elastic.Apm.Agent</code> that implicitly initializes the agent, and then you call the <code class="literal">Elastic.Apm.Agent.Setup</code> method on the already initialized agent.</p>
+<p>Another example might be when you use the Public Agent API in combination with the IIS module or the ASP.NET Core NuGet package, where you enable the agent with the <code class="literal">UseElasticApm</code> or <code class="literal">UseAllElasticApm</code> methods. Both the first call to the IIS module and the <code class="literal">UseElasticApm</code>/<code class="literal">UseAllElasticApm</code> methods internally call the <code class="literal">Elastic.Apm.Agent.Setup</code> method to initialize the agent.</p>
+<p>You may use the Public Agent API with the <code class="literal">Elastic.Apm.Agent</code> class in code that can potentially execute before the IIS module initializes or the <code class="literal">UseElasticApm</code>/<code class="literal">UseAllElasticApm</code> calls execute. If that happens, those will fail, as the Agent has been implicitly initialized already.</p>
+<p>To prevent the <code class="literal">InstanceAlreadyCreatedException</code> in these scenarios, first use the <code class="literal">Elastic.Apm.Agent.IsConfigured</code> method to check if the agent is already initialized. After the check, you can safely use other methods in the Public Agent API. This will prevent accidental implicit agent initialization.</p>
 </div>
 <div class="navfooter">
 <span class="prev">
 <a href="performance-tuning.html">« Performance tuning</a>
 </span>
 <span class="next">
-<a href="_collecting_agent_logs.html">Collecting agent logs »</a>
+<a href="upgrading.html">Upgrading »</a>
 </span>
 </div>
 </div>
