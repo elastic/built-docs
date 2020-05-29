@@ -51,6 +51,9 @@ All of this can be done directly from the <code class="literal">apm-server.yml</
 <a class="xref" href="ilm.html#ilm-setup" title="Set up ILM with APM Server">Set up ILM with APM Server</a>
 </li>
 <li class="listitem">
+<a class="xref" href="ilm.html#custom-ilm-alias" title="Create a custom ILM rollover_alias">Create a custom ILM <code class="literal">rollover_alias</code></a>
+</li>
+<li class="listitem">
 <a class="xref" href="ilm.html#custom-ilm-policy" title="Create a custom ILM policy">Create a custom ILM policy</a>
 </li>
 <li class="listitem">
@@ -101,6 +104,47 @@ to <code class="literal">true</code>.</p>
       enabled: true</pre>
 </div>
 <p>ILM can now be customized via the remaining <code class="literal">apm-server.ilm.setup.*</code> configuration options.</p>
+<h4><a id="custom-ilm-alias"></a>Create a custom ILM <code class="literal">rollover_alias</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/master/docs/ilm.asciidoc">edit</a></h4>
+<p>You can define a custom rollover alias per event type. The rollover alias can only contain a
+restricted set of variables, limited to variables concerning <code class="literal">observer.*</code>. In case other
+variables are configured, the server will refuse to start.
+The related ILM policy can specify a rollover action, e.g. when an index reaches a size of 50GB
+it should roll over to create a new index. The <code class="literal">rollover_alias</code> abstracts away the concrete write index, while
+automatically being updated and keeping track of the current write index.
+This allows to use the <code class="literal">rollover_alias</code> instead of specific indices in queries.</p>
+<p>For example when defining a rollover alias with name <code class="literal">apm-7.8.0-transaction</code>, an alias pointing to a write index
+<code class="literal">apm-7.8.0-transaction-000001</code> is created. When the index reaches the defined size or age it will roll over to
+a new index <code class="literal">apm-7.8.0-transaction-000002</code>. The rollover alias <code class="literal">apm-7.8.0-transaction</code> keeps
+track of which index is the write index when ingesting data.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Ensure that the configured <code class="literal">rollover_alias</code> for all event types start with the same prefix,
+and that this prefix is also configured for <code class="literal">setup.template.name</code> and <code class="literal">setup.template.pattern</code>.
+If the template configuration is not accordingly changed, the Elasticsearch index template with
+the predefined mappings will not match against created indices, leading to indexing issues.</p>
+</div>
+</div>
+<p>The example below shows how to change the <code class="literal">rollover_alias</code> to a custom value,
+and set the template configuration to a matching name and pattern.</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">apm-server:
+  ilm:
+    enabled: "auto"
+    setup:
+      mapping:
+        - event_type: "error"
+          rollover_alias: "apm-dev-error"
+        - event_type: "span"
+          rollover_alias: "apm-dev-span"
+        - event_type: "transaction"
+          rollover_alias: "apm-dev-transaction"
+        - event_type: "metric"
+          rollover_alias: "apm-dev-metric"
+
+setup.template.name: "apm-dev"
+setup.template.pattern: "apm-dev*"</pre>
+</div>
 <h4><a id="custom-ilm-policy"></a>Create a custom ILM policy<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/master/docs/ilm.asciidoc">edit</a></h4>
 <p>You can define as many policies as you&#8217;d like, but they only need to be created once,
 and will persist through version upgrades.
@@ -216,6 +260,7 @@ and another for <code class="literal">transactions</code> and <code class="liter
 and a delete phase after 30 days.
 The <code class="literal">apm-transaction-metric-policy</code> keeps data in the hot, warm, and cold phases for a longer period of time,
 and does not delete any data.</p>
+<p>Additionally this example shows how to set custom rollover aliases.</p>
 <div class="pre_wrapper lang-yml">
 <pre class="programlisting prettyprint lang-yml">  ilm:
     enabled: "auto"
@@ -223,12 +268,16 @@ and does not delete any data.</p>
       mapping:
         - event_type: "error"
           policy_name: "apm-error-span-policy"
+          rollover_alias: "apm-%{[observer.version]}-development-error"
         - event_type: "span"
           policy_name: "apm-error-span-policy"
+          rollover_alias: "apm-%{[observer.version]}-development-span"
         - event_type: "transaction"
           policy_name: "apm-transaction-metric-policy"
+          rollover_alias: "apm-%{[observer.version]}-development-transaction"
         - event_type: "metric"
           policy_name: "apm-transaction-metric-policy"
+          rollover_alias: "apm-%{[observer.version]}-development-metric"
       enabled: true
       policies:
         - name: "apm-error-span-policy"
