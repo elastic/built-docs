@@ -51,7 +51,7 @@ All of this can be done directly from the <code class="literal">apm-server.yml</
 <a class="xref" href="ilm.html#ilm-setup" title="Set up ILM with APM Server">Set up ILM with APM Server</a>
 </li>
 <li class="listitem">
-<a class="xref" href="ilm.html#custom-ilm-alias" title="Create a custom ILM rollover_alias">Create a custom ILM <code class="literal">rollover_alias</code></a>
+<a class="xref" href="ilm.html#custom-ilm-index-suffix" title="Create a custom ILM index_suffix">Create a custom ILM <code class="literal">index_suffix</code></a>
 </li>
 <li class="listitem">
 <a class="xref" href="ilm.html#custom-ilm-policy" title="Create a custom ILM policy">Create a custom ILM policy</a>
@@ -104,29 +104,45 @@ to <code class="literal">true</code>.</p>
       enabled: true</pre>
 </div>
 <p>ILM can now be customized via the remaining <code class="literal">apm-server.ilm.setup.*</code> configuration options.</p>
-<h4><a id="custom-ilm-alias"></a>Create a custom ILM <code class="literal">rollover_alias</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/master/docs/ilm.asciidoc">edit</a></h4>
-<p>You can define a custom rollover alias per event type. The rollover alias can only contain a
-restricted set of variables, limited to variables concerning <code class="literal">observer.*</code>. In case other
-variables are configured, the server will refuse to start.
-The related ILM policy can specify a rollover action, e.g. when an index reaches a size of 50GB
-it should roll over to create a new index. The <code class="literal">rollover_alias</code> abstracts away the concrete write index, while
+<h4><a id="custom-ilm-index-suffix"></a>Create a custom ILM <code class="literal">index_suffix</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/master/docs/ilm.asciidoc">edit</a></h4>
+<p>You can define a custom index suffix for each event type. The index suffix is limited to variables
+concerning <code class="literal">observer.*</code>; if other variables are configured, the server will refuse to start.
+The resulting rollover alias and index name will be of type <code class="literal">apm-{version}-{event_type}-{custom_index_suffix},
+e.g., `apm-7.9.0-span-foo</code>.
+The mapped ILM policy can specify a rollover action, e.g., when an index reaches a size of 50GB,
+it should roll over to create a new index. The rollover alias abstracts away the concrete write index, while
 automatically being updated and keeping track of the current write index.
-This allows to use the <code class="literal">rollover_alias</code> instead of specific indices in queries.</p>
-<p>For example when defining a rollover alias with name <code class="literal">apm-7.8.0-transaction</code>, an alias pointing to a write index
-<code class="literal">apm-7.8.0-transaction-000001</code> is created. When the index reaches the defined size or age it will roll over to
-a new index <code class="literal">apm-7.8.0-transaction-000002</code>. The rollover alias <code class="literal">apm-7.8.0-transaction</code> keeps
-track of which index is the write index when ingesting data.</p>
+This allows you to use the rollover alias instead of specific indices in queries.</p>
+<p>For example, the default rollover alias for event type <code class="literal">transaction</code> would be <code class="literal">apm-7.8.0-transaction</code>. This alias points
+to a write index named <code class="literal">apm-7.8.0-transaction-000001</code>. When this index reaches its defined size or age, it will roll over to
+a new index named <code class="literal">apm-7.8.0-transaction-000002</code>. The rollover alias of <code class="literal">apm-7.8.0-transaction</code> keeps
+track of which index is the current write index while ingesting data.</p>
 <div class="note admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>Ensure that the configured <code class="literal">rollover_alias</code> for all event types start with the same prefix,
-and that this prefix is also configured for <code class="literal">setup.template.name</code> and <code class="literal">setup.template.pattern</code>.
-If the template configuration is not accordingly changed, the Elasticsearch index template with
-the predefined mappings will not match against created indices, leading to indexing issues.</p>
+<p>Manually ensure that templates containing customized index information do not conflict with each other
+or the default templates.</p>
 </div>
 </div>
-<p>The example below shows how to change the <code class="literal">rollover_alias</code> to a custom value,
-and set the template configuration to a matching name and pattern.</p>
+<p>By default, the APM Server creates a template without a custom index suffix per event type. When defining custom
+index suffixes, always ensure that templates, that might have been set up previously, are removed or do not conflict.
+A conflicting behavior could occur when an index matches multiple templates with the same <code class="literal">order</code>.
+For example, the APM Server was started without any customization, leading to a default index setup. Afterward, the
+Server configuration is customized to add the index suffix <code class="literal">production</code> for the event type <code class="literal">span</code>.
+When the Server restarts, it will set up a new index template based on the new custom index suffix.
+A newly created index named <code class="literal">apm-server-7.9.0-span-production</code> would now match the default template with the index pattern of
+<code class="literal">apm-server-7.9.0-span*</code>, but also the new template with the index pattern <code class="literal">apm-server-7.9.0-span-production*</code>.
+In this case, the old template needs to be manually deleted,
+or the <code class="literal">index_pattern</code> or <code class="literal">order</code> need to be changed to avoid conflicts.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If you customize <code class="literal">setup.template.pattern</code>, ensure that the configured pattern
+still matches the rollover aliases. If it doesn&#8217;t, the Elasticsearch index template with the predefined mappings will
+not match against created indices, leading to indexing issues.</p>
+</div>
+</div>
+<p>The example below shows how to change the <code class="literal">index_suffix</code> to a custom value.</p>
 <div class="pre_wrapper lang-yml">
 <pre class="programlisting prettyprint lang-yml">apm-server:
   ilm:
@@ -134,16 +150,13 @@ and set the template configuration to a matching name and pattern.</p>
     setup:
       mapping:
         - event_type: "error"
-          rollover_alias: "apm-dev-error"
+          index_suffix: "dev"
         - event_type: "span"
-          rollover_alias: "apm-dev-span"
+          index_suffix: "dev"
         - event_type: "transaction"
-          rollover_alias: "apm-dev-transaction"
+          index_suffix: "dev"
         - event_type: "metric"
-          rollover_alias: "apm-dev-metric"
-
-setup.template.name: "apm-dev"
-setup.template.pattern: "apm-dev*"</pre>
+          index_suffix: "dev"</pre>
 </div>
 <h4><a id="custom-ilm-policy"></a>Create a custom ILM policy<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/master/docs/ilm.asciidoc">edit</a></h4>
 <p>You can define as many policies as you&#8217;d like, but they only need to be created once,
@@ -268,16 +281,16 @@ and does not delete any data.</p>
       mapping:
         - event_type: "error"
           policy_name: "apm-error-span-policy"
-          rollover_alias: "apm-%{[observer.version]}-development-error"
+          index_suffix: "development"
         - event_type: "span"
           policy_name: "apm-error-span-policy"
-          rollover_alias: "apm-%{[observer.version]}-development-span"
+          index_suffix: "development"
         - event_type: "transaction"
           policy_name: "apm-transaction-metric-policy"
-          rollover_alias: "apm-%{[observer.version]}-development-transaction"
+          index_suffix: "development"
         - event_type: "metric"
           policy_name: "apm-transaction-metric-policy"
-          rollover_alias: "apm-%{[observer.version]}-development-metric"
+          index_suffix: "development"
       enabled: true
       policies:
         - name: "apm-error-span-policy"
