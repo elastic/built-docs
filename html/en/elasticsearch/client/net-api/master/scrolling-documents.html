@@ -3,11 +3,11 @@
   <head>
     
 <meta charset="UTF-8">
-<title>Logging with Fiddler | Elasticsearch.Net and NEST: the .NET clients [master] | Elastic</title>
+<title>Scrolling documents | Elasticsearch.Net and NEST: the .NET clients [master] | Elastic</title>
 <link rel="home" href="index.html" title="Elasticsearch.Net and NEST: the .NET clients [master]"/>
-<link rel="up" href="logging.html" title="Logging"/>
-<link rel="prev" href="diagnostic-source.html" title="Diagnostic Source"/>
-<link rel="next" href="deprecation-logging.html" title="Deprecation logging"/>
+<link rel="up" href="search.html" title="Search"/>
+<link rel="prev" href="returned-fields.html" title="Selecting fields to return"/>
+<link rel="next" href="covariant-search-results.html" title="Covariant search results"/>
 <meta name="DC.type" content="Learn/Docs/Clients/.Net/master"/>
 <meta name="DC.subject" content="Clients"/>
 <meta name="DC.identifier" content="master"/>
@@ -113,90 +113,225 @@ Not what you want? See the
 <div class="breadcrumbs">
 <span class="breadcrumb-link"><a href="index.html">Elasticsearch.Net and NEST:  the .NET clients [master]</a></span>
 »
-<span class="breadcrumb-link"><a href="troubleshooting.html">Troubleshooting</a></span>
+<span class="breadcrumb-link"><a href="nest.html">NEST - High level client</a></span>
 »
-<span class="breadcrumb-link"><a href="logging.html">Logging</a></span>
+<span class="breadcrumb-link"><a href="search.html">Search</a></span>
 »
-<span class="breadcrumb-node">Logging with Fiddler</span>
+<span class="breadcrumb-node">Scrolling documents</span>
 </div>
 <div class="navheader">
 <span class="prev">
-<a href="diagnostic-source.html">« Diagnostic Source</a>
+<a href="returned-fields.html">« Selecting fields to return</a>
 </span>
 <span class="next">
-<a href="deprecation-logging.html">Deprecation logging »</a>
+<a href="covariant-search-results.html">Covariant search results »</a>
 </span>
 </div>
 <div class="section">
 <div class="titlepage"><div><div>
-<h2 class="title"><a id="logging-with-fiddler"></a>Logging with Fiddler<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/master/docs/client-concepts/troubleshooting/logging-with-fiddler.asciidoc">edit</a></h2>
+<h2 class="title"><a id="scrolling-documents"></a>Scrolling documents<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/master/docs/search/scrolling-documents.asciidoc">edit</a></h2>
 </div></div></div>
-<p>A web debugging proxy such as <a href="http://www.telerik.com/fiddler" class="ulink" target="_top">Fiddler</a> is a useful way to capture HTTP traffic
-from a machine, particularly whilst developing against a local Elasticsearch cluster.</p>
+<p>The scroll API can be used to return a large collection of documents from Elasticsearch.</p>
+<p>NEST exposes the scroll API and an observable scroll implementation that can be used
+to write concurrent scroll requests.</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<h3 class="title"><a id="_capturing_traffic_to_a_remote_cluster"></a>Capturing traffic to a remote cluster<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/master/docs/client-concepts/troubleshooting/logging-with-fiddler.asciidoc">edit</a></h3>
+<h3 class="title"><a id="_simple_use"></a>Simple use<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/master/docs/search/scrolling-documents.asciidoc">edit</a></h3>
 </div></div></div>
-<p>To capture traffic against a remote cluster is as simple as launching Fiddler! You may want to also
-filter traffic to only show requests to the remote cluster by using the filters tab</p>
-<div class="imageblock">
-<div class="content">
-<img src="capture-requests-remotehost.png" alt="Capturing requests to a remote host">
-</div>
-</div>
-</div>
-
-<div class="section">
-<div class="titlepage"><div><div>
-<h3 class="title"><a id="_capturing_traffic_to_a_local_cluster"></a>Capturing traffic to a local cluster<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/master/docs/client-concepts/troubleshooting/logging-with-fiddler.asciidoc">edit</a></h3>
-</div></div></div>
-<p>The .NET Framework is hardcoded not to send requests for <code class="literal">localhost</code> through any proxies and as a proxy
-Fiddler will not receive such traffic.</p>
-<p>This is easily circumvented by using <code class="literal">ipv4.fiddler</code> as the hostname instead of <code class="literal">localhost</code></p>
+<p>The simplest use of the scroll API is to perform a search request with a
+scroll timeout, then pass the scroll id returned in each response to
+the next request to the scroll API, until no more documents are returned</p>
 <div class="pre_wrapper lang-csharp">
-<pre class="programlisting prettyprint lang-csharp">var isFiddlerRunning = Process.GetProcessesByName("fiddler").Any();
-var host = isFiddlerRunning ? "ipv4.fiddler" : "localhost";
+<pre class="programlisting prettyprint lang-csharp">var searchResponse = Client.Search&lt;Project&gt;(s =&gt; s
+    .Query(q =&gt; q
+        .Term(f =&gt; f.State, StateOfBeing.Stable)
+    )
+    .Scroll("10s") <a id="CO74-1"></a><i class="conum" data-value="1"></i>
+);
 
-var connectionSettings = new ConnectionSettings(new Uri($"http://{host}:9200"))
-    .PrettyJson(); <a id="CO95-1"></a><i class="conum" data-value="1"></i>
-
-var client = new ElasticClient(connectionSettings);</pre>
+while (searchResponse.Documents.Any()) <a id="CO74-2"></a><i class="conum" data-value="2"></i>
+{
+    ProcessResponse(searchResponse); <a id="CO74-3"></a><i class="conum" data-value="3"></i>
+    searchResponse = Client.Scroll&lt;Project&gt;("10s", searchResponse.ScrollId);
+}</pre>
 </div>
 <div class="calloutlist">
 <table border="0" summary="Callout list">
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO95-1"><i class="conum" data-value="1"></i></a></p>
+<p><a href="#CO74-1"><i class="conum" data-value="1"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>prettify json requests and responses to make them easier to read in Fiddler</p>
+<p>Specify a scroll time for how long Elasticsearch should keep this scroll open on the server side. The time specified should be sufficient to process the response on the client side.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO74-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>make subsequent requests to the scroll API to keep fetching documents, whilst documents are returned</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO74-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>do something with the response</p>
 </td>
 </tr>
 </table>
 </div>
-<p>With Fiddler running, the requests and responses will now be captured and can be inspected in the
-Inspectors tab</p>
-<div class="imageblock">
-<div class="content">
-<img src="inspect-requests.png" alt="Inspecting requests and responses">
 </div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="scrollall-observable"></a>ScrollAllObservable<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/master/docs/search/scrolling-documents.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Similar to <a class="xref" href="indexing-documents.html#bulkall-observable" title="Multiple documents with BulkAllObservable helper"><code class="literal">BulkAllObservable</code></a> for bulk indexing a large number of documents,
+NEST exposes an observable scroll implementation, <code class="literal">ScrollAllObservable</code>, that can be used
+to write concurrent scroll requests. <code class="literal">ScrollAllObservable</code> uses sliced scrolls to split the scroll into
+multiple slices that can be consumed concurrently.</p>
+<p>The simplest use of <code class="literal">ScrollAllObservable</code> is</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">int numberOfSlices = Environment.ProcessorCount; <a id="CO75-1"></a><i class="conum" data-value="1"></i>
+
+var scrollAllObservable = Client.ScrollAll&lt;Project&gt;("10s", numberOfSlices, sc =&gt; sc
+    .MaxDegreeOfParallelism(numberOfSlices) <a id="CO75-2"></a><i class="conum" data-value="2"></i>
+    .Search(s =&gt; s
+        .Query(q =&gt; q
+            .Term(f =&gt; f.State, StateOfBeing.Stable)
+        )
+    )
+);
+
+scrollAllObservable.Wait(TimeSpan.FromMinutes(10), response =&gt; <a id="CO75-3"></a><i class="conum" data-value="3"></i>
+{
+    ProcessResponse(response.SearchResponse); <a id="CO75-4"></a><i class="conum" data-value="4"></i>
+});</pre>
 </div>
-<p>As before, you may also want to filter traffic to only show requests to <code class="literal">ipv4.fiddler</code> on the port
-on which you are running Elasticsearch.</p>
-<div class="imageblock">
-<div class="content">
-<img src="capture-requests-localhost.png" alt="Capturing requests to localhost">
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO75-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>See <a href="/guide/en/elasticsearch/reference/current/search-request-body.html#sliced-scroll" class="ulink" target="_top">sliced scroll</a> documentation for choosing an appropriate number of slices.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO75-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Number of concurrent sliced scroll requests. Usually want to set this to the same value as the number of slices</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO75-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Total overall time for scrolling <span class="strong strong"><strong>all</strong></span> documents. Ensure this is a sufficient value to scroll all documents</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO75-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>do something with the response</p>
+</td>
+</tr>
+</table>
 </div>
+<p>More control over how the observable is consumed can be achieved by writing
+your own observer and subscribing to the observable, which will initiate scrolling</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">int numberOfSlices = Environment.ProcessorCount;
+
+var scrollAllObservable = Client.ScrollAll&lt;Project&gt;("10s", numberOfSlices, sc =&gt; sc
+    .MaxDegreeOfParallelism(numberOfSlices)
+    .Search(s =&gt; s
+        .Query(q =&gt; q
+            .Term(f =&gt; f.State, StateOfBeing.Stable)
+        )
+    )
+);
+
+var waitHandle = new ManualResetEvent(false);
+ExceptionDispatchInfo info = null;
+
+var scrollAllObserver = new ScrollAllObserver&lt;Project&gt;(
+    onNext: response =&gt; ProcessResponse(response.SearchResponse), <a id="CO76-1"></a><i class="conum" data-value="1"></i>
+    onError: e =&gt;
+    {
+        info = ExceptionDispatchInfo.Capture(e); <a id="CO76-2"></a><i class="conum" data-value="2"></i>
+        waitHandle.Set();
+    },
+    onCompleted: () =&gt; waitHandle.Set()
+);
+
+scrollAllObservable.Subscribe(scrollAllObserver); <a id="CO76-3"></a><i class="conum" data-value="3"></i>
+
+waitHandle.WaitOne(); <a id="CO76-4"></a><i class="conum" data-value="4"></i>
+info?.Throw(); <a id="CO76-5"></a><i class="conum" data-value="5"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO76-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>do something with the response</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO76-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>if an exception is thrown, capture it to throw outside of the observer</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO76-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>initiate scrolling</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO76-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>block the current thread until the wait handle is set</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO76-5"><i class="conum" data-value="5"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>if an exception was captured whilst scrolling, throw it</p>
+</td>
+</tr>
+</table>
 </div>
 </div>
 
 </div>
 <div class="navfooter">
 <span class="prev">
-<a href="diagnostic-source.html">« Diagnostic Source</a>
+<a href="returned-fields.html">« Selecting fields to return</a>
 </span>
 <span class="next">
-<a href="deprecation-logging.html">Deprecation logging »</a>
+<a href="covariant-search-results.html">Covariant search results »</a>
 </span>
 </div>
 </div>

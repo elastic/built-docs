@@ -3,11 +3,11 @@
   <head>
     
 <meta charset="UTF-8">
-<title>Index name inference | Elasticsearch.Net and NEST: the .NET clients [7.x] | Elastic</title>
+<title>Scrolling documents | Elasticsearch.Net and NEST: the .NET clients [7.x] | Elastic</title>
 <link rel="home" href="index.html" title="Elasticsearch.Net and NEST: the .NET clients [7.x]"/>
-<link rel="up" href="nest-conventions.html" title="Conventions"/>
-<link rel="prev" href="nest-conventions.html" title="Conventions"/>
-<link rel="next" href="types-and-relations-inference.html" title="Relation names inference"/>
+<link rel="up" href="search.html" title="Search"/>
+<link rel="prev" href="returned-fields.html" title="Selecting fields to return"/>
+<link rel="next" href="covariant-search-results.html" title="Covariant search results"/>
 <meta name="DC.type" content="Learn/Docs/Clients/.Net/7.x"/>
 <meta name="DC.subject" content="Clients"/>
 <meta name="DC.identifier" content="7.x"/>
@@ -111,201 +111,223 @@
 »
 <span class="breadcrumb-link"><a href="nest.html">NEST - High level client</a></span>
 »
-<span class="breadcrumb-link"><a href="nest-conventions.html">Conventions</a></span>
+<span class="breadcrumb-link"><a href="search.html">Search</a></span>
 »
-<span class="breadcrumb-node">Index name inference</span>
+<span class="breadcrumb-node">Scrolling documents</span>
 </div>
 <div class="navheader">
 <span class="prev">
-<a href="nest-conventions.html">« Conventions</a>
+<a href="returned-fields.html">« Selecting fields to return</a>
 </span>
 <span class="next">
-<a href="types-and-relations-inference.html">Relation names inference »</a>
+<a href="covariant-search-results.html">Covariant search results »</a>
 </span>
 </div>
 <div class="section">
 <div class="titlepage"><div><div>
-<h2 class="title"><a id="index-name-inference"></a>Index name inference<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/7.x/docs/client-concepts/high-level/inference/index-name-inference.asciidoc">edit</a></h2>
+<h2 class="title"><a id="scrolling-documents"></a>Scrolling documents<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/7.x/docs/search/scrolling-documents.asciidoc">edit</a></h2>
 </div></div></div>
-<p>Many endpoints within the Elasticsearch API expect to receive one or more index names
-as part of the request, in order to know what index/indices a request should operate on.</p>
-<p>NEST has a number of ways in which the index name(s) can be specified</p>
+<p>The scroll API can be used to return a large collection of documents from Elasticsearch.</p>
+<p>NEST exposes the scroll API and an observable scroll implementation that can be used
+to write concurrent scroll requests.</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<h3 class="title"><a id="_default_index_name_on_connection_settings"></a>Default Index name on Connection Settings<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/7.x/docs/client-concepts/high-level/inference/index-name-inference.asciidoc">edit</a></h3>
+<h3 class="title"><a id="_simple_use"></a>Simple use<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/7.x/docs/search/scrolling-documents.asciidoc">edit</a></h3>
 </div></div></div>
-<p>A default index name can be specified on <code class="literal">ConnectionSettings</code> using <code class="literal">.DefaultIndex()</code>.
-This is the default index name to use, when no other index name can be resolved for a request</p>
+<p>The simplest use of the scroll API is to perform a search request with a
+scroll timeout, then pass the scroll id returned in each response to
+the next request to the scroll API, until no more documents are returned</p>
 <div class="pre_wrapper lang-csharp">
-<pre class="programlisting prettyprint lang-csharp">var settings = new ConnectionSettings()
-    .DefaultIndex("defaultindex"); <a id="CO79-1"></a><i class="conum" data-value="1"></i>
+<pre class="programlisting prettyprint lang-csharp">var searchResponse = Client.Search&lt;Project&gt;(s =&gt; s
+    .Query(q =&gt; q
+        .Term(f =&gt; f.State, StateOfBeing.Stable)
+    )
+    .Scroll("10s") <a id="CO74-1"></a><i class="conum" data-value="1"></i>
+);
 
-var client = new ElasticClient(settings);
-var searchResponse = client.Search&lt;Project&gt;();</pre>
+while (searchResponse.Documents.Any()) <a id="CO74-2"></a><i class="conum" data-value="2"></i>
+{
+    ProcessResponse(searchResponse); <a id="CO74-3"></a><i class="conum" data-value="3"></i>
+    searchResponse = Client.Scroll&lt;Project&gt;("10s", searchResponse.ScrollId);
+}</pre>
 </div>
 <div class="calloutlist">
 <table border="0" summary="Callout list">
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO79-1"><i class="conum" data-value="1"></i></a></p>
+<p><a href="#CO74-1"><i class="conum" data-value="1"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>set the default index</p>
+<p>Specify a scroll time for how long Elasticsearch should keep this scroll open on the server side. The time specified should be sufficient to process the response on the client side.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO74-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>make subsequent requests to the scroll API to keep fetching documents, whilst documents are returned</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO74-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>do something with the response</p>
 </td>
 </tr>
 </table>
-</div>
-<p>will send a search request to the API endpoint</p>
-<div class="pre_wrapper lang-javascript">
-<pre class="programlisting prettyprint lang-javascript">"http://localhost:9200/defaultindex/_search"</pre>
 </div>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<h3 class="title"><a id="index-name-type-mapping"></a>Index name for a .NET type<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/7.x/docs/client-concepts/high-level/inference/index-name-inference.asciidoc">edit</a></h3>
+<h3 class="title"><a id="scrollall-observable"></a>ScrollAllObservable<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/7.x/docs/search/scrolling-documents.asciidoc">edit</a></h3>
 </div></div></div>
-<p>An index name can be mapped for a <em>Plain Old CLR Object</em> (POCO) using <code class="literal">.DefaultMappingFor&lt;T&gt;()</code> on <code class="literal">ConnectionSettings</code></p>
+<p>Similar to <a class="xref" href="indexing-documents.html#bulkall-observable" title="Multiple documents with BulkAllObservable helper"><code class="literal">BulkAllObservable</code></a> for bulk indexing a large number of documents,
+NEST exposes an observable scroll implementation, <code class="literal">ScrollAllObservable</code>, that can be used
+to write concurrent scroll requests. <code class="literal">ScrollAllObservable</code> uses sliced scrolls to split the scroll into
+multiple slices that can be consumed concurrently.</p>
+<p>The simplest use of <code class="literal">ScrollAllObservable</code> is</p>
 <div class="pre_wrapper lang-csharp">
-<pre class="programlisting prettyprint lang-csharp">var settings = new ConnectionSettings()
-    .DefaultMappingFor&lt;Project&gt;(m =&gt; m
-        .IndexName("projects")
-    );
+<pre class="programlisting prettyprint lang-csharp">int numberOfSlices = Environment.ProcessorCount; <a id="CO75-1"></a><i class="conum" data-value="1"></i>
 
-var client = new ElasticClient(settings);
-var searchResponse = client.Search&lt;Project&gt;();</pre>
-</div>
-<p>will send a search request to the API endpoint</p>
-<div class="pre_wrapper lang-javascript">
-<pre class="programlisting prettyprint lang-javascript">"http://localhost:9200/projects/_search"</pre>
-</div>
-<p><code class="literal">.DefaultMappingFor&lt;T&gt;()</code> can also be used to specify other defaults for a POCO, including
-property names, property to use for the document id, amongst others.</p>
-<p>An index name for a POCO provided using <code class="literal">.DefaultMappingFor&lt;T&gt;()</code> <span class="strong strong"><strong>will take precedence</strong></span> over
-the default index name set on <code class="literal">ConnectionSettings</code>. This way, the client can be configured with a default index to use if no
-index is specified, and a specific index to use for different POCO types.</p>
-<div class="pre_wrapper lang-csharp">
-<pre class="programlisting prettyprint lang-csharp">var settings = new ConnectionSettings()
-    .DefaultIndex("defaultindex") <a id="CO80-1"></a><i class="conum" data-value="1"></i>
-    .DefaultMappingFor&lt;Project&gt;(m =&gt; m
-        .IndexName("projects") <a id="CO80-2"></a><i class="conum" data-value="2"></i>
-    );
+var scrollAllObservable = Client.ScrollAll&lt;Project&gt;("10s", numberOfSlices, sc =&gt; sc
+    .MaxDegreeOfParallelism(numberOfSlices) <a id="CO75-2"></a><i class="conum" data-value="2"></i>
+    .Search(s =&gt; s
+        .Query(q =&gt; q
+            .Term(f =&gt; f.State, StateOfBeing.Stable)
+        )
+    )
+);
 
-var client = new ElasticClient(settings);
-
-var projectSearchResponse = client.Search&lt;Project&gt;();</pre>
+scrollAllObservable.Wait(TimeSpan.FromMinutes(10), response =&gt; <a id="CO75-3"></a><i class="conum" data-value="3"></i>
+{
+    ProcessResponse(response.SearchResponse); <a id="CO75-4"></a><i class="conum" data-value="4"></i>
+});</pre>
 </div>
 <div class="calloutlist">
 <table border="0" summary="Callout list">
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO80-1"><i class="conum" data-value="1"></i></a></p>
+<p><a href="#CO75-1"><i class="conum" data-value="1"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>a default index to use, when no other index can be inferred</p>
+<p>See <a href="/guide/en/elasticsearch/reference/current/search-request-body.html#sliced-scroll" class="ulink" target="_top">sliced scroll</a> documentation for choosing an appropriate number of slices.</p>
 </td>
 </tr>
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO80-2"><i class="conum" data-value="2"></i></a></p>
+<p><a href="#CO75-2"><i class="conum" data-value="2"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>a index to use when <code class="literal">Project</code> is the target POCO type</p>
+<p>Number of concurrent sliced scroll requests. Usually want to set this to the same value as the number of slices</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO75-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Total overall time for scrolling <span class="strong strong"><strong>all</strong></span> documents. Ensure this is a sufficient value to scroll all documents</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO75-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>do something with the response</p>
 </td>
 </tr>
 </table>
 </div>
-<p>will send a search request to the API endpoint</p>
-<div class="pre_wrapper lang-javascript">
-<pre class="programlisting prettyprint lang-javascript">"http://localhost:9200/projects/_search"</pre>
-</div>
-<p>but</p>
+<p>More control over how the observable is consumed can be achieved by writing
+your own observer and subscribing to the observable, which will initiate scrolling</p>
 <div class="pre_wrapper lang-csharp">
-<pre class="programlisting prettyprint lang-csharp">var objectSearchResponse = client.Search&lt;object&gt;();</pre>
-</div>
-<p>will send a search request to the API endpoint</p>
-<div class="pre_wrapper lang-javascript">
-<pre class="programlisting prettyprint lang-javascript">"http://localhost:9200/defaultindex/_search"</pre>
-</div>
-</div>
+<pre class="programlisting prettyprint lang-csharp">int numberOfSlices = Environment.ProcessorCount;
 
-<div class="section">
-<div class="titlepage"><div><div>
-<h3 class="title"><a id="_explicitly_specifying_index_name_on_the_request"></a>Explicitly specifying Index name on the request<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/7.x/docs/client-concepts/high-level/inference/index-name-inference.asciidoc">edit</a></h3>
-</div></div></div>
-<p>For API calls that expect an index name, an index name can be explicitly provided
-on the request</p>
-<div class="pre_wrapper lang-csharp">
-<pre class="programlisting prettyprint lang-csharp">var settings = new ConnectionSettings();
-var client = new ElasticClient(settings);
+var scrollAllObservable = Client.ScrollAll&lt;Project&gt;("10s", numberOfSlices, sc =&gt; sc
+    .MaxDegreeOfParallelism(numberOfSlices)
+    .Search(s =&gt; s
+        .Query(q =&gt; q
+            .Term(f =&gt; f.State, StateOfBeing.Stable)
+        )
+    )
+);
 
-var response = client.Search&lt;Project&gt;(s =&gt; s
-    .Index("some-other-index") <a id="CO81-1"></a><i class="conum" data-value="1"></i>
-);</pre>
+var waitHandle = new ManualResetEvent(false);
+ExceptionDispatchInfo info = null;
+
+var scrollAllObserver = new ScrollAllObserver&lt;Project&gt;(
+    onNext: response =&gt; ProcessResponse(response.SearchResponse), <a id="CO76-1"></a><i class="conum" data-value="1"></i>
+    onError: e =&gt;
+    {
+        info = ExceptionDispatchInfo.Capture(e); <a id="CO76-2"></a><i class="conum" data-value="2"></i>
+        waitHandle.Set();
+    },
+    onCompleted: () =&gt; waitHandle.Set()
+);
+
+scrollAllObservable.Subscribe(scrollAllObserver); <a id="CO76-3"></a><i class="conum" data-value="3"></i>
+
+waitHandle.WaitOne(); <a id="CO76-4"></a><i class="conum" data-value="4"></i>
+info?.Throw(); <a id="CO76-5"></a><i class="conum" data-value="5"></i></pre>
 </div>
 <div class="calloutlist">
 <table border="0" summary="Callout list">
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO81-1"><i class="conum" data-value="1"></i></a></p>
+<p><a href="#CO76-1"><i class="conum" data-value="1"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>Provide the index name on the request</p>
+<p>do something with the response</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO76-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>if an exception is thrown, capture it to throw outside of the observer</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO76-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>initiate scrolling</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO76-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>block the current thread until the wait handle is set</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO76-5"><i class="conum" data-value="5"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>if an exception was captured whilst scrolling, throw it</p>
 </td>
 </tr>
 </table>
-</div>
-<p>will send a search request to the API endpoint</p>
-<div class="pre_wrapper lang-javascript">
-<pre class="programlisting prettyprint lang-javascript">"http://localhost:9200/some-other-index/_search"</pre>
-</div>
-<p>When an index name is provided on a request, it <span class="strong strong"><strong>will take precedence</strong></span> over the default
-index name specified on <code class="literal">ConnectionSettings</code>, <em>and</em> any index name specified for the POCO
-using <code class="literal">.DefaultMappingFor&lt;T&gt;()</code>. The following example will send a search request
-to the same API endpoint as the previous example</p>
-<div class="pre_wrapper lang-csharp">
-<pre class="programlisting prettyprint lang-csharp">var settings = new ConnectionSettings()
-    .DefaultIndex("defaultindex")
-    .DefaultMappingFor&lt;Project&gt;(m =&gt; m
-        .IndexName("projects")
-    );
-
-var client = new ElasticClient(settings);
-
-var response = client.Search&lt;Project&gt;(s =&gt; s
-    .Index("some-other-index")
-);</pre>
-</div>
-<p>In summary, the order of precedence for determining the index name for a request is</p>
-<div class="olist orderedlist">
-<ol class="orderedlist">
-<li class="listitem">
-Index name specified  on the request
-</li>
-<li class="listitem">
-Index name specified for the generic type parameter in the request using <code class="literal">.DefaultMappingFor&lt;T&gt;()</code>
-</li>
-<li class="listitem">
-Default index name specified on <code class="literal">ConnectionSettings</code>
-</li>
-</ol>
-</div>
-<div class="important admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p>If no index can be determined for a request that requires an index, the client will throw
-an exception to indicate that this is the case.</p>
-</div>
 </div>
 </div>
 
 </div>
 <div class="navfooter">
 <span class="prev">
-<a href="nest-conventions.html">« Conventions</a>
+<a href="returned-fields.html">« Selecting fields to return</a>
 </span>
 <span class="next">
-<a href="types-and-relations-inference.html">Relation names inference »</a>
+<a href="covariant-search-results.html">Covariant search results »</a>
 </span>
 </div>
 </div>
