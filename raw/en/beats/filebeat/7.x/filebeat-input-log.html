@@ -101,6 +101,45 @@ because this can lead to unexpected behaviour.</p>
 </div>
 <div class="section">
 <div class="titlepage"><div><div>
+<h3 class="title"><a id="file-identity"></a>Reading files on network shares and cloud providers<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.x/filebeat/docs/inputs/input-log.asciidoc">edit</a></h3>
+</div></div></div>
+<p>However, one of the limitations of these data sources can be mitigated
+if you configure Filebeat adequately.</p>
+<p>By default, Filebeat identifies files based on their inodes and
+device IDs. However, on network shares and cloud providers these
+values might change during the lifetime of the file. If this happens
+Filebeat thinks that file is new and resends the whole content
+of the file. To solve this problem you can configure <code class="literal">file_identity</code> option. Possible
+values besides the default <code class="literal">inode_deviceid</code> are <code class="literal">path</code> and <code class="literal">inode_marker</code>.</p>
+<p>Selecting <code class="literal">path</code> instructs Filebeat to identify files based on their
+paths. This is a quick way to aviod rereading files if inode and device ids
+might change. However, keep in mind if the files are rotated (renamed), they
+will be reread and resubmitted.</p>
+<p>The option <code class="literal">inode_marker</code> can be used if the inodes stay the same even if
+the device id is changed. You should choose this method if your files are
+rotated instead of <code class="literal">path</code> if possible. You have to configure a marker file
+readable by Filebeat and set the path in the option <code class="literal">path</code> of <code class="literal">inode_marker</code>.</p>
+<p>The content of this file must be unique to the device. You can put the
+UUID of the device or mountpoint where the input is stored. The following
+example oneliner generates a hidden marker file for the selected mountpoint <code class="literal">/logs</code>:
+Please note that you should not use this option on Windows as file identifiers might be
+more volatile.</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">$ lsblk -o MOUNTPOINT,UUD | grep /logs | awk '{print $2}' &gt;&gt; /logs/.filebeat-marker</pre>
+</div>
+<p>To set the generated file as a marker for <code class="literal">file_identity</code> you should configure
+the input the following way:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: log
+  paths:
+    - /logs/*.log
+  file_identity.inode_marker.path: /logs/.filebeat-marker</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
 <h3 class="title"><a id="rotating-logs"></a>Reading from rotating logs<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.x/filebeat/docs/inputs/input-log.asciidoc">edit</a></h3>
 </div></div></div>
 <p>When dealing with file rotation, avoid harvesting symlinks. Instead
@@ -108,6 +147,9 @@ use the <a class="xref" href="filebeat-input-log.html#input-paths" title="paths"
 a pattern that matches the file you want to harvest and all of its rotated
 files. Also make sure your log rotation strategy prevents lost or duplicate
 messages. For more information, see <a class="xref" href="file-log-rotation.html" title="Log rotation results in lost or duplicate events">Log rotation results in lost or duplicate events</a>.</p>
+<p>Furthermore, to avoid duplicate of rotated log messages, do not use the
+<code class="literal">path</code> method for <code class="literal">file_identity</code>. Or exclude the rotated files with <code class="literal">exclude_files</code>
+option.</p>
 </div>
 
 <div class="section">
@@ -541,6 +583,9 @@ not depend on the file name. If the <code class="literal">close_renamed</code> o
 file is renamed or moved in such a way that it&#8217;s no longer matched by the file
 patterns specified for the , the file will not be picked up again.
 Filebeat will not finish reading the file.</p>
+<p>Do not use this option when <code class="literal">path</code> based <code class="literal">file_identity</code> is configured. It does
+not make sense to enable the option, as Filebeat cannot detect renames using
+path names as unique identifiers.</p>
 <p>WINDOWS: If your Windows log rotation system shows errors because it can&#8217;t
 rotate the files, you should enable this option.</p>
 <h5><a id="filebeat-input-log-close-removed"></a><code class="literal">close_removed</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.x/filebeat/docs/inputs/input-common-file-options.asciidoc">edit</a></h5>
@@ -761,6 +806,73 @@ file that hasn&#8217;t been harvested for a longer period of time.</p>
 <p>This configuration option applies per input. You can use this option to
 indirectly set higher priorities on certain inputs by assigning a higher
 limit of harvesters.</p>
+<h5><a id="_file_identity_3"></a><code class="literal">file_identity</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.x/filebeat/docs/inputs/input-common-file-options.asciidoc">edit</a></h5>
+<p>Different <code class="literal">file_identity</code> methods can be configured to suit the
+environment where you are collecting log messages.</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<span class="strong strong"><strong><code class="literal">native</code></strong></span>
+</span>
+</dt>
+<dd>
+The default behaviour of Filebeat is to differentiate
+between files using their inodes and device ids.
+</dd>
+</dl>
+</div>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">file_identity.native: ~</pre>
+</div>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<span class="strong strong"><strong><code class="literal">path</code></strong></span>
+</span>
+</dt>
+<dd>
+To identify files based on their paths use this strategy.
+</dd>
+</dl>
+</div>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Only use this strategy if your log files are rotated to a folder
+outside of the scope of your input or not at all. Otherwise you end up
+with duplicated events.</p>
+</div>
+</div>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This strategy does not support renaming files.
+If an input file is renamed, Filebeat will read it again if the new path
+matches the settings of the input.</p>
+</div>
+</div>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">file_identity.path: ~</pre>
+</div>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<span class="strong strong"><strong><code class="literal">inode_marker</code></strong></span>
+</span>
+</dt>
+<dd>
+If the device id changes from time to time, you must use
+this method to distinguish files. This option is not supported on Windows.
+</dd>
+</dl>
+</div>
+<p>Set the location of the marker file the following way:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">file_identity.inode_marker.path: /logs/.filebeat-marker</pre>
+</div>
 </div>
 
 <div class="section">
