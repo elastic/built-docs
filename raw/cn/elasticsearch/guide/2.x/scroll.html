@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>游标查询 Scroll | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="distributed-search.html" title="执行分布式检索"/>
+<link rel="prev" href="_search_options.html" title="搜索选项"/>
+<link rel="next" href="index-management.html" title="索引管理"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="getting-started.html">基础入门</a></span>
+»
+<span class="breadcrumb-link"><a href="distributed-search.html">执行分布式检索</a></span>
+»
+<span class="breadcrumb-node">游标查询 <em>Scroll</em></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="_search_options.html">« 搜索选项</a>
+</span>
+<span class="next">
+<a href="index-management.html">索引管理 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="scroll"></a>游标查询 <em>Scroll</em></h2>
+</div></div></div>
+<p><code class="literal">scroll</code> 查询   可以用来对 Elasticsearch 有效地执行大批量的文档查询，而又不用付出深度分页那种代价。</p>
+<p>游标查询允许我们  先做查询初始化，然后再批量地拉取结果。
+这有点儿像传统数据库中的 <em>cursor</em>   。</p>
+<p>游标查询会取某个时间点的快照数据。 查询初始化之后索引上的任何变化会被它忽略。
+它通过保存旧的数据文件来实现这个特性，结果就像保留初始化时的索引 <em>视图</em> 一样。</p>
+<p>深度分页的代价根源是结果集全局排序，如果去掉全局排序的特性的话查询结果的成本就会很低。
+游标查询用字段 <code class="literal">_doc</code> 来排序。 这个指令让 Elasticsearch 仅仅从还有结果的分片返回下一批结果。</p>
+<p>启用游标查询可以通过在查询的时候设置参数 <code class="literal">scroll</code> 的值为我们期望的游标查询的过期时间。
+游标查询的过期时间会在每次做查询的时候刷新，所以这个时间只需要足够处理当前批的结果就可以了，而不是处理查询结果的所有文档的所需时间。
+这个过期时间的参数很重要，因为保持这个游标查询窗口需要消耗资源，所以我们期望如果不再需要维护这种资源就该早点儿释放掉。
+设置这个超时能够让 Elasticsearch 在稍后空闲的时候自动释放这部分资源。</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">GET /old_index/_search?scroll=1m <a id="CO32-1"></a><i class="conum" data-value="1"></i>
+{
+    "query": { "match_all": {}},
+    "sort" : ["_doc"], <a id="CO32-2"></a><i class="conum" data-value="2"></i>
+    "size":  1000
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO32-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>保持游标查询窗口一分钟。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO32-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>关键字 <code class="literal">_doc</code> 是最有效的排序顺序。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>这个查询的返回结果包括一个字段 <code class="literal">_scroll_id</code>， 它是一个base64编码的长字符串  。 现在我们能传递字段
+<code class="literal">_scroll_id</code> 到 <code class="literal">_search/scroll</code> 查询接口获取下一批结果：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">GET /_search/scroll
+{
+    "scroll": "1m", <a id="CO33-1"></a><i class="conum" data-value="1"></i>
+    "scroll_id" : "cXVlcnlUaGVuRmV0Y2g7NTsxMDk5NDpkUmpiR2FjOFNhNnlCM1ZDMWpWYnRROzEwOTk1OmRSamJHYWM4U2E2eUIzVkMxalZidFE7MTA5OTM6ZFJqYkdhYzhTYTZ5QjNWQzFqVmJ0UTsxMTE5MDpBVUtwN2lxc1FLZV8yRGVjWlI2QUVBOzEwOTk2OmRSamJHYWM4U2E2eUIzVkMxalZidFE7MDs="
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO33-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>注意再次设置游标查询过期时间为一分钟。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>这个游标查询返回的下一批结果。
+尽管我们指定字段 <code class="literal">size</code> 的值为1000，我们有可能取到超过这个值数量的文档。
+   当查询的时候， 字段 <code class="literal">size</code> 作用于单个分片，所以每个批次实际返回的文档数量最大为
+ <code class="literal">size * number_of_primary_shards</code> 。</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>注意游标查询每次返回一个新字段 <code class="literal">_scroll_id</code>。每次我们做下一次游标查询，
+ 我们必须把前一次查询返回的字段 <code class="literal">_scroll_id</code> 传递进去。 当没有更多的结果返回的时候，我们就处理完所有匹配的文档了。</p>
+</div>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>提示：某些官方的 Elasticsearch 客户端比如
+<a href="http://elasticsearch-py.readthedocs.org/en/master/helpers.html#scan" class="ulink" target="_top">Python 客户端</a> 和
+<a href="https://metacpan.org/pod/Search::Elasticsearch::Scroll" class="ulink" target="_top">Perl 客户端</a> 提供了这个功能易用的封装。</p>
+</div>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="_search_options.html">« 搜索选项</a>
+</span>
+<span class="next">
+<a href="index-management.html">索引管理 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

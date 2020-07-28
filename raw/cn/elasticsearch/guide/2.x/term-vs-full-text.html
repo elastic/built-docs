@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>基于词项与基于全文 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="full-text-search.html" title="全文搜索"/>
+<link rel="prev" href="full-text-search.html" title="全文搜索"/>
+<link rel="next" href="match-query.html" title="匹配查询"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="search-in-depth.html">深入搜索</a></span>
+»
+<span class="breadcrumb-link"><a href="full-text-search.html">全文搜索</a></span>
+»
+<span class="breadcrumb-node">基于词项与基于全文</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="full-text-search.html">« 全文搜索</a>
+</span>
+<span class="next">
+<a href="match-query.html">匹配查询 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="term-vs-full-text"></a>基于词项与基于全文</h2>
+</div></div></div>
+<p>所有查询会或多或少的执行相关度计算，但不是所有查询都有分析阶段。和一些特殊的完全不会对文本进行操作的查询（如 <code class="literal">bool</code> 或 <code class="literal">function_score</code> ）不同，文本查询可以划分成两大家族：</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+基于词项的查询
+</span>
+</dt>
+<dd>
+<p>如 <code class="literal">term</code> 或 <code class="literal">fuzzy</code> 这样的底层查询不需要分析阶段，它们对单个词项进行操作。用 <code class="literal">term</code> 查询词项 <code class="literal">Foo</code> 只要在倒排索引中查找 <em>准确词项</em> ，并且用 TF/IDF 算法为每个包含该词项的文档计算相关度评分 <code class="literal">_score</code> 。</p>
+<p>记住 <code class="literal">term</code> 查询只对倒排索引的词项精确匹配，这点很重要，它不会对词的多样性进行处理（如， <code class="literal">foo</code> 或 <code class="literal">FOO</code> ）。这里，无须考虑词项是如何存入索引的。如果是将 <code class="literal">["Foo","Bar"]</code> 索引存入一个不分析的（ <code class="literal">not_analyzed</code> ）包含精确值的字段，或者将 <code class="literal">Foo Bar</code> 索引到一个带有 <code class="literal">whitespace</code> 空格分析器的字段，两者的结果都会是在倒排索引中有 <code class="literal">Foo</code> 和 <code class="literal">Bar</code> 这两个词。</p>
+</dd>
+<dt>
+<span class="term">
+基于全文的查询
+</span>
+</dt>
+<dd>
+<p>像 <code class="literal">match</code> 或 <code class="literal">query_string</code> 这样的查询是高层查询，它们了解字段映射的信息：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+如果查询 <code class="literal">日期（date）</code> 或 <code class="literal">整数（integer）</code> 字段，它们会将查询字符串分别作为日期或整数对待。
+</li>
+<li class="listitem">
+如果查询一个（ <code class="literal">not_analyzed</code> ）未分析的精确值字符串字段，它们会将整个查询字符串作为单个词项对待。
+</li>
+<li class="listitem">
+但如果要查询一个（ <code class="literal">analyzed</code> ）已分析的全文字段，它们会先将查询字符串传递到一个合适的分析器，然后生成一个供查询的词项列表。
+</li>
+</ul>
+</div>
+<p>一旦组成了词项列表，这个查询会对每个词项逐一执行底层的查询，再将结果合并，然后为每个文档生成一个最终的相关度评分。</p>
+<p>我们将会在随后章节中详细讨论这个过程。</p>
+</dd>
+</dl>
+</div>
+<p>我们很少直接使用基于词项的搜索，通常情况下都是对全文进行查询，而非单个词项，这只需要简单的执行一个高层全文查询（进而在高层查询内部会以基于词项的底层查询完成搜索）。</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>当我们想要查询一个具有精确值的 <code class="literal">not_analyzed</code> 未分析字段之前，需要考虑，是否真的采用评分查询，或者非评分查询会更好。</p>
+<p>单词项查询通常可以用是、非这种二元问题表示，所以更适合用过滤，而且这样做可以有效利用<a class="xref" href="filter-caching.html" title="关于缓存">缓存</a>：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">GET /_search
+{
+    "query": {
+        "constant_score": {
+            "filter": {
+                "term": { "gender": "female" }
+            }
+        }
+    }
+}</pre>
+</div>
+</div>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="full-text-search.html">« 全文搜索</a>
+</span>
+<span class="next">
+<a href="match-query.html">匹配查询 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>共享索引 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="scale.html" title="扩容设计"/>
+<link rel="prev" href="user-based.html" title="基于用户的数据"/>
+<link rel="next" href="faking-it.html" title="利用别名实现一个用户一个索引"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="modeling-your-data.html">数据建模</a></span>
+»
+<span class="breadcrumb-link"><a href="scale.html">扩容设计</a></span>
+»
+<span class="breadcrumb-node">共享索引</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="user-based.html">« 基于用户的数据</a>
+</span>
+<span class="next">
+<a href="faking-it.html">利用别名实现一个用户一个索引 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="shared-index"></a>共享索引</h2>
+</div></div></div>
+<p>我们可以为许多的小论坛使用一个大的共享的索引，
+将论坛标识索引进一个字段并且将它用作一个过滤器：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">PUT /forums
+{
+  "settings": {
+    "number_of_shards": 10 <a id="CO293-1"></a><i class="conum" data-value="1"></i>
+  },
+  "mappings": {
+    "post": {
+      "properties": {
+        "forum_id": { <a id="CO293-2"></a><i class="conum" data-value="2"></i>
+          "type":  "string",
+          "index": "not_analyzed"
+        }
+      }
+    }
+  }
+}
+
+PUT /forums/post/1
+{
+  "forum_id": "baking", <a id="CO293-3"></a><i class="conum" data-value="2"></i>
+  "title":    "Easy recipe for ginger nuts",
+  ...
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO293-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>创建一个足够大的索引来存储数千个小论坛的数据。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO293-2"><i class="conum" data-value="2"></i></a><a href="#CO293-3"></a></p>
+</td>
+<td align="left" valign="top">
+<p>每个帖子都必须包含一个 <code class="literal">forum_id</code> 来标识它属于哪个论坛。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>我们可以把 <code class="literal">forum_id</code> 用作一个过滤器来针对单个论坛进行搜索。这个过滤器可以排除索引中绝大部分的数据（属于其它论坛的数据），缓存会保证快速的响应：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /forums/post/_search
+{
+  "query": {
+    "bool": {
+      "must": {
+        "match": {
+          "title": "ginger nuts"
+        }
+      },
+      "filter": {
+        "term": {
+          "forum_id": {
+            "baking"
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<p>这个办法行得通，但我们可以做得更好。
+来自于同一个论坛的帖子可以简单地容纳于单个分片，但它们现在被打散到了这个索引的所有十个分片中。
+这意味着每个搜索请求都必须被转发至所有十个分片的一个主分片或者副本分片。
+如果能够保证所有来自于同一个论坛的所有帖子都被存储于同一个分片可能会是个好想法。</p>
+<p>在 <a class="xref" href="routing-value.html" title="路由一个文档到一个分片中">路由一个文档到一个分片中</a>，我们说过一个文档将通过使用如下公式来分配到一个指定分片：</p>
+<pre class="literallayout">shard = hash(routing) % number_of_primary_shards</pre>
+
+<p><code class="literal">routing</code> 的值默认为文档的 <code class="literal">_id</code> ，但我们可以覆盖它并且提供我们自己自定义的路由值，例如 <code class="literal">forum_id</code> 。
+所有有着相同 <code class="literal">routing</code> 值的文档都将被存储于相同的分片：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">PUT /forums/post/1?routing=baking <a id="CO294-1"></a><i class="conum" data-value="1"></i>
+{
+  "forum_id": "baking", <a id="CO294-2"></a><i class="conum" data-value="1"></i>
+  "title":    "Easy recipe for ginger nuts",
+  ...
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO294-1"><i class="conum" data-value="1"></i></a><a href="#CO294-2"></a></p>
+</td>
+<td align="left" valign="top">
+<p>将 <code class="literal">forum_id</code> 用于路由值保证所有来自相同论坛的帖子都存储于相同的分片。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>当我们搜索一个指定论坛的帖子时，我们可以传递相同的 <code class="literal">routing</code> 值来保证搜索请求仅在存有我们文档的分片上执行：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /forums/post/_search?routing=baking <a id="CO295-1"></a><i class="conum" data-value="1"></i>
+{
+  "query": {
+    "bool": {
+      "must": {
+        "match": {
+          "title": "ginger nuts"
+        }
+      },
+      "filter": {
+        "term": { <a id="CO295-2"></a><i class="conum" data-value="2"></i>
+          "forum_id": {
+            "baking"
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO295-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>查询请求仅在对应于 <code class="literal">routing</code> 值的分片上执行。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO295-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>我们还是需要过滤（Filter）查询，因为一个分片可以存储来自于很多论坛的帖子。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>多个论坛可以通过传递一个逗号分隔的列表来指定 <code class="literal">routing</code> 值，然后将每个 <code class="literal">forum_id</code> 包含于一个 <code class="literal">terms</code> 查询：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /forums/post/_search?routing=baking,cooking,recipes
+{
+  "query": {
+    "bool": {
+      "must": {
+        "match": {
+          "title": "ginger nuts"
+        }
+      },
+      "filter": {
+        "terms": {
+          "forum_id": {
+            [ "baking", "cooking", "recipes" ]
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<p>这种方式从技术上来说比较高效，由于要为每一个查询或者索引请求指定 <code class="literal">routing</code> 和 <code class="literal">terms</code> 的值看起来有一点的笨拙。
+索引别名可以帮你解决这些！</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="user-based.html">« 基于用户的数据</a>
+</span>
+<span class="next">
+<a href="faking-it.html">利用别名实现一个用户一个索引 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

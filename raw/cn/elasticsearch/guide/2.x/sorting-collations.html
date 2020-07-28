@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>排序和整理 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="token-normalization.html" title="归一化词元"/>
+<link rel="prev" href="character-folding.html" title="Unicode 字符折叠"/>
+<link rel="next" href="stemming.html" title="将单词还原为词根"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="languages.html">处理人类语言</a></span>
+»
+<span class="breadcrumb-link"><a href="token-normalization.html">归一化词元</a></span>
+»
+<span class="breadcrumb-node">排序和整理</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="character-folding.html">« Unicode 字符折叠</a>
+</span>
+<span class="next">
+<a href="stemming.html">将单词还原为词根 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="sorting-collations"></a>排序和整理</h2>
+</div></div></div>
+<p>本章到目前为止，我们已经了解了怎么以搜索为目的去规范化词汇单元。  本章节中要考虑的最终用例是字符串排序。 </p>
+<p>在 <a class="xref" href="multi-fields.html" title="字符串排序与多字段">字符串排序与多字段</a> （复数域）中，我们解释了 Elasticsearch  为什么不能在 <code class="literal">analyzed</code> （分析过）的字符串字段上排序，并演示了如何为同一个域创建 <em>复数域索引</em> ，其中 <code class="literal">analyzed</code> 域用来搜索， <code class="literal">not_analyzed</code> 域用来排序。 </p>
+<p><code class="literal">analyzed</code> 域无法排序并不是因为使用了分析器，而是因为分析器将字符串拆分成了很多词汇单元，就像一个 <em>词汇袋</em> ，所以 Elasticsearch 不知道使用那一个词汇单元排序。</p>
+<p>依赖于 <code class="literal">not_analyzed</code> 域来排序的话不是很灵活：这仅仅允许我们使用原始字符串这一确定的值排序。然而我们 <em>可以</em> 使用分析器来实现另外一种排序规则，只要你选择的分析器总是为每个字符串输出有且仅有一个的词汇单元。</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="case-insensitive-sorting"></a>大小写敏感排序</h3>
+</div></div></div>
+<p>想象下我们有三个 <code class="literal">用户</code> 文档，文档的 <code class="literal">姓名</code> 域分别含有 <code class="literal">Boffey</code> 、 <code class="literal">BROWN</code> 和 <code class="literal">bailey</code> 。首先我们将使用在 <a class="xref" href="multi-fields.html" title="字符串排序与多字段">字符串排序与多字段</a> 中提到的技术，使用 <code class="literal">not_analyzed</code> 域来排序：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT /my_index
+{
+  "mappings": {
+    "user": {
+      "properties": {
+        "name": { <a id="CO148-1"></a><i class="conum" data-value="1"></i>
+          "type": "string",
+          "fields": {
+            "raw": { <a id="CO148-2"></a><i class="conum" data-value="2"></i>
+              "type":  "string",
+              "index": "not_analyzed"
+            }
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO148-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">analyzed</code> <code class="literal">name</code> 域用来搜索。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO148-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">not_analyzed</code> <code class="literal">name.raw</code> 域用来排序。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>我们可以索引一些文档用来测试排序：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT /my_index/user/1
+{ "name": "Boffey" }
+
+PUT /my_index/user/2
+{ "name": "BROWN" }
+
+PUT /my_index/user/3
+{ "name": "bailey" }
+
+GET /my_index/user/_search?sort=name.raw</pre>
+</div>
+<p>运行这个搜索请求将会返回这样的文档排序： <code class="literal">BROWN</code> 、 <code class="literal">Boffey</code> 、 <code class="literal">bailey</code> 。 这个是 <em>词典排序</em>  跟 <em>字符串排序</em> 相反。基本上就是大写字母开头的字节要比小写字母开头的字节权重低，所以这些姓名是按照最低值优先排序。</p>
+<p>这可能对计算机是合理的，但是对人来说并不是那么合理，人们更期望这些姓名按照字母顺序排序，忽略大小写。为了实现这个，我们需要把每个姓名按照我们想要的排序的顺序索引。</p>
+<p>换句话来说，我们需要一个能输出单个小写词汇单元的分析器：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT /my_index
+{
+  "settings": {
+    "analysis": {
+      "analyzer": {
+        "case_insensitive_sort": {
+          "tokenizer": "keyword",    <a id="CO149-1"></a><i class="conum" data-value="1"></i>
+          "filter":  [ "lowercase" ] <a id="CO149-2"></a><i class="conum" data-value="2"></i>
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO149-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">keyword</code> 分词器将输入的字符串原封不动的输出。 </p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO149-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">lowercase</code> 分词过滤器将词汇单元转化为小写字母。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>使用  <code class="literal">大小写不敏感排序</code> 分析器替换后，现在我们可以将其用在我们的复数域：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT /my_index/_mapping/user
+{
+  "properties": {
+    "name": {
+      "type": "string",
+      "fields": {
+        "lower_case_sort": { <a id="CO150-1"></a><i class="conum" data-value="1"></i>
+          "type":     "string",
+          "analyzer": "case_insensitive_sort"
+        }
+      }
+    }
+  }
+}
+
+PUT /my_index/user/1
+{ "name": "Boffey" }
+
+PUT /my_index/user/2
+{ "name": "BROWN" }
+
+PUT /my_index/user/3
+{ "name": "bailey" }
+
+GET /my_index/user/_search?sort=name.lower_case_sort</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO150-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">name.lower_case_sort</code> 域将会为我们提供大小写不敏感排序。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>运行这个搜索请求会得到我们想要的文档排序： <code class="literal">bailey</code> 、 <code class="literal">Boffey</code> 、 <code class="literal">BROWN</code> 。</p>
+<p>但是这个顺序是正确的么？它符合我门的期望所以看起来像是正确的，
+但我们的期望可能受到这个事实的影响：这本书是英文的，我们的例子中使用的所有字母都属于到英语字母表。</p>
+<p>如果我们添加一个德语姓名 <em>Böhm</em> 会怎样呢？</p>
+<p>现在我们的姓名会返回这样的排序： <code class="literal">bailey</code> 、 <code class="literal">Boffey</code> 、 <code class="literal">BROWN</code> 、 <code class="literal">Böhm</code> 。 <code class="literal">Böhm</code> 会排在 <code class="literal">BROWN</code> 后面的原因是这些单词依然是按照它们表现的字节值排序的。 <code class="literal">r</code> 所存储的字节为 <code class="literal">0x72</code> ，而 <code class="literal">ö</code> 存储的字节值为 <code class="literal">0xF6</code> ，所以 <code class="literal">Böhm</code> 排在最后。每个字符的字节值都是历史的意外。</p>
+<p>显然，默认排序顺序对于除简单英语之外的任何事物都是无意义的。事实上，没有完全“正确”的排序规则。这完全取决于你使用的语言。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_语言之间的区别"></a>语言之间的区别</h3>
+</div></div></div>
+<p>每门语言都有自己的排序规则，并且  有时候甚至有多种排序规则。  这里有几个例子，我们前一小节中的四个名字在不同的上下文中是怎么排序的：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+英语：     <code class="literal">bailey</code> 、 <code class="literal">boffey</code> 、 <code class="literal">böhm</code> 、   <code class="literal">brown</code>
+</li>
+<li class="listitem">
+德语：      <code class="literal">bailey</code> 、 <code class="literal">boffey</code> 、 <code class="literal">böhm</code> 、 <code class="literal">brown</code>
+</li>
+<li class="listitem">
+德语电话簿：  <code class="literal">bailey</code> 、 <code class="literal">böhm</code> 、 <code class="literal">boffey</code> 、 <code class="literal">brown</code>
+</li>
+<li class="listitem">
+瑞典语：          <code class="literal">bailey</code>, <code class="literal">boffey</code>, <code class="literal">brown</code>,  <code class="literal">böhm</code>
+</li>
+</ul>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>德语电话簿将 <code class="literal">böhm</code> 放在 <code class="literal">boffey</code> 的原因是 <code class="literal">ö</code> 和 <code class="literal">oe</code> 在处理名字和地点的时候会被看成同义词，所以 <code class="literal">böhm</code> 在排序时像是被写成了 <code class="literal">boehm</code> 。</p>
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="uca"></a>Unicode 归类算法</h3>
+</div></div></div>
+<p>归类是将文本按预定义顺序排序的过程。  <em>Unicode 归类算法</em> 或称为 UCA （参见  <a href="http://www.unicode.org/reports/tr10/" class="ulink" target="_top"><em>www.unicode.org/reports/tr10</em></a> ） 定义了一种将字符串按照在归类单元表中定义的顺序排序的方法（通常称为排序规则）。</p>
+<p>UCA 还定义了 <em>默认 Unicode 排序规则元素表</em> 或称为 <em>DUCET</em> ， <em>DUCET</em> 为无论任何语言的所有 Unicode 字符定义了默认排序。如你所见，没有惟一一个正确的排序规则，所以 DUCET 让更少的人感到烦恼，且烦恼尽可能的小，但它还远不是解决所有排序烦恼的万能药。</p>
+<p>而且，明显几乎每种语言都有自己的排序规则。大多时候使用
+ DUCET 作为起点并且添加一些自定义规则用来处理每种语言的特性。</p>
+<p>UCA 将字符串和排序规则作为输入，并输出二进制排序键。
+将根据指定的排序规则对字符串集合进行排序转化为对其二进制排序键的简单比较。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_unicode_排序"></a>Unicode 排序</h3>
+</div></div></div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>本节中描述的方法可能会在未来版本的 Elasticsearch 中更改。请查看 <a class="xref" href="icu-plugin.html" title="安装 ICU 插件"><code class="literal">icu</code> plugin</a> 文档的最新信息。</p>
+</div>
+</div>
+<p><code class="literal">icu_collation</code> 分词过滤器默认使用 DUCET 排序规则。这已经是对默认排序的改进了。想要使用 <code class="literal">icu_collation</code> 我们仅需要创建一个使用默认 <code class="literal">icu_collation</code> 过滤器的分析器：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT /my_index
+{
+  "settings": {
+    "analysis": {
+      "analyzer": {
+        "ducet_sort": {
+          "tokenizer": "keyword",
+          "filter": [ "icu_collation" ] <a id="CO151-1"></a><i class="conum" data-value="1"></i>
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO151-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>使用默认 DUCET 归类。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>通常，我们想要排序的字段就是我们想要搜索的字段，
+因此我们使用与在 <a class="xref" href="sorting-collations.html#case-insensitive-sorting" title="大小写敏感排序">大小写敏感排序</a> 中使用的相同的复数域方法：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT /my_index/_mapping/user
+{
+  "properties": {
+    "name": {
+      "type": "string",
+      "fields": {
+        "sort": {
+          "type": "string",
+          "analyzer": "ducet_sort"
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<p>使用这个映射， <code class="literal">name.sort</code> 域将会含有一个仅用来排序的键。我们没有指定某种语言，所以它会默认会使用 <a class="xref" href="sorting-collations.html#uca" title="Unicode 归类算法">DUCET collation</a> 。</p>
+<p>现在，我们可以重新索引我们的案例文档并测试排序：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT /my_index/user/_bulk
+{ "index": { "_id": 1 }}
+{ "name": "Boffey" }
+{ "index": { "_id": 2 }}
+{ "name": "BROWN" }
+{ "index": { "_id": 3 }}
+{ "name": "bailey" }
+{ "index": { "_id": 4 }}
+{ "name": "Böhm" }
+
+GET /my_index/user/_search?sort=name.sort</pre>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>注意，每个文档返回的 <code class="literal">sort</code> 键，在前面的例子中看起来像 <code class="literal">brown</code> 和 <code class="literal">böhm</code> ，现在看起来像天书： <code class="literal">ᖔ乏昫တ倈⠀\u0001</code> 。原因是 <code class="literal">icu_collat​​ion</code> 过滤器输出键
+仅用于有效分类，不用于任何其他目的。</p>
+</div>
+</div>
+<p>运行这个搜索请求反问的文档排序为： <code class="literal">bailey</code> 、 <code class="literal">Boffey</code> 、 <code class="literal">Böhm</code> 、 <code class="literal">BROWN</code> 。这个排序对英语和德语来说都正确，这已经是一种进步，但是它对德语电话簿和瑞典语来说还不正确。下一步我们为不同的语言自定义映射。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_指定语言"></a>指定语言</h3>
+</div></div></div>
+<p>可以为特定的语言配置使用归类表的 <code class="literal">icu_collation</code> 过滤器，例如一个国家特定版本的语言，或者像德语电话簿之类的子集。
+这个可以按照如下所示通过使用 <code class="literal">language</code> 、 <code class="literal">country</code> 、 和 <code class="literal">variant</code> 参数来创建自定义版本的分词过滤器：</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+英语
+</span>
+</dt>
+<dd>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{ "language": "en" }</pre>
+</div>
+</dd>
+<dt>
+<span class="term">
+德语
+</span>
+</dt>
+<dd>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{ "language": "de" }</pre>
+</div>
+</dd>
+<dt>
+<span class="term">
+奥地利德语
+</span>
+</dt>
+<dd>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{ "language": "de", "country": "AT" }</pre>
+</div>
+</dd>
+<dt>
+<span class="term">
+德语电话簿
+</span>
+</dt>
+<dd>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{ "language": "de", "variant": "@collation=phonebook" }</pre>
+</div>
+</dd>
+</dl>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>你可以在一下网址阅读更多的 ICU 本地支持：
+<a href="http://userguide.icu-project.org/locale" class="ulink" target="_top">http://userguide.icu-project.org/locale</a>.</p>
+</div>
+</div>
+<p>这个例子演示怎么创建德语电话簿排序规则：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT /my_index
+{
+  "settings": {
+    "number_of_shards": 1,
+    "analysis": {
+      "filter": {
+        "german_phonebook": { <a id="CO152-1"></a><i class="conum" data-value="1"></i>
+          "type":     "icu_collation",
+          "language": "de",
+          "country":  "DE",
+          "variant":  "@collation=phonebook"
+        }
+      },
+      "analyzer": {
+        "german_phonebook": { <a id="CO152-2"></a><i class="conum" data-value="2"></i>
+          "tokenizer": "keyword",
+          "filter":  [ "german_phonebook" ]
+        }
+      }
+    }
+  },
+  "mappings": {
+    "user": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "fields": {
+            "sort": { <a id="CO152-3"></a><i class="conum" data-value="3"></i>
+              "type":     "string",
+              "analyzer": "german_phonebook"
+            }
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO152-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>首先我们为德语电话薄创建一个自定义版本的  <code class="literal">icu_collation</code> 。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO152-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>之后我们将其包装在自定义的分析器中。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO152-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>并且为我们的 <code class="literal">name.sort</code> 域配置它。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>像我们之前那样重新索引并重新搜索：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT /my_index/user/_bulk
+{ "index": { "_id": 1 }}
+{ "name": "Boffey" }
+{ "index": { "_id": 2 }}
+{ "name": "BROWN" }
+{ "index": { "_id": 3 }}
+{ "name": "bailey" }
+{ "index": { "_id": 4 }}
+{ "name": "Böhm" }
+
+GET /my_index/user/_search?sort=name.sort</pre>
+</div>
+<p>现在返回的文档排序为： <code class="literal">bailey</code> 、 <code class="literal">Böhm</code> 、 <code class="literal">Boffey</code> 、 <code class="literal">BROWN</code> 。在德语电话簿归类中， <code class="literal">Böhm</code> 等同于 <code class="literal">Boehm</code> ，所以排在 <code class="literal">Boffey</code> 前面。</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_多排序规则"></a>多排序规则</h4>
+</div></div></div>
+<p>每种语言都可以使用复数域来支持对同一个域进行多规则排序：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT /my_index/_mapping/_user
+{
+  "properties": {
+    "name": {
+      "type": "string",
+      "fields": {
+        "default": {
+          "type":     "string",
+          "analyzer": "ducet" <a id="CO153-1"></a><i class="conum" data-value="1"></i>
+        },
+        "french": {
+          "type":     "string",
+          "analyzer": "french" <a id="CO153-2"></a><i class="conum" data-value="1"></i>
+        },
+        "german": {
+          "type":     "string",
+          "analyzer": "german_phonebook" <a id="CO153-3"></a><i class="conum" data-value="1"></i>
+        },
+        "swedish": {
+          "type":     "string",
+          "analyzer": "swedish" <a id="CO153-4"></a><i class="conum" data-value="1"></i>
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO153-1"><i class="conum" data-value="1"></i></a><a href="#CO153-2"></a><a href="#CO153-3"></a><a href="#CO153-4"></a></p>
+</td>
+<td align="left" valign="top">
+<p>我们需要为每个排序规则创建相应的分析器。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>使用这个映射，只要按照 <code class="literal">name.french</code> 、  <code class="literal">name.german</code> 或 <code class="literal">name.swedish</code> 域排序，就可以为法语、德语和瑞典语用户正确的排序结果了。不支持的语言可以回退到使用 <code class="literal">name.default</code> 域，它使用 DUCET 排序顺序。</p>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_自定义排序"></a>自定义排序</h3>
+</div></div></div>
+<p><code class="literal">icu_collation</code> 分词过滤器提供很多选项，不止 <code class="literal">language</code> 、 <code class="literal">country</code> 、和 <code class="literal">variant</code> ，这些选项可以用于定制排序算法。可用的选项有以下作用：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+忽略变音符号
+</li>
+<li class="listitem">
+顺序大写排先或排后，或忽略大小写
+</li>
+<li class="listitem">
+考虑或忽略标点符号和空白
+</li>
+<li class="listitem">
+将数字按字符串或数字值排序
+</li>
+<li class="listitem">
+自定义现有归类或定义自己的归类
+</li>
+</ul>
+</div>
+<p>这些选项的详细信息超出了本书的范围，更多的信息可以查询 <a href="https://github.com/elasticsearch/elasticsearch-analysis-icu" class="ulink" target="_top">ICU plug-in documentation</a> 和 <a href="http://userguide.icu-project.org/collation/concepts" class="ulink" target="_top">ICU project collation documentation</a> 。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="character-folding.html">« Unicode 字符折叠</a>
+</span>
+<span class="next">
+<a href="stemming.html">将单词还原为词根 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

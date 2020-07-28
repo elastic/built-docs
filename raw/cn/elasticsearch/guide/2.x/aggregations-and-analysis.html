@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>聚合与分析 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="docvalues-and-fielddata.html" title="Doc Values and Fielddata"/>
+<link rel="prev" href="_deep_dive_on_doc_values.html" title="深入理解 Doc Values"/>
+<link rel="next" href="_limiting_memory_usage.html" title="限制内存使用"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="aggregations.html">聚合</a></span>
+»
+<span class="breadcrumb-link"><a href="docvalues-and-fielddata.html">Doc Values and Fielddata</a></span>
+»
+<span class="breadcrumb-node">聚合与分析</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="_deep_dive_on_doc_values.html">« 深入理解 Doc Values</a>
+</span>
+<span class="next">
+<a href="_limiting_memory_usage.html">限制内存使用 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="aggregations-and-analysis"></a>聚合与分析</h2>
+</div></div></div>
+<p>有些聚合，比如 <code class="literal">terms</code> 桶， 操作字符串字段。字符串字段可能是 <code class="literal">analyzed</code> 或者 <code class="literal">not_analyzed</code> ，
+那么问题来了，分析是怎么影响聚合的呢？</p>
+<p>答案是影响“很多”，有两个原因：分析影响聚合中使用的 tokens ，并且 doc values <em>不能使用于</em> 分析字符串。</p>
+<p>让我们解决第一个问题：分析 tokens 的产生如何影响聚合。首先索引一些代表美国各个州的文档：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">POST /agg_analysis/data/_bulk
+{ "index": {}}
+{ "state" : "New York" }
+{ "index": {}}
+{ "state" : "New Jersey" }
+{ "index": {}}
+{ "state" : "New Mexico" }
+{ "index": {}}
+{ "state" : "New York" }
+{ "index": {}}
+{ "state" : "New York" }</pre>
+</div>
+<p>我们希望创建一个数据集里各个州的唯一列表，并且计数。
+简单，让我们使用 <code class="literal">terms</code> 桶：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">GET /agg_analysis/data/_search
+{
+    "size" : 0,
+    "aggs" : {
+        "states" : {
+            "terms" : {
+                "field" : "state"
+            }
+        }
+    }
+}</pre>
+</div>
+<p>得到结果：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+...
+   "aggregations": {
+      "states": {
+         "buckets": [
+            {
+               "key": "new",
+               "doc_count": 5
+            },
+            {
+               "key": "york",
+               "doc_count": 3
+            },
+            {
+               "key": "jersey",
+               "doc_count": 1
+            },
+            {
+               "key": "mexico",
+               "doc_count": 1
+            }
+         ]
+      }
+   }
+}</pre>
+</div>
+<p>宝贝儿，这完全不是我们想要的！没有对州名计数，聚合计算了每个词的数目。背后的原因很简单：聚合是基于倒排索引创建的，倒排索引是 后置分析（ <em>post-analysis</em> ）的。</p>
+<p>当我们把这些文档加入到 Elasticsearch 中时，字符串 <code class="literal">"New York"</code> 被分析/分析成 <code class="literal">["new", "york"]</code> 。这些单独的 tokens ，都被用来填充聚合计数，所以我们最终看到 <code class="literal">new</code> 的数量而不是 <code class="literal">New York</code> 。</p>
+<p>这显然不是我们想要的行为，但幸运的是很容易修正它。</p>
+<p>我们需要为 <code class="literal">state</code> 定义 multifield 并且设置成 <code class="literal">not_analyzed</code> 。这样可以防止 <code class="literal">New York</code> 被分析，也意味着在聚合过程中它会以单个 token 的形式存在。让我们尝试完整的过程，但这次指定一个 <em>raw</em> multifield：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">DELETE /agg_analysis/
+PUT /agg_analysis
+{
+  "mappings": {
+    "data": {
+      "properties": {
+        "state" : {
+          "type": "string",
+          "fields": {
+            "raw" : {
+              "type": "string",
+              "index": "not_analyzed"<a id="CO217-1"></a><i class="conum" data-value="1"></i>
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+POST /agg_analysis/data/_bulk
+{ "index": {}}
+{ "state" : "New York" }
+{ "index": {}}
+{ "state" : "New Jersey" }
+{ "index": {}}
+{ "state" : "New Mexico" }
+{ "index": {}}
+{ "state" : "New York" }
+{ "index": {}}
+{ "state" : "New York" }
+
+GET /agg_analysis/data/_search
+{
+  "size" : 0,
+  "aggs" : {
+    "states" : {
+        "terms" : {
+            "field" : "state.raw" <a id="CO217-2"></a><i class="conum" data-value="2"></i>
+        }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO217-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>这次我们显式映射 <code class="literal">state</code> 字段并包括一个 <code class="literal">not_analyzed</code> 辅字段。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO217-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>聚合针对 <code class="literal">state.raw</code> 字段而不是 <code class="literal">state</code> 。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>现在运行聚合，我们得到了合理的结果：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+...
+   "aggregations": {
+      "states": {
+         "buckets": [
+            {
+               "key": "New York",
+               "doc_count": 3
+            },
+            {
+               "key": "New Jersey",
+               "doc_count": 1
+            },
+            {
+               "key": "New Mexico",
+               "doc_count": 1
+            }
+         ]
+      }
+   }
+}</pre>
+</div>
+<p>在实际中，这样的问题很容易被察觉，我们的聚合会返回一些奇怪的桶，我们会记住分析的问题。
+总之，很少有在聚合中使用分析字段的实例。当我们疑惑时，只要增加一个 multifield 就能有两种选择。</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_分析字符串和_fielddataanalyzed_strings_and_fielddata"></a>分析字符串和 Fielddata（Analyzed strings and Fielddata）</h3>
+</div></div></div>
+<p>当第一个问题涉及如何聚合数据并显示给用户，第二个问题主要是技术和幕后。</p>
+<p>Doc values 不支持 <code class="literal">analyzed</code> 字符串字段，因为它们不能很有效的表示多值字符串。 Doc values 最有效的是，当每个文档都有一个或几个 tokens 时，
+但不是无数的，分析字符串（想象一个 PDF ，可能有几兆字节并有数以千计的独特 tokens）。</p>
+<p>出于这个原因，doc values 不生成分析的字符串，然而，这些字段仍然可以使用聚合，那怎么可能呢？</p>
+<p>答案是一种被称为 <em>fielddata</em> 的数据结构。与 doc values 不同，fielddata 构建和管理 100% 在内存中，常驻于 JVM 内存堆。这意味着它本质上是不可扩展的，有很多边缘情况下要提防。
+本章的其余部分是解决在分析字符串上下文中 fielddata 的挑战。</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>从历史上看，fielddata 是 <em>所有</em> 字段的默认设置。但是 Elasticsearch 已迁移到 doc values 以减少 OOM 的几率。分析的字符串是仍然使用 fielddata 的最后一块阵地。
+最终目标是建立一个序列化的数据结构类似于 doc values ，可以处理高维度的分析字符串，逐步淘汰 fielddata。</p>
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_高基数内存的影响high_cardinality_memory_implications"></a>高基数内存的影响（High-Cardinality Memory Implications）</h3>
+</div></div></div>
+<p>避免分析字段的另外一个原因就是：高基数字段在加载到 fielddata 时会消耗大量内存。 分析的过程会经常（尽管不总是这样）生成大量的 token，这些 token 大多都是唯一的。
+这会增加字段的整体基数并且带来更大的内存压力。</p>
+<p>有些类型的分析对于内存来说 <em>极度</em> 不友好，想想 n-gram 的分析过程， <code class="literal">New York</code> 会被 n-gram 分析成以下 token：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">ne</code>
+</li>
+<li class="listitem">
+<code class="literal">ew</code>
+</li>
+<li class="listitem">
+<code class="literal">w&#160;</code>
+</li>
+<li class="listitem">
+<code class="literal">&#160;y</code>
+</li>
+<li class="listitem">
+<code class="literal">yo</code>
+</li>
+<li class="listitem">
+<code class="literal">or</code>
+</li>
+<li class="listitem">
+<code class="literal">rk</code>
+</li>
+</ul>
+</div>
+<p>可以想象 n-gram 的过程是如何生成大量唯一 token 的，特别是在分析成段文本的时候。当这些数据加载到内存中，会轻而易举的将我们堆空间消耗殆尽。</p>
+<p>因此，在聚合字符串字段之前，请评估情况：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+这是一个 <code class="literal">not_analyzed</code> 字段吗？如果是，可以通过 doc values 节省内存 。
+</li>
+<li class="listitem">
+否则，这是一个 <code class="literal">analyzed</code> 字段，它将使用 fielddata 并加载到内存中。这个字段因为 ngrams 有一个非常大的基数？如果是，这对于内存来说极度不友好。
+</li>
+</ul>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="_deep_dive_on_doc_values.html">« 深入理解 Doc Values</a>
+</span>
+<span class="next">
+<a href="_limiting_memory_usage.html">限制内存使用 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

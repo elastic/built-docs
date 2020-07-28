@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>多字符串查询 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="multi-field-search.html" title="多字段搜索"/>
+<link rel="prev" href="multi-field-search.html" title="多字段搜索"/>
+<link rel="next" href="_single_query_string.html" title="单字符串查询"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="search-in-depth.html">深入搜索</a></span>
+»
+<span class="breadcrumb-link"><a href="multi-field-search.html">多字段搜索</a></span>
+»
+<span class="breadcrumb-node">多字符串查询</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="multi-field-search.html">« 多字段搜索</a>
+</span>
+<span class="next">
+<a href="_single_query_string.html">单字符串查询 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="multi-query-strings"></a>多字符串查询</h2>
+</div></div></div>
+<p>最简单的多字段查询可以将搜索项映射到具体的字段。如果我们知道 <em>War and Peace</em> 是标题，Leo Tolstoy 是作者，很容易就能把两个条件用 <code class="literal">match</code> 语句表示，并将它们用 <a class="xref" href="bool-query.html" title="组合查询"><code class="literal">bool</code> 查询</a> 组合起来：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">GET /_search
+{
+  "query": {
+    "bool": {
+      "should": [
+        { "match": { "title":  "War and Peace" }},
+        { "match": { "author": "Leo Tolstoy"   }}
+      ]
+    }
+  }
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/110_Multi_Field_Search/05_Multiple_query_strings.json"></div>
+<p><code class="literal">bool</code> 查询采取 <em>more-matches-is-better</em> 匹配越多越好的方式，所以每条 <code class="literal">match</code> 语句的评分结果会被加在一起，从而为每个文档提供最终的分数 <code class="literal">_score</code> 。能与两条语句同时匹配的文档比只与一条语句匹配的文档得分要高。</p>
+<p>当然，并不是只能使用 <code class="literal">match</code> 语句：可以用 <code class="literal">bool</code> 查询来包裹组合任意其他类型的查询，甚至包括其他的 <code class="literal">bool</code> 查询。我们可以在上面的示例中添加一条语句来指定译者版本的偏好：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">GET /_search
+{
+  "query": {
+    "bool": {
+      "should": [
+        { "match": { "title":  "War and Peace" }},
+        { "match": { "author": "Leo Tolstoy"   }},
+        { "bool":  {
+          "should": [
+            { "match": { "translator": "Constance Garnett" }},
+            { "match": { "translator": "Louise Maude"      }}
+          ]
+        }}
+      ]
+    }
+  }
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/110_Multi_Field_Search/05_Multiple_query_strings.json"></div>
+<p>为什么将译者条件语句放入另一个独立的 <code class="literal">bool</code> 查询中呢？所有的四个 <code class="literal">match</code> 查询都是 <code class="literal">should</code> 语句，所以为什么不将 translator 语句与其他如 title 、 author 这样的语句放在同一层呢？</p>
+<p>答案在于评分的计算方式。 <code class="literal">bool</code> 查询运行每个 <code class="literal">match</code> 查询，再把评分加在一起，然后将结果与所有匹配的语句数量相乘，最后除以所有的语句数量。处于同一层的每条语句具有相同的权重。在前面这个例子中，包含 translator 语句的 <code class="literal">bool</code> 查询，只占总评分的三分之一。如果将 translator 语句与 title 和 author 两条语句放入同一层，那么 title 和 author 语句只贡献四分之一评分。</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="prioritising-clauses"></a>语句的优先级</h3>
+</div></div></div>
+<p>前例中每条语句贡献三分之一评分的这种方式可能并不是我们想要的，我们可能对 title 和 author 两条语句更感兴趣，这样就需要调整查询，使 title 和 author 语句相对来说更重要。</p>
+<p>在武器库中，最容易使用的就是 <code class="literal">boost</code> 参数。为了提升 <code class="literal">title</code> 和 <code class="literal">author</code> 字段的权重，为它们分配的 <code class="literal">boost</code> 值大于 <code class="literal">1</code> ：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">GET /_search
+{
+  "query": {
+    "bool": {
+      "should": [
+        { "match": { <a id="CO66-1"></a><i class="conum" data-value="1"></i>
+            "title":  {
+              "query": "War and Peace",
+              "boost": 2
+        }}},
+        { "match": { <a id="CO66-2"></a><i class="conum" data-value="1"></i>
+            "author":  {
+              "query": "Leo Tolstoy",
+              "boost": 2
+        }}},
+        { "bool":  { <a id="CO66-3"></a><i class="conum" data-value="2"></i>
+            "should": [
+              { "match": { "translator": "Constance Garnett" }},
+              { "match": { "translator": "Louise Maude"      }}
+            ]
+        }}
+      ]
+    }
+  }
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/110_Multi_Field_Search/05_Multiple_query_strings.json"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO66-1"><i class="conum" data-value="1"></i></a><a href="#CO66-2"></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">title</code> 和 <code class="literal">author</code> 语句的 <code class="literal">boost</code> 值为 <code class="literal">2</code> 。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO66-3"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>嵌套 <code class="literal">bool</code> 语句默认的 <code class="literal">boost</code> 值为 <code class="literal">1</code> 。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>要获取 <code class="literal">boost</code> 参数 “最佳” 值，较为简单的方式就是不断试错：设定 <code class="literal">boost</code> 值，运行测试查询，如此反复。 <code class="literal">boost</code> 值比较合理的区间处于 <code class="literal">1</code> 到 <code class="literal">10</code> 之间，当然也有可能是 <code class="literal">15</code> 。如果为 <code class="literal">boost</code> 指定比这更高的值，将不会对最终的评分结果产生更大影响，因为评分是被 <a class="xref" href="_boosting_query_clauses.html#boost-normalization">归一化的（normalized）</a> 。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="multi-field-search.html">« 多字段搜索</a>
+</span>
+<span class="next">
+<a href="_single_query_string.html">单字符串查询 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

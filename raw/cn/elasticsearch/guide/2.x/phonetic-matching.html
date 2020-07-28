@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>语音匹配 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="fuzzy-matching.html" title="拼写错误"/>
+<link rel="prev" href="fuzzy-scoring.html" title="模糊性评分"/>
+<link rel="next" href="aggregations.html" title="聚合"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="languages.html">处理人类语言</a></span>
+»
+<span class="breadcrumb-link"><a href="fuzzy-matching.html">拼写错误</a></span>
+»
+<span class="breadcrumb-node">语音匹配</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="fuzzy-scoring.html">« 模糊性评分</a>
+</span>
+<span class="next">
+<a href="aggregations.html">聚合 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="phonetic-matching"></a>语音匹配</h2>
+</div></div></div>
+<p>最后，在尝试任何其他匹配方法都无效后，我们可以求助于搜索发音相似的词，即使他们的拼写不同。</p>
+<p>有一些用于将词转换成语音标识的算法。
+ <a href="http://en.wikipedia.org/wiki/Soundex" class="ulink" target="_top">Soundex</a> 算法是这些算法的鼻祖，
+而且大多数语音算法是 Soundex 的改进或者专业版本，例如 <a href="http://en.wikipedia.org/wiki/Metaphone" class="ulink" target="_top">Metaphone</a>
+和 <a href="http://en.wikipedia.org/wiki/Metaphone#Double_Metaphone" class="ulink" target="_top">Double Metaphone</a> （扩展了除英语以外的其他语言的语音匹配），
+<a href="http://en.wikipedia.org/wiki/Caverphone" class="ulink" target="_top">Caverphone</a> 算法匹配了新西兰的名称，
+<a href="https://en.wikipedia.org/wiki/Daitch–Mokotoff_Soundex#Beider.E2.80.93Morse_Phonetic_Name_Matching_Algorithm" class="ulink" target="_top">Beider-Morse</a> 算法吸收了 Soundex 算法为了更好的匹配德语和依地语名称，
+<a href="http://de.wikipedia.org/wiki/K%C3%B6lner_Phonetik" class="ulink" target="_top">Kölner Phonetik</a> 为了更好的处理德语词汇。</p>
+<p>值得一提的是，语音算法是相当简陋的，他们设计初衷针对的语言通常是英语或德语。这限制了他们的实用性。
+不过，为了某些明确的目标，并与其他技术相结合，语音匹配能够作为一个有用的工具。</p>
+<p>首先，你需要从
+<a href="/guide/en/elasticsearch/plugins/current/analysis-phonetic.html" class="ulink" target="_top">https://www.elastic.co/guide/en/elasticsearch/plugins/current/analysis-phonetic.html</a> 获取语音分析插件并在集群的每个节点安装，
+然后重启每个节点。</p>
+<p>然后，您可以创建一个使用语音语汇单元过滤器的自定义分析器，并尝试下面的方法：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">PUT /my_index
+{
+  "settings": {
+    "analysis": {
+      "filter": {
+        "dbl_metaphone": { <a id="CO181-1"></a><i class="conum" data-value="1"></i>
+          "type":    "phonetic",
+          "encoder": "double_metaphone"
+        }
+      },
+      "analyzer": {
+        "dbl_metaphone": {
+          "tokenizer": "standard",
+          "filter":    "dbl_metaphone" <a id="CO181-2"></a><i class="conum" data-value="2"></i>
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO181-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>首先，配置一个自定义 <code class="literal">phonetic</code> 语汇单元过滤器并使用 <code class="literal">double_metaphone</code> 编码器。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO181-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>然后在自定义分析器中使用自定义语汇单元过滤器。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>现在我们可以通过 <code class="literal">analyze</code> API 来进行测试：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /my_index/_analyze?analyzer=dbl_metaphone
+Smith Smythe</pre>
+</div>
+<p>每个  <code class="literal">Smith</code> 和 <code class="literal">Smythe</code> 在同一位置产生两个语汇单元： <code class="literal">SM0</code> 和 <code class="literal">XMT</code> 。
+通过分析器播放 <code class="literal">John</code> ， <code class="literal">Jon</code> 和 <code class="literal">Johnnie</code> 将产生两个语汇单元   <code class="literal">JN</code> 和 <code class="literal">AN</code> ，而 <code class="literal">Jonathon</code> 产生语汇单元 <code class="literal">JN0N</code> 和 <code class="literal">ANTN</code> 。</p>
+<p>语音分析器可以像任何其他分析器一样使用。 首先映射一个字段来使用它，然后索引一些数据：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">PUT /my_index/_mapping/my_type
+{
+  "properties": {
+    "name": {
+      "type": "string",
+      "fields": {
+        "phonetic": { <a id="CO182-1"></a><i class="conum" data-value="1"></i>
+          "type":     "string",
+          "analyzer": "dbl_metaphone"
+        }
+      }
+    }
+  }
+}
+
+PUT /my_index/my_type/1
+{
+  "name": "John Smith"
+}
+
+PUT /my_index/my_type/2
+{
+  "name": "Jonnie Smythe"
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO182-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">name.phonetic</code> 字段使用自定义 <code class="literal">dbl_metaphone</code> 分析器。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>可以使用 <code class="literal">match</code> 查询来进行搜索：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /my_index/my_type/_search
+{
+  "query": {
+    "match": {
+      "name.phonetic": {
+        "query": "Jahnnie Smeeth",
+        "operator": "and"
+      }
+    }
+  }
+}</pre>
+</div>
+<p>这个查询返回全部两个文档，演示了如何进行简陋的语音匹配。
+ 用语音算法计算评分是没有价值的。
+语音匹配的目的不是为了提高精度，而是要提高召回率&#8212;&#8203;以扩展足够的范围来捕获可能匹配的文档。</p>
+<p>通常更有意义的使用语音算法是在检索到结果后，由另一台计算机进行消费和后续处理，而不是由人类用户直接使用。</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="fuzzy-scoring.html">« 模糊性评分</a>
+</span>
+<span class="next">
+<a href="aggregations.html">聚合 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

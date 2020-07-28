@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>匹配查询 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="full-text-search.html" title="全文搜索"/>
+<link rel="prev" href="term-vs-full-text.html" title="基于词项与基于全文"/>
+<link rel="next" href="match-multi-word.html" title="多词查询"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="search-in-depth.html">深入搜索</a></span>
+»
+<span class="breadcrumb-link"><a href="full-text-search.html">全文搜索</a></span>
+»
+<span class="breadcrumb-node">匹配查询</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="term-vs-full-text.html">« 基于词项与基于全文</a>
+</span>
+<span class="next">
+<a href="match-multi-word.html">多词查询 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="match-query"></a>匹配查询</h2>
+</div></div></div>
+<p>匹配查询 <code class="literal">match</code> 是个 <em>核心</em> 查询。无论需要查询什么字段， <code class="literal">match</code> 查询都应该会是首选的查询方式。它是一个高级 <em>全文查询</em> ，这表示它既能处理全文字段，又能处理精确字段。</p>
+<p>这就是说， <code class="literal">match</code> 查询主要的应用场景就是进行全文搜索，我们以下面一个简单例子来说明全文搜索是如何工作的：</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="match-test-data"></a>索引一些数据</h3>
+</div></div></div>
+<p>首先，我们使用 <a class="xref" href="bulk.html" title="代价较小的批量操作"><code class="literal">bulk</code> API</a> 创建一些新的文档和索引：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">DELETE /my_index <a id="CO56-1"></a><i class="conum" data-value="1"></i>
+
+PUT /my_index
+{ "settings": { "number_of_shards": 1 }} <a id="CO56-2"></a><i class="conum" data-value="2"></i>
+
+POST /my_index/my_type/_bulk
+{ "index": { "_id": 1 }}
+{ "title": "The quick brown fox" }
+{ "index": { "_id": 2 }}
+{ "title": "The quick brown fox jumps over the lazy dog" }
+{ "index": { "_id": 3 }}
+{ "title": "The quick brown fox jumps over the quick dog" }
+{ "index": { "_id": 4 }}
+{ "title": "Brown fox brown dog" }</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/100_Full_Text_Search/05_Match_query.json"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO56-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>删除已有的索引。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO56-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>稍后，我们会在 <a class="xref" href="relevance-is-broken.html" title="被破坏的相关度！">被破坏的相关性！</a> 中解释只为这个索引分配一个主分片的原因。</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_单个词查询"></a>单个词查询</h3>
+</div></div></div>
+<p>我们用第一个示例来解释使用 <code class="literal">match</code> 查询搜索全文字段中的单个词：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">GET /my_index/my_type/_search
+{
+    "query": {
+        "match": {
+            "title": "QUICK!"
+        }
+    }
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/100_Full_Text_Search/05_Match_query.json"></div>
+<p>Elasticsearch 执行上面这个 <code class="literal">match</code> 查询的步骤是：</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p><em>检查字段类型</em> 。</p>
+<p>标题 <code class="literal">title</code> 字段是一个 <code class="literal">string</code> 类型（ <code class="literal">analyzed</code> ）已分析的全文字段，这意味着查询字符串本身也应该被分析。</p>
+</li>
+<li class="listitem">
+<p><em>分析查询字符串</em> 。</p>
+<p>将查询的字符串 <code class="literal">QUICK!</code> 传入标准分析器中，输出的结果是单个项 <code class="literal">quick</code> 。因为只有一个单词项，所以 <code class="literal">match</code> 查询执行的是单个底层 <code class="literal">term</code> 查询。</p>
+</li>
+<li class="listitem">
+<p><em>查找匹配文档</em> 。</p>
+<p>用 <code class="literal">term</code> 查询在倒排索引中查找 <code class="literal">quick</code> 然后获取一组包含该项的文档，本例的结果是文档：1、2 和 3 。</p>
+</li>
+<li class="listitem">
+<p><em>为每个文档评分</em> 。</p>
+<p>用 <code class="literal">term</code> 查询计算每个文档相关度评分 <code class="literal">_score</code> ，这是种将词频（term frequency，即词 <code class="literal">quick</code> 在相关文档的 <code class="literal">title</code> 字段中出现的频率）和反向文档频率（inverse document frequency，即词 <code class="literal">quick</code> 在所有文档的 <code class="literal">title</code> 字段中出现的频率），以及字段的长度（即字段越短相关度越高）相结合的计算方式。参见 <a class="xref" href="relevance-intro.html" title="什么是相关性?">相关性的介绍</a> 。</p>
+</li>
+</ol>
+</div>
+<p>这个过程给我们以下（经缩减）结果：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">"hits": [
+ {
+    "_id":      "1",
+    "_score":   0.5, <a id="CO57-1"></a><i class="conum" data-value="1"></i>
+    "_source": {
+       "title": "The quick brown fox"
+    }
+ },
+ {
+    "_id":      "3",
+    "_score":   0.44194174, <a id="CO57-2"></a><i class="conum" data-value="2"></i>
+    "_source": {
+       "title": "The quick brown fox jumps over the quick dog"
+    }
+ },
+ {
+    "_id":      "2",
+    "_score":   0.3125, <a id="CO57-3"></a><i class="conum" data-value="2"></i>
+    "_source": {
+       "title": "The quick brown fox jumps over the lazy dog"
+    }
+ }
+]</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO57-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>文档 1 最相关，因为它的 <code class="literal">title</code> 字段更短，即 <code class="literal">quick</code> 占据内容的一大部分。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO57-2"><i class="conum" data-value="2"></i></a><a href="#CO57-3"></a></p>
+</td>
+<td align="left" valign="top">
+<p>文档 3 比 文档 2 更具相关性，因为在文档 3 中 <code class="literal">quick</code> 出现了两次。</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="term-vs-full-text.html">« 基于词项与基于全文</a>
+</span>
+<span class="next">
+<a href="match-multi-word.html">多词查询 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

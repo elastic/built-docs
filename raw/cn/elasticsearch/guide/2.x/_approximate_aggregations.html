@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>近似聚合 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="aggregations.html" title="聚合"/>
+<link rel="prev" href="_sorting_based_on_deep_metrics.html" title="基于“深度”度量排序"/>
+<link rel="next" href="cardinality.html" title="统计去重后的数量"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="aggregations.html">聚合</a></span>
+»
+<span class="breadcrumb-node">近似聚合</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="_sorting_based_on_deep_metrics.html">« 基于“深度”度量排序</a>
+</span>
+<span class="next">
+<a href="cardinality.html">统计去重后的数量 »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="_approximate_aggregations"></a>近似聚合</h2>
+</div></div></div>
+<p>如果所有的数据都在一台机器上，那么生活会容易许多。 CS201 课上教的经典算法就足够应付这些问题。如果所有的数据都在一台机器上，那么也就不需要像 Elasticsearch 这样的分布式软件了。不过一旦我们开始分布式存储数据，就需要小心地选择算法。</p>
+<p>有些算法可以分布执行，到目前为止讨论过的所有聚合都是单次请求获得精确结果的。这些类型的算法通常被认为是 <em>高度并行的</em> ，因为它们无须任何额外代价，就能在多台机器上并行执行。比如当计算 <code class="literal">max</code> 度量时，以下的算法就非常简单：</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+把请求广播到所有分片。
+</li>
+<li class="listitem">
+查看每个文档的 <code class="literal">price</code> 字段。如果 <code class="literal">price &gt; current_max</code> ，将 <code class="literal">current_max</code> 替换成 <code class="literal">price</code> 。
+</li>
+<li class="listitem">
+返回所有分片的最大 <code class="literal">price</code> 并传给协调节点。
+</li>
+<li class="listitem">
+找到从所有分片返回的最大 <code class="literal">price</code> 。这是最终的最大值。
+</li>
+</ol>
+</div>
+<p>这个算法可以随着机器数的线性增长而横向扩展，无须任何协调操作（机器之间不需要讨论中间结果），而且内存消耗很小（一个整型就能代表最大值）。</p>
+<p>不幸的是，不是所有的算法都像获取最大值这样简单。更加复杂的操作则需要在算法的性能和内存使用上做出权衡。对于这个问题，我们有个三角因子模型：大数据、精确性和实时性。</p>
+<p>我们需要选择其中两项：</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+精确 + 实时
+</span>
+</dt>
+<dd>
+数据可以存入单台机器的内存之中，我们可以随心所欲，使用任何想用的算法。结果会 100% 精确，响应会相对快速。
+</dd>
+<dt>
+<span class="term">
+大数据 + 精确
+</span>
+</dt>
+<dd>
+传统的 Hadoop。可以处理 PB 级的数据并且为我们提供精确的答案，但它可能需要几周的时间才能为我们提供这个答案。
+</dd>
+<dt>
+<span class="term">
+大数据 + 实时
+</span>
+</dt>
+<dd>
+近似算法为我们提供准确但不精确的结果。
+</dd>
+</dl>
+</div>
+<p>Elasticsearch 目前支持两种近似算法（ <code class="literal">cardinality</code> 和 <code class="literal">percentiles</code> ）。 它们会提供准确但不是 100% 精确的结果。
+以牺牲一点小小的估算错误为代价，这些算法可以为我们换来高速的执行效率和极小的内存消耗。</p>
+<p>对于 <em>大多数</em> 应用领域，能够 <em>实时</em> 返回高度准确的结果要比 100% 精确结果重要得多。乍一看这可能是天方夜谭。有人会叫 <em>“我们需要精确的答案！”</em> 。但仔细考虑 0.5% 误差所带来的影响：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+99% 的网站延时都在 132ms 以下。
+</li>
+<li class="listitem">
+0.5% 的误差对以上延时的影响在正负 0.66ms 。
+</li>
+<li class="listitem">
+近似计算的结果会在毫秒内返回，而“完全正确”的结果就可能需要几秒，甚至无法返回。
+</li>
+</ul>
+</div>
+<p>只要简单的查看网站的延时情况，难道我们会在意近似结果是 132.66ms 而不是 132ms 吗？当然，不是所有的领域都能容忍这种近似结果，但对于绝大多数来说是没有问题的。接受近似结果更多的是一种 <em>文化观念上</em> 的壁垒而不是商业或技术上的需要。</p>
+
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="_sorting_based_on_deep_metrics.html">« 基于“深度”度量排序</a>
+</span>
+<span class="next">
+<a href="cardinality.html">统计去重后的数量 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

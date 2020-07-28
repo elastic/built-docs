@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>实际使用中的一些建议 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="parent-child.html" title="父-子关系文档"/>
+<link rel="prev" href="grandparents.html" title="祖辈与孙辈关系"/>
+<link rel="next" href="scale.html" title="扩容设计"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="modeling-your-data.html">数据建模</a></span>
+»
+<span class="breadcrumb-link"><a href="parent-child.html">父-子关系文档</a></span>
+»
+<span class="breadcrumb-node">实际使用中的一些建议</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="grandparents.html">« 祖辈与孙辈关系</a>
+</span>
+<span class="next">
+<a href="scale.html">扩容设计 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="parent-child-performance"></a>实际使用中的一些建议</h2>
+</div></div></div>
+<p>当文档索引性能远比查询性能重要的时候，父子关系是非常有用的，但是它也是有巨大代价的。其查询速度会比同等的嵌套查询慢5到10倍!</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_全局序号和延迟"></a>全局序号和延迟</h3>
+</div></div></div>
+<p>父子关系使用了<a class="xref" href="preload-fielddata.html#global-ordinals" title="全局序号（Global Ordinals）">全局序数</a>  来加速文档间的联合。不管父子关系映射是否使用了内存缓存或基于硬盘的 doc values，当索引变更时，全局序数要重建。</p>
+<p>一个分片中父文档越多，那么全局序数的重建就需要更多的时间。父子关系更适合于父文档少、子文档多的情况。</p>
+<p>全局序数默认情况下是延迟构建的：在refresh后的第一个父子查询会触发全局序数的构建。而这个构建会导致用户使用时感受到明显的迟缓。你可以使用<a class="xref" href="preload-fielddata.html#eager-global-ordinals" title="预构建全局序号（Eager global ordinals）">全局序数预加载</a>  来将全局序数构建的开销由query阶段转移到refresh阶段，设置如下：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">PUT /company
+{
+  "mappings": {
+    "branch": {},
+    "employee": {
+      "_parent": {
+        "type": "branch",
+        "fielddata": {
+          "loading": "eager_global_ordinals" <a id="CO285-1"></a><i class="conum" data-value="1"></i>
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO285-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>在一个新的段可搜索前，<code class="literal">_parent</code> 字段的全局序数会被构建。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>当父文档过多时，全局序数的构建会耗费很多时间。此时可以通过增加 <code class="literal">refresh_interval</code>  来减少 refresh 的次数，延长全局序数的有效时间，这也很大程度上减小了全局序数每秒重建的cpu消耗。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_多代使用和结语"></a>多代使用和结语</h3>
+</div></div></div>
+<p>多代文档的联合查询(查看 <a class="xref" href="grandparents.html" title="祖辈与孙辈关系">祖辈与孙辈关系</a>)虽然看起来很吸引人，但必须考虑如下的代价：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+联合越多，性能越差。
+</li>
+<li class="listitem">
+每一代的父文档都要将其字符串类型的 <code class="literal">_id</code> 字段存储在内存中，这会占用大量内存。
+</li>
+</ul>
+</div>
+<p>当你考虑父子关系是否适合你现有关系模型时，请考虑下面这些建议：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+尽量少地使用父子关系，仅在子文档远多于父文档时使用。
+</li>
+<li class="listitem">
+避免在一个查询中使用多个父子联合语句。
+</li>
+<li class="listitem">
+在 has_child 查询中使用 filter 上下文，或者设置 score_mode 为 none 来避免计算文档得分。
+</li>
+<li class="listitem">
+保证父 IDs 尽量短，以便在 doc values 中更好地压缩，被临时载入时占用更少的内存。
+</li>
+</ul>
+</div>
+<p><em>最重要的是:</em> 先考虑下我们之前讨论过的其他方式来达到父子关系的效果。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="grandparents.html">« 祖辈与孙辈关系</a>
+</span>
+<span class="next">
+<a href="scale.html">扩容设计 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

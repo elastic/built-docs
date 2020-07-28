@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>地理距离过滤器 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="geopoints.html" title="地理坐标点"/>
+<link rel="prev" href="geo-bounding-box.html" title="地理坐标盒模型过滤器"/>
+<link rel="next" href="sorting-by-distance.html" title="按距离排序"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="geoloc.html">地理位置</a></span>
+»
+<span class="breadcrumb-link"><a href="geopoints.html">地理坐标点</a></span>
+»
+<span class="breadcrumb-node">地理距离过滤器</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="geo-bounding-box.html">« 地理坐标盒模型过滤器</a>
+</span>
+<span class="next">
+<a href="sorting-by-distance.html">按距离排序 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="geo-distance"></a>地理距离过滤器</h2>
+</div></div></div>
+<p>地理距离过滤器（ <code class="literal">geo_distance</code> ）以给定位置为圆心画一个圆，来找出那些地理坐标落在其中的文档：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /attractions/restaurant/_search
+{
+  "query": {
+    "filtered": {
+      "filter": {
+        "geo_distance": {
+          "distance": "1km", <a id="CO230-1"></a><i class="conum" data-value="1"></i>
+          "location": { <a id="CO230-2"></a><i class="conum" data-value="2"></i>
+            "lat":  40.715,
+            "lon": -73.988
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO230-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>找出所有与指定点距离在 <code class="literal">1km</code> 内的 <code class="literal">location</code> 字段。访问 <a href="/guide/en/elasticsearch/reference/5.6/common-options.html#distance-units" class="ulink" target="_top">Distance Units</a> 查看所支持的距离表示单位。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO230-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>中心点可以表示为字符串，数组或者（如示例中的）对象。详见 <a class="xref" href="lat-lon-formats.html" title="经纬度坐标格式">经纬度坐标格式</a>。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>地理距离过滤器计算代价昂贵。为了优化性能，Elasticsearch 先画一个矩形框来围住整个圆形，这样就可以先用消耗较少的盒模型计算方式来排除掉尽可能多的文档。
+然后只对落在盒模型内的这部分点用地理距离计算方式处理。</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>你需要判断你的用户，是否需要如此精确的使用圆模型来做距离过滤？通常使用矩形模型 <a class="xref" href="geo-bounding-box.html" title="地理坐标盒模型过滤器">bounding box</a> 是比地理距离更高效的方式，并且往往也能满足应用需求。</p>
+</div>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_更快的地理距离计算"></a>更快的地理距离计算</h3>
+</div></div></div>
+<p>两点间的距离计算，有多种牺牲性能换取精度的算法：</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">arc</code>
+</span>
+</dt>
+<dd>
+最慢但最精确的是 <code class="literal">arc</code> 计算方式，这种方式把世界当作球体来处理。不过这种方式的精度有限，因为这个世界并不是完全的球体。
+</dd>
+<dt>
+<span class="term">
+<code class="literal">plane</code>
+</span>
+</dt>
+<dd>
+<code class="literal">plane</code> 计算方式把地球当成是平坦的，这种方式快一些但是精度略逊。在赤道附近的位置精度最好，而靠近两极则变差。
+</dd>
+<dt>
+<span class="term">
+<code class="literal">sloppy_arc</code>
+</span>
+</dt>
+<dd>
+如此命名，是因为它使用了 Lucene 的 <code class="literal">SloppyMath</code> 类。这是一种用精度换取速度的计算方式，
+它使用 <a href="http://en.wikipedia.org/wiki/Haversine_formula" class="ulink" target="_top">Haversine formula</a> 来计算距离。它比 <code class="literal">arc</code> 计算方式快 4 到 5 倍，并且距离精度达 99.9%。这也是默认的计算方式。
+</dd>
+</dl>
+</div>
+<p>你可以参考下例来指定不同的计算方式：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /attractions/restaurant/_search
+{
+  "query": {
+    "filtered": {
+      "filter": {
+        "geo_distance": {
+          "distance":      "1km",
+          "distance_type": "plane", <a id="CO231-1"></a><i class="conum" data-value="1"></i>
+          "location": {
+            "lat":  40.715,
+            "lon": -73.988
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO231-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>使用更快但精度稍差的 <code class="literal">plane</code> 计算方法。</p>
+</td>
+</tr>
+</table>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>你的用户真的会在意一个餐馆落在指定圆形区域数米之外吗？一些地理位置相关的应用会有较高的精度要求；但大部分实际应用场景中，使用精度较低但响应更快的计算方式可能更好。</p>
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="geo-distance-range"></a>地理距离区间过滤器</h3>
+</div></div></div>
+<p><code class="literal">geo_distance</code> 和 <code class="literal">geo_distance_range</code> 过滤器的唯一差别在于后者是一个环状的，它会排除掉落在内圈中的那部分文档。</p>
+<p>指定到中心点的距离也可以换一种表示方式：指定一个最小距离（使用 <code class="literal">gt</code> 或者 <code class="literal">gte</code> ）和最大距离（使用 <code class="literal">lt</code> 和 <code class="literal">lte</code> ），就像使用 <code class="literal">range</code> 过滤器一样：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /attractions/restaurant/_search
+{
+  "query": {
+    "filtered": {
+      "filter": {
+        "geo_distance_range": {
+          "gte":    "1km", <a id="CO232-1"></a><i class="conum" data-value="1"></i>
+          "lt":     "2km", <a id="CO232-2"></a><i class="conum" data-value="1"></i>
+          "location": {
+            "lat":  40.715,
+            "lon": -73.988
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO232-1"><i class="conum" data-value="1"></i></a><a href="#CO232-2"></a></p>
+</td>
+<td align="left" valign="top">
+<p>匹配那些距离中心点大于等于 <code class="literal">1km</code> 而小于 <code class="literal">2km</code> 的位置。</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="geo-bounding-box.html">« 地理坐标盒模型过滤器</a>
+</span>
+<span class="next">
+<a href="sorting-by-distance.html">按距离排序 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

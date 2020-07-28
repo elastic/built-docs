@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>添加索引 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="distributed-cluster.html" title="集群内的原理"/>
+<link rel="prev" href="cluster-health.html" title="集群健康"/>
+<link rel="next" href="_add_failover.html" title="添加故障转移"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="getting-started.html">基础入门</a></span>
+»
+<span class="breadcrumb-link"><a href="distributed-cluster.html">集群内的原理</a></span>
+»
+<span class="breadcrumb-node">添加索引</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="cluster-health.html">« 集群健康</a>
+</span>
+<span class="next">
+<a href="_add_failover.html">添加故障转移 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="_add-an-index"></a>添加索引</h2>
+</div></div></div>
+<p>我们往 Elasticsearch 添加数据时需要用到 <em>索引</em> —— 保存相关数据的地方。
+索引实际上是指向一个或者多个物理 <em>分片</em> 的 <em>逻辑命名空间</em> 。</p>
+<p>一个 <em>分片</em> 是一个底层的 <em>工作单元</em> ，它仅保存了全部数据中的一部分。
+在<a class="xref" href="inside-a-shard.html" title="分片内部原理"><code class="literal">分片内部机制</code></a>中，我们将详细介绍分片是如何工作的，而现在我们只需知道一个分片是一个 Lucene 的实例，以及它本身就是一个完整的搜索引擎。
+我们的文档被存储和索引到分片内，但是应用程序是直接与索引而不是与分片进行交互。</p>
+<p>Elasticsearch 是利用分片将数据分发到集群内各处的。分片是数据的容器，文档保存在分片内，分片又被分配到集群内的各个节点里。
+当你的集群规模扩大或者缩小时， Elasticsearch 会自动的在各节点中迁移分片，使得数据仍然均匀分布在集群里。</p>
+<p>一个分片可以是 <em>主</em> 分片或者 <em>副本</em> 分片。
+索引内任意一个文档都归属于一个主分片，所以主分片的数目决定着索引能够保存的最大数据量。</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>技术上来说，一个主分片最大能够存储 Integer.MAX_VALUE - 128 个文档，但是实际最大值还需要参考你的使用场景：包括你使用的硬件，
+文档的大小和复杂程度，索引和查询文档的方式以及你期望的响应时长。</p>
+</div>
+</div>
+<p>一个副本分片只是一个主分片的拷贝。副本分片作为硬件故障时保护数据不丢失的冗余备份，并为搜索和返回文档等读操作提供服务。</p>
+<p>在索引建立的时候就已经确定了主分片数，但是副本分片数可以随时修改。</p>
+<p>让我们在包含一个空节点的集群内创建名为 <code class="literal">blogs</code> 的索引。
+索引在默认情况下会被分配5个主分片，
+但是为了演示目的，我们将分配3个主分片和一份副本（每个主分片拥有一个副本分片）：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">PUT /blogs
+{
+   "settings" : {
+      "number_of_shards" : 3,
+      "number_of_replicas" : 1
+   }
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/020_Distributed_Cluster/15_Add_index.json"></div>
+<p>我们的集群现在是<a class="xref" href="_add-an-index.html#cluster-one-node" title="拥有一个索引的单节点集群">Figure 2, &#8220;拥有一个索引的单节点集群&#8221;</a>。所有3个主分片都被分配在 <code class="literal">Node 1</code> 。</p>
+<div id="cluster-one-node" class="imageblock">
+<div class="content">
+<img src="images/elas_0202.png" alt="拥有一个索引的单节点集群">
+</div>
+<div class="title">Figure 2. 拥有一个索引的单节点集群</div>
+</div>
+<p>如果我们现在查看<a class="xref" href="cluster-health.html" title="集群健康"><code class="literal">集群健康</code></a>，我们将看到如下内容：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+  "cluster_name": "elasticsearch",
+  "status": "yellow", <a id="CO8-1"></a><i class="conum" data-value="1"></i>
+  "timed_out": false,
+  "number_of_nodes": 1,
+  "number_of_data_nodes": 1,
+  "active_primary_shards": 3,
+  "active_shards": 3,
+  "relocating_shards": 0,
+  "initializing_shards": 0,
+  "unassigned_shards": 3, <a id="CO8-2"></a><i class="conum" data-value="2"></i>
+  "delayed_unassigned_shards": 0,
+  "number_of_pending_tasks": 0,
+  "number_of_in_flight_fetch": 0,
+  "task_max_waiting_in_queue_millis": 0,
+  "active_shards_percent_as_number": 50
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO8-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>集群 <code class="literal">status</code> 值为 <code class="literal">yellow</code> 。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO8-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>没有被分配到任何节点的副本数。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>集群的健康状况为 <code class="literal">yellow</code> 则表示全部 <em>主</em> 分片都正常运行（集群可以正常服务所有请求），但是 <em>副本</em> 分片没有全部处在正常状态。
+实际上，所有3个副本分片都是 <code class="literal">unassigned</code> —— 它们都没有被分配到任何节点。
+在同一个节点上既保存原始数据又保存副本是没有意义的，因为一旦失去了那个节点，我们也将丢失该节点上的所有副本数据。</p>
+<p>当前我们的集群是正常运行的，但是在硬件故障时有丢失数据的风险。</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="cluster-health.html">« 集群健康</a>
+</span>
+<span class="next">
+<a href="_add_failover.html">添加故障转移 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

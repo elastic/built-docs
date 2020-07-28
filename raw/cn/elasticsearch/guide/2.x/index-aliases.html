@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>索引别名和零停机 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="index-management.html" title="索引管理"/>
+<link rel="prev" href="reindex.html" title="重新索引你的数据"/>
+<link rel="next" href="inside-a-shard.html" title="分片内部原理"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="getting-started.html">基础入门</a></span>
+»
+<span class="breadcrumb-link"><a href="index-management.html">索引管理</a></span>
+»
+<span class="breadcrumb-node">索引别名和零停机</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="reindex.html">« 重新索引你的数据</a>
+</span>
+<span class="next">
+<a href="inside-a-shard.html">分片内部原理 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="index-aliases"></a>索引别名和零停机</h2>
+</div></div></div>
+<p>在前面提到的，重建索引的问题是必须更新应用中的索引名称。   索引别名就是用来解决这个问题的！</p>
+<p>索引 <em>别名</em> 就像一个快捷方式或软连接，可以指向一个或多个索引，也可以给任何一个需要索引名的API来使用。<em>别名</em>  带给我们极大的灵活性，允许我们做下面这些：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+在运行的集群中可以无缝的从一个索引切换到另一个索引
+</li>
+<li class="listitem">
+给多个索引分组 (例如， <code class="literal">last_three_months</code>)
+</li>
+<li class="listitem">
+给索引的一个子集创建 <code class="literal">视图</code>
+</li>
+</ul>
+</div>
+<p>在后面我们会讨论更多关于别名的使用。现在，我们将解释怎样使用别名在零停机下从旧索引切换到新索引。</p>
+<p>有两种方式管理别名： <code class="literal">_alias</code> 用于单个操作， <code class="literal">_aliases</code> 用于执行多个原子级操作。</p>
+<p>在本章中，我们假设你的应用有一个叫 <code class="literal">my_index</code> 的索引。事实上， <code class="literal">my_index</code> 是一个指向当前真实索引的别名。真实索引包含一个版本号： <code class="literal">my_index_v1</code> ， <code class="literal">my_index_v2</code> 等等。</p>
+<p>首先，创建索引 <code class="literal">my_index_v1</code> ，然后将别名
+<code class="literal">my_index</code> 指向它：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">PUT /my_index_v1 <a id="CO36-1"></a><i class="conum" data-value="1"></i>
+PUT /my_index_v1/_alias/my_index <a id="CO36-2"></a><i class="conum" data-value="2"></i></pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/070_Index_Mgmt/55_Aliases.json"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO36-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>创建索引 <code class="literal">my_index_v1</code> 。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO36-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>设置别名 <code class="literal">my_index</code> 指向 <code class="literal">my_index_v1</code> 。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>你可以检测这个别名指向哪一个索引：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">GET /*/_alias/my_index</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/070_Index_Mgmt/55_Aliases.json"></div>
+<p>或哪些别名指向这个索引：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">GET /my_index_v1/_alias/*</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/070_Index_Mgmt/55_Aliases.json"></div>
+<p>两者都会返回下面的结果：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+    "my_index_v1" : {
+        "aliases" : {
+            "my_index" : { }
+        }
+    }
+}</pre>
+</div>
+<p>然后，我们决定修改索引中一个字段的映射。当然，我们不能修改现存的映射，所以我们必须重新索引数据。   首先, 我们用新映射创建索引 <code class="literal">my_index_v2</code> ：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">PUT /my_index_v2
+{
+    "mappings": {
+        "my_type": {
+            "properties": {
+                "tags": {
+                    "type":   "string",
+                    "index":  "not_analyzed"
+                }
+            }
+        }
+    }
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/070_Index_Mgmt/55_Aliases.json"></div>
+<p>然后我们将数据从 <code class="literal">my_index_v1</code> 索引到 <code class="literal">my_index_v2</code> ，下面的过程在 <a class="xref" href="reindex.html" title="重新索引你的数据">重新索引你的数据</a> 中已经描述过。一旦我们确定文档已经被正确地重索引了，我们就将别名指向新的索引。</p>
+<p>一个别名可以指向多个索引，所以我们在添加别名到新索引的同时必须从旧的索引中删除它。这个操作需要原子化，这意味着我们需要使用 <code class="literal">_aliases</code> 操作：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">POST /_aliases
+{
+    "actions": [
+        { "remove": { "index": "my_index_v1", "alias": "my_index" }},
+        { "add":    { "index": "my_index_v2", "alias": "my_index" }}
+    ]
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/070_Index_Mgmt/55_Aliases.json"></div>
+<p>你的应用已经在零停机的情况下从旧索引迁移到新索引了。</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>即使你认为现在的索引设计已经很完美了，在生产环境中，还是有可能需要做一些修改的。</p>
+<p>做好准备：在你的应用中使用别名而不是索引名。然后你就可以在任何时候重建索引。别名的开销很小，应该广泛使用。</p>
+</div>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="reindex.html">« 重新索引你的数据</a>
+</span>
+<span class="next">
+<a href="inside-a-shard.html">分片内部原理 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>停用词与性能 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="stopwords.html" title="停用词: 性能与精度"/>
+<link rel="prev" href="using-stopwords.html" title="使用停用词"/>
+<link rel="next" href="common-terms.html" title="词项的分别管理"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="languages.html">处理人类语言</a></span>
+»
+<span class="breadcrumb-link"><a href="stopwords.html">停用词: 性能与精度</a></span>
+»
+<span class="breadcrumb-node">停用词与性能</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="using-stopwords.html">« 使用停用词</a>
+</span>
+<span class="next">
+<a href="common-terms.html">词项的分别管理 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="stopwords-performance"></a>停用词与性能</h2>
+</div></div></div>
+<p>保留停用词最大的缺点就影响搜索性能。使用 Elasticsearch 进行全文搜索，它需要为所有匹配的文档计算相关度评分 <code class="literal">_score</code> 从而返回最相关的前 10 个文档。</p>
+<p>通常大多数的单词在所有文档中出现的频率低于0.1％，但是有少数词（例如 <code class="literal">the</code> ）几乎存在于所有的文档中。假设有一个索引含有100万个文档，查询 <code class="literal">quick brown fox</code> 词组，能够匹配上的可能少于1000个文档。但是如果查询 <code class="literal">the quick brown fox</code> 词组，几乎需要对索引中的100万个文档进行评分和排序，只是为了返回前 10 名最相关的文档。</p>
+<p>问题的关键是 <code class="literal">the quick brown fox</code> 词组实际是查询 <code class="literal">the</code> 或 <code class="literal">quick</code> 或 <code class="literal">brown</code> 或 <code class="literal">fox</code>&#x2014; 任何文档即使它什么内容都没有而只包含 <code class="literal">the</code> 这个词也会被包括在结果集中。因此，我们需要找到一种降低待评分文档数量的方法。</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="stopwords-and"></a>and 操作符 (and Operator)</h3>
+</div></div></div>
+<p>我们想要减少待评分文档的数量，最简单的方式就是在<a class="xref" href="match-multi-word.html#match-improving-precision" title="提高精度"><code class="literal">and</code> 操作符</a> <code class="literal">match</code> 查询时使用 <code class="literal">and</code> 操作符，这样可以让所有词都是必须的。</p>
+<p>以下是 <code class="literal">match</code> 查询：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+    "match": {
+        "text": {
+            "query":    "the quick brown fox",
+            "operator": "and"
+             }
+    }
+}</pre>
+</div>
+<p>上述查询被重写为 <code class="literal">bool</code> 查询如下：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+    "bool": {
+        "must": [
+            { "term": { "text": "the" }},
+            { "term": { "text": "quick" }},
+            { "term": { "text": "brown" }},
+            { "term": { "text": "fox" }}
+        ]
+    }
+}</pre>
+</div>
+<p><code class="literal">bool</code> 查询会智能的根据较优的顺序依次执行每个 <code class="literal">term</code> 查询：它会从最低频的词开始。因为所有词项都必须匹配，只要包含低频词的文档才有可能匹配。使用 <code class="literal">and</code> 操作符可以大大提升多词查询的速度。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_最少匹配数minimum_should_match"></a>最少匹配数(minimum_should_match)</h3>
+</div></div></div>
+<p>在精度匹配<a class="xref" href="match-multi-word.html#match-precision" title="控制精度">控制精度</a>的章节里面，我们讨论过使用 <code class="literal">minimum_should_match</code> 配置去掉结果中次相关的长尾。虽然它只对这个目的奏效，但是也为我们从侧面带来一个好处，它提供 <code class="literal">and</code> 操作符相似的性能。</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+    "match": {
+        "text": {
+            "query": "the quick brown fox",
+            "minimum_should_match": "75%"
+        }
+    }
+}</pre>
+</div>
+<p>在上面这个示例中，四分之三的词都必须匹配，这意味着我们只需考虑那些包含最低频或次低频词的文档。
+相比默认使用 <code class="literal">or</code> 操作符的简单查询，这为我们带来了巨大的性能提升。不过我们有办法可以做得更好……</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="using-stopwords.html">« 使用停用词</a>
+</span>
+<span class="next">
+<a href="common-terms.html">词项的分别管理 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

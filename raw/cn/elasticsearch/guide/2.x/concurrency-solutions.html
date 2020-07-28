@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>解决并发问题 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="relations.html" title="关联关系处理"/>
+<link rel="prev" href="denormalization-concurrency.html" title="非规范化和并发"/>
+<link rel="next" href="nested-objects.html" title="嵌套对象"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="modeling-your-data.html">数据建模</a></span>
+»
+<span class="breadcrumb-link"><a href="relations.html">关联关系处理</a></span>
+»
+<span class="breadcrumb-node">解决并发问题</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="denormalization-concurrency.html">« 非规范化和并发</a>
+</span>
+<span class="next">
+<a href="nested-objects.html">嵌套对象 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="concurrency-solutions"></a>解决并发问题</h2>
+</div></div></div>
+<p>当我们允许多个人 <em>同时</em> 重命名文件或目录时，问题就来了。
+设想一下，你正在对一个包含了成百上千文件的目录 <code class="literal">/clinton</code> 进行重命名操作。
+同时，另一个用户对这个目录下的单个文件 <code class="literal">/clinton/projects/elasticsearch/README.txt</code> 进行重命名操作。
+这个用户的修改操作，尽管在你的操作后开始，但可能会更快的完成。</p>
+<p>以下有两种情况可能出现：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+你决定使用 <code class="literal">version</code> （版本）号，在这种情况下，当与 <code class="literal">README.txt</code> 文件重命名的版本号产生冲突时，你的批量重命名操作将会失败。
+</li>
+<li class="listitem">
+你没有使用版本控制，你的变更将覆盖其他用户的变更。
+</li>
+</ul>
+</div>
+<p>问题的原因是 Elasticsearch 不支持 <a href="http://en.wikipedia.org/wiki/ACID_transactions" class="ulink" target="_top">ACID 事务</a>。
+ 对单个文件的变更是 ACIDic 的，但包含多个文档的变更不支持。</p>
+<p>如果你的主要数据存储是关系数据库，并且 Elasticsearch 仅仅作为一个搜索引擎
+或一种提升性能的方法，可以首先在数据库中执行变更动作，然后在完成后将这些变更复制到 Elasticsearch。
+通过这种方式，你将受益于数据库 ACID 事务支持，并且在 Elasticsearch 中以正确的顺序产生变更。
+并发在关系数据库中得到了处理。</p>
+<p>如果你不使用关系型存储，这些并发问题就需要在 Elasticsearch 的事务水准进行处理。
+以下是三个切实可行的使用 Elasticsearch 的解决方案，它们都涉及某种形式的锁：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+全局锁
+</li>
+<li class="listitem">
+文档锁
+</li>
+<li class="listitem">
+树锁
+</li>
+</ul>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>当使用一个外部系统替代 Elasticsearch 时，本节中所描述的解决方案可以通过相同的原则来实现。</p>
+</div>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="global-lock"></a>全局锁</h3>
+</div></div></div>
+<p>通过在任何时间只允许一个进程来进行变更动作，我们可以完全避免并发问题。
+大多数的变更只涉及少量文件，会很快完成。一个顶级目录的重命名操作会对其他变更造成较长时间的阻塞，但可能很少这样做。</p>
+<p>因为在 Elasticsearch 文档级别的变更支持 ACIDic，我们可以使用一个文档是否存在的状态作为一个全局锁。
+为了请求得到锁，我们尝试 <code class="literal">create</code> 全局锁文档：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">PUT /fs/lock/global/_create
+{}</pre>
+</div>
+<p>如果这个 <code class="literal">create</code> 请求因冲突异常而失败，说明另一个进程已被授予全局锁，我们将不得不稍后再试。
+如果请求成功了，我们自豪的成为全局锁的主人，然后可以继续完成我们的变更。一旦完成，我们就必须通过删除全局锁文档来释放锁：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">DELETE /fs/lock/global</pre>
+</div>
+<p>根据变更的频繁程度以及时间消耗，一个全局锁能对系统造成大幅度的性能限制。
+我们可以通过让我们的锁更细粒度的方式来增加并行度。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="document-locking"></a>文档锁</h3>
+</div></div></div>
+<p>我们可以使用前面描述相同的方法技术来锁定个体文档，而不是锁定整个文件系统。
+
+我们可以使用 <a class="xref" href="scroll.html" title="游标查询 Scroll">scrolled search</a> 检索所有的文档，这些文档会被变更影响因此每一个文档都创建了一个锁文件：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">PUT /fs/lock/_bulk
+{ "create": { "_id": 1}} <a id="CO260-1"></a><i class="conum" data-value="1"></i>
+{ "process_id": 123    } <a id="CO260-2"></a><i class="conum" data-value="2"></i>
+{ "create": { "_id": 2}}
+{ "process_id": 123    }</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO260-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">lock</code> 文档的 ID 将与应被锁定的文件的 ID 相同。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO260-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">process_id</code> 代表要执行变更进程的唯一 ID。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>如果一些文件已被锁定，部分的 <code class="literal">bulk</code> 请求将失败，我们将不得不再次尝试。</p>
+<p>当然，如果我们试图再次锁定 <em>所有</em> 的文件， 我们前面使用的 <code class="literal">create</code> 语句将会失败，因为所有文件都已被我们锁定！
+我们需要一个 <code class="literal">update</code> 请求带 <code class="literal">upsert</code> 参数以及下面这个 <code class="literal">script</code> ，而不是一个简单的 <code class="literal">create</code> 语句：</p>
+<div class="pre_wrapper lang-groovy">
+<pre class="programlisting prettyprint lang-groovy">if ( ctx._source.process_id != process_id ) { <a id="CO261-1"></a><i class="conum" data-value="1"></i>
+  assert false;  <a id="CO261-2"></a><i class="conum" data-value="2"></i>
+}
+ctx.op = 'noop'; <a id="CO261-3"></a><i class="conum" data-value="3"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO261-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">process_id</code> 是传递到脚本的一个参数。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO261-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">assert false</code> 将引发异常，导致更新失败。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO261-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>将 <code class="literal">op</code> 从 <code class="literal">update</code> 更新到 <code class="literal">noop</code> 防止更新请求作出任何改变，但仍返回成功。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>完整的 <code class="literal">update</code> 请求如下所示：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">POST /fs/lock/1/_update
+{
+  "upsert": { "process_id": 123 },
+  "script": "if ( ctx._source.process_id != process_id )
+  { assert false }; ctx.op = 'noop';"
+  "params": {
+    "process_id": 123
+  }
+}</pre>
+</div>
+<p>如果文档并不存在， <code class="literal">upsert</code> 文档将会被插入&#8212;&#8203;和前面 <code class="literal">create</code> 请求相同。
+但是，如果该文件 <em>确实</em> 存在，该脚本会查看存储在文档上的 <code class="literal">process_id</code> 。
+如果 <code class="literal">process_id</code> 匹配，更新不会执行（ <code class="literal">noop</code> ）但脚本会返回成功。
+如果两者并不匹配， <code class="literal">assert false</code> 抛出一个异常，你也知道了获取锁的尝试已经失败。</p>
+<p>一旦所有锁已成功创建，你就可以继续进行你的变更。</p>
+<p>之后，你必须释放所有的锁，通过检索所有的锁文档并进行批量删除，可以完成锁的释放：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">POST /fs/_refresh <a id="CO262-1"></a><i class="conum" data-value="1"></i>
+
+GET /fs/lock/_search?scroll=1m <a id="CO262-2"></a><i class="conum" data-value="2"></i>
+{
+    "sort" : ["_doc"],
+    "query": {
+        "match" : {
+            "process_id" : 123
+        }
+    }
+}
+
+PUT /fs/lock/_bulk
+{ "delete": { "_id": 1}}
+{ "delete": { "_id": 2}}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO262-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">refresh</code> 调用确保所有 <code class="literal">lock</code> 文档对搜索请求可见。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO262-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>当你需要在单次搜索请求返回大量的检索结果集时，你可以使用 <a class="xref" href="scroll.html" title="游标查询 Scroll"><code class="literal">scroll</code></a> 查询。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>文档级锁可以实现细粒度的访问控制，但是为数百万文档创建锁文件开销也很大。
+在某些情况下，你可以用少得多的工作量实现细粒度的锁定，如以下目录树场景中所示。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="tree-locking"></a>树锁</h3>
+</div></div></div>
+<p>在前面的例子中，我们可以锁定的目录树的一部分，而不是锁定每一个涉及的文档。
+我们将需要独占访问我们要重命名的文件或目录，它可以通过 <em>独占锁</em> 文档来实现：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{ "lock_type": "exclusive" }</pre>
+</div>
+<p>同时我们需要共享锁定所有的父目录，通过 <em>共享锁</em> 文档：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+  "lock_type":  "shared",
+  "lock_count": 1 <a id="CO263-1"></a><i class="conum" data-value="1"></i>
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO263-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">lock_count</code> 记录持有共享锁进程的数量。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>对 <code class="literal">/clinton/projects/elasticsearch/README.txt</code> 进行重命名的进程需要在这个文件上有 <em>独占锁</em> ，
+以及在 <code class="literal">/clinton</code> 、 <code class="literal">/clinton/projects</code> 和 <code class="literal">/clinton/projects/elasticsearch</code> 目录有 <em>共享锁</em> 。</p>
+<p>一个简单的 <code class="literal">create</code> 请求将满足独占锁的要求，但共享锁需要脚本的更新来实现一些额外的逻辑：</p>
+<div class="pre_wrapper lang-groovy">
+<pre class="programlisting prettyprint lang-groovy">if (ctx._source.lock_type == 'exclusive') {
+  assert false; <a id="CO264-1"></a><i class="conum" data-value="1"></i>
+}
+ctx._source.lock_count++ <a id="CO264-2"></a><i class="conum" data-value="2"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO264-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>如果 <code class="literal">lock_type</code> 是 <code class="literal">exclusive</code> （独占）的，<code class="literal">assert</code> 语句将抛出一个异常，导致更新请求失败。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO264-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>否则，我们对 <code class="literal">lock_count</code> 进行增量处理。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>这个脚本处理了 <code class="literal">lock</code> 文档已经存在的情况，但我们还需要一个用来处理的文档还不存在情况的 <code class="literal">upsert</code> 文档。
+完整的更新请求如下：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">POST /fs/lock/%2Fclinton/_update <a id="CO265-1"></a><i class="conum" data-value="1"></i>
+{
+  "upsert": { <a id="CO265-2"></a><i class="conum" data-value="2"></i>
+    "lock_type":  "shared",
+    "lock_count": 1
+  },
+  "script": "if (ctx._source.lock_type == 'exclusive')
+  { assert false }; ctx._source.lock_count++"
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO265-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>文档的 ID 是 <code class="literal">/clinton</code> ，经过URL编码后成为 <code class="literal">%2fclinton</code> 。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO265-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">upsert</code> 文档如果不存在，则会被插入。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>一旦我们成功地在所有的父目录中获得一个共享锁，我们尝试在文件本身 <code class="literal">create</code> 一个独占锁：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">PUT /fs/lock/%2Fclinton%2fprojects%2felasticsearch%2fREADME.txt/_create
+{ "lock_type": "exclusive" }</pre>
+</div>
+<p>现在，如果有其他人想要重新命名 <code class="literal">/clinton</code> 目录，他们将不得不在这条路径上获得一个独占锁：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">PUT /fs/lock/%2Fclinton/_create
+{ "lock_type": "exclusive" }</pre>
+</div>
+<p>这个请求将失败，因为一个具有相同 ID 的 <code class="literal">lock</code> 文档已经存在。
+另一个用户将不得不等待我们的操作完成以及释放我们的锁。独占锁只能这样被删除：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">DELETE /fs/lock/%2Fclinton%2fprojects%2felasticsearch%2fREADME.txt</pre>
+</div>
+<p>共享锁需要另一个脚本对 <code class="literal">lock_count</code> 递减，如果计数下降到零，删除 <code class="literal">lock</code> 文档：</p>
+<div class="pre_wrapper lang-groovy">
+<pre class="programlisting prettyprint lang-groovy">if (--ctx._source.lock_count == 0) {
+  ctx.op = 'delete' <a id="CO266-1"></a><i class="conum" data-value="1"></i>
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO266-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>一旦 <code class="literal">lock_count</code> 达到0， <code class="literal">ctx.op</code> 会从 <code class="literal">update</code> 被修改成  <code class="literal">delete</code> 。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>此更新请求将为每级父目录由下至上的执行，从最长路径到最短路径：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">POST /fs/lock/%2Fclinton%2fprojects%2felasticsearch/_update
+{
+  "script": "if (--ctx._source.lock_count == 0) { ctx.op = 'delete' } "
+}</pre>
+</div>
+<p>树锁用最小的代价提供了细粒度的并发控制。当然，它不适用于所有的情况&#8212;&#8203;数据模型必须有类似于目录树的顺序访问路径才能使用。</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>这三个方案&#8212;&#8203;全局、文档或树锁&#8212;&#8203;都没有处理锁最棘手的问题：如果持有锁的进程死了怎么办？</p>
+<p>一个进程的意外死亡给我们留下了2个问题：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+我们如何知道我们可以释放的死亡进程中所持有的锁？
+</li>
+<li class="listitem">
+我们如何清理死去的进程没有完成的变更？
+</li>
+</ul>
+</div>
+<p>这些主题超出了本书的范围，但是如果你决定使用锁，你需要给对他们进行一些思考。</p>
+</div>
+</div>
+<p>当非规范化成为很多项目的一个很好的选择，采用锁方案的需求会带来复杂的实现逻辑。
+作为替代方案，Elasticsearch 提供两个模型帮助我们处理相关联的实体： <em>嵌套的对象</em> 和 <em>父子关系</em> 。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="denormalization-concurrency.html">« 非规范化和并发</a>
+</span>
+<span class="next">
+<a href="nested-objects.html">嵌套对象 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

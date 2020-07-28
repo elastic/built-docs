@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Doc Values | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="docvalues-and-fielddata.html" title="Doc Values and Fielddata"/>
+<link rel="prev" href="docvalues-and-fielddata.html" title="Doc Values and Fielddata"/>
+<link rel="next" href="_deep_dive_on_doc_values.html" title="深入理解 Doc Values"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="aggregations.html">聚合</a></span>
+»
+<span class="breadcrumb-link"><a href="docvalues-and-fielddata.html">Doc Values and Fielddata</a></span>
+»
+<span class="breadcrumb-node">Doc Values</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="docvalues-and-fielddata.html">« Doc Values and Fielddata</a>
+</span>
+<span class="next">
+<a href="_deep_dive_on_doc_values.html">深入理解 Doc Values »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="docvalues"></a>Doc Values</h2>
+</div></div></div>
+<p>聚合使用一个叫 <em>doc values</em> 的数据结构（在 <a class="xref" href="docvalues-intro.html" title="Doc Values 介绍">Doc Values 介绍</a> 里简单介绍）。 Doc values 可以使聚合更快、更高效并且内存友好，所以理解它的工作方式十分有益。</p>
+<p>Doc values 的存在是因为倒排索引只对某些操作是高效的。
+倒排索引的优势  在于查找包含某个项的文档，而对于从另外一个方向的相反操作并不高效，即：确定哪些项是否存在单个文档里，聚合需要这种次级的访问模式。</p>
+<p>对于以下倒排索引：</p>
+<pre class="literallayout">Term      Doc_1   Doc_2   Doc_3
+------------------------------------
+brown   |   X   |   X   |
+dog     |   X   |       |   X
+dogs    |       |   X   |   X
+fox     |   X   |       |   X
+foxes   |       |   X   |
+in      |       |   X   |
+jumped  |   X   |       |   X
+lazy    |   X   |   X   |
+leap    |       |   X   |
+over    |   X   |   X   |   X
+quick   |   X   |   X   |   X
+summer  |       |   X   |
+the     |   X   |       |   X
+------------------------------------</pre>
+
+<p>如果我们想要获得所有包含 <code class="literal">brown</code> 的文档的词的完整列表，我们会创建如下查询：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">GET /my_index/_search
+{
+  "query" : {
+    "match" : {
+      "body" : "brown"
+    }
+  },
+  "aggs" : {
+    "popular_terms": {
+      "terms" : {
+        "field" : "body"
+      }
+    }
+  }
+}</pre>
+</div>
+<p>查询部分简单又高效。倒排索引是根据项来排序的，所以我们首先在词项列表中找到 <code class="literal">brown</code> ，然后扫描所有列，找到包含 <code class="literal">brown</code> 的文档。我们可以快速看到 <code class="literal">Doc_1</code> 和 <code class="literal">Doc_2</code> 包含 <code class="literal">brown</code> 这个 token。</p>
+<p>然后，对于聚合部分，我们需要找到 <code class="literal">Doc_1</code> 和 <code class="literal">Doc_2</code> 里所有唯一的词项。 用倒排索引做这件事情代价很高：
+我们会迭代索引里的每个词项并收集 <code class="literal">Doc_1</code> 和 <code class="literal">Doc_2</code> 列里面 token。这很慢而且难以扩展：随着词项和文档的数量增加，执行时间也会增加。</p>
+<p>Doc values 通过转置两者间的关系来解决这个问题。倒排索引将词项映射到包含它们的文档，doc values 将文档映射到它们包含的词项：</p>
+<pre class="literallayout">Doc      Terms
+-----------------------------------------------------------------
+Doc_1 | brown, dog, fox, jumped, lazy, over, quick, the
+Doc_2 | brown, dogs, foxes, in, lazy, leap, over, quick, summer
+Doc_3 | dog, dogs, fox, jumped, over, quick, the
+-----------------------------------------------------------------</pre>
+
+<p>当数据被转置之后，想要收集到 <code class="literal">Doc_1</code> 和 <code class="literal">Doc_2</code> 的唯一 token 会非常容易。获得每个文档行，获取所有的词项，然后求两个集合的并集。</p>
+<p>因此，搜索和聚合是相互紧密缠绕的。搜索使用倒排索引查找文档，聚合操作收集和聚合 doc values 里的数据。</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Doc values 不仅可以用于聚合。 任何需要查找某个文档包含的值的操作都必须使用它。
+除了聚合，还包括排序，访问字段值的脚本，父子关系处理（参见 <a class="xref" href="parent-child.html" title="父-子关系文档"><em>父-子关系文档</em></a> ）。</p>
+</div>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="docvalues-and-fielddata.html">« Doc Values and Fielddata</a>
+</span>
+<span class="next">
+<a href="_deep_dive_on_doc_values.html">深入理解 Doc Values »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

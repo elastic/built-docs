@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>非规范化和并发 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="relations.html" title="关联关系处理"/>
+<link rel="prev" href="top-hits.html" title="字段折叠"/>
+<link rel="next" href="concurrency-solutions.html" title="解决并发问题"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="modeling-your-data.html">数据建模</a></span>
+»
+<span class="breadcrumb-link"><a href="relations.html">关联关系处理</a></span>
+»
+<span class="breadcrumb-node">非规范化和并发</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="top-hits.html">« 字段折叠</a>
+</span>
+<span class="next">
+<a href="concurrency-solutions.html">解决并发问题 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="denormalization-concurrency"></a>非规范化和并发</h2>
+</div></div></div>
+<p>当然，数据非规范化也有弊端。
+第一个缺点是索引会更大因为每个博客文章文档的 <code class="literal">_source</code> 将会更大，并且这里有很多的索引字段。这通常不是一个大问题。数据写到磁盘将会被高度压缩，而且磁盘已经很廉价了。Elasticsearch 可以愉快地应付这些额外的数据。</p>
+<p>更重要的问题是，如果用户改变了他的名字，他所有的博客文章也需要更新了。幸运的是，用户不经常更改名称。即使他们做了，
+用户也不可能写超过几千篇博客文章，所以更新博客文章通过 <a class="xref" href="scroll.html" title="游标查询 Scroll"><code class="literal">scroll</code></a> 和 <a class="xref" href="bulk.html" title="代价较小的批量操作"><code class="literal">bulk</code></a> APIs 大概耗费不到一秒。</p>
+<p>然而，让我们考虑一个更复杂的场景，其中的变化很常见，影响深远，而且非常重要，并发。</p>
+<p>在这个例子中，我们将在 Elasticsearch 模拟一个文件系统的目录树，非常类似 Linux 文件系统：根目录是 <code class="literal">/</code> ，每个目录可以包含文件和子目录。</p>
+<p>我们希望能够搜索到一个特定目录下的文件，等效于：</p>
+<pre class="literallayout">grep "some text" /clinton/projects/elasticsearch/*</pre>
+
+<p>这就要求我们索引文件所在目录的路径：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">PUT /fs/file/1
+{
+  "name":     "README.txt", <a id="CO254-1"></a><i class="conum" data-value="1"></i>
+  "path":     "/clinton/projects/elasticsearch", <a id="CO254-2"></a><i class="conum" data-value="2"></i>
+  "contents": "Starting a new Elasticsearch project is easy..."
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO254-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>文件名</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO254-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>文件所在目录的全路径</p>
+</td>
+</tr>
+</table>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>事实上，我们也应当索引 <code class="literal">directory</code> 文档，如此我们可以在目录内列出所有的文件和子目录，但为了简洁，我们将忽略这个需求。</p>
+</div>
+</div>
+<p>我们也希望能够搜索到一个特定目录下的目录树包含的的任何文件，相当于此：</p>
+<pre class="literallayout">grep -r "some text" /clinton</pre>
+
+<p>为了支持这一点，我们需要对路径层次结构进行索引：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">/clinton</code>
+</li>
+<li class="listitem">
+<code class="literal">/clinton/projects</code>
+</li>
+<li class="listitem">
+<code class="literal">/clinton/projects/elasticsearch</code>
+</li>
+</ul>
+</div>
+<p>这种层次结构能够通过 <code class="literal">path</code> 字段使用 <a href="/guide/en/elasticsearch/reference/5.6/analysis-pathhierarchy-tokenizer.html" class="ulink" target="_top"><code class="literal">path_hierarchy</code> tokenizer</a> 自动生成：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">PUT /fs
+{
+  "settings": {
+    "analysis": {
+      "analyzer": {
+        "paths": { <a id="CO255-1"></a><i class="conum" data-value="1"></i>
+          "tokenizer": "path_hierarchy"
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO255-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>自定义的 <code class="literal">paths</code> 分析器在默认设置中使用 <a href="/guide/en/elasticsearch/reference/5.6/analysis-pathhierarchy-tokenizer.html" class="ulink" target="_top"><code class="literal">path_hierarchy</code> tokenizer</a>。</p>
+</td>
+</tr>
+</table>
+</div>
+<p><code class="literal">file</code> 类型的映射看起来如下所示：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">PUT /fs/_mapping/file
+{
+  "properties": {
+    "name": { <a id="CO256-1"></a><i class="conum" data-value="1"></i>
+      "type":  "string",
+      "index": "not_analyzed"
+    },
+    "path": { <a id="CO256-2"></a><i class="conum" data-value="2"></i>
+      "type":  "string",
+      "index": "not_analyzed",
+      "fields": {
+        "tree": { <a id="CO256-3"></a><i class="conum" data-value="2"></i>
+          "type":     "string",
+          "analyzer": "paths"
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO256-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">name</code> 字段将包含确切名称。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO256-2"><i class="conum" data-value="2"></i></a><a href="#CO256-3"></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">path</code> 字段将包含确切的目录名称，而 <code class="literal">path.tree</code> 字段将包含路径层次结构。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>一旦索引建立并且文件已被编入索引，我们可以执行一个搜索，在 <code class="literal">/clinton/projects/elasticsearch</code> 目录中包含 <code class="literal">elasticsearch</code> 的文件，如下所示：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /fs/file/_search
+{
+  "query": {
+    "filtered": {
+      "query": {
+        "match": {
+          "contents": "elasticsearch"
+        }
+      },
+      "filter": {
+        "term": { <a id="CO257-1"></a><i class="conum" data-value="1"></i>
+          "path": "/clinton/projects/elasticsearch"
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO257-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>仅在该目录中查找文件。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>所有在 <code class="literal">/clinton</code> 下面的任何子目录存放的文件将在 <code class="literal">path.tree</code> 字段中包含 <code class="literal">/clinton</code> 词项。所以我们能够搜索 <code class="literal">/clinton</code> 的任何子目录中的所有文件，如下所示：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /fs/file/_search
+{
+  "query": {
+    "filtered": {
+      "query": {
+        "match": {
+          "contents": "elasticsearch"
+        }
+      },
+      "filter": {
+        "term": { <a id="CO258-1"></a><i class="conum" data-value="1"></i>
+          "path.tree": "/clinton"
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO258-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>在这个目录或其下任何子目录中查找文件。</p>
+</td>
+</tr>
+</table>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_重命名文件和目录"></a>重命名文件和目录</h3>
+</div></div></div>
+<p>到目前为止一切顺利。 重命名一个文件很容易&#8212;&#8203;所需要的只是一个简单的 <code class="literal">update</code> 或 <code class="literal">index</code> 请求。
+你甚至可以使用 <a class="xref" href="optimistic-concurrency-control.html" title="乐观并发控制">optimistic concurrency control</a> 确保你的变化不会与其他用户的变化发生冲突：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">PUT /fs/file/1?version=2 <a id="CO259-1"></a><i class="conum" data-value="1"></i>
+{
+  "name":     "README.asciidoc",
+  "path":     "/clinton/projects/elasticsearch",
+  "contents": "Starting a new Elasticsearch project is easy..."
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO259-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">version</code> 编号确保该更改仅应用于该索引中具有此相同的版本号的文档。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>我们甚至可以重命名一个目录，但这意味着更新所有存在于该目录下路径层次结构中的所有文件。
+这可能快速或缓慢，取决于有多少文件需要更新。我们所需要做的就是使用  <a class="xref" href="scroll.html" title="游标查询 Scroll"><code class="literal">scroll</code></a> 来检索所有的文件，
+以及 <a class="xref" href="bulk.html" title="代价较小的批量操作"><code class="literal">bulk</code> API</a> 来更新它们。这个过程不是原子的，但是所有的文件将会迅速转移到他们的新存放位置。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="top-hits.html">« 字段折叠</a>
+</span>
+<span class="next">
+<a href="concurrency-solutions.html">解决并发问题 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

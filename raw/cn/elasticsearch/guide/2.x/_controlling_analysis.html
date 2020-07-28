@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>控制分析 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="full-text-search.html" title="全文搜索"/>
+<link rel="prev" href="_boosting_query_clauses.html" title="查询语句提升权重"/>
+<link rel="next" href="relevance-is-broken.html" title="被破坏的相关度！"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="search-in-depth.html">深入搜索</a></span>
+»
+<span class="breadcrumb-link"><a href="full-text-search.html">全文搜索</a></span>
+»
+<span class="breadcrumb-node">控制分析</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="_boosting_query_clauses.html">« 查询语句提升权重</a>
+</span>
+<span class="next">
+<a href="relevance-is-broken.html">被破坏的相关度！ »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="_controlling_analysis"></a>控制分析</h2>
+</div></div></div>
+<p>查询只能查找倒排索引表中真实存在的项，所以保证文档在索引时与查询字符串在搜索时应用相同的分析过程非常重要，这样查询的项才能够匹配倒排索引中的项。</p>
+<p>尽管是在说 <em>文档</em> ，不过分析器可以由每个字段决定。每个字段都可以有不同的分析器，既可以通过配置为字段指定分析器，也可以使用更高层的类型（type）、索引（index）或节点（node）的默认配置。在索引时，一个字段值是根据配置或默认分析器分析的。</p>
+<p>例如为 <code class="literal">my_index</code> 新增一个字段：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">PUT /my_index/_mapping/my_type
+{
+    "my_type": {
+        "properties": {
+            "english_title": {
+                "type":     "string",
+                "analyzer": "english"
+            }
+        }
+    }
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/100_Full_Text_Search/30_Analysis.json"></div>
+<p>现在我们就可以通过使用 <code class="literal">analyze</code> API 来分析单词 <code class="literal">Foxes</code> ，进而比较 <code class="literal">english_title</code> 字段和 <code class="literal">title</code> 字段在索引时的分析结果：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">GET /my_index/_analyze
+{
+  "field": "my_type.title",   <a id="CO65-1"></a><i class="conum" data-value="1"></i>
+  "text": "Foxes"
+}
+
+GET /my_index/_analyze
+{
+  "field": "my_type.english_title",   <a id="CO65-2"></a><i class="conum" data-value="2"></i>
+  "text": "Foxes"
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/100_Full_Text_Search/30_Analysis.json"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO65-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>字段 <code class="literal">title</code> ，使用默认的 <code class="literal">standard</code> 标准分析器，返回词项 <code class="literal">foxes</code> 。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO65-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>字段 <code class="literal">english_title</code> ，使用 <code class="literal">english</code> 英语分析器，返回词项 <code class="literal">fox</code> 。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>这意味着，如果使用底层 <code class="literal">term</code> 查询精确项 <code class="literal">fox</code> 时， <code class="literal">english_title</code> 字段会匹配但 <code class="literal">title</code> 字段不会。</p>
+<p>如同 <code class="literal">match</code> 查询这样的高层查询知道字段映射的关系，能为每个被查询的字段应用正确的分析器。可以使用  <code class="literal">validate-query</code> API 查看这个行为：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">GET /my_index/my_type/_validate/query?explain
+{
+    "query": {
+        "bool": {
+            "should": [
+                { "match": { "title":         "Foxes"}},
+                { "match": { "english_title": "Foxes"}}
+            ]
+        }
+    }
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/100_Full_Text_Search/30_Analysis.json"></div>
+<p>返回语句的 <code class="literal">explanation</code> 结果：</p>
+<pre class="literallayout">(title:foxes english_title:fox)</pre>
+
+<p><code class="literal">match</code> 查询为每个字段使用合适的分析器，以保证它在寻找每个项时都为该字段使用正确的格式。</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_默认分析器"></a>默认分析器</h3>
+</div></div></div>
+<p>虽然我们可以在字段层级指定分析器，但是如果该层级没有指定任何的分析器，那么我们如何能确定这个字段使用的是哪个分析器呢？</p>
+<p>分析器可以从三个层面进行定义：按字段（per-field）、按索引（per-index）或全局缺省（global default）。Elasticsearch 会按照以下顺序依次处理，直到它找到能够使用的分析器。索引时的顺序如下：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+字段映射里定义的 <code class="literal">analyzer</code> ，否则
+</li>
+<li class="listitem">
+索引设置中名为 <code class="literal">default</code> 的分析器，默认为
+</li>
+<li class="listitem">
+<code class="literal">standard</code> 标准分析器
+</li>
+</ul>
+</div>
+<p>在搜索时，顺序有些许不同：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+查询自己定义的  <code class="literal">analyzer</code> ，否则
+</li>
+<li class="listitem">
+字段映射里定义的 <code class="literal">analyzer</code> ，否则
+</li>
+<li class="listitem">
+索引设置中名为 <code class="literal">default</code> 的分析器，默认为
+</li>
+<li class="listitem">
+<code class="literal">standard</code> 标准分析器
+</li>
+</ul>
+</div>
+<p>有时，在索引时和搜索时使用不同的分析器是合理的。我们可能要想为同义词建索引（例如，所有 <code class="literal">quick</code> 出现的地方，同时也为 <code class="literal">fast</code> 、 <code class="literal">rapid</code> 和 <code class="literal">speedy</code> 创建索引）。但在搜索时，我们不需要搜索所有的同义词，取而代之的是寻找用户输入的单词是否是 <code class="literal">quick</code> 、 <code class="literal">fast</code> 、 <code class="literal">rapid</code> 或 <code class="literal">speedy</code> 。</p>
+<p>为了区分，Elasticsearch 也支持一个可选的 <code class="literal">search_analyzer</code> 映射，它仅会应用于搜索时（ <code class="literal">analyzer</code> 还用于索引时）。还有一个等价的 <code class="literal">default_search</code> 映射，用以指定索引层的默认配置。</p>
+<p>如果考虑到这些额外参数，一个搜索时的 <em>完整</em> 顺序会是下面这样：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+查询自己定义的  <code class="literal">analyzer</code> ，否则
+</li>
+<li class="listitem">
+字段映射里定义的 <code class="literal">search_analyzer</code> ，否则
+</li>
+<li class="listitem">
+字段映射里定义的 <code class="literal">analyzer</code> ，否则
+</li>
+<li class="listitem">
+索引设置中名为 <code class="literal">default_search</code> 的分析器，默认为
+</li>
+<li class="listitem">
+索引设置中名为 <code class="literal">default</code> 的分析器，默认为
+</li>
+<li class="listitem">
+<code class="literal">standard</code> 标准分析器
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_分析器配置实践"></a>分析器配置实践</h3>
+</div></div></div>
+<p>就可以配置分析器地方的数量而言是十分惊人的，但是实际非常简单。</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_保持简单"></a>保持简单</h4>
+</div></div></div>
+<p>多数情况下，会提前知道文档会包括哪些字段。最简单的途径就是在创建索引或者增加类型映射时，为每个全文字段设置分析器。这种方式尽管有点麻烦，但是它让我们可以清楚的看到每个字段每个分析器是如何设置的。</p>
+<p>通常，多数字符串字段都是 <code class="literal">not_analyzed</code> 精确值字段，比如标签（tag）或枚举（enum），而且更多的全文字段会使用默认的 <code class="literal">standard</code> 分析器或 <code class="literal">english</code> 或其他某种语言的分析器。这样只需要为少数一两个字段指定自定义分析：或许标题 <code class="literal">title</code> 字段需要以支持 <em>输入即查找（find-as-you-type）</em> 的方式进行索引。</p>
+<p>可以在索引级别设置中，为绝大部分的字段设置你想指定的 <code class="literal">default</code> 默认分析器。然后在字段级别设置中，对某一两个字段配置需要指定的分析器。</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>对于和时间相关的日志数据，通常的做法是每天自行创建索引，由于这种方式不是从头创建的索引，仍然可以用
+<a href="/guide/en/elasticsearch/reference/5.6/indices-templates.html" class="ulink" target="_top">索引模板（Index Template）</a>
+为新建的索引指定配置和映射。</p>
+</div>
+</div>
+</div>
+
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="_boosting_query_clauses.html">« 查询语句提升权重</a>
+</span>
+<span class="next">
+<a href="relevance-is-broken.html">被破坏的相关度！ »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

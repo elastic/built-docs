@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>组合查询 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="full-text-search.html" title="全文搜索"/>
+<link rel="prev" href="match-multi-word.html" title="多词查询"/>
+<link rel="next" href="_how_match_uses_bool.html" title="如何使用布尔匹配"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="search-in-depth.html">深入搜索</a></span>
+»
+<span class="breadcrumb-link"><a href="full-text-search.html">全文搜索</a></span>
+»
+<span class="breadcrumb-node">组合查询</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="match-multi-word.html">« 多词查询</a>
+</span>
+<span class="next">
+<a href="_how_match_uses_bool.html">如何使用布尔匹配 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="bool-query"></a>组合查询</h2>
+</div></div></div>
+<p>在 <a class="xref" href="combining-filters.html" title="组合过滤器">组合过滤器</a> 中，我们讨论过如何使用 <code class="literal">bool</code> 过滤器通过 <code class="literal">and</code> 、 <code class="literal">or</code> 和 <code class="literal">not</code> 逻辑组合将多个过滤器进行组合。在查询中， <code class="literal">bool</code> 查询有类似的功能，只有一个重要的区别。</p>
+<p>过滤器做二元判断：文档是否应该出现在结果中？但查询更精妙，它除了决定一个文档是否应该被包括在结果中，还会计算文档的 <em>相关程度</em> 。</p>
+<p>与过滤器一样， <code class="literal">bool</code> 查询也可以接受 <code class="literal">must</code> 、 <code class="literal">must_not</code> 和 <code class="literal">should</code> 参数下的多个查询语句。比如：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">GET /my_index/my_type/_search
+{
+  "query": {
+    "bool": {
+      "must":     { "match": { "title": "quick" }},
+      "must_not": { "match": { "title": "lazy"  }},
+      "should": [
+                  { "match": { "title": "brown" }},
+                  { "match": { "title": "dog"   }}
+      ]
+    }
+  }
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/100_Full_Text_Search/15_Bool_query.json"></div>
+<p>以上的查询结果返回 <code class="literal">title</code> 字段包含词项 <code class="literal">quick</code> 但不包含 <code class="literal">lazy</code> 的任意文档。目前为止，这与 <code class="literal">bool</code> 过滤器的工作方式非常相似。</p>
+<p>区别就在于两个 <code class="literal">should</code> 语句，也就是说：一个文档不必包含 <code class="literal">brown</code> 或 <code class="literal">dog</code> 这两个词项，但如果一旦包含，我们就认为它们 <em>更相关</em> ：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+  "hits": [
+     {
+        "_id":      "3",
+        "_score":   0.70134366, <a id="CO60-1"></a><i class="conum" data-value="1"></i>
+        "_source": {
+           "title": "The quick brown fox jumps over the quick dog"
+        }
+     },
+     {
+        "_id":      "1",
+        "_score":   0.3312608,
+        "_source": {
+           "title": "The quick brown fox"
+        }
+     }
+  ]
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO60-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>文档 3 会比文档 1 有更高评分是因为它同时包含 <code class="literal">brown</code> 和 <code class="literal">dog</code> 。</p>
+</td>
+</tr>
+</table>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_评分计算"></a>评分计算</h3>
+</div></div></div>
+<p><code class="literal">bool</code> 查询会为每个文档计算相关度评分 <code class="literal">_score</code> ，再将所有匹配的 <code class="literal">must</code> 和 <code class="literal">should</code> 语句的分数 <code class="literal">_score</code> 求和，最后除以 <code class="literal">must</code> 和 <code class="literal">should</code> 语句的总数。</p>
+<p><code class="literal">must_not</code> 语句不会影响评分；它的作用只是将不相关的文档排除。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_控制精度"></a>控制精度</h3>
+</div></div></div>
+<p>所有 <code class="literal">must</code> 语句必须匹配，所有 <code class="literal">must_not</code> 语句都必须不匹配，但有多少 <code class="literal">should</code> 语句应该匹配呢？默认情况下，没有 <code class="literal">should</code> 语句是必须匹配的，只有一个例外：那就是当没有 <code class="literal">must</code> 语句的时候，至少有一个 <code class="literal">should</code> 语句必须匹配。</p>
+<p>就像我们能控制 <a class="xref" href="match-multi-word.html#match-precision" title="控制精度"><code class="literal">match</code> 查询的精度</a> 一样，我们可以通过 <code class="literal">minimum_should_match</code> 参数控制需要匹配的 <code class="literal">should</code> 语句的数量，它既可以是一个绝对的数字，又可以是个百分比：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">GET /my_index/my_type/_search
+{
+  "query": {
+    "bool": {
+      "should": [
+        { "match": { "title": "brown" }},
+        { "match": { "title": "fox"   }},
+        { "match": { "title": "dog"   }}
+      ],
+      "minimum_should_match": 2 <a id="CO61-1"></a><i class="conum" data-value="1"></i>
+    }
+  }
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/100_Full_Text_Search/15_Bool_query.json"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO61-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>这也可以用百分比表示。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>这个查询结果会将所有满足以下条件的文档返回： <code class="literal">title</code> 字段包含 <code class="literal">"brown"
+AND "fox"</code> 、 <code class="literal">"brown" AND "dog"</code> 或 <code class="literal">"fox" AND "dog"</code> 。如果有文档包含所有三个条件，它会比只包含两个的文档更相关。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="match-multi-word.html">« 多词查询</a>
+</span>
+<span class="next">
+<a href="_how_match_uses_bool.html">如何使用布尔匹配 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

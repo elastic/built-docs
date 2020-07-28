@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Unicode 大小写折叠 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="token-normalization.html" title="归一化词元"/>
+<link rel="prev" href="unicode-normalization.html" title="Unicode的世界"/>
+<link rel="next" href="character-folding.html" title="Unicode 字符折叠"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="languages.html">处理人类语言</a></span>
+»
+<span class="breadcrumb-link"><a href="token-normalization.html">归一化词元</a></span>
+»
+<span class="breadcrumb-node">Unicode 大小写折叠</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="unicode-normalization.html">« Unicode的世界</a>
+</span>
+<span class="next">
+<a href="character-folding.html">Unicode 字符折叠 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="case-folding"></a>Unicode 大小写折叠</h2>
+</div></div></div>
+<p>人类没有创造力的话就不会是人类， 而人类的语言就恰恰反映了这一点。</p>
+<p>处理一个单词的大小写看起来是一个简单的任务，除非遇到需要处理多语言的情况。</p>
+<p>那就举一个例子：转换小写德国单词 <code class="literal">ß</code>。把它转换成大写是 <code class="literal">SS</code>，然后在转换成小写就成了 <code class="literal">ss</code>。还有一个例子：转换希腊字母 <code class="literal">ς</code> (sigma, 在单词末尾使用)。把它转换成大写是 <code class="literal">Σ</code>，然后再转换成小写就成了 <code class="literal">σ</code>。</p>
+<p>把词条小写的核心是让他们看起来更像，而不是更不像。在Unicode中，这个工作是大小写折叠(case folding)来完成的，而不是小写化(lowercasing)。  <em>大小写折叠</em> (<em>Case folding</em>) 把单词转换到一种(通常是小写)形式，是让写法不会影响单词的比较，所以拼写不需要完全正确。</p>
+<p>例如：单词 <code class="literal">ß</code>，已经是小写形式了，会被_折叠_(<em>folded</em>)成 <code class="literal">ss</code>。类似的小写的 <code class="literal">ς</code> 被折叠成 <code class="literal">σ</code>，这样的话，无论 <code class="literal">σ</code>， <code class="literal">ς</code>， 和 `Σ`出现在哪里， 他们就都可以比较了。</p>
+<pre class="literallayout">`icu_normalizer` 语汇单元过滤器默认的归一化(normalization)模式是 `nfkc_cf`。它像 `nfkc` 模式一样：</pre>
+
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<em>组合</em> (<em>Composes</em>) 字符用最短的字节来表示。
+</li>
+<li class="listitem">
+用 <em>兼容</em> (<em>compatibility</em>）模式，把像 <code class="literal">ﬃ</code> 的字符转换成简单的 <code class="literal">ffi</code>
+</li>
+</ul>
+</div>
+<p>但是，也会这样做：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<em>大小写折叠</em> (<em>Case-folds</em>) 字符成一种适合比较的形式
+</li>
+</ul>
+</div>
+<p>换句话说， <code class="literal">nfkc_cf`等价于 `lowercase</code> 语汇单元过滤器(token filters)，但是却适用于所有的语言。 <em>on-steroids</em> 等价于 <code class="literal">standard</code> 分析器，例如：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT /my_index
+{
+  "settings": {
+    "analysis": {
+      "analyzer": {
+        "my_lowercaser": {
+          "tokenizer": "icu_tokenizer",
+          "filter":  [ "icu_normalizer" ] <a id="CO144-1"></a><i class="conum" data-value="1"></i>
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO144-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">icu_normalizer</code> 默认是 <code class="literal">nfkc_cf</code> 模式.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>我们来比较 <code class="literal">Weißkopfseeadler`和 `WEISSKOPFSEEADLER</code>(大写形式) 分别通过 `standard`分析器和我们的Unicode自识别(Unicode-aware)分析器处理得到的结果：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">GET /_analyze?analyzer=standard <a id="CO145-1"></a><i class="conum" data-value="1"></i>
+Weißkopfseeadler WEISSKOPFSEEADLER
+
+GET /my_index/_analyze?analyzer=my_lowercaser <a id="CO145-2"></a><i class="conum" data-value="2"></i>
+Weißkopfseeadler WEISSKOPFSEEADLER</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO145-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>得到的词元(token)是 <code class="literal">weißkopfseeadler</code>, <code class="literal">weisskopfseeadler</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO145-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>得到的词元(token)是 <code class="literal">weisskopfseeadler</code>, <code class="literal">weisskopfseeadler</code></p>
+<pre class="literallayout">`standard`分析器得到了两个不同且不可比较的词元(token)，而我们定制化的分析器得到了两个相同但是不符合原意的词元(token)。</pre>
+
+</td>
+</tr>
+</table>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="unicode-normalization.html">« Unicode的世界</a>
+</span>
+<span class="next">
+<a href="character-folding.html">Unicode 字符折叠 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

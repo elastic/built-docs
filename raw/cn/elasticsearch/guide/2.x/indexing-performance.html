@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>索引性能技巧 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="post_deploy.html" title="部署后"/>
+<link rel="prev" href="logging.html" title="日志记录"/>
+<link rel="next" href="_delaying_shard_allocation.html" title="推迟分片分配"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="administration.html">管理、监控和部署</a></span>
+»
+<span class="breadcrumb-link"><a href="post_deploy.html">部署后</a></span>
+»
+<span class="breadcrumb-node">索引性能技巧</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="logging.html">« 日志记录</a>
+</span>
+<span class="next">
+<a href="_delaying_shard_allocation.html">推迟分片分配 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="indexing-performance"></a>索引性能技巧</h2>
+</div></div></div>
+<p>如果你是在一个索引负载很重的环境，比如索引的是基础设施日志，你可能愿意牺牲一些搜索性能换取更快的索引速率。在这些场景里，搜索常常是很少见的操作，而且一般是由你公司内部的人发起的。他们也愿意为一个搜索等上几秒钟，而不像普通消费者，要求一个搜索必须毫秒级返回。</p>
+<p>基于这种特殊的场景，我们可以有几种权衡办法来提高你的索引性能。</p>
+<div class="sidebar">
+<div class="titlepage"><div><div>
+<p class="title"><strong>这些技巧仅适用于 Elasticsearch 1.3 及以后的版本</strong></p>
+</div></div></div>
+<p>本书是为最新几个版本的 Elasticsearch 写的，虽然大多数内容在更老的版本也也有效。</p>
+<p>不过，本节提及的技巧， <em>只</em> 针对 1.3 及以后版本。该版本后有不少性能提升和故障修复是直接影响到索引的。事实上，有些建议在老版本上反而会因为故障或性能缺陷而 <em>降低</em> 性能。</p>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_科学的测试性能"></a>科学的测试性能</h3>
+</div></div></div>
+<p>性能测试永远是复杂的，所以在你的方法里已经要尽可能的科学。随机摆弄旋钮以及写入开关可不是做性能调优的好办法。如果有太多种 <em>可能</em> ，我们就无法判断到底哪一种有最好的 <em>效果</em> 。合理的测试方法如下：</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+在单个节点上，对单个分片，无副本的场景测试性能。
+</li>
+<li class="listitem">
+在 100% 默认配置的情况下记录性能结果，这样你就有了一个对比基线。
+</li>
+<li class="listitem">
+确保性能测试运行足够长的时间（30 分钟以上）这样你可以评估长期性能，而不是短期的峰值或延迟。一些事件（比如段合并，GC）不会立刻发生，所以性能概况会随着时间继续而改变的。
+</li>
+<li class="listitem">
+开始在基线上逐一修改默认值。严格测试它们，如果性能提升可以接受，保留这个配置项，开始下一项。
+</li>
+</ol>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_使用批量请求并调整其大小"></a>使用批量请求并调整其大小</h3>
+</div></div></div>
+<p>显而易见的，优化性能应该使用批量请求。批量的大小则取决于你的数据、分析和集群配置，不过每次批量数据 5&#x2013;15 MB 大是个不错的起始点。注意这里说的是物理字节数大小。文档计数对批量大小来说不是一个好指标。比如说，如果你每次批量索引 1000 个文档，记住下面的事实：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+1000 个 1 KB 大小的文档加起来是 1 MB 大。
+</li>
+<li class="listitem">
+1000 个 100 KB 大小的文档加起来是 100 MB 大。
+</li>
+</ul>
+</div>
+<p>这可是完完全全不一样的批量大小了。批量请求需要在协调节点上加载进内存，所以批量请求的物理大小比文档计数重要得多。</p>
+<p>从 5&#x2013;15 MB 开始测试批量请求大小，缓慢增加这个数字，直到你看不到性能提升为止。然后开始增加你的批量写入的并发度（多线程等等办法）。</p>
+<p>用 Marvel 以及诸如 <code class="literal">iostat</code> 、 <code class="literal">top</code> 和 <code class="literal">ps</code> 等工具监控你的节点，观察资源什么时候达到瓶颈。如果你开始收到 <code class="literal">EsRejectedExecutionException</code> ，你的集群没办法再继续了：至少有一种资源到瓶颈了。或者减少并发数，或者提供更多的受限资源（比如从机械磁盘换成 SSD），或者添加更多节点。</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>写数据的时候，要确保批量请求是轮询发往你的全部数据节点的。不要把所有请求都发给单个节点，因为这个节点会需要在处理的时候把所有批量请求都存在内存里。</p>
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_存储"></a>存储</h3>
+</div></div></div>
+<p>磁盘在现代服务器上通常都是瓶颈。Elasticsearch 重度使用磁盘，你的磁盘能处理的吞吐量越大，你的节点就越稳定。这里有一些优化磁盘 I/O 的技巧：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+使用 SSD。就像其他地方提过的，他们比机械磁盘优秀多了。
+</li>
+<li class="listitem">
+使用 RAID 0。条带化 RAID 会提高磁盘 I/O，代价显然就是当一块硬盘故障时整个就故障了。不要使用镜像或者奇偶校验 RAID 因为副本已经提供了这个功能。
+</li>
+<li class="listitem">
+另外，使用多块硬盘，并允许 Elasticsearch 通过多个 <code class="literal">path.data</code> 目录配置把数据条带化分配到它们上面。
+</li>
+<li class="listitem">
+不要使用远程挂载的存储，比如 NFS 或者 SMB/CIFS。这个引入的延迟对性能来说完全是背道而驰的。
+</li>
+<li class="listitem">
+如果你用的是 EC2，当心 EBS。即便是基于 SSD 的 EBS，通常也比本地实例的存储要慢。
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="segments-and-merging"></a>段和合并</h3>
+</div></div></div>
+<p>段合并的计算量庞大，而且还要吃掉大量磁盘 I/O。合并在后台定期操作，因为他们可能要很长时间才能完成，尤其是比较大的段。这个通常来说都没问题，因为大规模段合并的概率是很小的。</p>
+<p>不过有时候合并会拖累写入速率。如果这个真的发生了，Elasticsearch 会自动限制索引请求到单个线程里。这个可以防止出现 <em>段爆炸</em> 问题，即数以百计的段在被合并之前就生成出来。如果 Elasticsearch 发现合并拖累索引了，它会会记录一个声明有 <code class="literal">now throttling indexing</code> 的 <code class="literal">INFO</code> 级别信息。</p>
+<p>Elasticsearch 默认设置在这块比较保守：不希望搜索性能被后台合并影响。不过有时候（尤其是 SSD，或者日志场景）限流阈值太低了。</p>
+<p>默认值是 20 MB/s，对机械磁盘应该是个不错的设置。如果你用的是 SSD，可以考虑提高到 100&#x2013;200 MB/s。测试验证对你的系统哪个值合适：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT /_cluster/settings
+{
+    "persistent" : {
+        "indices.store.throttle.max_bytes_per_sec" : "100mb"
+    }
+}</pre>
+</div>
+<p>如果你在做批量导入，完全不在意搜索，你可以彻底关掉合并限流。这样让你的索引速度跑到你磁盘允许的极限：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT /_cluster/settings
+{
+    "transient" : {
+        "indices.store.throttle.type" : "none" <a id="CO307-1"></a><i class="conum" data-value="1"></i>
+    }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO307-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>设置限流类型为 <code class="literal">none</code> 彻底关闭合并限流。等你完成了导入，记得改回 <code class="literal">merge</code> 重新打开限流。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>如果你使用的是机械磁盘而非 SSD，你需要添加下面这个配置到你的 <code class="literal">elasticsearch.yml</code> 里：</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">index.merge.scheduler.max_thread_count: 1</pre>
+</div>
+<p>机械磁盘在并发 I/O 支持方面比较差，所以我们需要降低每个索引并发访问磁盘的线程数。这个设置允许 <code class="literal">max_thread_count + 2</code> 个线程同时进行磁盘操作，也就是设置为 <code class="literal">1</code> 允许三个线程。</p>
+<p>对于 SSD，你可以忽略这个设置，默认是 <code class="literal">Math.min(3, Runtime.getRuntime().availableProcessors() / 2)</code> ，对 SSD 来说运行的很好。</p>
+<p>最后，你可以增加 <code class="literal">index.translog.flush_threshold_size</code> 设置，从默认的 512 MB 到更大一些的值，比如 1 GB。这可以在一次清空触发的时候在事务日志里积累出更大的段。而通过构建更大的段，清空的频率变低，大段合并的频率也变低。这一切合起来导致更少的磁盘 I/O 开销和更好的索引速率。当然，你会需要对应量级的 heap 内存用以积累更大的缓冲空间，调整这个设置的时候请记住这点。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_其他"></a>其他</h3>
+</div></div></div>
+<p>最后，还有一些其他值得考虑的东西需要记住：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+如果你的搜索结果不需要近实时的准确度，考虑把每个索引的 <code class="literal">index.refresh_interval</code>改到 <code class="literal">30s</code> 。如果你是在做大批量导入，导入期间你可以通过设置这个值为 <code class="literal">-1</code> 关掉刷新。别忘记在完工的时候重新开启它。
+</li>
+<li class="listitem">
+<p>如果你在做大批量导入，考虑通过设置 <code class="literal">index.number_of_replicas: 0</code>关闭副本。文档在复制的时候，整个文档内容都被发往副本节点，然后逐字的把索引过程重复一遍。这意味着每个副本也会执行分析、索引以及可能的合并过程。</p>
+<p>相反，如果你的索引是零副本，然后在写入完成后再开启副本，恢复过程本质上只是一个字节到字节的网络传输。相比重复索引过程，这个算是相当高效的了。</p>
+</li>
+<li class="listitem">
+如果你没有给每个文档自带 ID，使用 Elasticsearch 的自动 ID 功能。这个为避免版本查找做了优化，因为自动生成的 ID 是唯一的。
+</li>
+<li class="listitem">
+如果你在使用自己的 ID，尝试使用一种 <a href="http://blog.mikemccandless.com/2014/05/choosing-fast-unique-identifier-uuid.html" class="ulink" target="_top">Lucene 友好的</a> ID。包括零填充序列 ID、UUID-1 和纳秒；这些 ID 都是有一致的，压缩良好的序列模式。相反的，像 UUID-4 这样的 ID，本质上是随机的，压缩比很低，会明显拖慢 Lucene。
+</li>
+</ul>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="logging.html">« 日志记录</a>
+</span>
+<span class="next">
+<a href="_delaying_shard_allocation.html">推迟分片分配 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>不要触碰这些配置！ | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="deploy.html" title="部署"/>
+<link rel="prev" href="important-configuration-changes.html" title="重要配置的修改"/>
+<link rel="next" href="heap-sizing.html" title="堆内存:大小和交换"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="administration.html">管理、监控和部署</a></span>
+»
+<span class="breadcrumb-link"><a href="deploy.html">部署</a></span>
+»
+<span class="breadcrumb-node">不要触碰这些配置！</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="important-configuration-changes.html">« 重要配置的修改</a>
+</span>
+<span class="next">
+<a href="heap-sizing.html">堆内存:大小和交换 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="dont-touch-these-settings"></a>不要触碰这些配置！</h2>
+</div></div></div>
+<p>在 Elasticsearch 中有一些热点，人们可能不可避免的会碰到。 我们理解的，所有的调整就是为了优化，但是这些调整，你真的不需要理会它。因为它们经常会被乱用，从而造成系统的不稳定或者糟糕的性能，甚至两者都有可能。</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_垃圾回收器"></a>垃圾回收器</h3>
+</div></div></div>
+<p>这里已经简要介绍了 <a class="xref" href="_monitoring_individual_nodes.html#garbage_collector_primer" title="垃圾回收入门">垃圾回收入门</a>，JVM 使用一个垃圾回收器来释放不再使用的内存。 这篇内容的确是上一篇的一个延续，
+但是因为重要，所以值得单独拿出来作为一节。</p>
+<p>不要更改默认的垃圾回收器！</p>
+<p>Elasticsearch 默认的垃圾回收器（ GC ）是 CMS。 这个垃圾回收器可以和应用并行处理，以便它可以最小化停顿。
+然而，它有两个 stop-the-world 阶段，处理大内存也有点吃力。</p>
+<p>尽管有这些缺点，它还是目前对于像 Elasticsearch 这样低延迟需求软件的最佳垃圾回收器。官方建议使用 CMS。</p>
+<p>现在有一款新的垃圾回收器，叫 G1 垃圾回收器（ G1GC ）。 这款新的 GC 被设计，旨在比 CMS 更小的暂停时间，以及对大内存的处理能力。
+它的原理是把内存分成许多区域，并且预测哪些区域最有可能需要回收内存。通过优先收集这些区域（ <em>garbage first</em> ），产生更小的暂停时间，从而能应对更大的内存。</p>
+<p>听起来很棒！遗憾的是，G1GC 还是太新了，经常发现新的 bugs。这些错误通常是段（ segfault ）类型，便造成硬盘的崩溃。
+Lucene 的测试套件对垃圾回收算法要求严格，看起来这些缺陷 G1GC 并没有很好地解决。</p>
+<p>我们很希望在将来某一天推荐使用 G1GC，但是对于现在，它还不能足够稳定的满足 Elasticsearch 和 Lucene 的要求。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_线程池"></a>线程池</h3>
+</div></div></div>
+<p>许多人 <em>喜欢</em> 调整线程池。 无论什么原因，人们都对增加线程数无法抵抗。索引太多了？增加线程！搜索太多了？增加线程！节点空闲率低于 95％？增加线程！</p>
+<p>Elasticsearch 默认的线程设置已经是很合理的了。对于所有的线程池（除了 <code class="literal">搜索</code> ），线程个数是根据 CPU 核心数设置的。
+如果你有 8 个核，你可以同时运行的只有 8 个线程，只分配 8 个线程给任何特定的线程池是有道理的。</p>
+<p>搜索线程池设置的大一点，配置为 <code class="literal">int（（ 核心数 ＊ 3 ）／ 2 ）＋ 1</code> 。</p>
+<p>你可能会认为某些线程可能会阻塞（如磁盘上的 I／O 操作），所以你才想加大线程的。对于 Elasticsearch 来说这并不是一个问题：因为大多数 I／O 的操作是由 Lucene 线程管理的，而不是 Elasticsearch。</p>
+<p>此外，线程池通过传递彼此之间的工作配合。你不必再因为它正在等待磁盘写操作而担心网络线程阻塞，
+因为网络线程早已把这个工作交给另外的线程池，并且网络进行了响应。</p>
+<p>最后，你的处理器的计算能力是有限的，拥有更多的线程会导致你的处理器频繁切换线程上下文。
+一个处理器同时只能运行一个线程。所以当它需要切换到其它不同的线程的时候，它会存储当前的状态（寄存器等等），然后加载另外一个线程。
+如果幸运的话，这个切换发生在同一个核心，如果不幸的话，这个切换可能发生在不同的核心，这就需要在内核间总线上进行传输。</p>
+<p>这个上下文的切换，会给 CPU 时钟周期带来管理调度的开销；在现代的 CPUs 上，开销估计高达 30 μs。也就是说线程会被堵塞超过 30 μs，如果这个时间用于线程的运行，极有可能早就结束了。</p>
+<p>人们经常稀里糊涂的设置线程池的值。8 个核的 CPU，我们遇到过有人配了 60、100 甚至 1000 个线程。
+这些设置只会让 CPU 实际工作效率更低。</p>
+<p>所以，下次请不要调整线程池的线程数。如果你真 <em>想调整</em> ，
+一定要关注你的 CPU 核心数，最多设置成核心数的两倍，再多了都是浪费。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="important-configuration-changes.html">« 重要配置的修改</a>
+</span>
+<span class="next">
+<a href="heap-sizing.html">堆内存:大小和交换 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

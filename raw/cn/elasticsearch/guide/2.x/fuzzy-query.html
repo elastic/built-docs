@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>模糊查询 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="fuzzy-matching.html" title="拼写错误"/>
+<link rel="prev" href="fuzziness.html" title="模糊性"/>
+<link rel="next" href="fuzzy-match-query.html" title="模糊匹配查询"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="languages.html">处理人类语言</a></span>
+»
+<span class="breadcrumb-link"><a href="fuzzy-matching.html">拼写错误</a></span>
+»
+<span class="breadcrumb-node">模糊查询</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="fuzziness.html">« 模糊性</a>
+</span>
+<span class="next">
+<a href="fuzzy-match-query.html">模糊匹配查询 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="fuzzy-query"></a>模糊查询</h2>
+</div></div></div>
+<p><a href="/guide/en/elasticsearch/reference/5.6/query-dsl-fuzzy-query.html" class="ulink" target="_top"><code class="literal">fuzzy</code> 查询</a>是 <code class="literal">term</code> 查询的模糊等价。
+也许你很少直接使用它，但是理解它是如何工作的，可以帮助你在更高级别的 <code class="literal">match</code> 查询中使用模糊性。</p>
+<p>为了解它是如何运作的，我们首先索引一些文档：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">POST /my_index/my_type/_bulk
+{ "index": { "_id": 1 }}
+{ "text": "Surprise me!"}
+{ "index": { "_id": 2 }}
+{ "text": "That was surprising."}
+{ "index": { "_id": 3 }}
+{ "text": "I wasn't surprised."}</pre>
+</div>
+<p>现在我们可以为词 <code class="literal">surprize</code> 运行一个 <code class="literal">fuzzy</code> 查询：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /my_index/my_type/_search
+{
+  "query": {
+    "fuzzy": {
+      "text": "surprize"
+    }
+  }
+}</pre>
+</div>
+<p><code class="literal">fuzzy</code> 查询是一个词项级别的查询，所以它不做任何分析。它通过某个词项以及指定的 <code class="literal">fuzziness</code> 查找到词典中所有的词项。
+<code class="literal">fuzziness</code> 默认设置为 <code class="literal">AUTO</code> 。</p>
+<p>在我们的例子中， <code class="literal">surprise</code> 比较 <code class="literal">surprise</code> 和 <code class="literal">surprised</code> 都在编辑距离 2 以内，
+所以文档 1 和 3 匹配。通过以下查询，我们可以减少匹配度到仅匹配 <code class="literal">surprise</code> ：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /my_index/my_type/_search
+{
+  "query": {
+    "fuzzy": {
+      "text": {
+        "value": "surprize",
+        "fuzziness": 1
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_提高性能"></a>提高性能</h3>
+</div></div></div>
+<p><code class="literal">fuzzy</code> 查询的工作原理是给定原始词项及构造一个 <em>编辑自动机</em>&#x2014;
+像表示所有原始字符串指定编辑距离的字符串的一个大图表。</p>
+<p>然后模糊查询使用这个自动机依次高效遍历词典中的所有词项以确定是否匹配。
+一旦收集了词典中存在的所有匹配项，就可以计算匹配文档列表。</p>
+<p>当然，根据存储在索引中的数据类型，一个编辑距离 2 的模糊查询能够匹配一个非常大数量的词项同时执行效率会非常糟糕。
+下面两个参数可以用来限制对性能的影响：</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">prefix_length</code>
+</span>
+</dt>
+<dd>
+不能被 &#8220;模糊化&#8221; 的初始字符数。
+大部分的拼写错误发生在词的结尾，而不是词的开始。
+例如通过将 <code class="literal">prefix_length</code> 设置为 <code class="literal">3</code> ，你可能够显著降低匹配的词项数量。
+</dd>
+<dt>
+<span class="term">
+<code class="literal">max_expansions</code>
+</span>
+</dt>
+<dd>
+如果一个模糊查询扩展了三个或四个模糊选项， 这些新的模糊选项也许是有意义的。如
+果它产生 1000 个模糊选项，那么就基本没有意义了。
+设置 <code class="literal">max_expansions</code> 用来限制将产生的模糊选项的总数量。模糊查询将收集匹配词项直到达到 <code class="literal">max_expansions</code> 的限制。
+</dd>
+</dl>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="fuzziness.html">« 模糊性</a>
+</span>
+<span class="next">
+<a href="fuzzy-match-query.html">模糊匹配查询 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

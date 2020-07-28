@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>相关度评分背后的理论 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="controlling-relevance.html" title="控制相关度"/>
+<link rel="prev" href="controlling-relevance.html" title="控制相关度"/>
+<link rel="next" href="practical-scoring-function.html" title="Lucene 的实用评分函数"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="search-in-depth.html">深入搜索</a></span>
+»
+<span class="breadcrumb-link"><a href="controlling-relevance.html">控制相关度</a></span>
+»
+<span class="breadcrumb-node">相关度评分背后的理论</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="controlling-relevance.html">« 控制相关度</a>
+</span>
+<span class="next">
+<a href="practical-scoring-function.html">Lucene 的实用评分函数 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="scoring-theory"></a>相关度评分背后的理论</h2>
+</div></div></div>
+<p>Lucene（或 Elasticsearch）使用 <a href="http://en.wikipedia.org/wiki/Standard_Boolean_model" class="ulink" target="_top"><em>布尔模型（Boolean model）</em></a> 查找匹配文档，并用一个名为 <a class="xref" href="practical-scoring-function.html" title="Lucene 的实用评分函数"><em>实用评分函数（practical scoring function）</em></a> 的公式来计算相关度。这个公式借鉴了 <a href="http://en.wikipedia.org/wiki/Tfidf" class="ulink" target="_top"><em>词频/逆向文档频率（term frequency/inverse document frequency）</em></a> 和 <a href="http://en.wikipedia.org/wiki/Vector_space_model" class="ulink" target="_top"><em>向量空间模型（vector space model）</em></a>，同时也加入了一些现代的新特性，如协调因子（coordination factor），字段长度归一化（field length normalization），以及词或查询语句权重提升。</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>不要紧张！这些概念并没有像它们字面看起来那么复杂，尽管本小节提到了算法、公式和数学模型，但内容还是让人容易理解的，与理解算法本身相比，了解这些因素如何影响结果更为重要。</p>
+</div>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="boolean-model"></a>布尔模型</h3>
+</div></div></div>
+<p><em>布尔模型（Boolean Model）</em> 只是在查询中使用 <code class="literal">AND</code> 、 <code class="literal">OR</code> 和 <code class="literal">NOT</code> （与、或和非）这样的条件来查找匹配的文档，以下查询：</p>
+<pre class="literallayout">full AND text AND search AND (elasticsearch OR lucene)</pre>
+
+<p>会将所有包括词 <code class="literal">full</code> 、 <code class="literal">text</code> 和 <code class="literal">search</code> ，以及 <code class="literal">elasticsearch</code> 或 <code class="literal">lucene</code> 的文档作为结果集。</p>
+<p>这个过程简单且快速，它将所有可能不匹配的文档排除在外。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="tfidf"></a>词频/逆向文档频率（TF/IDF）</h3>
+</div></div></div>
+<p>当匹配到一组文档后，需要根据相关度排序这些文档，不是所有的文档都包含所有词，有些词比其他的词更重要。一个文档的相关度评分部分取决于每个查询词在文档中的 <em>权重</em> 。</p>
+<p>词的权重由三个因素决定，在 <a class="xref" href="relevance-intro.html" title="什么是相关性?">什么是相关</a> 中已经有所介绍，有兴趣可以了解下面的公式，但并不要求记住。</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="tf"></a>词频</h4>
+</div></div></div>
+<p>词在文档中出现的频度是多少？频度越高，权重 <em>越高</em> 。 5 次提到同一词的字段比只提到 1 次的更相关。词频的计算方式如下：</p>
+<pre class="literallayout">tf(t in d) = √frequency <a id="CO101-1"></a><i class="conum" data-value="1"></i></pre>
+
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO101-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>词 <code class="literal">t</code> 在文档 <code class="literal">d</code> 的词频（ <code class="literal">tf</code> ）是该词在文档中出现次数的平方根。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>如果不在意词在某个字段中出现的频次，而只在意是否出现过，则可以在字段映射中禁用词频统计：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">PUT /my_index
+{
+  "mappings": {
+    "doc": {
+      "properties": {
+        "text": {
+          "type":          "string",
+          "index_options": "docs" <a id="CO102-1"></a><i class="conum" data-value="1"></i>
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO102-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>将参数 <code class="literal">index_options</code> 设置为 <code class="literal">docs</code> 可以禁用词频统计及词频位置，这个映射的字段不会计算词的出现次数，对于短语或近似查询也不可用。要求精确查询的 <code class="literal">not_analyzed</code> 字符串字段会默认使用该设置。</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="idf"></a>逆向文档频率</h4>
+</div></div></div>
+<p>词在集合所有文档里出现的频率是多少？频次越高，权重 <em>越低</em> 。常用词如 <code class="literal">and</code> 或 <code class="literal">the</code> 对相关度贡献很少，因为它们在多数文档中都会出现，一些不常见词如 <code class="literal">elastic</code> 或 <code class="literal">hippopotamus</code> 可以帮助我们快速缩小范围找到感兴趣的文档。逆向文档频率的计算公式如下：</p>
+<pre class="literallayout">idf(t) = 1 + log ( numDocs / (docFreq + 1)) <a id="CO103-1"></a><i class="conum" data-value="1"></i></pre>
+
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO103-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>词 <code class="literal">t</code> 的逆向文档频率（ <code class="literal">idf</code> ）是：索引中文档数量除以所有包含该词的文档数，然后求其对数。</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="field-norm"></a>字段长度归一值</h4>
+</div></div></div>
+<p>字段的长度是多少？字段越短，字段的权重 <em>越高</em> 。如果词出现在类似标题 <code class="literal">title</code> 这样的字段，要比它出现在内容 <code class="literal">body</code> 这样的字段中的相关度更高。字段长度的归一值公式如下：</p>
+<pre class="literallayout">norm(d) = 1 / √numTerms <a id="CO104-1"></a><i class="conum" data-value="1"></i></pre>
+
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO104-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>字段长度归一值（ <code class="literal">norm</code> ）是字段中词数平方根的倒数。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>字段长度的归一值对全文搜索非常重要，许多其他字段不需要有归一值。无论文档是否包括这个字段，索引中每个文档的每个 <code class="literal">string</code> 字段都大约占用 1 个 byte 的空间。对于 <code class="literal">not_analyzed</code> 字符串字段的归一值默认是禁用的，而对于 <code class="literal">analyzed</code> 字段也可以通过修改字段映射禁用归一值：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">PUT /my_index
+{
+  "mappings": {
+    "doc": {
+      "properties": {
+        "text": {
+          "type": "string",
+          "norms": { "enabled": false } <a id="CO105-1"></a><i class="conum" data-value="1"></i>
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO105-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>这个字段不会将字段长度归一值考虑在内，长字段和短字段会以相同长度计算评分。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>对于有些应用场景如日志，归一值不是很有用，要关心的只是字段是否包含特殊的错误码或者特定的浏览器唯一标识符。字段的长度对结果没有影响，禁用归一值可以节省大量内存空间。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_结合使用"></a>结合使用</h4>
+</div></div></div>
+<p>以下三个因素——词频（term frequency）、逆向文档频率（inverse document frequency）和字段长度归一值（field-length norm）——是在索引时计算并存储的。最后将它们结合在一起计算单个词在特定文档中的 <em>权重</em> 。</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>前面公式中提到的 <em>文档</em> 实际上是指文档里的某个字段，每个字段都有它自己的倒排索引，因此字段的 TF/IDF 值就是文档的 TF/IDF 值。</p>
+</div>
+</div>
+<p>当用 <code class="literal">explain</code> 查看一个简单的 <code class="literal">term</code> 查询时（参见 <a class="xref" href="relevance-intro.html#explain" title="理解评分标准">explain</a> ），可以发现与计算相关度评分的因子就是前面章节介绍的这些：</p>
+<div class="pre_wrapper lang-json pagebreak-before">
+<pre class="programlisting prettyprint lang-json pagebreak-before">PUT /my_index/doc/1
+{ "text" : "quick brown fox" }
+
+GET /my_index/doc/_search?explain
+{
+  "query": {
+    "term": {
+      "text": "fox"
+    }
+  }
+}</pre>
+</div>
+<p>以上请求（简化）的 <code class="literal">explanation</code> 解释如下：</p>
+<pre class="literallayout">weight(text:fox in 0) [PerFieldSimilarity]:  0.15342641 <a id="CO106-1"></a><i class="conum" data-value="1"></i>
+result of:
+    fieldWeight in 0                         0.15342641
+    product of:
+        tf(freq=1.0), with freq of 1:        1.0 <a id="CO106-2"></a><i class="conum" data-value="2"></i>
+        idf(docFreq=1, maxDocs=1):           0.30685282 <a id="CO106-3"></a><i class="conum" data-value="3"></i>
+        fieldNorm(doc=0):                    0.5 <a id="CO106-4"></a><i class="conum" data-value="4"></i></pre>
+
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO106-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>词 <code class="literal">fox</code> 在文档的内部 Lucene doc ID 为 <code class="literal">0</code> ，字段是 <code class="literal">text</code> 里的最终评分。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO106-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>词 <code class="literal">fox</code> 在该文档 <code class="literal">text</code> 字段中只出现了一次。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO106-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">fox</code> 在所有文档 <code class="literal">text</code> 字段索引的逆向文档频率。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO106-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>该字段的字段长度归一值。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>当然，查询通常不止一个词，所以需要一种合并多词权重的方式——向量空间模型（vector space model）。</p>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="vector-space-model"></a>向量空间模型</h3>
+</div></div></div>
+<p><em>向量空间模型（vector space model）</em> 提供一种比较多词查询的方式，单个评分代表文档与查询的匹配程度，为了做到这点，这个模型将文档和查询都以 <em>向量（vectors）</em> 的形式表示：</p>
+<p>向量实际上就是包含多个数的一维数组，例如：</p>
+<pre class="literallayout">[1,2,5,22,3,8]</pre>
+
+<p>在向量空间模型里，向量空间模型里的每个数字都代表一个词的 <em>权重</em> ，与 <a class="xref" href="scoring-theory.html#tfidf" title="词频/逆向文档频率（TF/IDF）">词频/逆向文档频率（term frequency/inverse document frequency）</a> 计算方式类似。</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>尽管 TF/IDF 是向量空间模型计算词权重的默认方式，但不是唯一方式。Elasticsearch 还有其他模型如 Okapi-BM25 。TF/IDF 是默认的因为它是个经检验过的简单又高效的算法，可以提供高质量的搜索结果。</p>
+</div>
+</div>
+<p>设想如果查询 “happy hippopotamus” ，常见词 <code class="literal">happy</code> 的权重较低，不常见词 <code class="literal">hippopotamus</code> 权重较高，假设 <code class="literal">happy</code> 的权重是 2 ， <code class="literal">hippopotamus</code> 的权重是 5 ，可以将这个二维向量—— <code class="literal">[2,5]</code> ——在坐标系下作条直线，线的起点是 (0,0) 终点是 (2,5) ，如图 <a class="xref" href="scoring-theory.html#img-vector-query" title="表示 “happy hippopotamus” 的二维查询向量">Figure 27, &#8220;表示 “happy hippopotamus” 的二维查询向量&#8221;</a> 。</p>
+<div id="img-vector-query" class="imageblock">
+<div class="content">
+<img src="images/elas_17in01.png" alt="查询向量绘点图">
+</div>
+<div class="title">Figure 27. 表示 “happy hippopotamus” 的二维查询向量</div>
+</div>
+<p>现在，设想我们有三个文档：</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+I am <em>happy</em> in summer 。
+</li>
+<li class="listitem">
+After Christmas I&#8217;m a <em>hippopotamus</em> 。
+</li>
+<li class="listitem">
+The <em>happy hippopotamus</em> helped Harry 。
+</li>
+</ol>
+</div>
+<p>可以为每个文档都创建包括每个查询词—— <code class="literal">happy</code> 和 <code class="literal">hippopotamus</code> ——权重的向量，然后将这些向量置入同一个坐标系中，如图 <a class="xref" href="scoring-theory.html#img-vector-docs" title="“happy hippopotamus” 查询及文档向量">Figure 28, &#8220;“happy hippopotamus” 查询及文档向量&#8221;</a> ：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+文档 1： <code class="literal">(happy,____________)</code> —— <code class="literal">[2,0]</code>
+</li>
+<li class="listitem">
+文档 2： <code class="literal">( ___ ,hippopotamus)</code> —— <code class="literal">[0,5]</code>
+</li>
+<li class="listitem">
+文档 3： <code class="literal">(happy,hippopotamus)</code> —— <code class="literal">[2,5]</code>
+</li>
+</ul>
+</div>
+<div id="img-vector-docs" class="imageblock">
+<div class="content">
+<img src="images/elas_17in02.png" alt="查询及文档向量绘点图">
+</div>
+<div class="title">Figure 28. “happy hippopotamus” 查询及文档向量</div>
+</div>
+<p>向量之间是可以比较的，只要测量查询向量和文档向量之间的角度就可以得到每个文档的相关度，文档 1 与查询之间的角度最大，所以相关度低；文档 2 与查询间的角度较小，所以更相关；文档 3 与查询的角度正好吻合，完全匹配。</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>在实际中，只有二维向量（两个词的查询）可以在平面上表示，幸运的是， <em>线性代数</em> ——作为数学中处理向量的一个分支——为我们提供了计算两个多维向量间角度工具，这意味着可以使用如上同样的方式来解释多个词的查询。</p>
+<p>关于比较两个向量的更多信息可以参考 <a href="http://en.wikipedia.org/wiki/Cosine_similarity" class="ulink" target="_top"><em>余弦近似度（cosine similarity）</em></a>。</p>
+</div>
+</div>
+<p>现在已经讲完评分计算的基本理论，我们可以继续了解 Lucene 是如何实现评分计算的。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="controlling-relevance.html">« 控制相关度</a>
+</span>
+<span class="next">
+<a href="practical-scoring-function.html">Lucene 的实用评分函数 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

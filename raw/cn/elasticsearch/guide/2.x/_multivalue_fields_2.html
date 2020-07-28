@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>多值字段 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="proximity-matching.html" title="近似匹配"/>
+<link rel="prev" href="slop.html" title="混合起来"/>
+<link rel="next" href="_closer_is_better.html" title="越近越好"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="search-in-depth.html">深入搜索</a></span>
+»
+<span class="breadcrumb-link"><a href="proximity-matching.html">近似匹配</a></span>
+»
+<span class="breadcrumb-node">多值字段</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="slop.html">« 混合起来</a>
+</span>
+<span class="next">
+<a href="_closer_is_better.html">越近越好 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="_multivalue_fields_2"></a>多值字段</h2>
+</div></div></div>
+<p>对多值字段使用短语匹配时会发生奇怪的事。  想象一下你索引这个文档:</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">PUT /my_index/groups/1
+{
+    "names": [ "John Abraham", "Lincoln Smith"]
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/120_Proximity_Matching/15_Multi_value_fields.json"></div>
+<p>然后运行一个对 <code class="literal">Abraham Lincoln</code> 的短语查询:</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">GET /my_index/groups/_search
+{
+    "query": {
+        "match_phrase": {
+            "names": "Abraham Lincoln"
+        }
+    }
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/120_Proximity_Matching/15_Multi_value_fields.json"></div>
+<p>令人惊讶的是， 即使 <code class="literal">Abraham</code> 和 <code class="literal">Lincoln</code> 在 <code class="literal">names</code> 数组里属于两个不同的人名， 我们的文档也匹配了查询。 这一切的原因在Elasticsearch数组的索引方式。</p>
+<p>在分析 <code class="literal">John Abraham</code> 的时候， 产生了如下信息：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Position 1: <code class="literal">john</code>
+</li>
+<li class="listitem">
+Position 2: <code class="literal">abraham</code>
+</li>
+</ul>
+</div>
+<p>然后在分析 <code class="literal">Lincoln Smith</code> 的时候， 产生了：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Position 3: <code class="literal">lincoln</code>
+</li>
+<li class="listitem">
+Position 4: <code class="literal">smith</code>
+</li>
+</ul>
+</div>
+<p>换句话说， Elasticsearch对以上数组分析生成了与分析单个字符串 <code class="literal">John Abraham Lincoln Smith</code> 一样几乎完全相同的语汇单元。 我们的查询示例寻找相邻的 <code class="literal">lincoln</code> 和 <code class="literal">abraham</code> ，
+而且这两个词条确实存在，并且它们俩正好相邻， 所以这个查询匹配了。</p>
+<p>幸运的是， 在这样的情况下有一种叫做 <code class="literal">position_increment_gap</code> 的简单的解决方案， 它在字段映射中配置。</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">DELETE /my_index/groups/ <a id="CO83-1"></a><i class="conum" data-value="1"></i>
+
+PUT /my_index/_mapping/groups <a id="CO83-2"></a><i class="conum" data-value="2"></i>
+{
+    "properties": {
+        "names": {
+            "type":                "string",
+            "position_increment_gap": 100
+        }
+    }
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/120_Proximity_Matching/15_Multi_value_fields.json"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO83-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>首先删除映射 <code class="literal">groups</code> 以及这个类型内的所有文档。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO83-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>然后创建一个有正确值的新的映射 <code class="literal">groups</code> 。</p>
+</td>
+</tr>
+</table>
+</div>
+<p><code class="literal">position_increment_gap</code> 设置告诉 Elasticsearch 应该为数组中每个新元素增加当前词条 <code class="literal">position</code> 的指定值。 所以现在当我们再索引 names 数组时，会产生如下的结果：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Position 1: <code class="literal">john</code>
+</li>
+<li class="listitem">
+Position 2: <code class="literal">abraham</code>
+</li>
+<li class="listitem">
+Position 103: <code class="literal">lincoln</code>
+</li>
+<li class="listitem">
+Position 104: <code class="literal">smith</code>
+</li>
+</ul>
+</div>
+<p>现在我们的短语查询可能无法匹配该文档因为 <code class="literal">abraham</code> 和 <code class="literal">lincoln</code> 之间的距离为 100 。 为了匹配这个文档你必须添加值为 100 的 <code class="literal">slop</code> 。</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="slop.html">« 混合起来</a>
+</span>
+<span class="next">
+<a href="_closer_is_better.html">越近越好 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

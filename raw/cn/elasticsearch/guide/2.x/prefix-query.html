@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>prefix 前缀查询 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="partial-matching.html" title="部分匹配"/>
+<link rel="prev" href="_postcodes_and_structured_data.html" title="邮编与结构化数据"/>
+<link rel="next" href="_wildcard_and_regexp_queries.html" title="通配符与正则表达式查询"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="search-in-depth.html">深入搜索</a></span>
+»
+<span class="breadcrumb-link"><a href="partial-matching.html">部分匹配</a></span>
+»
+<span class="breadcrumb-node">prefix 前缀查询</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="_postcodes_and_structured_data.html">« 邮编与结构化数据</a>
+</span>
+<span class="next">
+<a href="_wildcard_and_regexp_queries.html">通配符与正则表达式查询 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="prefix-query"></a>prefix 前缀查询</h2>
+</div></div></div>
+<p>为了找到所有以 <code class="literal">W1</code> 开始的邮编，可以使用简单的 <code class="literal">prefix</code> 查询：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">GET /my_index/address/_search
+{
+    "query": {
+        "prefix": {
+            "postcode": "W1"
+        }
+    }
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/130_Partial_Matching/10_Prefix_query.json"></div>
+<p><code class="literal">prefix</code> 查询是一个词级别的底层的查询，它不会在搜索之前分析查询字符串，它假定传入前缀就正是要查找的前缀。</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>默认状态下， <code class="literal">prefix</code> 查询不做相关度评分计算，它只是将所有匹配的文档返回，并为每条结果赋予评分值 <code class="literal">1</code> 。它的行为更像是过滤器而不是查询。 <code class="literal">prefix</code> 查询和 <code class="literal">prefix</code> 过滤器这两者实际的区别就是过滤器是可以被缓存的，而查询不行。</p>
+</div>
+</div>
+<p>之前已经提过：“只能在倒排索引中找到存在的词”，但我们并没有对这些邮编的索引进行特殊处理，每个邮编还是以它们精确值的方式存在于每个文档的索引中，那么 <code class="literal">prefix</code> 查询是如何工作的呢？</p>
+<p class="pagebreak-after">回想倒排索引包含了一个有序的唯一词列表（本例是邮编）。对于每个词，倒排索引都会将包含词的文档 ID 列入 <em>倒排表（postings list）</em> 。与示例对应的倒排索引是：</p>
+<pre class="literallayout">Term:          Doc IDs:
+-------------------------
+"SW5 0BE"    |  5
+"W1F 7HW"    |  3
+"W1V 3DG"    |  1
+"W2F 8HW"    |  2
+"WC1N 1LZ"   |  4
+-------------------------</pre>
+
+<p>为了支持前缀匹配，查询会做以下事情：</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+扫描词列表并查找到第一个以 <code class="literal">W1</code> 开始的词。
+</li>
+<li class="listitem">
+搜集关联的文档 ID 。
+</li>
+<li class="listitem">
+移动到下一个词。
+</li>
+<li class="listitem">
+如果这个词也是以 <code class="literal">W1</code> 开头，查询跳回到第二步再重复执行，直到下一个词不以 <code class="literal">W1</code> 为止。
+</li>
+</ol>
+</div>
+<p>这对于小的例子当然可以正常工作，但是如果倒排索引中有数以百万的邮编都是以 <code class="literal">W1</code> 开头时，前缀查询则需要访问每个词然后计算结果！</p>
+<p>前缀越短所需访问的词越多。如果我们要以 <code class="literal">W</code> 作为前缀而不是 <code class="literal">W1</code> ，那么就可能需要做千万次的匹配。</p>
+<div class="caution admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><code class="literal">prefix</code> 查询或过滤对于一些特定的匹配是有效的，但使用方式还是应当注意。当字段中词的集合很小时，可以放心使用，但是它的伸缩性并不好，会对我们的集群带来很多压力。可以使用较长的前缀来限制这种影响，减少需要访问的量。</p>
+</div>
+</div>
+<p>本章后面会介绍另一个索引时的解决方案，这个方案能使前缀匹配更高效，不过在此之前，需要先看看两个相关的查询： <code class="literal">wildcard</code> 和 <code class="literal">regexp</code> （模糊和正则）。</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="_postcodes_and_structured_data.html">« 邮编与结构化数据</a>
+</span>
+<span class="next">
+<a href="_wildcard_and_regexp_queries.html">通配符与正则表达式查询 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>堆内存:大小和交换 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="deploy.html" title="部署"/>
+<link rel="prev" href="dont-touch-these-settings.html" title="不要触碰这些配置！"/>
+<link rel="next" href="_file_descriptors_and_mmap.html" title="文件描述符和 MMap"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="administration.html">管理、监控和部署</a></span>
+»
+<span class="breadcrumb-link"><a href="deploy.html">部署</a></span>
+»
+<span class="breadcrumb-node">堆内存:大小和交换</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="dont-touch-these-settings.html">« 不要触碰这些配置！</a>
+</span>
+<span class="next">
+<a href="_file_descriptors_and_mmap.html">文件描述符和 MMap »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="heap-sizing"></a>堆内存:大小和交换</h2>
+</div></div></div>
+<p>Elasticsearch 默认安装后设置的堆内存是 1 GB。对于任何一个业务部署来说，
+这个设置都太小了。如果你正在使用这些默认堆内存配置，您的集群可能会出现问题。</p>
+<p>这里有两种方式修改 Elasticsearch 的堆内存。最简单的一个方法就是指定 <code class="literal">ES_HEAP_SIZE</code> 环境变量。服务进程在启动时候会读取这个变量，并相应的设置堆的大小。
+比如，你可以用下面的命令设置它：</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">export ES_HEAP_SIZE=10g</pre>
+</div>
+<p>此外，你也可以通过命令行参数的形式，在程序启动的时候把内存大小传递给它，如果你觉得这样更简单的话：</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">./bin/elasticsearch -Xmx10g -Xms10g <a id="CO301-1"></a><i class="conum" data-value="1"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO301-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>确保堆内存最小值（ <code class="literal">Xms</code> ）与最大值（ <code class="literal">Xmx</code> ）的大小是相同的，防止程序在运行时改变堆内存大小，
+这是一个很耗系统资源的过程。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>通常来说，设置 <code class="literal">ES_HEAP_SIZE</code> 环境变量，比直接写 <code class="literal">-Xmx -Xms</code> 更好一点。</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_把你的内存的少于一半给_lucene"></a>把你的内存的（少于）一半给 Lucene</h3>
+</div></div></div>
+<p>一个常见的问题是给 Elasticsearch 分配的内存 <em>太</em> 大了。假设你有一个 64 GB 内存的机器，
+天啊，我要把 64 GB 内存全都给 Elasticsearch。因为越多越好啊！</p>
+<p>当然，内存对于 Elasticsearch 来说绝对是重要的，它可以被许多内存数据结构使用来提供更快的操作。但是说到这里，
+还有另外一个内存消耗大户 <em>非堆内存</em> （off-heap）：Lucene。</p>
+<p>Lucene 被设计为可以利用操作系统底层机制来缓存内存数据结构。
+Lucene 的段是分别存储到单个文件中的。因为段是不可变的，这些文件也都不会变化，这是对缓存友好的，同时操作系统也会把这些段文件缓存起来，以便更快的访问。</p>
+<p>Lucene 的性能取决于和操作系统的相互作用。如果你把所有的内存都分配给 Elasticsearch 的堆内存，那将不会有剩余的内存交给 Lucene。
+这将严重地影响全文检索的性能。</p>
+<p>标准的建议是把 50％ 的可用内存作为 Elasticsearch 的堆内存，保留剩下的 50％。当然它也不会被浪费，Lucene 会很乐意利用起余下的内存。</p>
+<p>如果你不需要对分词字符串做聚合计算（例如，不需要 <a class="xref" href="aggregations-and-analysis.html" title="聚合与分析">fielddata</a> ）可以考虑降低堆内存。堆内存越小，Elasticsearch（更快的 GC）和 Lucene（更多的内存用于缓存）的性能越好。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="compressed_oops"></a>不要超过 32 GB！</h3>
+</div></div></div>
+<p>这里有另外一个原因不分配大内存给 Elasticsearch。事实上，
+JVM 在内存小于 32 GB 的时候会采用一个内存对象指针压缩技术。</p>
+<p>在 Java 中，所有的对象都分配在堆上，并通过一个指针进行引用。
+普通对象指针（OOP）指向这些对象，通常为 CPU <em>字长</em> 的大小：32 位或 64 位，取决于你的处理器。指针引用的就是这个 OOP 值的字节位置。</p>
+<p>对于 32 位的系统，意味着堆内存大小最大为 4 GB。对于 64 位的系统，
+可以使用更大的内存，但是 64 位的指针意味着更大的浪费，因为你的指针本身大了。更糟糕的是，
+更大的指针在主内存和各级缓存（例如 LLC，L1 等）之间移动数据的时候，会占用更多的带宽。</p>
+<p>Java 使用一个叫作  <a href="https://wikis.oracle.com/display/HotSpotInternals/CompressedOops" class="ulink" target="_top">内存指针压缩（compressed oops）</a>的技术来解决这个问题。
+它的指针不再表示对象在内存中的精确位置，而是表示 <em>偏移量</em> 。这意味着 32 位的指针可以引用 40 亿个 <em>对象</em> ，
+而不是 40 亿个字节。最终，
+也就是说堆内存增长到 32 GB 的物理内存，也可以用 32 位的指针表示。</p>
+<p>一旦你越过那个神奇的 ~32 GB 的边界，指针就会切回普通对象的指针。
+每个对象的指针都变长了，就会使用更多的 CPU 内存带宽，也就是说你实际上失去了更多的内存。事实上，当内存到达
+40&#x2013;50 GB 的时候，有效内存才相当于使用内存对象指针压缩技术时候的 32 GB 内存。</p>
+<p>这段描述的意思就是说：即便你有足够的内存，也尽量不要
+超过 32 GB。因为它浪费了内存，降低了 CPU 的性能，还要让 GC 应对大内存。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_到底需要低于_32_gb多少来设置我的_jvm"></a>到底需要低于 32 GB多少，来设置我的 JVM？</h3>
+</div></div></div>
+<p>遗憾的是，这需要看情况。确切的划分要根据 JVMs 和操作系统而定。
+如果你想保证其安全可靠，设置堆内存为 <code class="literal">31 GB</code> 是一个安全的选择。
+另外，你可以在你的 JVM 设置里添加 <code class="literal">-XX:+PrintFlagsFinal</code> 用来验证 <code class="literal">JVM</code> 的临界值，
+并且检查 UseCompressedOops 的值是否为 true。对于你自己使用的 JVM 和操作系统，这将找到最合适的堆内存临界值。</p>
+<p>例如，我们在一台安装  Java 1.7 的 MacOSX 上测试，可以看到指针压缩在被禁用之前，最大堆内存大约是在 32600 mb（~31.83 gb）：</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">$ JAVA_HOME=`/usr/libexec/java_home -v 1.7` java -Xmx32600m -XX:+PrintFlagsFinal 2&gt; /dev/null | grep UseCompressedOops
+     bool UseCompressedOops   := true
+$ JAVA_HOME=`/usr/libexec/java_home -v 1.7` java -Xmx32766m -XX:+PrintFlagsFinal 2&gt; /dev/null | grep UseCompressedOops
+     bool UseCompressedOops   = false</pre>
+</div>
+<p>相比之下，同一台机器安装 Java 1.8，可以看到指针压缩在被禁用之前，最大堆内存大约是在 32766 mb（~31.99 gb）：</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">$ JAVA_HOME=`/usr/libexec/java_home -v 1.8` java -Xmx32766m -XX:+PrintFlagsFinal 2&gt; /dev/null | grep UseCompressedOops
+     bool UseCompressedOops   := true
+$ JAVA_HOME=`/usr/libexec/java_home -v 1.8` java -Xmx32767m -XX:+PrintFlagsFinal 2&gt; /dev/null | grep UseCompressedOops
+     bool UseCompressedOops   = false</pre>
+</div>
+<p>这个例子告诉我们，影响内存指针压缩使用的临界值，
+是会根据 JVM 的不同而变化的。
+所以从其他地方获取的例子，需要谨慎使用，要确认检查操作系统配置和 JVM。</p>
+<p>如果使用的是  Elasticsearch v2.2.0，启动日志其实会告诉你 JVM 是否正在使用内存指针压缩。
+你会看到像这样的日志消息：</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">[2015-12-16 13:53:33,417][INFO ][env] [Illyana Rasputin] heap size [989.8mb], compressed ordinary object pointers [true]</pre>
+</div>
+<p>这表明内存指针压缩正在被使用。如果没有，日志消息会显示 <code class="literal">[false]</code> 。</p>
+<div class="sidebar pagebreak-before">
+<div class="titlepage"><div><div>
+<p class="title"><strong>我有一个 1 TB 内存的机器！</strong></p>
+</div></div></div>
+<p>这个 32 GB 的分割线是很重要的。那如果你的机器有很大的内存怎么办呢？
+一台有着 512&#x2013;768 GB内存的服务器愈发常见。</p>
+<p>首先，我们建议避免使用这样的高配机器（参考 <a class="xref" href="hardware.html" title="硬件">硬件</a>）。</p>
+<p>但是如果你已经有了这样的机器，你有三个可选项：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+你主要做全文检索吗？考虑给 Elasticsearch 4 - 32 GB 的内存，
+让 Lucene 通过操作系统文件缓存来利用余下的内存。那些内存都会用来缓存 segments，带来极速的全文检索。
+</li>
+<li class="listitem">
+你需要更多的排序和聚合？而且大部分的聚合计算是在数字、日期、地理点和 <code class="literal">非分词</code> 字符串上？你很幸运，你的聚合计算将在内存友好的 doc values 上完成！
+给 Elasticsearch 4 到 32 GB 的内存，其余部分为操作系统缓存内存中的 doc values。
+</li>
+<li class="listitem">
+你在对分词字符串做大量的排序和聚合（例如，标签或者 SigTerms，等等）不幸的是，这意味着你需要 fielddata，意味着你需要堆空间。考虑在单个机器上运行两个或多个节点，而不是拥有大量 RAM 的一个节点。仍然要坚持 50％ 原则。
+</li>
+</ul>
+</div>
+<p>假设你有个机器有 128 GB 的内存，你可以创建两个节点，每个节点内存分配不超过 32 GB。
+也就是说不超过 64 GB 内存给 ES 的堆内存，剩下的超过 64 GB 的内存给 Lucene。</p>
+<p>如果你选择这一种，你需要配置 <code class="literal">cluster.routing.allocation.same_shard.host: true</code> 。
+这会防止同一个分片（shard）的主副本存在同一个物理机上（因为如果存在一个机器上，副本的高可用性就没有了）。</p>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_swapping_是性能的坟墓"></a>Swapping 是性能的坟墓</h3>
+</div></div></div>
+<p>这是显而易见的，但是还是有必要说的更清楚一点：内存交换
+到磁盘对服务器性能来说是 <em>致命</em> 的。想想看：一个内存操作必须能够被快速执行。</p>
+<p>如果内存交换到磁盘上，一个 100 微秒的操作可能变成 10 毫秒。
+再想想那么多 10 微秒的操作时延累加起来。
+不难看出 swapping 对于性能是多么可怕。</p>
+<p>最好的办法就是在你的操作系统中完全禁用 swap。这样可以暂时禁用：</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">sudo swapoff -a</pre>
+</div>
+<p>如果需要永久禁用，你可能需要修改 <code class="literal">/etc/fstab</code> 文件，这要参考你的操作系统相关文档。</p>
+<p>如果你并不打算完全禁用 swap，也可以选择降低 <code class="literal">swappiness</code> 的值。
+这个值决定操作系统交换内存的频率。
+这可以预防正常情况下发生交换，但仍允许操作系统在紧急情况下发生交换。</p>
+<p>对于大部分Linux操作系统，可以在 <code class="literal">sysctl</code> 中这样配置：</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">vm.swappiness = 1 <a id="CO302-1"></a><i class="conum" data-value="1"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO302-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">swappiness</code> 设置为 <code class="literal">1</code> 比设置为 <code class="literal">0</code> 要好，因为在一些内核版本 <code class="literal">swappiness</code> 设置为 <code class="literal">0</code> 会触发系统 OOM-killer（注：Linux 内核的 Out of Memory（OOM）killer 机制）。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>最后，如果上面的方法都不合适，你需要打开配置文件中的 <code class="literal">mlockall</code> 开关。
+它的作用就是允许 JVM 锁住内存，禁止操作系统交换出去。在你的 <code class="literal">elasticsearch.yml</code> 文件中，设置如下：</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">bootstrap.mlockall: true</pre>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="dont-touch-these-settings.html">« 不要触碰这些配置！</a>
+</span>
+<span class="next">
+<a href="_file_descriptors_and_mmap.html">文件描述符和 MMap »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

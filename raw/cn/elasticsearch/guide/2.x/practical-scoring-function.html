@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Lucene 的实用评分函数 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="controlling-relevance.html" title="控制相关度"/>
+<link rel="prev" href="scoring-theory.html" title="相关度评分背后的理论"/>
+<link rel="next" href="query-time-boosting.html" title="查询时权重提升"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="search-in-depth.html">深入搜索</a></span>
+»
+<span class="breadcrumb-link"><a href="controlling-relevance.html">控制相关度</a></span>
+»
+<span class="breadcrumb-node">Lucene 的实用评分函数</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="scoring-theory.html">« 相关度评分背后的理论</a>
+</span>
+<span class="next">
+<a href="query-time-boosting.html">查询时权重提升 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="practical-scoring-function"></a>Lucene 的实用评分函数</h2>
+</div></div></div>
+<p>对于多词查询， Lucene 使用 <a class="xref" href="scoring-theory.html#boolean-model" title="布尔模型">布尔模型（Boolean model）</a> 、 <a class="xref" href="scoring-theory.html#tfidf" title="词频/逆向文档频率（TF/IDF）">TF/IDF</a> 以及 <a class="xref" href="scoring-theory.html#vector-space-model" title="向量空间模型">向量空间模型（vector space model）</a> ，然后将它们组合到单个高效的包里以收集匹配文档并进行评分计算。</p>
+<p>一个多词查询</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /my_index/doc/_search
+{
+  "query": {
+    "match": {
+      "text": "quick fox"
+    }
+  }
+}</pre>
+</div>
+<p>会在内部被重写为：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /my_index/doc/_search
+{
+  "query": {
+    "bool": {
+      "should": [
+        {"term": { "text": "quick" }},
+        {"term": { "text": "fox"   }}
+      ]
+    }
+  }
+}</pre>
+</div>
+<p><code class="literal">bool</code> 查询实现了布尔模型，在这个例子中，它会将包括词 <code class="literal">quick</code> 和 <code class="literal">fox</code> 或两者兼有的文档作为查询结果。</p>
+<p>只要一个文档与查询匹配，Lucene 就会为查询计算评分，然后合并每个匹配词的评分结果。这里使用的评分计算公式叫做 <em>实用评分函数（practical scoring function）</em> 。看似很高大上，但是别被吓到——多数的组件都已经介绍过，下一步会讨论它引入的一些新元素。</p>
+<pre class="literallayout">score(q,d)  =  <a id="CO107-1"></a><i class="conum" data-value="1"></i>
+            queryNorm(q)  <a id="CO107-2"></a><i class="conum" data-value="2"></i>
+          · coord(q,d)    <a id="CO107-3"></a><i class="conum" data-value="3"></i>
+          · ∑ (           <a id="CO107-4"></a><i class="conum" data-value="4"></i>
+                tf(t in d)   <a id="CO107-5"></a><i class="conum" data-value="5"></i>
+              · idf(t)²      <a id="CO107-6"></a><i class="conum" data-value="6"></i>
+              · t.getBoost() <a id="CO107-7"></a><i class="conum" data-value="7"></i>
+              · norm(t,d)    <a id="CO107-8"></a><i class="conum" data-value="8"></i>
+            ) (t in q)    <a id="CO107-9"></a><i class="conum" data-value="4"></i></pre>
+
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO107-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">score(q,d)</code> 是文档 <code class="literal">d</code> 与查询 <code class="literal">q</code> 的相关度评分。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO107-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">queryNorm(q)</code> 是 <a class="xref" href="practical-scoring-function.html#query-norm" title="查询归一因子"><em>查询归一化</em> 因子</a> （新）。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO107-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">coord(q,d)</code> 是 <a class="xref" href="practical-scoring-function.html#coord" title="查询协调"><em>协调</em> 因子</a> （新）。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO107-4"><i class="conum" data-value="4"></i></a><a href="#CO107-9"></a></p>
+</td>
+<td align="left" valign="top">
+<p>查询 <code class="literal">q</code> 中每个词 <code class="literal">t</code> 对于文档 <code class="literal">d</code> 的权重和。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO107-5"><i class="conum" data-value="5"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">tf(t in d)</code> 是词 <code class="literal">t</code> 在文档 <code class="literal">d</code> 中的 <a class="xref" href="scoring-theory.html#tf" title="词频">词频</a> 。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO107-6"><i class="conum" data-value="6"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">idf(t)</code> 是词 <code class="literal">t</code> 的 <a class="xref" href="scoring-theory.html#idf" title="逆向文档频率">逆向文档频率</a> 。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO107-7"><i class="conum" data-value="7"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">t.getBoost()</code> 是查询中使用的 <a class="xref" href="query-time-boosting.html" title="查询时权重提升"><em>boost</em></a>（新）。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO107-8"><i class="conum" data-value="8"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">norm(t,d)</code> 是 <a class="xref" href="scoring-theory.html#field-norm" title="字段长度归一值">字段长度归一值</a> ，与 <a class="xref" href="practical-scoring-function.html#index-boost" title="索引时字段层权重提升">索引时字段层 boost</a> （如果存在）的和（新）。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>上节已介绍过 <code class="literal">score</code> 、 <code class="literal">tf</code> 和 <code class="literal">idf</code> 。现在来介绍 <code class="literal">queryNorm</code> 、 <code class="literal">coord</code> 、 <code class="literal">t.getBoost</code> 和 <code class="literal">norm</code> 。</p>
+<p>我们会在本章后面继续探讨 <a class="xref" href="query-time-boosting.html" title="查询时权重提升">查询时的权重提升</a> 的问题，但是首先需要了解查询归一化、协调和索引时字段层面的权重提升等概念。</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="query-norm"></a>查询归一因子</h3>
+</div></div></div>
+<p><em>查询归一因子</em> （ <code class="literal">queryNorm</code> ）试图将查询 <em>归一化</em> ，这样就能将两个不同的查询结果相比较。</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>尽管查询归一值的目的是为了使查询结果之间能够相互比较，但是它并不十分有效，因为相关度评分 <code class="literal">_score</code> 的目的是为了将当前查询的结果进行排序，比较不同查询结果的相关度评分没有太大意义。</p>
+</div>
+</div>
+<p>这个因子是在查询过程的最前面计算的，具体的计算依赖于具体查询，一个典型的实现如下：</p>
+<pre class="literallayout">queryNorm = 1 / √sumOfSquaredWeights <a id="CO108-1"></a><i class="conum" data-value="1"></i></pre>
+
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO108-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">sumOfSquaredWeights</code> 是查询里每个词的 IDF 的平方和。</p>
+</td>
+</tr>
+</table>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>相同查询归一化因子会被应用到每个文档，不能被更改，总而言之，可以被忽略。</p>
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="coord"></a>查询协调</h3>
+</div></div></div>
+<p><em>协调因子</em> （ <code class="literal">coord</code> ）可以为那些查询词包含度高的文档提供奖励，文档里出现的查询词越多，它越有机会成为好的匹配结果。</p>
+<p>设想查询 <code class="literal">quick brown fox</code> ，每个词的权重都是 1.5 。如果没有协调因子，最终评分会是文档里所有词权重的总和。例如：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+文档里有 <code class="literal">fox</code> &#8594; 评分： 1.5
+</li>
+<li class="listitem">
+文档里有 <code class="literal">quick fox</code> &#8594; 评分： 3.0
+</li>
+<li class="listitem">
+文档里有 <code class="literal">quick brown fox</code> &#8594; 评分： 4.5
+</li>
+</ul>
+</div>
+<p>协调因子将评分与文档里匹配词的数量相乘，然后除以查询里所有词的数量，如果使用协调因子，评分会变成：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+文档里有 <code class="literal">fox</code> &#8594; 评分： <code class="literal">1.5 * 1 / 3</code> = 0.5
+</li>
+<li class="listitem">
+文档里有 <code class="literal">quick fox</code> &#8594; 评分： <code class="literal">3.0 * 2 / 3</code> = 2.0
+</li>
+<li class="listitem">
+文档里有 <code class="literal">quick brown fox</code> &#8594; 评分： <code class="literal">4.5 * 3 / 3</code> = 4.5
+</li>
+</ul>
+</div>
+<p>协调因子能使包含所有三个词的文档比只包含两个词的文档评分要高出很多。</p>
+<p>回想将查询 <code class="literal">quick brown fox</code> 重写成 <code class="literal">bool</code> 查询的形式：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /_search
+{
+  "query": {
+    "bool": {
+      "should": [
+        { "term": { "text": "quick" }},
+        { "term": { "text": "brown" }},
+        { "term": { "text": "fox"   }}
+      ]
+    }
+  }
+}</pre>
+</div>
+<p><code class="literal">bool</code> 查询默认会对所有 <code class="literal">should</code> 语句使用协调功能，不过也可以将其禁用。为什么要这样做？通常的回答是——无须这样。查询协调通常是件好事，当使用 <code class="literal">bool</code> 查询将多个高级查询如 <code class="literal">match</code> 查询包裹的时候，让协调功能开启是有意义的，匹配的语句越多，查询请求与返回文档间的重叠度就越高。</p>
+<p>但在某些高级应用中，将协调功能关闭可能更好。设想正在查找同义词 <code class="literal">jump</code> 、 <code class="literal">leap</code> 和 <code class="literal">hop</code> 时，并不关心会出现多少个同义词，因为它们都表示相同的意思，实际上，只有其中一个同义词会出现，这是不使用协调因子的一个好例子：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /_search
+{
+  "query": {
+    "bool": {
+      "disable_coord": true,
+      "should": [
+        { "term": { "text": "jump" }},
+        { "term": { "text": "hop"  }},
+        { "term": { "text": "leap" }}
+      ]
+    }
+  }
+}</pre>
+</div>
+<p>当使用同义词的时候（参照： <a class="xref" href="synonyms.html" title="同义词">同义词</a> ），Lucene 内部是这样的：重写的查询会禁用同义词的协调功能。大多数禁用操作的应用场景是自动处理的，无须为此担心。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="index-boost"></a>索引时字段层权重提升</h3>
+</div></div></div>
+<p>我们会讨论 <a class="xref" href="query-time-boosting.html" title="查询时权重提升">查询时的权重提升</a>，让字段 <em>权重提升</em> 就是让某个字段比其他字段更重要。当然在索引时也能做到如此。实际上，权重的提升会被应用到字段的每个词，而不是字段本身。</p>
+<p>将提升值存储在索引中无须更多空间，这个字段层索引时的提升值与字段长度归一值（参见 <a class="xref" href="scoring-theory.html#field-norm" title="字段长度归一值">字段长度归一值</a> ）一起作为单个字节存于索引， <code class="literal">norm(t,d)</code> 是前面公式的返回值。</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>我们不建议在建立索引时对字段提升权重，有以下原因：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+将提升值与字段长度归一值合在单个字节中存储会丢失字段长度归一值的精度，这样会导致 Elasticsearch 不知如何区分包含三个词的字段和包含五个词的字段。
+</li>
+<li class="listitem">
+要想改变索引时的提升值，就必须重新为所有文档建立索引，与此不同的是，查询时的提升值可以随着每次查询的不同而更改。
+</li>
+<li class="listitem">
+如果一个索引时权重提升的字段有多个值，提升值会按照每个值来自乘，这会导致该字段的权重急剧上升。
+</li>
+</ul>
+</div>
+<p><a class="xref" href="query-time-boosting.html" title="查询时权重提升">查询时赋予权重</a> 是更为简单、清楚、灵活的选择。</p>
+</div>
+</div>
+<p>了解了查询归一化、协同和索引时权重提升这些方式后，可以进一步了解相关度计算最有用的工具：查询时的权重提升。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="scoring-theory.html">« 相关度评分背后的理论</a>
+</span>
+<span class="next">
+<a href="query-time-boosting.html">查询时权重提升 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

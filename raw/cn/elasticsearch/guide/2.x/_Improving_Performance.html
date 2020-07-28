@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>性能优化 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="proximity-matching.html" title="近似匹配"/>
+<link rel="prev" href="proximity-relevance.html" title="使用邻近度提高相关度"/>
+<link rel="next" href="shingles.html" title="寻找相关词"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="search-in-depth.html">深入搜索</a></span>
+»
+<span class="breadcrumb-link"><a href="proximity-matching.html">近似匹配</a></span>
+»
+<span class="breadcrumb-node">性能优化</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="proximity-relevance.html">« 使用邻近度提高相关度</a>
+</span>
+<span class="next">
+<a href="shingles.html">寻找相关词 »</a>
+</span>
+</div>
+<div class="section pagebreak-before">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="_Improving_Performance"></a>性能优化</h2>
+</div></div></div>
+<p>短语查询和邻近查询都比简单的 <code class="literal">query</code> 查询代价更高。
+一个 <code class="literal">match</code> 查询仅仅是看词条是否存在于倒排索引中，而一个 <code class="literal">match_phrase</code> 查询是必须计算并比较多个可能重复词项的位置。</p>
+<p><a href="http://people.apache.org/~mikemccand/lucenebench/" class="ulink" target="_top">Lucene nightly benchmarks</a> 表明一个简单的 <code class="literal">term</code> 查询比一个短语查询大约快 10 倍，比邻近查询(有 <code class="literal">slop</code> 的短语
+查询)大约快 20 倍。当然，这个代价指的是在搜索时而不是索引时。</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>通常，短语查询的额外成本并不像这些数字所暗示的那么吓人。事实上，性能上的差距只是证明一个简单的 <code class="literal">term</code> 查询有多快。标准全文数据的短语查询通常在几毫秒内完成，因此实际上都是完全可用，即使是在一个繁忙的集群上。</p>
+<p>在某些特定病理案例下，短语查询可能成本太高了，但比较少见。一个典型例子就是DNA序列，在序列里很多同样的词项在很多位置重复出现。在这里使用高 <code class="literal">slop</code> 值会到导致位置计算大量增加。</p>
+</div>
+</div>
+<p>那么我们应该如何限制短语查询和邻近近查询的性能消耗呢？一种有用的方法是减少需要通过短语查询检查的文档总数。</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="rescore-api"></a>结果集重新评分</h3>
+</div></div></div>
+<p>在<a class="xref" href="proximity-relevance.html" title="使用邻近度提高相关度">先前的章节中</a> ，我们讨论了而使用邻近查询来调整相关度，而不是使用它将文档从结果列表中添加或者排除。一个查询可能会匹配成千上万的结果，但我们的用户很可能只对结果的前几页感兴趣。</p>
+<p>一个简单的 <code class="literal">match</code> 查询已经通过排序把包含所有含有搜索词条的文档放在结果列表的前面了。事实上，我们只想对这些 <em>顶部文档</em> 重新排序，来给同时匹配了短语查询的文档一个额外的相关度升级。</p>
+<p><code class="literal">search</code> API 通过 <em>重新评分</em> 明确支持该功能。重新评分阶段支持一个代价更高的评分算法&#8212;&#8203;比如 <code class="literal">phrase</code> 查询&#8212;&#8203;只是为了从每个分片中获得前 <code class="literal">K</code> 个结果。 然后会根据它们的最新评分
+重新排序。</p>
+<p>该请求如下所示：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">GET /my_index/my_type/_search
+{
+    "query": {
+        "match": {  <a id="CO87-1"></a><i class="conum" data-value="1"></i>
+            "title": {
+                "query":                "quick brown fox",
+                "minimum_should_match": "30%"
+            }
+        }
+    },
+    "rescore": {
+        "window_size": 50, <a id="CO87-2"></a><i class="conum" data-value="2"></i>
+        "query": {         <a id="CO87-3"></a><i class="conum" data-value="3"></i>
+            "rescore_query": {
+                "match_phrase": {
+                    "title": {
+                        "query": "quick brown fox",
+                        "slop":  50
+                    }
+                }
+            }
+        }
+    }
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/120_Proximity_Matching/30_Performance.json"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO87-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">match</code> 查询决定哪些文档将包含在最终结果集中，并通过 TF/IDF 排序。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO87-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">window_size</code> 是每一分片进行重新评分的顶部文档数量。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO87-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>目前唯一支持的重新打分算法就是另一个查询，但是以后会有计划增加更多的算法。</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="proximity-relevance.html">« 使用邻近度提高相关度</a>
+</span>
+<span class="next">
+<a href="shingles.html">寻找相关词 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

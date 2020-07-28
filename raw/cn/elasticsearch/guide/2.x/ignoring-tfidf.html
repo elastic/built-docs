@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>忽略 TF/IDF | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="controlling-relevance.html" title="控制相关度"/>
+<link rel="prev" href="not-quite-not.html" title="Not Quite Not"/>
+<link rel="next" href="function-score-query.html" title="function_score 查询"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="search-in-depth.html">深入搜索</a></span>
+»
+<span class="breadcrumb-link"><a href="controlling-relevance.html">控制相关度</a></span>
+»
+<span class="breadcrumb-node">忽略 TF/IDF</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="not-quite-not.html">« Not Quite Not</a>
+</span>
+<span class="next">
+<a href="function-score-query.html">function_score 查询 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="ignoring-tfidf"></a>忽略 TF/IDF</h2>
+</div></div></div>
+<p>有时候我们根本不关心 TF/IDF ，只想知道一个词是否在某个字段中出现过。可能搜索一个度假屋并希望它能尽可能有以下设施：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+WiFi
+</li>
+<li class="listitem">
+Garden（花园）
+</li>
+<li class="listitem">
+Pool（游泳池）
+</li>
+</ul>
+</div>
+<p>这个度假屋的文档如下：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{ "description": "A delightful four-bedroomed house with ... " }</pre>
+</div>
+<p>可以用简单的 <code class="literal">match</code> 查询进行匹配：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /_search
+{
+  "query": {
+    "match": {
+      "description": "wifi garden pool"
+    }
+  }
+}</pre>
+</div>
+<p>但这并不是真正的 <em>全文搜索</em> ，此种情况下，TF/IDF 并无用处。我们既不关心 <code class="literal">wifi</code> 是否为一个普通词，也不关心它在文档中出现是否频繁，关心的只是它是否曾出现过。实际上，我们希望根据房屋不同设施的数量对其排名——设施越多越好。如果设施出现，则记 <code class="literal">1</code> 分，不出现记 <code class="literal">0</code> 分。</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="constant-score-query"></a>constant_score 查询</h3>
+</div></div></div>
+<p>在 <a href="/guide/en/elasticsearch/reference/5.6/query-dsl-constant-score-query.html" class="ulink" target="_top"><code class="literal">constant_score</code></a>
+查询中，它可以包含查询或过滤，为任意一个匹配的文档指定评分 <code class="literal">1</code> ，忽略 TF/IDF 信息：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /_search
+{
+  "query": {
+    "bool": {
+      "should": [
+        { "constant_score": {
+          "query": { "match": { "description": "wifi" }}
+        }},
+        { "constant_score": {
+          "query": { "match": { "description": "garden" }}
+        }},
+        { "constant_score": {
+          "query": { "match": { "description": "pool" }}
+        }}
+      ]
+    }
+  }
+}</pre>
+</div>
+<p>或许不是所有的设施都同等重要——对某些用户来说有些设施更有价值。如果最重要的设施是游泳池，那我们可以为更重要的设施增加权重：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /_search
+{
+  "query": {
+    "bool": {
+      "should": [
+        { "constant_score": {
+          "query": { "match": { "description": "wifi" }}
+        }},
+        { "constant_score": {
+          "query": { "match": { "description": "garden" }}
+        }},
+        { "constant_score": {
+          "boost":   2 <a id="CO111-1"></a><i class="conum" data-value="1"></i>
+          "query": { "match": { "description": "pool" }}
+        }}
+      ]
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO111-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">pool</code> 语句的权重提升值为 <code class="literal">2</code> ，而其他的语句为 <code class="literal">1</code> 。</p>
+</td>
+</tr>
+</table>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>最终的评分并不是所有匹配语句的简单求和， <a class="xref" href="practical-scoring-function.html#coord" title="查询协调">协调因子（coordination factor）</a> 和 <a class="xref" href="practical-scoring-function.html#query-norm" title="查询归一因子">查询归一化因子（query normalization factor）</a> 仍然会被考虑在内。</p>
+</div>
+</div>
+<p>我们可以给 <code class="literal">features</code> 字段加上 <code class="literal">not_analyzed</code> 类型来提升度假屋文档的匹配能力：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{ "features": [ "wifi", "pool", "garden" ] }</pre>
+</div>
+<p>默认情况下，一个 <code class="literal">not_analyzed</code> 字段会禁用 <a class="xref" href="scoring-theory.html#field-norm" title="字段长度归一值">字段长度归一值（field-length norms）</a> 的功能，并将 <code class="literal">index_options</code> 设为 <code class="literal">docs</code> 选项，禁用 <a class="xref" href="scoring-theory.html#tf" title="词频">词频</a> ，但还是存在问题：每个词的 <a class="xref" href="scoring-theory.html#idf" title="逆向文档频率">倒排文档频率</a> 仍然会被考虑。</p>
+<p>可以采用与之前相同的方法 <code class="literal">constant_score</code> 查询来解决这个问题：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /_search
+{
+  "query": {
+    "bool": {
+      "should": [
+        { "constant_score": {
+          "query": { "match": { "features": "wifi" }}
+        }},
+        { "constant_score": {
+          "query": { "match": { "features": "garden" }}
+        }},
+        { "constant_score": {
+          "boost":   2
+          "query": { "match": { "features": "pool" }}
+        }}
+      ]
+    }
+  }
+}</pre>
+</div>
+<p>实际上，每个设施都应该看成一个过滤器，对于度假屋来说要么具有某个设施要么没有——过滤器因为其性质天然合适。而且，如果使用过滤器，我们还可以利用缓存。</p>
+<p>这里的问题是：过滤器无法计算评分。这样就需要寻求一种方式将过滤器和查询间的差异抹平。 <code class="literal">function_score</code> 查询不仅正好可以扮演这个角色，而且有更强大的功能。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="not-quite-not.html">« Not Quite Not</a>
+</span>
+<span class="next">
+<a href="function-score-query.html">function_score 查询 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

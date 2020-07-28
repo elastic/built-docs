@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>乐观并发控制 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="data-in-data-out.html" title="数据输入和输出"/>
+<link rel="prev" href="version-control.html" title="处理冲突"/>
+<link rel="next" href="partial-updates.html" title="文档的部分更新"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="getting-started.html">基础入门</a></span>
+»
+<span class="breadcrumb-link"><a href="data-in-data-out.html">数据输入和输出</a></span>
+»
+<span class="breadcrumb-node">乐观并发控制</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="version-control.html">« 处理冲突</a>
+</span>
+<span class="next">
+<a href="partial-updates.html">文档的部分更新 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="optimistic-concurrency-control"></a>乐观并发控制</h2>
+</div></div></div>
+<p>Elasticsearch 是分布式的。当文档创建、更新或删除时，
+新版本的文档必须复制到集群中的其他节点。Elasticsearch 也是异步和并发的，这意味着这些复制请求被并行发送，并且到达目的地时也许 <em>顺序是乱的</em> 。
+Elasticsearch 需要一种方法确保文档的旧版本不会覆盖新的版本。</p>
+<p>当我们之前讨论 <code class="literal">index</code> ， <code class="literal">GET</code> 和 <code class="literal">delete</code> 请求时，我们指出每个文档都有一个 <code class="literal">_version</code> （版本）号，当文档被修改时版本号递增。
+Elasticsearch 使用这个 <code class="literal">_version</code> 号来确保变更以正确顺序得到执行。如果旧版本的文档在新版本之后到达，它可以被简单的忽略。</p>
+<p>我们可以利用 <code class="literal">_version</code> 号来确保
+应用中相互冲突的变更不会导致数据丢失。我们通过指定想要修改文档的 <code class="literal">version</code> 号来达到这个目的。
+如果该版本不是当前版本号，我们的请求将会失败。</p>
+<p>让我们创建一个新的博客文章：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">PUT /website/blog/1/_create
+{
+  "title": "My first blog entry",
+  "text":  "Just trying this out..."
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/030_Data/40_Concurrency.json"></div>
+<p>响应体告诉我们，这个新创建的文档 <code class="literal">_version</code> 版本号是 <code class="literal">1</code> 。现在假设我们想编辑这个文档：我们加载其数据到 web 表单中，
+做一些修改，然后保存新的版本。</p>
+<p>首先我们检索文档:</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">GET /website/blog/1</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/030_Data/40_Concurrency.json"></div>
+<p>响应体包含相同的 <code class="literal">_version</code> 版本号 <code class="literal">1</code> ：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+  "_index" :   "website",
+  "_type" :    "blog",
+  "_id" :      "1",
+  "_version" : 1,
+  "found" :    true,
+  "_source" :  {
+      "title": "My first blog entry",
+      "text":  "Just trying this out..."
+  }
+}</pre>
+</div>
+<p>现在，当我们尝试通过重建文档的索引来保存修改，我们指定 <code class="literal">version</code> 为我们的修改会被应用的版本：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">PUT /website/blog/1?version=1 <a id="CO11-1"></a><i class="conum" data-value="1"></i>
+{
+  "title": "My first blog entry",
+  "text":  "Starting to get the hang of this..."
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/030_Data/40_Concurrency.json"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO11-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>我们想这个在我们索引中的文档只有现在的 <code class="literal">_version</code> 为 <code class="literal">1</code> 时，本次更新才能成功。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>此请求成功，并且响应体告诉我们 <code class="literal">_version</code> 已经递增到 <code class="literal">2</code> ：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">{
+  "_index":   "website",
+  "_type":    "blog",
+  "_id":      "1",
+  "_version": 2
+  "created":  false
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/030_Data/40_Concurrency.json"></div>
+<p>然而，如果我们重新运行相同的索引请求，仍然指定 <code class="literal">version=1</code> ，
+Elasticsearch 返回 <code class="literal">409 Conflict</code> HTTP 响应码，和一个如下所示的响应体：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">{
+   "error": {
+      "root_cause": [
+         {
+            "type": "version_conflict_engine_exception",
+            "reason": "[blog][1]: version conflict, current [2], provided [1]",
+            "index": "website",
+            "shard": "3"
+         }
+      ],
+      "type": "version_conflict_engine_exception",
+      "reason": "[blog][1]: version conflict, current [2], provided [1]",
+      "index": "website",
+      "shard": "3"
+   },
+   "status": 409
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/030_Data/40_Concurrency.json"></div>
+<p>这告诉我们在 Elasticsearch 中这个文档的当前 <code class="literal">_version</code> 号是 <code class="literal">2</code> ，但我们指定的更新版本号为 <code class="literal">1</code> 。</p>
+<p>我们现在怎么做取决于我们的应用需求。我们可以告诉用户说其他人已经修改了文档，并且在再次保存之前检查这些修改内容。
+或者，在之前的商品 <code class="literal">stock_count</code> 场景，我们可以获取到最新的文档并尝试重新应用这些修改。</p>
+<p>所有文档的更新或删除 API，都可以接受 <code class="literal">version</code> 参数，这允许你在代码中使用乐观的并发控制，这是一种明智的做法。</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_Using_Versions_from_an_External_System"></a>通过外部系统使用版本控制</h3>
+</div></div></div>
+<p>一个常见的设置是使用其它数据库作为主要的数据存储，使用 Elasticsearch 做数据检索，
+
+这意味着主数据库的所有更改发生时都需要被复制到 Elasticsearch ，如果多个进程负责这一数据同步，你可能遇到类似于之前描述的并发问题。</p>
+<p>如果你的主数据库已经有了版本号&#8201;&#8212;&#8201;或一个能作为版本号的字段值比如 <code class="literal">timestamp</code>&#8201;&#8212;&#8201;那么你就可以在 Elasticsearch 中通过增加 <code class="literal">version_type=external</code> 到查询字符串的方式重用这些相同的版本号，
+版本号必须是大于零的整数，
+且小于 <code class="literal">9.2E+18</code>&#8201;&#8212;&#8201;一个 Java 中 <code class="literal">long</code> 类型的正值。</p>
+<p>外部版本号的处理方式和我们之前讨论的内部版本号的处理方式有些不同，
+Elasticsearch 不是检查当前 <code class="literal">_version</code> 和请求中指定的版本号是否相同，
+而是检查当前 <code class="literal">_version</code> 是否 <em>小于</em> 指定的版本号。
+如果请求成功，外部的版本号作为文档的新 <code class="literal">_version</code> 进行存储。</p>
+<p>外部版本号不仅在索引和删除请求是可以指定，而且在 <em>创建</em> 新文档时也可以指定。</p>
+<p>例如，要创建一个新的具有外部版本号 <code class="literal">5</code> 的博客文章，我们可以按以下方法进行：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">PUT /website/blog/2?version=5&amp;version_type=external
+{
+  "title": "My first external blog entry",
+  "text":  "Starting to get the hang of this..."
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/030_Data/40_External_versions.json"></div>
+<p>在响应中，我们能看到当前的 <code class="literal">_version</code> 版本号是 <code class="literal">5</code> ：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+  "_index":   "website",
+  "_type":    "blog",
+  "_id":      "2",
+  "_version": 5,
+  "created":  true
+}</pre>
+</div>
+<p>现在我们更新这个文档，指定一个新的 <code class="literal">version</code> 号是 <code class="literal">10</code> ：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">PUT /website/blog/2?version=10&amp;version_type=external
+{
+  "title": "My first external blog entry",
+  "text":  "This is a piece of cake..."
+}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/030_Data/40_External_versions.json"></div>
+<p>请求成功并将当前 <code class="literal">_version</code> 设为 <code class="literal">10</code> ：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+  "_index":   "website",
+  "_type":    "blog",
+  "_id":      "2",
+  "_version": 10,
+  "created":  false
+}</pre>
+</div>
+<p>如果你要重新运行此请求时，它将会失败，并返回像我们之前看到的同样的冲突错误，
+因为指定的外部版本号不大于 Elasticsearch 的当前版本号。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="version-control.html">« 处理冲突</a>
+</span>
+<span class="next">
+<a href="partial-updates.html">文档的部分更新 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Geohash 网格聚合 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="geo-aggs.html" title="地理位置聚合"/>
+<link rel="prev" href="geo-distance-agg.html" title="地理距离聚合"/>
+<link rel="next" href="geo-bounds-agg.html" title="地理边界聚合"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="geoloc.html">地理位置</a></span>
+»
+<span class="breadcrumb-link"><a href="geo-aggs.html">地理位置聚合</a></span>
+»
+<span class="breadcrumb-node">Geohash 网格聚合</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="geo-distance-agg.html">« 地理距离聚合</a>
+</span>
+<span class="next">
+<a href="geo-bounds-agg.html">地理边界聚合 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="geohash-grid-agg"></a>Geohash 网格聚合</h2>
+</div></div></div>
+<p>通过一个查询返回的结果数量对在地图上单独的显示每一个位置点而言可能太多了。 <code class="literal">geohash_grid</code> 按照你定义的精度计算每一个点的 geohash 值而将附近的位置聚合在一起。</p>
+<p>结果是一个网格—一个单元格表示一个可以显示在地图上的 geohash 。通过改变 geohash 的精度，你可以按国家或者城市街区来概括全世界。</p>
+<p>聚合是稀疏的—它 仅返回那些含有文档的单元。
+如果 geohashes 太精确，将产生太多的 buckets，它将默认返回那些包含了大量文档、最密集的10000个单元。 然而，为了计算哪些是最密集的 Top10000 ，它还是需要产生 <em>所有</em> 的 buckets 。可以通过以下方式来控制 buckets 的产生数量：</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+使用 <code class="literal">geo_bounding_box</code> 来限制结果。
+</li>
+<li class="listitem">
+为你的边界大小选择一个适当的 <code class="literal">precision</code> (精度)
+</li>
+</ol>
+</div>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET /attractions/restaurant/_search
+{
+  "size" : 0,
+  "query": {
+    "constant_score": {
+      "filter": {
+        "geo_bounding_box": {
+          "location": { <a id="CO240-1"></a><i class="conum" data-value="1"></i>
+            "top_left": {
+              "lat":  40.8,
+              "lon": -74.1
+            },
+            "bottom_right": {
+              "lat":  40.4,
+              "lon": -73.7
+            }
+          }
+        }
+      }
+    }
+  },
+  "aggs": {
+    "new_york": {
+      "geohash_grid": { <a id="CO240-2"></a><i class="conum" data-value="2"></i>
+        "field":     "location",
+        "precision": 5
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO240-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>边界框将搜索限制在大纽约区的范围</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO240-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Geohashes 精度为 <code class="literal">5</code> 大约是 5km x 5km。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>Geohashes 精度为 <code class="literal">5</code> ，每个约25平方公里，所以10000个单元按这个精度将覆盖250000平方公里。我们指定的边界范围，约44km x 33km，或约1452平方公里，所以我们的边界在安全范围内；我们绝对不会在内存中创建了太多的 buckets。</p>
+<p>前面的请求响应看起来是这样的：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">...
+"aggregations": {
+  "new_york": {
+     "buckets": [ <a id="CO241-1"></a><i class="conum" data-value="1"></i>
+        {
+           "key": "dr5rs",
+           "doc_count": 2
+        },
+        {
+           "key": "dr5re",
+           "doc_count": 1
+        }
+     ]
+  }
+}
+...</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO241-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>每个 bucket 包含作为 <code class="literal">key</code> 的 geohash 值</p>
+</td>
+</tr>
+</table>
+</div>
+<p>同样，我们也没有指定任何子聚合，所以我们得到是文档计数。如果需要，我们也可以了解这些 buckets 中受欢迎的餐厅类型、平均价格或其他细节。</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>要在地图上绘制这些 buckets，你需要一个将 geohash 转换成同等边界框或中心点的库。JavaScript 和其他语言已有的库会为你执行这个转换，但你也可以从使用 <a class="xref" href="geo-bounds-agg.html" title="地理边界聚合">geo-bounds-agg</a> 的信息来进行类似的工作。</p>
+</div>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="geo-distance-agg.html">« 地理距离聚合</a>
+</span>
+<span class="next">
+<a href="geo-bounds-agg.html">地理边界聚合 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

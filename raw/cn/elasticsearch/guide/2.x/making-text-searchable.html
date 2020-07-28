@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>使文本可被搜索 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="inside-a-shard.html" title="分片内部原理"/>
+<link rel="prev" href="inside-a-shard.html" title="分片内部原理"/>
+<link rel="next" href="dynamic-indices.html" title="动态更新索引"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="getting-started.html">基础入门</a></span>
+»
+<span class="breadcrumb-link"><a href="inside-a-shard.html">分片内部原理</a></span>
+»
+<span class="breadcrumb-node">使文本可被搜索</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="inside-a-shard.html">« 分片内部原理</a>
+</span>
+<span class="next">
+<a href="dynamic-indices.html">动态更新索引 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="making-text-searchable"></a>使文本可被搜索</h2>
+</div></div></div>
+<p>必须解决的第一个挑战是如何使文本可被搜索。
+传统的数据库每个字段存储单个值，但这对全文检索并不够。文本字段中的每个单词需要被搜索，对数据库意味着需要单个字段有索引多值(这里指单词)的能力。</p>
+<p>最好的支持 <em>一个字段多个值</em> 需求的数据结构是我们在 <a class="xref" href="inverted-index.html" title="倒排索引">倒排索引</a> 章节中介绍过的 <em>倒排索引</em> 。
+倒排索引包含一个有序列表，列表包含所有文档出现过的不重复个体，或称为 <em>词项</em> ，对于每一个词项，包含了它所有曾出现过文档的列表。</p>
+<pre class="literallayout">Term  | Doc 1 | Doc 2 | Doc 3 | ...
+------------------------------------
+brown |   X   |       |  X    | ...
+fox   |   X   |   X   |  X    | ...
+quick |   X   |   X   |       | ...
+the   |   X   |       |  X    | ...</pre>
+
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>当讨论倒排索引时，我们会谈到 <em>文档</em> 标引，因为历史原因，倒排索引被用来对整个非结构化文本文档进行标引。
+Elasticsearch 中的 <em>文档</em> 是有字段和值的结构化 JSON 文档。事实上，在 JSON 文档中，
+每个被索引的字段都有自己的倒排索引。</p>
+</div>
+</div>
+<p>这个倒排索引相比特定词项出现过的文档列表，会包含更多其它信息。它会保存每一个词项出现过的文档总数，
+在对应的文档中一个具体词项出现的总次数，词项在文档中的顺序，每个文档的长度，所有文档的平均长度，等等。这些统计信息允许
+Elasticsearch 决定哪些词比其它词更重要，哪些文档比其它文档更重要，这些内容在 <a class="xref" href="relevance-intro.html" title="什么是相关性?">什么是相关性?</a> 中有描述。</p>
+<p>为了能够实现预期功能，倒排索引需要知道集合中的 <em>所有</em> 文档，这是需要认识到的关键问题。</p>
+<p>早期的全文检索会为整个文档集合建立一个很大的倒排索引并将其写入到磁盘。
+一旦新的索引就绪，旧的就会被其替换，这样最近的变化便可以被检索到。</p>
+<div class="section pagebreak-before">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_不变性"></a>不变性</h3>
+</div></div></div>
+<p>倒排索引被写入磁盘后是 <em>不可改变</em> 的:它永远不会修改。
+不变性有重要的价值：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+不需要锁。如果你从来不更新索引，你就不需要担心多进程同时修改数据的问题。
+</li>
+<li class="listitem">
+一旦索引被读入内核的文件系统缓存，便会留在哪里，由于其不变性。只要文件系统缓存中还有足够的空间，那么大部分读请求会直接请求内存，而不会命中磁盘。这提供了很大的性能提升。
+</li>
+<li class="listitem">
+其它缓存(像filter缓存)，在索引的生命周期内始终有效。它们不需要在每次数据改变时被重建，因为数据不会变化。
+</li>
+<li class="listitem">
+写入单个大的倒排索引允许数据被压缩，减少磁盘 I/O 和 需要被缓存到内存的索引的使用量。
+</li>
+</ul>
+</div>
+<p>当然，一个不变的索引也有不好的地方。主要事实是它是不可变的! 你不能修改它。如果你需要让一个新的文档
+可被搜索，你需要重建整个索引。这要么对一个索引所能包含的数据量造成了很大的限制，要么对索引可被更新的频率造成了很大的限制。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="inside-a-shard.html">« 分片内部原理</a>
+</span>
+<span class="next">
+<a href="dynamic-indices.html">动态更新索引 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

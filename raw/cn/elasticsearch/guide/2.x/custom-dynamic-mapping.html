@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>自定义动态映射 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="index-management.html" title="索引管理"/>
+<link rel="prev" href="dynamic-mapping.html" title="动态映射"/>
+<link rel="next" href="default-mapping.html" title="缺省映射"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="getting-started.html">基础入门</a></span>
+»
+<span class="breadcrumb-link"><a href="index-management.html">索引管理</a></span>
+»
+<span class="breadcrumb-node">自定义动态映射</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="dynamic-mapping.html">« 动态映射</a>
+</span>
+<span class="next">
+<a href="default-mapping.html">缺省映射 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="custom-dynamic-mapping"></a>自定义动态映射</h2>
+</div></div></div>
+<p>如果你想在运行时增加新的字段，你可能会启用动态映射。然而，有时候，动态映射 <code class="literal">规则</code> 可能不太智能。幸运的是，我们可以通过设置去自定义这些规则，以便更好的适用于你的数据。</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="date-detection"></a>日期检测</h3>
+</div></div></div>
+<p>当 Elasticsearch 遇到一个新的字符串字段时，它会检测这个字段是否包含一个可识别的日期，比如 <code class="literal">2014-01-01</code> 。如果它像日期，这个字段就会被作为 <code class="literal">date</code> 类型添加。否则，它会被作为 <code class="literal">string</code> 类型添加。</p>
+<p>有些时候这个行为可能导致一些问题。想象下，你有如下这样的一个文档：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{ "note": "2014-01-01" }</pre>
+</div>
+<p>假设这是第一次识别 <code class="literal">note</code> 字段，它会被添加为 <code class="literal">date</code> 字段。但是如果下一个文档像这样：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{ "note": "Logged out" }</pre>
+</div>
+<p>这显然不是一个日期，但为时已晚。这个字段已经是一个日期类型，这个 <code class="literal">不合法的日期</code> 将会造成一个异常。</p>
+<p>日期检测可以通过在根对象上设置 <code class="literal">date_detection</code> 为 <code class="literal">false</code> 来关闭：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT /my_index
+{
+    "mappings": {
+        "my_type": {
+            "date_detection": false
+        }
+    }
+}</pre>
+</div>
+<p>使用这个映射，字符串将始终作为 <code class="literal">string</code> 类型。如果你需要一个 <code class="literal">date</code> 字段，你必须手动添加。</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Elasticsearch 判断字符串为日期的规则可以通过 <a href="/guide/en/elasticsearch/reference/5.6/dynamic-field-mapping.html#date-detection" class="ulink" target="_top"><code class="literal">dynamic_date_formats</code> setting</a> 来设置。</p>
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="dynamic-templates"></a>动态模板</h3>
+</div></div></div>
+<p>使用 <code class="literal">dynamic_templates</code> ，你可以完全控制新检测生成字段的映射。你甚至可以通过字段名称或数据类型来应用不同的映射。</p>
+<p>每个模板都有一个名称，你可以用来描述这个模板的用途， 一个 <code class="literal">mapping</code> 来指定映射应该怎样使用，以及至少一个参数 (如 <code class="literal">match</code>) 来定义这个模板适用于哪个字段。</p>
+<p>模板按照顺序来检测；第一个匹配的模板会被启用。例如，我们给 <code class="literal">string</code> 类型字段定义两个模板：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">es</code> ：以 <code class="literal">_es</code> 结尾的字段名需要使用 <code class="literal">spanish</code> 分词器。
+</li>
+<li class="listitem">
+<code class="literal">en</code> ：所有其他字段使用 <code class="literal">english</code> 分词器。
+</li>
+</ul>
+</div>
+<p>我们将 <code class="literal">es</code> 模板放在第一位，因为它比匹配所有字符串字段的 <code class="literal">en</code> 模板更特殊：</p>
+<div class="pre_wrapper lang-sense">
+<pre class="programlisting prettyprint lang-sense">PUT /my_index
+{
+    "mappings": {
+        "my_type": {
+            "dynamic_templates": [
+                { "es": {
+                      "match":              "*_es", <a id="CO35-1"></a><i class="conum" data-value="1"></i>
+                      "match_mapping_type": "string",
+                      "mapping": {
+                          "type":           "string",
+                          "analyzer":       "spanish"
+                      }
+                }},
+                { "en": {
+                      "match":              "*", <a id="CO35-2"></a><i class="conum" data-value="2"></i>
+                      "match_mapping_type": "string",
+                      "mapping": {
+                          "type":           "string",
+                          "analyzer":       "english"
+                      }
+                }}
+            ]
+}}}</pre>
+</div>
+<div class="sense_widget" data-snippet="snippets/070_Index_Mgmt/40_Custom_dynamic_mapping.json"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO35-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>匹配字段名以 <code class="literal">_es</code> 结尾的字段。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO35-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>匹配其他所有字符串类型字段。</p>
+</td>
+</tr>
+</table>
+</div>
+<p><code class="literal">match_mapping_type</code> 允许你应用模板到特定类型的字段上，就像有标准动态映射规则检测的一样， (例如 <code class="literal">string</code> 或 <code class="literal">long</code>)。</p>
+<p><code class="literal">match</code> 参数只匹配字段名称， <code class="literal">path_match</code> 参数匹配字段在对象上的完整路径，所以 <code class="literal">address.*.name</code> 将匹配这样的字段：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+    "address": {
+        "city": {
+            "name": "New York"
+        }
+    }
+}</pre>
+</div>
+<p><code class="literal">unmatch</code> 和 <code class="literal">path_unmatch</code>将被用于未被匹配的字段。</p>
+<p>更多的配置选项见 <a href="/guide/en/elasticsearch/reference/5.6/dynamic-mapping.html" class="ulink" target="_top">动态映射文档</a> 。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="dynamic-mapping.html">« 动态映射</a>
+</span>
+<span class="next">
+<a href="default-mapping.html">缺省映射 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

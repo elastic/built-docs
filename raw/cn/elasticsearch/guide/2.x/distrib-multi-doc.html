@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>多文档模式 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="distributed-docs.html" title="分布式文档存储"/>
+<link rel="prev" href="_partial_updates_to_a_document.html" title="局部更新文档"/>
+<link rel="next" href="search.html" title="搜索——最基本的工具"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="getting-started.html">基础入门</a></span>
+»
+<span class="breadcrumb-link"><a href="distributed-docs.html">分布式文档存储</a></span>
+»
+<span class="breadcrumb-node">多文档模式</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="_partial_updates_to_a_document.html">« 局部更新文档</a>
+</span>
+<span class="next">
+<a href="search.html">搜索——最基本的工具 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="distrib-multi-doc"></a>多文档模式</h2>
+</div></div></div>
+<p><code class="literal">mget</code> 和 <code class="literal">bulk</code> API 的模式类似于单文档模式。区别在于协调节点知道每个文档存在于哪个分片中。
+它将整个多文档请求分解成 <em>每个分片</em> 的多文档请求，并且将这些请求并行转发到每个参与节点。</p>
+<p>协调节点一旦收到来自每个节点的应答，就将每个节点的响应收集整理成单个响应，返回给客户端，如 <a class="xref" href="distrib-multi-doc.html#img-distrib-mget" title="使用 mget 取回多个文档">Figure 12, &#8220;使用 <code class="literal">mget</code> 取回多个文档&#8221;</a> 所示。</p>
+<div id="img-distrib-mget" class="imageblock">
+<div class="content">
+<img src="images/elas_0405.png" alt="“使用 `mget` 取回多个文档”">
+</div>
+<div class="title">Figure 12. 使用 <code class="literal">mget</code> 取回多个文档</div>
+</div>
+<p>以下是使用单个 <code class="literal">mget</code> 请求取回多个文档所需的步骤顺序：</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+客户端向 <code class="literal">Node 1</code> 发送 <code class="literal">mget</code> 请求。
+</li>
+<li class="listitem">
+<code class="literal">Node 1</code> 为每个分片构建多文档获取请求，然后并行转发这些请求到托管在每个所需的主分片或者副本分片的节点上。一旦收到所有答复， <code class="literal">Node 1</code> 构建响应并将其返回给客户端。
+</li>
+</ol>
+</div>
+<p>可以对 <code class="literal">docs</code> 数组中每个文档设置 <code class="literal">routing</code> 参数。</p>
+<p>bulk API， 如 <a class="xref" href="distrib-multi-doc.html#img-distrib-bulk" title="使用 bulk 修改多个文档">Figure 13, &#8220;使用 <code class="literal">bulk</code> 修改多个文档&#8221;</a> 所示， 允许在单个批量请求中执行多个创建、索引、删除和更新请求。</p>
+<div id="img-distrib-bulk" class="imageblock">
+<div class="content">
+<img src="images/elas_0406.png" alt="“使用 `bulk` 修改多个文档”">
+</div>
+<div class="title">Figure 13. 使用 <code class="literal">bulk</code> 修改多个文档</div>
+</div>
+<p><code class="literal">bulk</code> API 按如下步骤顺序执行：</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+客户端向 <code class="literal">Node 1</code> 发送 <code class="literal">bulk</code> 请求。
+</li>
+<li class="listitem">
+<code class="literal">Node 1</code> 为每个节点创建一个批量请求，并将这些请求并行转发到每个包含主分片的节点主机。
+</li>
+<li class="listitem">
+主分片一个接一个按顺序执行每个操作。当每个操作成功时，主分片并行转发新文档（或删除）到副本分片，然后执行下一个操作。
+一旦所有的副本分片报告所有操作成功，该节点将向协调节点报告成功，协调节点将这些响应收集整理并返回给客户端。
+</li>
+</ol>
+</div>
+<p><code class="literal">bulk</code> API 还可以在整个批量请求的最顶层使用 <code class="literal">consistency</code> 参数，以及在每个请求中的元数据中使用 <code class="literal">routing</code> 参数。</p>
+<div class="section pagebreak-before">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="bulk-format"></a>为什么是有趣的格式？</h3>
+</div></div></div>
+<p>当我们早些时候在<a class="xref" href="bulk.html" title="代价较小的批量操作">代价较小的批量操作</a>章节了解批量请求时，您可能会问自己，
+  "为什么 <code class="literal">bulk</code> API 需要有换行符的有趣格式，而不是发送包装在 JSON 数组中的请求，例如 <code class="literal">mget</code> API？" 。</p>
+<p>为了回答这一点，我们需要解释一点背景：在批量请求中引用的每个文档可能属于不同的主分片，
+每个文档可能被分配给集群中的任何节点。这意味着批量请求 <code class="literal">bulk</code> 中的每个 <em>操作</em> 都需要被转发到正确节点上的正确分片。</p>
+<p>如果单个请求被包装在 JSON 数组中，那就意味着我们需要执行以下操作：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+将 JSON 解析为数组（包括文档数据，可以非常大）
+</li>
+<li class="listitem">
+查看每个请求以确定应该去哪个分片
+</li>
+<li class="listitem">
+为每个分片创建一个请求数组
+</li>
+<li class="listitem">
+将这些数组序列化为内部传输格式
+</li>
+<li class="listitem">
+将请求发送到每个分片
+</li>
+</ul>
+</div>
+<p>这是可行的，但需要大量的 RAM 来存储原本相同的数据的副本，并将创建更多的数据结构，Java虚拟机（JVM）将不得不花费时间进行垃圾回收。</p>
+<p>相反，Elasticsearch可以直接读取被网络缓冲区接收的原始数据。
+它使用换行符字符来识别和解析小的 <code class="literal">action/metadata</code> 行来决定哪个分片应该处理每个请求。</p>
+<p>这些原始请求会被直接转发到正确的分片。没有冗余的数据复制，没有浪费的数据结构。整个请求尽可能在最小的内存中处理。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="_partial_updates_to_a_document.html">« 局部更新文档</a>
+</span>
+<span class="next">
+<a href="search.html">搜索——最基本的工具 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

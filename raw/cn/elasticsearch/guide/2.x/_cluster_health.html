@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>集群健康 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="cluster-admin.html" title="监控"/>
+<link rel="prev" href="marvel.html" title="Marvel 监控"/>
+<link rel="next" href="_monitoring_individual_nodes.html" title="监控单个节点"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="administration.html">管理、监控和部署</a></span>
+»
+<span class="breadcrumb-link"><a href="cluster-admin.html">监控</a></span>
+»
+<span class="breadcrumb-node">集群健康</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="marvel.html">« Marvel 监控</a>
+</span>
+<span class="next">
+<a href="_monitoring_individual_nodes.html">监控单个节点 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="_cluster_health"></a>集群健康</h2>
+</div></div></div>
+<p>一个 Elasticsearch 集群至少包括一个节点和一个索引。或者它可能有一百个数据节点、三个单独的主节点，以及一小打客户端节点——这些共同操作一千个索引（以及上万个分片）。</p>
+<p>不管集群扩展到多大规模，你都会想要一个快速获取集群状态的途径。<code class="literal">Cluster Health</code> API 充当的就是这个角色。你可以把它想象成是在一万英尺的高度鸟瞰集群。它可以告诉你安心吧一切都好，或者警告你集群某个地方有问题。</p>
+<p>让我们执行一下 <code class="literal">cluster-health</code> API 然后看看响应体是什么样子的：</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">GET _cluster/health</pre>
+</div>
+<p>和 Elasticsearch 里其他 API 一样，<code class="literal">cluster-health</code> 会返回一个 JSON 响应。这对自动化和告警系统来说，非常便于解析。响应中包含了和你集群有关的一些关键信息：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+   "cluster_name": "elasticsearch_zach",
+   "status": "green",
+   "timed_out": false,
+   "number_of_nodes": 1,
+   "number_of_data_nodes": 1,
+   "active_primary_shards": 10,
+   "active_shards": 10,
+   "relocating_shards": 0,
+   "initializing_shards": 0,
+   "unassigned_shards": 0
+}</pre>
+</div>
+<p>响应信息中最重要的一块就是 <code class="literal">status</code> 字段。状态可能是下列三个值之一：</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">green</code>
+</span>
+</dt>
+<dd>
+所有的主分片和副本分片都已分配。你的集群是 100% 可用的。
+</dd>
+<dt>
+<span class="term">
+<code class="literal">yellow</code>
+</span>
+</dt>
+<dd>
+所有的主分片已经分片了，但至少还有一个副本是缺失的。不会有数据丢失，所以搜索结果依然是完整的。不过，你的高可用性在某种程度上被弱化。如果 <em>更多的</em> 分片消失，你就会丢数据了。把 <code class="literal">yellow</code> 想象成一个需要及时调查的警告。
+</dd>
+<dt>
+<span class="term">
+<code class="literal">red</code>
+</span>
+</dt>
+<dd>
+至少一个主分片（以及它的全部副本）都在缺失中。这意味着你在缺少数据：搜索只能返回部分数据，而分配到这个分片上的写入请求会返回一个异常。
+</dd>
+</dl>
+</div>
+<p><code class="literal">green</code>/<code class="literal">yellow</code>/<code class="literal">red</code> 状态是一个概览你的集群并了解眼下正在发生什么的好办法。剩下来的指标给你列出来集群的状态概要：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">number_of_nodes</code> 和 <code class="literal">number_of_data_nodes</code> 这个命名完全是自描述的。
+</li>
+<li class="listitem">
+<code class="literal">active_primary_shards</code> 指出你集群中的主分片数量。这是涵盖了所有索引的汇总值。
+</li>
+<li class="listitem">
+<code class="literal">active_shards</code> 是涵盖了所有索引的_所有_分片的汇总值，即包括副本分片。
+</li>
+<li class="listitem">
+<code class="literal">relocating_shards</code> 显示当前正在从一个节点迁往其他节点的分片的数量。通常来说应该是 0，不过在 Elasticsearch 发现集群不太均衡时，该值会上涨。比如说：添加了一个新节点，或者下线了一个节点。
+</li>
+<li class="listitem">
+<code class="literal">initializing_shards</code> 是刚刚创建的分片的个数。比如，当你刚创建第一个索引，分片都会短暂的处于 <code class="literal">initializing</code> 状态。这通常会是一个临时事件，分片不应该长期停留在 <code class="literal">initializing</code> 状态。你还可能在节点刚重启的时候看到 <code class="literal">initializing</code> 分片：当分片从磁盘上加载后，它们会从 <code class="literal">initializing</code> 状态开始。
+</li>
+<li class="listitem">
+<code class="literal">unassigned_shards</code> 是已经在集群状态中存在的分片，但是实际在集群里又找不着。通常未分配分片的来源是未分配的副本。比如，一个有 5 分片和 1 副本的索引，在单节点集群上，就会有 5 个未分配副本分片。如果你的集群是 <code class="literal">red</code> 状态，也会长期保有未分配分片（因为缺少主分片）。
+</li>
+</ul>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_钻更深点找到问题索引"></a>钻更深点：找到问题索引</h3>
+</div></div></div>
+<p>想象一下某天碰到问题了， 而你发现你的集群健康状态看起来像是这样：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+   "cluster_name": "elasticsearch_zach",
+   "status": "red",
+   "timed_out": false,
+   "number_of_nodes": 8,
+   "number_of_data_nodes": 8,
+   "active_primary_shards": 90,
+   "active_shards": 180,
+   "relocating_shards": 0,
+   "initializing_shards": 0,
+   "unassigned_shards": 20
+}</pre>
+</div>
+<p>好了，从这个健康状态里我们能推断出什么来？嗯，我们集群是 <code class="literal">red</code> ，意味着我们缺数据（主分片 + 副本分片）了。我们知道我们集群原先有 10 个节点，但是在这个健康状态里列出来的只有 8 个数据节点。有两个数据节点不见了。我们看到有 20 个未分配分片。</p>
+<p>这就是我们能收集到的全部信息。那些缺失分片的情况依然是个谜。我们是缺了 20 个索引，每个索引里少 1 个主分片？还是缺 1 个索引里的 20 个主分片？还是 10 个索引里的各 1 主 1 副本分片？具体是哪个索引？</p>
+<p>要回答这个问题，我们需要使用 <code class="literal">level</code> 参数让 <code class="literal">cluster-health</code> 答出更多一点的信息：</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">GET _cluster/health?level=indices</pre>
+</div>
+<p>这个参数会让 <code class="literal">cluster-health</code> API 在我们的集群信息里添加一个索引清单，以及有关每个索引的细节（状态、分片数、未分配分片数等等）：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+   "cluster_name": "elasticsearch_zach",
+   "status": "red",
+   "timed_out": false,
+   "number_of_nodes": 8,
+   "number_of_data_nodes": 8,
+   "active_primary_shards": 90,
+   "active_shards": 180,
+   "relocating_shards": 0,
+   "initializing_shards": 0,
+   "unassigned_shards": 20
+   "indices": {
+      "v1": {
+         "status": "green",
+         "number_of_shards": 10,
+         "number_of_replicas": 1,
+         "active_primary_shards": 10,
+         "active_shards": 20,
+         "relocating_shards": 0,
+         "initializing_shards": 0,
+         "unassigned_shards": 0
+      },
+      "v2": {
+         "status": "red", <a id="CO298-1"></a><i class="conum" data-value="1"></i>
+         "number_of_shards": 10,
+         "number_of_replicas": 1,
+         "active_primary_shards": 0,
+         "active_shards": 0,
+         "relocating_shards": 0,
+         "initializing_shards": 0,
+         "unassigned_shards": 20 <a id="CO298-2"></a><i class="conum" data-value="2"></i>
+      },
+      "v3": {
+         "status": "green",
+         "number_of_shards": 10,
+         "number_of_replicas": 1,
+         "active_primary_shards": 10,
+         "active_shards": 20,
+         "relocating_shards": 0,
+         "initializing_shards": 0,
+         "unassigned_shards": 0
+      },
+      ....
+   }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO298-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>我们可以看到 <code class="literal">v2</code> 索引就是让集群变 <code class="literal">red</code> 的那个索引。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO298-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>由此明确了，20 个缺失分片全部来自这个索引。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>一旦我们询问要索引的输出，哪个索引有问题立马就很清楚了：<code class="literal">v2</code> 索引。我们还可以看到这个索引曾经有 10 个主分片和一个副本，而现在这 20 个分片全不见了。可以推测，这 20 个索引就是位于从我们集群里不见了的那两个节点上。</p>
+<p><code class="literal">level</code> 参数还可以接受其他更多选项：</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">GET _cluster/health?level=shards</pre>
+</div>
+<p><code class="literal">shards</code> 选项会提供一个详细得多的输出，列出每个索引里每个分片的状态和位置。这个输出有时候很有用，但是由于太过详细会比较难用。如果你知道哪个索引有问题了，本章讨论的其他 API 显得更加有用一点。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_阻塞等待状态变化"></a>阻塞等待状态变化</h3>
+</div></div></div>
+<p>当构建单元和集成测试时，或者实现和 Elasticsearch 相关的自动化脚本时，<code class="literal">cluster-health</code> API 还有另一个小技巧非常有用。你可以指定一个 <code class="literal">wait_for_status</code> 参数，它只有在状态达标之后才会返回。比如：</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">GET _cluster/health?wait_for_status=green</pre>
+</div>
+<p>这个调用会 <em>阻塞</em> （不给你的程序返回控制权）住直到 <code class="literal">cluster-health</code> 变成 <code class="literal">green</code> ，也就是说所有主分片和副本分片都分配下去了。这对自动化脚本和测试非常重要。</p>
+<p>如果你创建一个索引，Elasticsearch 必须在集群状态中向所有节点广播这个变更。那些节点必须初始化这些新分片，然后响应给主节点说这些分片已经 <code class="literal">Started</code> 。这个过程很快，但是因为网络延迟，可能要花 10&#x2013;20ms。</p>
+<p>如果你有个自动化脚本是 (a) 创建一个索引然后 (b) 立刻写入一个文档，这个操作会失败。因为索引还没完全初始化完成。在 (a) 和 (b) 两步之间的时间可能不到 1ms —— 对网络延迟来说这可不够。</p>
+<p>比起使用 <code class="literal">sleep</code> 命令，直接让你的脚本或者测试使用 <code class="literal">wait_for_status</code> 参数调用 <code class="literal">cluster-health</code> 更好。当索引完全创建好，<code class="literal">cluster-health</code> 就会变成 <code class="literal">green</code> ，然后这个调用就会把控制权交还给你的脚本，然后你就可以开始写入了。</p>
+<p>有效的选项是： <code class="literal">green</code> 、 <code class="literal">yellow</code> 和 <code class="literal">red</code> 。这个调回会在达到你要求（或者『更高』）的状态时返回。比如，如果你要求的是 <code class="literal">yellow</code> ，状态变成 <code class="literal">yellow</code> 或者 <code class="literal">green</code> 都会打开调用。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="marvel.html">« Marvel 监控</a>
+</span>
+<span class="next">
+<a href="_monitoring_individual_nodes.html">监控单个节点 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

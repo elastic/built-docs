@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>段合并 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="inside-a-shard.html" title="分片内部原理"/>
+<link rel="prev" href="translog.html" title="持久化变更"/>
+<link rel="next" href="search-in-depth.html" title="深入搜索"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="getting-started.html">基础入门</a></span>
+»
+<span class="breadcrumb-link"><a href="inside-a-shard.html">分片内部原理</a></span>
+»
+<span class="breadcrumb-node">段合并</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="translog.html">« 持久化变更</a>
+</span>
+<span class="next">
+<a href="search-in-depth.html">深入搜索 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="merge-process"></a>段合并</h2>
+</div></div></div>
+<p>由于自动刷新流程每秒会创建一个新的段  ，这样会导致短时间内的段数量暴增。而段数目太多会带来较大的麻烦。
+每一个段都会消耗文件句柄、内存和cpu运行周期。更重要的是，每个搜索请求都必须轮流检查每个段；所以段越多，搜索也就越慢。</p>
+<p>Elasticsearch通过在后台进行段合并来解决这个问题。小的段被合并到大的段，然后这些大的段再被合并到更大的段。</p>
+<p>段合并的时候会将那些旧的已删除文档从文件系统中清除。被删除的文档（或被更新文档的旧版本）不会被拷贝到新的大段中。</p>
+<p>启动段合并不需要你做任何事。进行索引和搜索时会自动进行。这个流程像在 <a class="xref" href="merge-process.html#img-merge" title="两个提交了的段和一个未提交的段正在被合并到一个更大的段">Figure 25, &#8220;两个提交了的段和一个未提交的段正在被合并到一个更大的段&#8221;</a> 中提到的一样工作：</p>
+<p>1、 当索引的时候，刷新（refresh）操作会创建新的段并将段打开以供搜索使用。</p>
+<p>2、 合并进程选择一小部分大小相似的段，并且在后台将它们合并到更大的段中。这并不会中断索引和搜索。</p>
+<div id="img-merge" class="imageblock">
+<div class="content">
+<img src="images/elas_1110.png" alt="Two commited segments and one uncommited segment in the process of being merged into a bigger segment">
+</div>
+<div class="title">Figure 25. 两个提交了的段和一个未提交的段正在被合并到一个更大的段</div>
+</div>
+<p>3、 <a class="xref" href="merge-process.html#img-post-merge" title="一旦合并结束，老的段被删除">Figure 26, &#8220;一旦合并结束，老的段被删除&#8221;</a> 说明合并完成时的活动：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+新的段被刷新（flush）到了磁盘。
+   ** 写入一个包含新段且排除旧的和较小的段的新提交点。
+</li>
+<li class="listitem">
+新的段被打开用来搜索。
+</li>
+<li class="listitem">
+老的段被删除。
+</li>
+</ul>
+</div>
+<div id="img-post-merge" class="imageblock">
+<div class="content">
+<img src="images/elas_1111.png" alt="一旦合并结束，老的段被删除">
+</div>
+<div class="title">Figure 26. 一旦合并结束，老的段被删除</div>
+</div>
+<p>合并大的段需要消耗大量的I/O和CPU资源，如果任其发展会影响搜索性能。Elasticsearch在默认情况下会对合并流程进行资源限制，所以搜索仍然
+有足够的资源很好地执行。</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>查看 <a class="xref" href="indexing-performance.html#segments-and-merging" title="段和合并">段和合并</a> 来为你的实例获取关于合并调整的建议。</p>
+</div>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="optimize-api"></a>optimize API</h3>
+</div></div></div>
+<p><code class="literal">optimize</code> API大可看做是 <em>强制合并</em> API。它会将一个分片强制合并到 <code class="literal">max_num_segments</code> 参数指定大小的段数目。
+这样做的意图是减少段的数量（通常减少到一个），来提升搜索性能。</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><code class="literal">optimize</code> API <em>不应该</em> 被用在一个活跃的索引————一个正积极更新的索引。后台合并流程已经可以很好地完成工作。
+optimizing 会阻碍这个进程。不要干扰它！</p>
+</div>
+</div>
+<p>在特定情况下，使用 <code class="literal">optimize</code> API 颇有益处。例如在日志这种用例下，每天、每周、每月的日志被存储在一个索引中。
+老的索引实质上是只读的；它们也并不太可能会发生变化。</p>
+<p>在这种情况下，使用optimize优化老的索引，将每一个分片合并为一个单独的段就很有用了；这样既可以节省资源，也可以使搜索更加快速：</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">POST /logstash-2014-10/_optimize?max_num_segments=1 <a id="CO41-1"></a><i class="conum" data-value="1"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO41-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>合并索引中的每个分片为一个单独的段</p>
+</td>
+</tr>
+</table>
+</div>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>请注意，使用 <code class="literal">optimize</code> API 触发段合并的操作不会受到任何资源上的限制。这可能会消耗掉你节点上全部的I/O资源, 使其没有余裕来处理搜索请求，从而有可能使集群失去响应。
+如果你想要对索引执行 <code class="literal">optimize</code>，你需要先使用分片分配（查看 <a class="xref" href="retiring-data.html#migrate-indices" title="迁移旧索引">迁移旧索引</a>）把索引移到一个安全的节点，再执行。</p>
+</div>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="translog.html">« 持久化变更</a>
+</span>
+<span class="next">
+<a href="search-in-depth.html">深入搜索 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

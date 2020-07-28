@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>备份你的集群 | Elasticsearch: 权威指南 | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch: 权威指南"/>
+<link rel="up" href="post_deploy.html" title="部署后"/>
+<link rel="prev" href="_rolling_restarts.html" title="滚动重启"/>
+<link rel="next" href="_restoring_from_a_snapshot.html" title="从快照恢复"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Definitive Guide"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="cn"/>
+</head>
+<body><div class="page_header">
+<b>请注意:</b><br/>本书基于 Elasticsearch 2.x 版本，有些内容可能已经过时。
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch: 权威指南</a></span>
+»
+<span class="breadcrumb-link"><a href="administration.html">管理、监控和部署</a></span>
+»
+<span class="breadcrumb-link"><a href="post_deploy.html">部署后</a></span>
+»
+<span class="breadcrumb-node">备份你的集群</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="_rolling_restarts.html">« 滚动重启</a>
+</span>
+<span class="next">
+<a href="_restoring_from_a_snapshot.html">从快照恢复 »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="backing-up-your-cluster"></a>备份你的集群</h2>
+</div></div></div>
+<p>使用无论哪个存储数据的软件，定期备份你的数据都是很重要的。Elasticsearch 副本提供了高可靠性；它们让你可以容忍零星的节点丢失而不会中断服务。</p>
+<p>但是，副本并不提供对灾难性故障的保护。对这种情况，你需要的是对集群真正的备份——在某些东西确实出问题的时候有一个完整的拷贝。</p>
+<p>要备份你的集群，你可以使用 <code class="literal">snapshot</code> API。这个会拿到你集群里当前的状态和数据然后保存到一个共享仓库里。这个备份过程是"智能"的。你的第一个快照会是一个数据的完整拷贝，但是所有后续的快照会保留的是已存快照和新数据之间的差异。随着你不时的对数据进行快照，备份也在增量的添加和删除。这意味着后续备份会相当快速，因为它们只传输很小的数据量。</p>
+<p>要使用这个功能，你必须首先创建一个保存数据的仓库。有多个仓库类型可以供你选择：</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+共享文件系统，比如 NAS
+</li>
+<li class="listitem">
+Amazon S3
+</li>
+<li class="listitem">
+HDFS (Hadoop 分布式文件系统)
+</li>
+<li class="listitem">
+Azure Cloud
+</li>
+</ul>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_创建仓库"></a>创建仓库</h3>
+</div></div></div>
+<p>让我部署一个共享文件系统仓库：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT _snapshot/my_backup <a id="CO309-1"></a><i class="conum" data-value="1"></i>
+{
+    "type": "fs", <a id="CO309-2"></a><i class="conum" data-value="2"></i>
+    "settings": {
+        "location": "/mount/backups/my_backup" <a id="CO309-3"></a><i class="conum" data-value="3"></i>
+    }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO309-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>给我们的仓库取一个名字，在本例它叫 <code class="literal">my_backup</code> 。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO309-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>我们指定仓库的类型应该是一个共享文件系统。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO309-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>最后，我们提供一个已挂载的设备作为目的地址。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>注意：共享文件系统路径必须确保集群所有节点都可以访问到。</p>
+<p>这步会在挂载点创建仓库和所需的元数据。还有一些其他的配置你可能想要配置的，这些取决于你的节点、网络的性能状况和仓库位置：</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">max_snapshot_bytes_per_sec</code>
+</span>
+</dt>
+<dd>
+当快照数据进入仓库时，这个参数控制这个过程的限流情况。默认是每秒 <code class="literal">20mb</code> 。
+</dd>
+<dt>
+<span class="term">
+<code class="literal">max_restore_bytes_per_sec</code>
+</span>
+</dt>
+<dd>
+当从仓库恢复数据时，这个参数控制什么时候恢复过程会被限流以保障你的网络不会被占满。默认是每秒 <code class="literal">20mb</code>。
+</dd>
+</dl>
+</div>
+<p>假设我们有一个非常快的网络，而且对额外的流量也很 OK，那我们可以增加这些默认值：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">POST _snapshot/my_backup/ <a id="CO310-1"></a><i class="conum" data-value="1"></i>
+{
+    "type": "fs",
+    "settings": {
+        "location": "/mount/backups/my_backup",
+        "max_snapshot_bytes_per_sec" : "50mb", <a id="CO310-2"></a><i class="conum" data-value="2"></i>
+        "max_restore_bytes_per_sec" : "50mb"
+    }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO310-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>注意我们用的是 <code class="literal">POST</code> 而不是 <code class="literal">PUT</code> 。这会更新已有仓库的设置。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO310-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>然后添加我们的新设置。</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_快照所有打开的索引"></a>快照所有打开的索引</h3>
+</div></div></div>
+<p>一个仓库可以包含多个快照。每个快照跟一系列索引相关（比如所有索引，一部分索引，或者单个索引）。当创建快照的时候，你指定你感兴趣的索引然后给快照取一个唯一的名字。</p>
+<p>让我们从最基础的快照命令开始：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT _snapshot/my_backup/snapshot_1</pre>
+</div>
+<p>这个会备份所有打开的索引到 <code class="literal">my_backup</code> 仓库下一个命名为 <code class="literal">snapshot_1</code> 的快照里。这个调用会立刻返回，然后快照会在后台运行。</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>通常你会希望你的快照作为后台进程运行，不过有时候你会希望在你的脚本中一直等待到完成。这可以通过添加一个 <code class="literal">wait_for_completion</code> 标记实现：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT _snapshot/my_backup/snapshot_1?wait_for_completion=true</pre>
+</div>
+<p>这个会阻塞调用直到快照完成。注意大型快照会花很长时间才返回。</p>
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_快照指定索引"></a>快照指定索引</h3>
+</div></div></div>
+<p>默认行为是备份所有打开的索引。不过如果你在用 Marvel，你不是真的想要把所有诊断相关的 <code class="literal">.marvel</code> 索引也备份起来。可能你就压根没那么大空间备份所有数据。</p>
+<p>这种情况下，你可以在快照你的集群的时候指定备份哪些索引：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT _snapshot/my_backup/snapshot_2
+{
+    "indices": "index_1,index_2"
+}</pre>
+</div>
+<p>这个快照命令现在只会备份 <code class="literal">index1</code> 和 <code class="literal">index2</code> 了。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_列出快照相关的信息"></a>列出快照相关的信息</h3>
+</div></div></div>
+<p>一旦你开始在你的仓库里积攒起快照了，你可能就慢慢忘记里面各自的细节了——特别是快照按照时间划分命名的时候（比如， <code class="literal">backup_2014_10_28</code> ）。</p>
+<p>要获得单个快照的信息，直接对仓库和快照名发起一个 <code class="literal">GET</code> 请求：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">GET _snapshot/my_backup/snapshot_2</pre>
+</div>
+<p>这个会返回一个小响应，包括快照相关的各种信息：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+   "snapshots": [
+      {
+         "snapshot": "snapshot_1",
+         "indices": [
+            ".marvel_2014_28_10",
+            "index1",
+            "index2"
+         ],
+         "state": "SUCCESS",
+         "start_time": "2014-09-02T13:01:43.115Z",
+         "start_time_in_millis": 1409662903115,
+         "end_time": "2014-09-02T13:01:43.439Z",
+         "end_time_in_millis": 1409662903439,
+         "duration_in_millis": 324,
+         "failures": [],
+         "shards": {
+            "total": 10,
+            "failed": 0,
+            "successful": 10
+         }
+      }
+   ]
+}</pre>
+</div>
+<p>要获取一个仓库中所有快照的完整列表，使用 <code class="literal">_all</code> 占位符替换掉具体的快照名称：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">GET _snapshot/my_backup/_all</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_删除快照"></a>删除快照</h3>
+</div></div></div>
+<p>最后，我们需要一个命令来删除所有不再有用的旧快照。这只要对仓库/快照名称发一个简单的 <code class="literal">DELETE</code> HTTP 调用：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">DELETE _snapshot/my_backup/snapshot_2</pre>
+</div>
+<p>用 API 删除快照很重要，而不能用其他机制（比如手动删除，或者用 S3 上的自动清除工具）。因为快照是增量的，有可能很多快照依赖于过去的段。<code class="literal">delete</code> API 知道哪些数据还在被更多近期快照使用，然后会只删除不再被使用的段。</p>
+<p>但是，如果你做了一次人工文件删除，你将会面临备份严重损坏的风险，因为你在删除的是可能还在使用中的数据。</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_监控快照进度"></a>监控快照进度</h3>
+</div></div></div>
+<p><code class="literal">wait_for_completion</code> 标记提供了一个监控的基础形式，但哪怕只是对一个中等规模的集群做快照恢复的时候，它都真的不够用。</p>
+<p>另外两个 API 会给你有关快照状态更详细的信息。首先你可以给快照 ID 执行一个 <code class="literal">GET</code>，就像我们之前获取一个特定快照的信息时做的那样：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">GET _snapshot/my_backup/snapshot_3</pre>
+</div>
+<p>如果你调用这个命令的时候快照还在进行中，你会看到它什么时候开始，运行了多久等等信息。不过要注意，这个 API 用的是快照机制相同的线程池。如果你在快照非常大的分片，状态更新的间隔会很大，因为 API 在竞争相同的线程池资源。</p>
+<p>更好的方案是拽取 <code class="literal">_status</code> API 数据：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">GET _snapshot/my_backup/snapshot_3/_status</pre>
+</div>
+<p><code class="literal">_status</code> API 立刻返回，然后给出详细的多的统计值输出：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+   "snapshots": [
+      {
+         "snapshot": "snapshot_3",
+         "repository": "my_backup",
+         "state": "IN_PROGRESS", <a id="CO311-1"></a><i class="conum" data-value="1"></i>
+         "shards_stats": {
+            "initializing": 0,
+            "started": 1, <a id="CO311-2"></a><i class="conum" data-value="2"></i>
+            "finalizing": 0,
+            "done": 4,
+            "failed": 0,
+            "total": 5
+         },
+         "stats": {
+            "number_of_files": 5,
+            "processed_files": 5,
+            "total_size_in_bytes": 1792,
+            "processed_size_in_bytes": 1792,
+            "start_time_in_millis": 1409663054859,
+            "time_in_millis": 64
+         },
+         "indices": {
+            "index_3": {
+               "shards_stats": {
+                  "initializing": 0,
+                  "started": 0,
+                  "finalizing": 0,
+                  "done": 5,
+                  "failed": 0,
+                  "total": 5
+               },
+               "stats": {
+                  "number_of_files": 5,
+                  "processed_files": 5,
+                  "total_size_in_bytes": 1792,
+                  "processed_size_in_bytes": 1792,
+                  "start_time_in_millis": 1409663054859,
+                  "time_in_millis": 64
+               },
+               "shards": {
+                  "0": {
+                     "stage": "DONE",
+                     "stats": {
+                        "number_of_files": 1,
+                        "processed_files": 1,
+                        "total_size_in_bytes": 514,
+                        "processed_size_in_bytes": 514,
+                        "start_time_in_millis": 1409663054862,
+                        "time_in_millis": 22
+                     }
+                  },
+                  ...</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO311-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>一个正在运行的快照会显示 <code class="literal">IN_PROGRESS</code> 作为状态。</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO311-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>这个特定快照有一个分片还在传输（另外四个已经完成）。</p>
+</td>
+</tr>
+</table>
+</div>
+<p>响应包括快照的总体状况，但也包括下钻到每个索引和每个分片的统计值。这个给你展示了有关快照进展的非常详细的视图。分片可以在不同的完成状态：</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">INITIALIZING</code>
+</span>
+</dt>
+<dd>
+分片在检查集群状态看看自己是否可以被快照。这个一般是非常快的。
+</dd>
+<dt>
+<span class="term">
+<code class="literal">STARTED</code>
+</span>
+</dt>
+<dd>
+数据正在被传输到仓库。
+</dd>
+<dt>
+<span class="term">
+<code class="literal">FINALIZING</code>
+</span>
+</dt>
+<dd>
+数据传输完成；分片现在在发送快照元数据。
+</dd>
+<dt>
+<span class="term">
+<code class="literal">DONE</code>
+</span>
+</dt>
+<dd>
+快照完成！
+</dd>
+<dt>
+<span class="term">
+<code class="literal">FAILED</code>
+</span>
+</dt>
+<dd>
+快照处理的时候碰到了错误，这个分片/索引/快照不可能完成了。检查你的日志获取更多信息。
+</dd>
+</dl>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_取消一个快照"></a>取消一个快照</h3>
+</div></div></div>
+<p>最后，你可能想取消一个快照或恢复。因为它们是长期运行的进程，执行操作的时候一个笔误或者过错就会花很长时间来解决——而且同时还会耗尽有价值的资源。</p>
+<p>要取消一个快照，在他进行中的时候简单的删除快照就可以：</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">DELETE _snapshot/my_backup/snapshot_3</pre>
+</div>
+<p>这个会中断快照进程。然后删除仓库里进行到一半的快照。</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="_rolling_restarts.html">« 滚动重启</a>
+</span>
+<span class="next">
+<a href="_restoring_from_a_snapshot.html">从快照恢复 »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
