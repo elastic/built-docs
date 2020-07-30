@@ -5,9 +5,8 @@
 <meta charset="UTF-8">
 <title>How highlighters work internally | Elasticsearch Reference [7.x] | Elastic</title>
 <link rel="home" href="index.html" title="Elasticsearch Reference [7.x]"/>
-<link rel="up" href="run-a-search.html" title="Run a search"/>
-<link rel="prev" href="highlighting.html" title="Highlighting"/>
-<link rel="next" href="sort-search-results.html" title="Sort search results"/>
+<link rel="up" href="getting-started-modify-data.html" title="Modifying your data"/>
+<link rel="prev" href="run-a-search.html" title="Run a search"/>
 <meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.x"/>
 <meta name="DC.subject" content="Elasticsearch"/>
 <meta name="DC.identifier" content="7.x"/>
@@ -113,210 +112,28 @@ Not what you want? See the
 <div class="breadcrumbs">
 <span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.x]</a></span>
 »
-<span class="breadcrumb-link"><a href="search-your-data.html">Search your data</a></span>
-»
-<span class="breadcrumb-link"><a href="run-a-search.html">Run a search</a></span>
+<span class="breadcrumb-link"><a href="getting-started-modify-data.html">Modifying your data</a></span>
 »
 <span class="breadcrumb-node">How highlighters work internally</span>
 </div>
 <div class="navheader">
 <span class="prev">
-<a href="highlighting.html">« Highlighting</a>
+<a href="run-a-search.html">« Run a search</a>
 </span>
 <span class="next">
-<a href="sort-search-results.html">Sort search results »</a>
 </span>
 </div>
-<div class="section">
+<div class="section exclude">
 <div class="titlepage"><div><div>
-<h2 class="title"><a id="how-highlighters-work-internally"></a>How highlighters work internally<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/search/request/highlighters-internal.asciidoc">edit</a></h2>
+<h2 class="title"><a id="how-highlighters-work-internally"></a>How highlighters work internally<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/redirects.asciidoc">edit</a></h2>
 </div></div></div>
-<p>Given a query and a text (the content of a document field), the goal of a
-highlighter is to find the best text fragments for the query, and highlight
-the query terms in the found fragments. For this, a highlighter needs to
-address several questions:</p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-How break a text into fragments?
-</li>
-<li class="listitem">
-How to find the best fragments among all fragments?
-</li>
-<li class="listitem">
-How to highlight the query terms in a fragment?
-</li>
-</ul>
-</div>
-<div class="section">
-<div class="titlepage"><div><div>
-<h3 class="title"><a id="_how_to_break_a_text_into_fragments"></a>How to break a text into fragments?<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/search/request/highlighters-internal.asciidoc">edit</a></h3>
-</div></div></div>
-<p>Relevant settings: <code class="literal">fragment_size</code>, <code class="literal">fragmenter</code>, <code class="literal">type</code> of highlighter,
-<code class="literal">boundary_chars</code>, <code class="literal">boundary_max_scan</code>, <code class="literal">boundary_scanner</code>, <code class="literal">boundary_scanner_locale</code>.</p>
-<p>Plain highlighter begins with analyzing the text using the given analyzer,
-and creating a token stream from it. Plain highlighter uses a very simple
-algorithm to break the token stream into fragments. It loops through terms in the token stream,
-and every time the current term&#8217;s end_offset exceeds <code class="literal">fragment_size</code> multiplied by the number of
-created fragments, a new fragment is created. A little more computation is done with using <code class="literal">span</code>
-fragmenter to avoid breaking up text between highlighted terms. But overall, since the breaking is
-done only by <code class="literal">fragment_size</code>, some fragments can be quite odd, e.g. beginning
-with a punctuation mark.</p>
-<p>Unified or FVH highlighters do a better job of breaking up a text into
-fragments by utilizing Java&#8217;s <code class="literal">BreakIterator</code>. This ensures that a fragment
-is a valid sentence as long as <code class="literal">fragment_size</code> allows for this.</p>
-</div>
-
-<div class="section">
-<div class="titlepage"><div><div>
-<h3 class="title"><a id="_how_to_find_the_best_fragments"></a>How to find the best fragments?<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/search/request/highlighters-internal.asciidoc">edit</a></h3>
-</div></div></div>
-<p>Relevant settings: <code class="literal">number_of_fragments</code>.</p>
-<p>To find the best, most relevant, fragments, a highlighter needs to score
-each fragment in respect to the given query. The goal is to score only those
-terms that participated in generating the <em>hit</em> on the document.
-For some complex queries, this is still work in progress.</p>
-<p>The plain highlighter creates an in-memory index from the current token stream,
-and re-runs the original query criteria through Lucene&#8217;s query execution planner
-to get access to low-level match information for the current text.
-For more complex queries the original query could be converted to a span query,
-as span queries can handle phrases more accurately. Then this obtained low-level match
-information is used to score each individual fragment. The scoring method of the plain
-highlighter is quite simple. Each fragment is scored by the number of unique
-query terms found in this fragment. The score of individual term is equal to its boost,
-which is by default is 1. Thus, by default, a fragment that contains one unique query term,
-will get a score of 1; and a fragment that contains two unique query terms,
-will get a score of 2 and so on. The fragments are then sorted by their scores,
-so the highest scored fragments will be output first.</p>
-<p>FVH doesn&#8217;t need to analyze the text and build an in-memory index, as it uses
-pre-indexed document term vectors, and finds among them terms that correspond to the query.
-FVH scores each fragment by the number of query terms found in this fragment.
-Similarly to plain highlighter, score of individual term is equal to its boost value.
-In contrast to plain highlighter, all query terms are counted, not only unique terms.</p>
-<p>Unified highlighter can use pre-indexed term vectors or pre-indexed terms offsets,
-if they are available. Otherwise, similar to Plain Highlighter, it has to create
-an in-memory index from the text. Unified highlighter uses the BM25 scoring model
-to score fragments.</p>
-</div>
-
-<div class="section">
-<div class="titlepage"><div><div>
-<h3 class="title"><a id="_how_to_highlight_the_query_terms_in_a_fragment"></a>How to highlight the query terms in a fragment?<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/search/request/highlighters-internal.asciidoc">edit</a></h3>
-</div></div></div>
-<p>Relevant settings:  <code class="literal">pre-tags</code>, <code class="literal">post-tags</code>.</p>
-<p>The goal is to highlight only those terms that participated in generating the <em>hit</em> on the document.
-For some complex boolean queries, this is still work in progress, as highlighters don&#8217;t reflect
-the boolean logic of a query and only extract leaf (terms, phrases, prefix etc) queries.</p>
-<p>Plain highlighter given the token stream and the original text, recomposes the original text to
-highlight only terms from the token stream that are contained in the low-level match information
-structure from the previous step.</p>
-<p>FVH and unified highlighter use intermediate data structures to represent
-fragments in some raw form, and then populate them with actual text.</p>
-<p>A highlighter uses <code class="literal">pre-tags</code>, <code class="literal">post-tags</code> to encode highlighted terms.</p>
-</div>
-
-<div class="section">
-<div class="titlepage"><div><div>
-<h3 class="title"><a id="_an_example_of_the_work_of_the_unified_highlighter"></a>An example of the work of the unified highlighter<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/search/request/highlighters-internal.asciidoc">edit</a></h3>
-</div></div></div>
-<p>Let&#8217;s look in more details how unified highlighter works.</p>
-<p>First, we create a index with a text field <code class="literal">content</code>, that will be indexed
-using <code class="literal">english</code> analyzer, and will be indexed without offsets or term vectors.</p>
-<div class="pre_wrapper lang-js">
-<pre class="programlisting prettyprint lang-js">PUT test_index
-{
-  "mappings": {
-    "properties": {
-      "content": {
-        "type": "text",
-        "analyzer": "english"
-      }
-    }
-  }
-}</pre>
-</div>
-<p>We put the following document into the index:</p>
-<div class="pre_wrapper lang-js">
-<pre class="programlisting prettyprint lang-js">PUT test_index/_doc/doc1
-{
-  "content" : "For you I'm only a fox like a hundred thousand other foxes. But if you tame me, we'll need each other. You'll be the only boy in the world for me. I'll be the only fox in the world for you."
-}</pre>
-</div>
-<p>And we ran the following query with a highlight request:</p>
-<div class="pre_wrapper lang-js">
-<pre class="programlisting prettyprint lang-js">GET test_index/_search
-{
-  "query": {
-    "match_phrase" : {"content" : "only fox"}
-  },
-  "highlight": {
-    "type" : "unified",
-    "number_of_fragments" : 3,
-    "fields": {
-      "content": {}
-    }
-  }
-}</pre>
-</div>
-<p>After <code class="literal">doc1</code> is found as a hit for this query, this hit will be passed to the
-unified highlighter for highlighting the field <code class="literal">content</code> of the document.
-Since the field <code class="literal">content</code> was not indexed either with offsets or term vectors,
-its raw field value will be analyzed, and in-memory index will be built from
-the terms that match the query:</p>
-<pre class="literallayout">{"token":"onli","start_offset":12,"end_offset":16,"position":3},
-{"token":"fox","start_offset":19,"end_offset":22,"position":5},
-{"token":"fox","start_offset":53,"end_offset":58,"position":11},
-{"token":"onli","start_offset":117,"end_offset":121,"position":24},
-{"token":"onli","start_offset":159,"end_offset":163,"position":34},
-{"token":"fox","start_offset":164,"end_offset":167,"position":35}</pre>
-
-<p>Our complex phrase query will be converted to the span query:
-<code class="literal">spanNear([text:onli, text:fox], 0, true)</code>, meaning that we are looking for
-terms "onli: and "fox" within 0 distance from each other, and in the given
-order. The span query will be run against the created before in-memory index,
-to find the following match:</p>
-<pre class="literallayout">{"term":"onli", "start_offset":159, "end_offset":163},
-{"term":"fox", "start_offset":164, "end_offset":167}</pre>
-
-<p>In our example, we have got a single match, but there could be several matches.
-Given the matches, the unified highlighter breaks the text of the field into
-so called "passages". Each passage must contain at least one match.
-The unified highlighter with the use of Java&#8217;s <code class="literal">BreakIterator</code> ensures that each
-passage represents a full sentence as long as it doesn&#8217;t exceed <code class="literal">fragment_size</code>.
-For our example, we have got a single passage with the following properties
-(showing only a subset of the properties here):</p>
-<pre class="literallayout">Passage:
-    startOffset: 147
-    endOffset: 189
-    score: 3.7158387
-    matchStarts: [159, 164]
-    matchEnds: [163, 167]
-    numMatches: 2</pre>
-
-<p>Notice how a passage has a score, calculated using the BM25 scoring formula
-adapted for passages. Scores allow us to choose the best scoring
-passages if there are more passages available than the requested
-by the user <code class="literal">number_of_fragments</code>. Scores also let us to sort passages by
-<code class="literal">order: "score"</code> if requested by the user.</p>
-<p>As the final step, the unified highlighter will extract from the field&#8217;s text
-a string corresponding to each passage:</p>
-<pre class="literallayout">"I'll be the only fox in the world for you."</pre>
-
-<p>and will format with the tags &lt;em&gt; and &lt;/em&gt; all matches in this string
-using the passages&#8217;s <code class="literal">matchStarts</code> and <code class="literal">matchEnds</code> information:</p>
-<pre class="literallayout">I'll be the &lt;em&gt;only&lt;/em&gt; &lt;em&gt;fox&lt;/em&gt; in the world for you.</pre>
-
-<p>This kind of formatted strings are the final result of the highlighter returned
-to the user.</p>
-</div>
-
+<p>See <a class="xref" href="highlighting.html#how-es-highlighters-work-internally" title="How highlighters work internally">How highlighters work internally</a>.</p>
 </div>
 <div class="navfooter">
 <span class="prev">
-<a href="highlighting.html">« Highlighting</a>
+<a href="run-a-search.html">« Run a search</a>
 </span>
 <span class="next">
-<a href="sort-search-results.html">Sort search results »</a>
 </span>
 </div>
 </div>
