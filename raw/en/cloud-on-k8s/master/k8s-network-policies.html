@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Network policies | Elastic Cloud on Kubernetes [master] | Elastic</title>
+<link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [master]"/>
+<link rel="up" href="k8s-advanced-topics.html" title="Advanced topics"/>
+<link rel="prev" href="k8s-traffic-splitting.html" title="Traffic Splitting"/>
+<link rel="next" href="k8s-reference.html" title="Reference"/>
+<meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/master"/>
+<meta name="DC.subject" content="ECK"/>
+<meta name="DC.identifier" content="master"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes [master]</a></span>
+»
+<span class="breadcrumb-link"><a href="k8s-advanced-topics.html">Advanced topics</a></span>
+»
+<span class="breadcrumb-node">Network policies</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="k8s-traffic-splitting.html">« Traffic Splitting</a>
+</span>
+<span class="next">
+<a href="k8s-reference.html">Reference »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="k8s-network-policies"></a>Network policies<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/advanced-topics/network-policies.asciidoc">edit</a></h2>
+</div></div></div>
+<p><a href="https://kubernetes.io/docs/concepts/services-networking/network-policies/" class="ulink" target="_top">Network policies</a> allow you to isolate pods by restricting incoming and outgoing network connections to a trusted set of sources and destinations. This section describes how to use network policies to isolate the ECK operator and the Elastic Stack applications to a set of namespaces to implement a form of soft multi-tenancy. Soft multi-tenancy is a term used to describe a scenario where a group of trusted users (different teams within an organization, for example) share a single resource such as a Kubernetes cluster. Note that network policies alone are not sufficient for security. You should complement them with strict RBAC policies, resource quotas, node taints, and other available security mechanisms to ensure that tenants cannot access, modify, or disrupt resources belonging to each other.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>There are several efforts to support multi-tenancy on Kubernetes, including the <a href="https://github.com/kubernetes-sigs/multi-tenancy" class="ulink" target="_top">official working group for multi-tenancy</a> and community extensions such as <a href="https://loft.sh" class="ulink" target="_top">loft</a> and <a href="https://github.com/kiosk-sh/kiosk" class="ulink" target="_top">kiosk</a>, that can make configuration and management easier. You may still need to employ network policies such the ones described below to have fine-grained control over Elastic Stack applications deployed by your tenants.</p>
+</div>
+</div>
+<p>The following sections assume that the operator is installed in the <code class="literal">elastic-system</code> namespace with the <a class="xref" href="k8s-operator-config.html" title="Configure ECK"><code class="literal">namespaces</code> configuration</a> set to <code class="literal">team-a,team-b</code>. Each namespace is expected to be labelled as follows:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl label namespace elastic-system eck.k8s.elastic.co/operator-name=elastic-operator
+kubectl label namespace team-a eck.k8s.elastic.co/tenant=team-a
+kubectl label namespace team-b eck.k8s.elastic.co/tenant=team-b</pre>
+</div>
+<h3><a id="k8s-network-policies-operator-isolation"></a>Isolating the operator<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/advanced-topics/network-policies.asciidoc">edit</a></h3>
+<p>The minimal set of permissions required are as follows:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Egress (outgoing)</strong></span></p></td>
+<td align="left" valign="top">
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+TCP port 443 of the Kubernetes API server.
+</li>
+<li class="listitem">
+UDP port 53 for DNS lookup.
+</li>
+<li class="listitem">
+TCP port 9200 of Elasticsearch nodes on managed namespace.
+</li>
+</ul>
+</div>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Ingress (incoming)</strong></span></p></td>
+<td align="left" valign="top">
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+TCP port 9443 for webhook requests from the Kubernetes API server.
+</li>
+</ul>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Assuming that the Kubernetes API server IP address is <code class="literal">10.0.0.1</code>, the following network policy implements the rules above.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Run <code class="literal">kubectl cluster-info | grep master</code> to obtain the API server IP address for your cluster.</p>
+</div>
+</div>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: elastic-operator
+  namespace: elastic-system
+spec:
+  egress:
+  - ports:
+    - port: 53
+      protocol: UDP
+  - ports:
+    - port: 443
+      protocol: TCP
+    to:
+    - ipBlock:
+        cidr: 10.0.0.1/32
+  - ports:
+    - port: 9200
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchExpressions:
+        - key: eck.k8s.elastic.co/tenant
+          operator: In
+          values:
+          - team-a
+          - team-b
+      podSelector:
+        matchLabels:
+          common.k8s.elastic.co/type: elasticsearch
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 10.0.0.1/32
+    ports:
+    - port: 9443
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      control-plane: elastic-operator</pre>
+</div>
+<h3><a id="k8s-network-policies-elasticsearch-isolation"></a>Isolating Elasticsearch<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/advanced-topics/network-policies.asciidoc">edit</a></h3>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Egress (outgoing)</strong></span></p></td>
+<td align="left" valign="top">
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+TCP port 9300 to other Elasticsearch nodes in the namespace (transport port).
+</li>
+<li class="listitem">
+UDP port 53 for DNS lookup.
+</li>
+</ul>
+</div>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Ingress (incoming)</strong></span></p></td>
+<td align="left" valign="top">
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+TCP port 9200 from the operator and other pods in the namespace.
+</li>
+</ul>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eck-elasticsearch
+  namespace: team-a
+spec:
+  egress:
+  - ports:
+    - port: 9300
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          eck.k8s.elastic.co/tenant: team-a
+      podSelector:
+        matchLabels:
+          common.k8s.elastic.co/type: elasticsearch
+  - ports:
+    - port: 53
+      protocol: UDP
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          eck.k8s.elastic.co/operator-name: elastic-operator
+      podSelector:
+        matchLabels:
+          control-plane: elastic-operator
+    - namespaceSelector:
+        matchLabels:
+          eck.k8s.elastic.co/tenant: team-a
+    # [Optional] Allow ingress controller pods from the ingress-nginx namespace.
+    #- namespaceSelector:
+    #    matchLabels:
+    #      name: ingress-nginx
+    ports:
+    - port: 9200
+      protocol: TCP
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          eck.k8s.elastic.co/tenant: team-a
+      podSelector:
+        matchLabels:
+          common.k8s.elastic.co/type: elasticsearch
+    ports:
+    - port: 9300
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      common.k8s.elastic.co/type: elasticsearch</pre>
+</div>
+<h3><a id="k8s-network-policies-kibana-isolation"></a>Isolating Kibana<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/advanced-topics/network-policies.asciidoc">edit</a></h3>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Egress (outgoing)</strong></span></p></td>
+<td align="left" valign="top">
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+TCP port 9200 to Elasticsearch nodes in the namespace.
+</li>
+<li class="listitem">
+UDP port 53 for DNS lookup.
+</li>
+</ul>
+</div>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Ingress (incoming)</strong></span></p></td>
+<td align="left" valign="top">
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+TCP port 5601 from other pods in the namespace.
+</li>
+</ul>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eck-kibana
+  namespace: team-a
+spec:
+  egress:
+  - ports:
+    - port: 9200
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          eck.k8s.elastic.co/tenant: team-a
+      podSelector:
+        matchLabels:
+          common.k8s.elastic.co/type: elasticsearch
+          # [Optional] Restrict to a single Elasticsearch cluster named hulk.
+          # elasticsearch.k8s.elastic.co/cluster-name=hulk
+  - ports:
+    - port: 53
+      protocol: UDP
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          eck.k8s.elastic.co/tenant: team-a
+    # [Optional] Allow ingress controller pods from the ingress-nginx namespace.
+    #- namespaceSelector:
+    #    matchLabels:
+    #      name: ingress-nginx
+    ports:
+    - port: 5601
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      common.k8s.elastic.co/type: kibana</pre>
+</div>
+<h3><a id="k8s-network-policies-apm-server-isolation"></a>Isolating APM Server<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/advanced-topics/network-policies.asciidoc">edit</a></h3>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Egress (outgoing)</strong></span></p></td>
+<td align="left" valign="top">
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+TCP port 9200 to Elasticsearch nodes in the namespace.
+</li>
+<li class="listitem">
+TCP port 5601 to Kibana instances in the namespace.
+</li>
+<li class="listitem">
+UDP port 53 for DNS lookup.
+</li>
+</ul>
+</div>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Ingress (incoming)</strong></span></p></td>
+<td align="left" valign="top">
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+TCP port 8200 from other pods in the namespace.
+</li>
+</ul>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eck-apm-server
+  namespace: team-a
+spec:
+  egress:
+  - ports:
+    - port: 9200
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          eck.k8s.elastic.co/tenant: team-a
+      podSelector:
+        matchLabels:
+          common.k8s.elastic.co/type: elasticsearch
+  - ports:
+    - port: 5601
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          eck.k8s.elastic.co/tenant: team-a
+      podSelector:
+        matchLabels:
+          common.k8s.elastic.co/type: kibana
+  - ports:
+    - port: 53
+      protocol: UDP
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          eck.k8s.elastic.co/tenant: team-a
+    # [Optional] Allow ingress controller pods from the ingress-nginx namespace.
+    #- namespaceSelector:
+    #    matchLabels:
+    #      name: ingress-nginx
+    ports:
+    - port: 8200
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      common.k8s.elastic.co/type: apm-server</pre>
+</div>
+<h3><a id="k8s-network-policies-enterprise-search-isolation"></a>Isolating Enterprise Search<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/advanced-topics/network-policies.asciidoc">edit</a></h3>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Egress (outgoing)</strong></span></p></td>
+<td align="left" valign="top">
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+TCP port 9200 to Elasticsearch nodes in the namespace.
+</li>
+<li class="listitem">
+UDP port 53 for DNS lookup.
+</li>
+</ul>
+</div>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Ingress (incoming)</strong></span></p></td>
+<td align="left" valign="top">
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+TCP port 3002 from other pods in the namespace.
+</li>
+</ul>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eck-enterprise-search
+  namespace: team-a
+spec:
+  egress:
+  - ports:
+    - port: 9200
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          eck.k8s.elastic.co/tenant: team-a
+      podSelector:
+        matchLabels:
+          common.k8s.elastic.co/type: elasticsearch
+  - ports:
+    - port: 53
+      protocol: UDP
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          eck.k8s.elastic.co/tenant: team-a
+    # [Optional] Allow ingress controller pods from the ingress-nginx namespace.
+    #- namespaceSelector:
+    #    matchLabels:
+    #      name: ingress-nginx
+    ports:
+    - port: 3002
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      common.k8s.elastic.co/type: enterprise-search</pre>
+</div>
+<h3><a id="k8s-network-policies-beats-isolation"></a>Isolating Beats<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/advanced-topics/network-policies.asciidoc">edit</a></h3>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Some Beats may require additional access rules than what is listed here. For example, Heartbeat will require a rule to allow access to the endpoint it is monitoring.</p>
+</div>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Egress (outgoing)</strong></span></p></td>
+<td align="left" valign="top">
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+TCP port 9200 to Elasticsearch nodes in the namespace.
+</li>
+<li class="listitem">
+TCP port 5601 to Kibana instances in the namespace.
+</li>
+<li class="listitem">
+UDP port 53 for DNS lookup.
+</li>
+</ul>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eck-beats
+  namespace: team-a
+spec:
+  egress:
+  - ports:
+    - port: 9200
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          eck.k8s.elastic.co/tenant: team-a
+      podSelector:
+        matchLabels:
+          common.k8s.elastic.co/type: elasticsearch
+  - ports:
+    - port: 5601
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          eck.k8s.elastic.co/tenant: team-a
+      podSelector:
+        matchLabels:
+          common.k8s.elastic.co/type: kibana
+  - ports:
+    - port: 53
+      protocol: UDP
+  podSelector:
+    matchLabels:
+      common.k8s.elastic.co/type: beat</pre>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="k8s-traffic-splitting.html">« Traffic Splitting</a>
+</span>
+<span class="next">
+<a href="k8s-reference.html">Reference »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
