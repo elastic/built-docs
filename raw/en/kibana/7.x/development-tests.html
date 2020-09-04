@@ -1112,26 +1112,75 @@ command from your plugin:</p>
 <div class="titlepage"><div><div>
 <h3 class="title"><a id="development-accessibility-tests"></a>Automated Accessibility Testing<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/contributing/development-accessibility-tests.asciidoc">edit</a></h3>
 </div></div></div>
+<p>To write an accessibility test, use the provided accessibility service <code class="literal">getService('a11y')</code>. Accessibility tests are fairly straightforward to write as <a href="https://github.com/dequelabs/axe-core" class="ulink" target="_top">axe</a> does most of the heavy lifting. Navigate to the UI that you need to test, then call <code class="literal">testAppSnapshot();</code> from the service imported earlier to make sure axe finds no failures. Navigate through every portion of the UI for the best coverage.</p>
+<p>An example test might look like this:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">export default function ({ getService, getPageObjects }) {
+  const { common, home } = getPageObjects(['common', 'home']);
+  const a11y = getService('a11y'); /* this is the wrapping service around axe */
+
+  describe('Kibana Home', () =&gt; {
+    before(async () =&gt; {
+      await common.navigateToApp('home'); /* navigates to the page we want to test */
+    });
+
+    it('Kibana Home view', async () =&gt; {
+      await retry.waitFor(
+        'home page visible',
+        async () =&gt; await testSubjects.exists('homeApp')
+      ); /* confirm you're on the correct page and that it's loaded */
+      await a11y.testAppSnapshot(); /* this expects that there are no failures found by axe */
+    });
+
+    /**
+     * If these tests were added by our QA team, tests that fail that require significant app code
+     * changes to be fixed will be skipped with a corresponding issue label with more info
+     */
+    // Skipped due to https://github.com/elastic/kibana/issues/99999
+    it.skip('all plugins view page meets a11y requirements', async () =&gt; {
+      await home.clickAllKibanaPlugins();
+      await a11y.testAppSnapshot();
+    });
+
+    /**
+     * Testing all the versions and different views of of a page is important to get good
+     * coverage. Things like empty states, different license levels, different permissions, and
+     * loaded data can all significantly change the UI which necessitates their own test.
+     */
+    it('Add Kibana sample data page', async () =&gt; {
+      await common.navigateToUrl('home', '/tutorial_directory/sampleData', {
+        useActualUrl: true,
+      });
+      await a11y.testAppSnapshot();
+    });
+  });
+}</pre>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_running_tests"></a>Running tests<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/contributing/development-accessibility-tests.asciidoc">edit</a></h4>
+</div></div></div>
 <p>To run the tests locally:</p>
 <div class="olist orderedlist">
 <ol class="orderedlist">
 <li class="listitem">
-In one terminal window run
-<code class="literal">node scripts/functional_tests_server --config test/accessibility/config.ts</code>
+<p>In one terminal window run:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">node scripts/functional_tests_server --config test/accessibility/config.ts</pre>
+</div>
 </li>
 <li class="listitem">
-In another terminal window run
-<code class="literal">node scripts/functional_test_runner.js --config test/accessibility/config.ts</code>
+<p>When the server prints that it is ready, in another terminal window run:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">node scripts/functional_test_runner.js --config test/accessibility/config.ts</pre>
+</div>
 </li>
 </ol>
 </div>
 <p>To run the x-pack tests, swap the config file out for
 <code class="literal">x-pack/test/accessibility/config.ts</code>.</p>
-<p>After the server is up, you can go to this instance of Kibana at
-<code class="literal">localhost:5620</code>.</p>
 <p>The testing is done using <a href="https://github.com/dequelabs/axe-core" class="ulink" target="_top">axe</a>.
-The same thing that runs in CI, can be run locally using their browser
-plugins:</p>
+You can run the same thing that runs CI using browser plugins:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
@@ -1142,6 +1191,49 @@ plugins:</p>
 </li>
 </ul>
 </div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_anatomy_of_a_failure"></a>Anatomy of a failure<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/contributing/development-accessibility-tests.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Failures can seem confusing if you&#8217;ve never seen one before. Here is a breakdown of what a failure coming from CI might look like:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">1)    Dashboard
+       create dashboard button:
+
+      Error: a11y report:
+
+ VIOLATION
+   [aria-hidden-focus]: Ensures aria-hidden elements do not contain focusable elements
+     Help: https://dequeuniversity.com/rules/axe/3.5/aria-hidden-focus?application=axeAPI
+     Elements:
+       - #example
+       at Accessibility.testAxeReport (test/accessibility/services/a11y/a11y.ts:90:15)
+       at Accessibility.testAppSnapshot (test/accessibility/services/a11y/a11y.ts:58:18)
+       at process._tickCallback (internal/process/next_tick.js:68:7)</pre>
+</div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+"Dashboard" and "create dashboard button" are the names of the test suite and specific test that failed.
+</li>
+<li class="listitem">
+Always in brackets, "[aria-hidden-focus]" is the name of the axe rule that failed, followed by a short description.
+</li>
+<li class="listitem">
+"Help: &lt;url&gt;" links to the axe documentation for that rule, including severity, remediation tips, and good and bad code examples.
+</li>
+<li class="listitem">
+"Elements:"  points to where in the DOM the failure originated (using CSS selector syntax). In this example, the problem came from an element with the ID <code class="literal">example</code>. If the selector is too complicated to find the source of the problem, use the browser plugins mentioned earlier to locate it. If you have a general idea where the issue is coming from, you can also try adding unique IDs to the page to narrow down the location.
+</li>
+<li class="listitem">
+The stack trace points to the internals of axe. The stack trace is there in case the test failure is a bug in axe and not in your code, although this is unlikely.
+</li>
+</ul>
+</div>
+</div>
+
 </div>
 
 </div>
