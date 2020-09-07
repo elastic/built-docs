@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Working with anomaly detection at scale | Machine Learning in the Elastic Stack [7.9] | Elastic</title>
+<link rel="home" href="index.html" title="Machine Learning in the Elastic Stack [7.9]"/>
+<link rel="up" href="ml-configuration.html" title="Configure anomaly detection"/>
+<link rel="prev" href="stopping-ml.html" title="Stop machine learning anomaly detection"/>
+<link rel="next" href="ml-api-quickref.html" title="API quick reference"/>
+<meta name="DC.type" content="Learn/Docs/Elastic Stack/Machine learning/7.9"/>
+<meta name="DC.subject" content="Machine learning"/>
+<meta name="DC.identifier" content="7.9"/>
+</head>
+<body>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Machine Learning in the Elastic Stack [7.9]</a></span>
+»
+<span class="breadcrumb-link"><a href="xpack-ml.html">Anomaly detection</a></span>
+»
+<span class="breadcrumb-link"><a href="ml-configuration.html">Configure anomaly detection</a></span>
+»
+<span class="breadcrumb-node">Working with anomaly detection at scale</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="stopping-ml.html">« Stop machine learning anomaly detection</a>
+</span>
+<span class="next">
+<a href="ml-api-quickref.html">API quick reference »</a>
+</span>
+</div>
+<div class="section xpack">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="anomaly-detection-scale"></a>Working with anomaly detection at scale<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.9/docs/en/stack/ml/anomaly-detection/anomaly-detection-scale.asciidoc">edit</a><a class="xpack_tag" href="/subscriptions"></a></h2>
+</div></div></div>
+<p>There are many advanced configuration options for anomaly detection jobs, some of them
+affect the performance or resource usage significantly. This guide contains a
+list of considerations to help you plan for using anomaly detection at scale.</p>
+<p>In this guide, you’ll learn how to:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Understand the impact of configuration options on the performance of
+anomaly detection jobs
+</li>
+</ul>
+</div>
+<p>Prerequisites:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+This guide assumes you’re already familiar with how to create anomaly detection jobs.
+If not, refer to <a class="xref" href="ml-overview.html" title="Overview"><em>Overview</em></a>.
+</li>
+</ul>
+</div>
+<p>The following recommendations are not sequential – the numbers just help to
+navigate between the list items; you can take action on one or more of them in
+any order. You can implement some of these changes on existing jobs; others
+require you to clone an existing job or create a new one.</p>
+<h4><a id="node-sizing"></a>1. Consider node sizing and configuration<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.9/docs/en/stack/ml/anomaly-detection/anomaly-detection-scale.asciidoc">edit</a></h4>
+<p>An anomaly detection job runs on a single node and requires sufficient resources to hold
+its model in memory. When a job is opened, it will be placed on the node with
+the most available memory at that time.</p>
+<p>The memory available to the machine learning native processes can roughly be thought of as
+total machine RAM minus that which is required for the operating system, Elasticsearch
+and any other software that is running on the same machine.</p>
+<p>The available memory for machine learning on a node must be sufficient to accommodate the
+size of the largest model. The total available memory across all machine learning nodes must
+be sufficient to accommodate the memory requirement for all simultaneously open
+jobs.</p>
+<p>In Elastic Cloud, dedicated machine learning nodes are provisioned with most of the RAM
+automatically being available to the machine learning native processes. If deploying
+self-managed, then we recommend deploying dedicated machine learning nodes and increasing
+the value of <code class="literal">xpack.ml.max_machine_memory_percent</code> from the default 30%. The
+default of 30% has to be set low in case other software is running on the same
+machine and to leave memory free for an OS file system cache on machine learning nodes that
+are also data nodes. If you use dedicated machine learning nodes as recommended and do not
+run any other software on them then it would be reasonable to run with a 2GB JVM
+heap and set <code class="literal">xpack.ml.max_machine_memory_percent</code> to 90% on machines with at
+least 24GB of RAM. This maximizes the number of machine learning jobs that can be run.</p>
+<p>Increasing the number of nodes will allow distribution of job processing as well
+as fault tolerance. If running many jobs, even small memory ones, then consider
+increasing the number of nodes in your environment.</p>
+<h4><a id="dedicated-results-index"></a>2. Use dedicated results indices<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.9/docs/en/stack/ml/anomaly-detection/anomaly-detection-scale.asciidoc">edit</a></h4>
+<p>For large jobs, use a dedicated results index. This ensures that results from a
+single large job do not dominate the shared results index. It also ensures that
+the job and results (if <code class="literal">results_retention_days</code> is set) can be deleted more
+efficiently and improves renormalization performance. By default, anomaly detection job
+results are stored in a shared index. To change to use a dedicated result index,
+you need to clone or create a new job.</p>
+<h4><a id="model-plot"></a>3. Disable model plot<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.9/docs/en/stack/ml/anomaly-detection/anomaly-detection-scale.asciidoc">edit</a></h4>
+<p>By default, model plot is enabled when you create jobs in Kibana. If you have a
+large job, however, consider disabling it. You can disable model plot for
+existing jobs by using the <a href="/guide/en/elasticsearch/reference/7.9/ml-update-job.html" class="ulink" target="_top">Update anomaly detection jobs API</a>.</p>
+<p>Model plot calculates and stores the model bounds for each analyzed entity,
+including both anomalous and non-anomalous entities. These bounds are used to
+display the shaded area in the Single Metric Viewer charts. Model plot creates
+one result document per bucket per split field value. If you have high
+cardinality fields and/or a short bucket span, disabling model plot reduces
+processing workload and results stored.</p>
+<h4><a id="detector-configuration"></a>4. Understand how detector configuration can impact model memory<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.9/docs/en/stack/ml/anomaly-detection/anomaly-detection-scale.asciidoc">edit</a></h4>
+<p>The following factors are most significant in increasing the memory required for
+a job:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+High cardinality of the <code class="literal">by</code> or <code class="literal">partition</code> fields
+</li>
+<li class="listitem">
+Multiple detectors
+</li>
+<li class="listitem">
+A high distinct count of influencers within a bucket
+</li>
+</ul>
+</div>
+<p>Optimize your anomaly detection job by choosing only relevant influencer fields and
+detectors.</p>
+<p>If you have high cardinality <code class="literal">by</code> or <code class="literal">partition</code> fields, ensure you have
+sufficient memory resources available for the job. Alternatively, consider if
+the job can be split into smaller jobs by using a datafeed query. For very high
+cardinality, using a <a class="xref" href="ml-configuring-populations.html" title="Performing population analysis">population analysis</a> may be
+more appropriate.</p>
+<p>To change partitioning fields, influencers and/or detectors, you need to clone
+or create a new job.</p>
+<h4><a id="optimize-bucket-span"></a>5. Optimize the bucket span<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.9/docs/en/stack/ml/anomaly-detection/anomaly-detection-scale.asciidoc">edit</a></h4>
+<p>Short bucket spans and high cardinality detectors are resource intensive and
+require more system resources.</p>
+<p>Bucket span is typically between 15m and 1h. The recommended value always
+depends on the data, the use case, and the latency required for alerting. A job
+with a longer bucket span uses less resources because fewer buckets require
+processing and fewer results are written. Bucket spans that are sensible
+dividers of an hour or day work best as most periodic patterns have a daily
+cycle.</p>
+<p>If your use case is suitable, consider increasing the bucket span to reduce
+processing workload. To change the bucket span, you need to clone or create a
+new job.</p>
+<h4><a id="set-model-memory-limit"></a>6. Set the model memory limit<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.9/docs/en/stack/ml/anomaly-detection/anomaly-detection-scale.asciidoc">edit</a></h4>
+<p>The <code class="literal">model_memory_limit</code> job configuration option sets the approximate maximum
+amount of memory resources required for analytical processing. If this variable
+is set too low for the job and the limit is approached, data pruning becomes
+more aggressive. Upon exceeding this limit, new entities are not modeled.</p>
+<p>Use model memory estimation to have a better picture of the memory needs of the
+model. Model memory estimation happens automatically when you create the job in
+Kibana or you can call the
+<a href="/guide/en/elasticsearch/reference/7.9/ml-estimate-model-memory.html" class="ulink" target="_top">Estimate anomaly detection jobs model memory API</a>
+manually. The estimation is based on the analysis configuration details for the
+job and cardinality estimates for the fields it references. You can update the
+memory settings of an existing job, but the job must be closed.</p>
+<h4><a id="pre-aggregate-data"></a>7. Pre-aggregate your data<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.9/docs/en/stack/ml/anomaly-detection/anomaly-detection-scale.asciidoc">edit</a></h4>
+<p>You can speed up the analysis by summarizing your data with aggregations.</p>
+<p>Anomaly detection jobs use summary statistics that are calculated for each bucket.
+The statistics can be calculated in the job itself or via aggregations. It is
+more efficient to use an aggregation when it’s possible, as in this case, the
+data node does the heavy-lifting instead of the machine learning node.</p>
+<p>In certain cases, you cannot do aggregations to increase performance. For
+example, categorization jobs use the full log message to detect anomalies, so
+this data cannot be aggregated. If you have many influencer fields, it may not
+be beneficial to use an aggregation either. This is because only a few documents
+in each bucket may have the combination of all the different influencer fields.</p>
+<p>Please consult <a class="xref" href="ml-configuring-aggregation.html" title="Aggregating data for faster performance">Aggregating data for faster performance</a> to learn more.</p>
+<h4><a id="results-retention"></a>8. Optimize the results retention<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.9/docs/en/stack/ml/anomaly-detection/anomaly-detection-scale.asciidoc">edit</a></h4>
+<p>Set a results retention window to reduce the amount of results stored.</p>
+<p>Anomaly detection results are retained indefinitely by default. Results build
+up over time, and your result index may be quite large. A large results index is
+slow to query and takes up significant space on your cluster. Consider how long
+you wish to retain the results and set <code class="literal">results_retention_days</code> accordingly –
+for example, to 30 or 60 days – to avoid unnecessarily large result indices.
+Deleting old results does not affect the model behavior. You can change this
+setting for existing jobs.</p>
+<h4><a id="renormalization-window"></a>9. Optimize the renormalization window<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.9/docs/en/stack/ml/anomaly-detection/anomaly-detection-scale.asciidoc">edit</a></h4>
+<p>Reduce the renormalization window to reduce processing workload.</p>
+<p>When a new anomaly has a much higher score than any anomaly in the past, the
+anomaly scores are adjusted on a range from 0 to 100 based on the new data. This
+is called renormalization. It can mean rewriting a large number of documents in
+the results index. Renormalization happens for results from the last 30 days or
+100 bucket spans (depending on which is the longer) by default. When you are
+working at scale, set <code class="literal">renormalization_window_days</code> to a lower value, so the
+workload is reduced. You can change this setting for existing jobs and changes
+will take effect after the job has been reopened.</p>
+<h4><a id="model-snapshot-retention"></a>10. Optimize the model snapshot retention<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.9/docs/en/stack/ml/anomaly-detection/anomaly-detection-scale.asciidoc">edit</a></h4>
+<p>Model snapshots are taken periodically, to ensure resilience in the event of a
+system failure and to allow you to manually revert to a specific point in time.
+These are stored in a compressed format in an internal index and kept according
+to the configured retention policy. Load is placed on the cluster when indexing
+a model snapshot and index size is increased as multiple snapshots are retained.</p>
+<p>When working with large model sizes, consider how frequently you want to create
+model snapshots using <code class="literal">background_persist_interval</code>. The default is every 3 to 4
+hours. Increasing this interval reduces the periodic indexing load on your
+cluster, but in the event of a system failure, you may be reverting to an older
+version of the model.</p>
+<p>Also consider how long you wish to retain snapshots using
+<code class="literal">model_snapshot_retention_days</code> and <code class="literal">daily_model_snapshot_retention_after_days</code>.
+Retaining fewer snapshots substantially reduces index storage requirements for
+model state, but also reduces the granularity of model snapshots from which you
+can revert.</p>
+<p>For more information, refer to <a class="xref" href="ml-model-snapshots.html" title="Model snapshots">Model snapshots</a>.</p>
+<h4><a id="search-queries"></a>11. Optimize your search queries<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.9/docs/en/stack/ml/anomaly-detection/anomaly-detection-scale.asciidoc">edit</a></h4>
+<p>If you are operating on a big scale, make sure that your datafeed query is as
+efficient as possible. There are different ways to write Elasticsearch queries and some
+of them are more efficient than others. Please consult
+<a href="/guide/en/elasticsearch/reference/7.9/tune-for-search-speed.html" class="ulink" target="_top">Tune for search speed</a> to learn more about Elasticsearch
+performance tuning.</p>
+<p>You need to clone or recreate an existing job if you want to optimize its search
+query.</p>
+<h4><a id="population-analysis"></a>12. Consider using population analysis<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.9/docs/en/stack/ml/anomaly-detection/anomaly-detection-scale.asciidoc">edit</a></h4>
+<p>Population analysis is more memory efficient than individual analysis of each
+series. It builds a profile of what a "typical" entity does over a specified
+time period and then identifies when one is behaving abnormally compared to the
+population. Use population analysis for analyzing high cardinality fields if you
+expect that the entities of the population generally behave in the same way.</p>
+<p>For more information, refer to <a class="xref" href="ml-configuring-populations.html" title="Performing population analysis">Performing population analysis</a>.</p>
+<h4><a id="forecasting"></a>13. Reduce the cost of forecasting<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.9/docs/en/stack/ml/anomaly-detection/anomaly-detection-scale.asciidoc">edit</a></h4>
+<p>There are two main performance factors to consider when you create a forecast:
+indexing load and memory usage. Check the cluster monitoring data to learn the
+indexing rate and the memory usage.</p>
+<p>Forecasting writes a new document to the result index for every forecasted
+element of the  for every bucket. Jobs with high partition or by field
+cardinality create more result documents, as do jobs with small bucket span and
+longer forecast duration. Only three concurrent forecasts may be run for a
+single job.</p>
+<p>To reduce indexing load, consider a shorter forecast duration and/or try to
+avoid concurrent forecast requests. Further performance gains can be achieved by
+reviewing the job configuration; for example by using a dedicated results index,
+increasing the bucket span and/or by having lower cardinality partitioning
+fields.</p>
+<p>The memory usage of a forecast is restricted to 20 MB by default. From 7.9, you
+can extend this limit by setting <code class="literal">max_model_memory</code> to a higher value. The
+maximum value is 40% of the memory limit of the anomaly detection job or 500 MB. If the
+forecast needs more memory than the provided value, it spools to disk. Forecasts
+that would take more than 500 MB to run won’t start because this is the maximum
+limit of disk space that a forecast is allowed to use.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="stopping-ml.html">« Stop machine learning anomaly detection</a>
+</span>
+<span class="next">
+<a href="ml-api-quickref.html">API quick reference »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
