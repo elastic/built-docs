@@ -36,15 +36,11 @@ Not what you want? See the
 <div class="titlepage"><div><div>
 <h2 class="title"><a id="paginate-search-results"></a>Paginate search results<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/search/search-your-data/paginate-search-results.asciidoc">edit</a></h2>
 </div></div></div>
-<p>By default, the <a class="xref" href="search-search.html" title="Search API">search API</a> returns the top 10 matching documents.</p>
-<p>To paginate through a larger set of results, you can use the search API&#8217;s <code class="literal">size</code>
-and <code class="literal">from</code> parameters. The <code class="literal">size</code> parameter is the number of matching documents
-to return. The <code class="literal">from</code> parameter is a zero-indexed offset from the beginning of
-the complete result set that indicates the document you want to start with.</p>
-<p>The following search API request sets the <code class="literal">from</code> offset to <code class="literal">5</code>, meaning the
-request offsets, or skips, the first five matching documents.</p>
-<p>The <code class="literal">size</code> parameter is <code class="literal">20</code>, meaning the request can return up to 20 documents,
-starting at the offset.</p>
+<p>By default, searches return the top 10 matching hits. To page through a larger
+set of results, you can use the <a class="xref" href="search-search.html" title="Search API">search API</a>'s <code class="literal">from</code> and <code class="literal">size</code>
+parameters. The <code class="literal">from</code> parameter defines the number of hits to skip, defaulting
+to <code class="literal">0</code>. The <code class="literal">size</code> parameter is the maximum number of hits to return. Together,
+these two parameters define a page of results.</p>
 <div class="pre_wrapper lang-ruby alternative">
 <pre class="programlisting prettyprint lang-ruby alternative">response = client.search(
   body: {
@@ -88,27 +84,214 @@ fmt.Println(res, err)</pre>
 }</pre>
 </div>
 <div class="console_widget has-ruby has-go" data-snippet="snippets/652.console"></div>
-<p>By default, you cannot page through more than 10,000 documents using the <code class="literal">from</code>
-and <code class="literal">size</code> parameters. This limit is set using the
-<a class="xref" href="index-modules.html#index-max-result-window"><code class="literal">index.max_result_window</code></a> index setting.</p>
-<p>Deep paging or requesting many results at once can result in slow searches.
-Results are sorted before being returned. Because search requests usually span
-multiple shards, each shard must generate its own sorted results. These separate
-results must then be combined and sorted to ensure that the overall sort order
-is correct.</p>
-<p>As an alternative to deep paging, we recommend using
-<a class="xref" href="paginate-search-results.html#scroll-search-results" title="Scroll search results">scroll</a> or the
-<a class="xref" href="paginate-search-results.html#search-after" title="Search after"><code class="literal">search_after</code></a> parameter.</p>
+<p>Avoid using <code class="literal">from</code> and <code class="literal">size</code> to page too deeply or request too many results at
+once. Search requests usually span multiple shards. Each shard must load its
+requested hits and the hits for any previous pages into memory. For deep pages
+or large sets of results, these operations can significantly increase memory and
+CPU usage, resulting in degraded performance or node failures.</p>
+<p>By default, you cannot use <code class="literal">from</code> and <code class="literal">size</code> to page through more than 10,000
+hits. This limit is a safeguard set by the
+<a class="xref" href="index-modules.html#index-max-result-window"><code class="literal">index.max_result_window</code></a> index setting. If you need
+to page through more than 10,000 hits, use the <a class="xref" href="paginate-search-results.html#search-after" title="Search after"><code class="literal">search_after</code></a>
+parameter instead.</p>
 <div class="warning admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>Elasticsearch uses Lucene&#8217;s internal doc IDs as tie-breakers. These internal
-doc IDs can be completely different across replicas of the same
-data. When paginating, you might occasionally see that documents with the same
-sort values are not ordered consistently.</p>
+<p>Elasticsearch uses Lucene&#8217;s internal doc IDs as tie-breakers. These internal doc
+IDs can be completely different across replicas of the same data. When paging
+search hits, you might occasionally see that documents with the same sort values
+are not ordered consistently.</p>
 </div>
 </div>
+<h3><a id="search-after"></a>Search after<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/search/search-your-data/paginate-search-results.asciidoc">edit</a></h3>
+<p>You can use the <code class="literal">search_after</code> parameter to retrieve the next page of hits
+using a set of <a class="xref" href="sort-search-results.html" title="Sort search results">sort values</a> from the previous page.</p>
+<p>Using <code class="literal">search_after</code> requires multiple search requests with the same <code class="literal">query</code> and
+<code class="literal">sort</code> values. If a <a class="xref" href="near-real-time.html" title="Near real-time search">refresh</a> occurs between these requests,
+the order of your results may change, causing inconsistent results across pages. To
+prevent this, you can create a <a class="xref" href="point-in-time-api.html" title="Point in time API">point in time (PIT)</a> to
+preserve the current index state over your searches.</p>
+<a id="5987afb2c17c73fe3d860937565ef115"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /my-index-000001/_pit?keep_alive=1m</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/653.console"></div>
+<p>The API returns a PIT ID.</p>
+<a id="cfc9cb8e4e87019349963a056bf75341"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "id": "46ToAwMDaWR4BXV1aWQxAgZub2RlXzEAAAAAAAAAAAEBYQNpZHkFdXVpZDIrBm5vZGVfMwAAAAAAAAAAKgFjA2lkeQV1dWlkMioGbm9kZV8yAAAAAAAAAAAMAWICBXV1aWQyAAAFdXVpZDEAAQltYXRjaF9hbGw_gAAAAA=="
+}</pre>
+</div>
+<p>To get the first page of results, submit a search request with a <code class="literal">sort</code>
+argument. If using a PIT, specify the PIT ID in the <code class="literal">pit.id</code> parameter.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>We recommend you include a tiebreaker field in your <code class="literal">sort</code>. This
+tiebreaker field should contain a unique value for each document. If you don&#8217;t
+include a tiebreaker field, your paged results could miss or duplicate hits.</p>
+</div>
+</div>
+<a id="071fc5b1023942a555221bc97fe65f88"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /my-index-000001/_search
+{
+  "size": 10000,
+  "query": {
+    "match" : {
+      "user.id" : "elkbee"
+    }
+  },
+  "pit": {
+	    "id":  "46ToAwMDaWR4BXV1aWQxAgZub2RlXzEAAAAAAAAAAAEBYQNpZHkFdXVpZDIrBm5vZGVfMwAAAAAAAAAAKgFjA2lkeQV1dWlkMioGbm9kZV8yAAAAAAAAAAAMAWICBXV1aWQyAAAFdXVpZDEAAQltYXRjaF9hbGw_gAAAAA==", <a id="CO174-1"></a><i class="conum" data-value="1"></i>
+	    "keep_alive": "1m"
+  },
+  "sort": [ <a id="CO174-2"></a><i class="conum" data-value="2"></i>
+    {"@timestamp": "asc"},
+    {"tie_breaker_id": "asc"}
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/654.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO174-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>PIT ID for the search.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO174-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Sorts hits for the search.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The search response includes an array of <code class="literal">sort</code> values for each hit. If you used
+a PIT, the response&#8217;s <code class="literal">pit_id</code> parameter contains an updated PIT ID.</p>
+<a id="c591624c6c02632ee8255939029f4b42"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "pit_id" : "46ToAwEPbXktaW5kZXgtMDAwMDAxFnVzaTVuenpUVGQ2TFNheUxVUG5LVVEAFldicVdzOFFtVHZTZDFoWWowTGkwS0EAAAAAAAAAAAQURzZzcUszUUJ5U1NMX3Jyak5ET0wBFnVzaTVuenpUVGQ2TFNheUxVUG5LVVEAAA==", <a id="CO175-1"></a><i class="conum" data-value="1"></i>
+  "took" : 17,
+  "timed_out" : false,
+  "_shards" : ...,
+  "hits" : {
+    "total" : ...,
+    "max_score" : null,
+    "hits" : [
+      ...
+      {
+        "_index" : "my-index-000001",
+        "_id" : "FaslK3QBySSL_rrj9zM5",
+        "_score" : null,
+        "_source" : ...,
+        "sort" : [                                <a id="CO175-2"></a><i class="conum" data-value="2"></i>
+          4098435132000,
+          "FaslK3QBySSL_rrj9zM5"
+        ]
+      }
+    ]
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO175-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Updated <code class="literal">id</code> for the point in time.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO175-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Sort values for the last returned hit.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>To get the next page of results, rerun the previous search using the last hit&#8217;s
+sort values as the <code class="literal">search_after</code> argument. If using a PIT, use the latest PIT
+ID in the <code class="literal">pit.id</code> parameter. The search&#8217;s <code class="literal">query</code> and <code class="literal">sort</code> arguments must
+remain unchanged. If provided, the <code class="literal">from</code> argument must be <code class="literal">0</code> (default) or <code class="literal">-1</code>.</p>
+<a id="cf68f718172f98dc7715b583bd84df03"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /my-index-000001/_search
+{
+  "size": 10000,
+  "query": {
+    "match" : {
+      "user.id" : "elkbee"
+    }
+  },
+  "pit": {
+	    "id":  "46ToAwEPbXktaW5kZXgtMDAwMDAxFnVzaTVuenpUVGQ2TFNheUxVUG5LVVEAFldicVdzOFFtVHZTZDFoWWowTGkwS0EAAAAAAAAAAAQURzZzcUszUUJ5U1NMX3Jyak5ET0wBFnVzaTVuenpUVGQ2TFNheUxVUG5LVVEAAA==", <a id="CO176-1"></a><i class="conum" data-value="1"></i>
+	    "keep_alive": "1m"
+  },
+  "sort": [
+    {"@timestamp": "asc"},
+    {"tie_breaker_id": "asc"}
+  ],
+  "search_after": [                                <a id="CO176-2"></a><i class="conum" data-value="2"></i>
+    4098435132000,
+    "FaslK3QBySSL_rrj9zM5"
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/655.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO176-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>PIT ID returned by the previous search.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO176-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Sort values from the previous search&#8217;s last hit.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>You can repeat this process to get additional pages of results. If using a PIT,
+you can extend the PIT&#8217;s retention period using the
+<code class="literal">keep_alive</code> parameter of each search request.</p>
+<p>When you&#8217;re finished, you should delete your PIT.</p>
+<a id="81e13f7108630194e041a473783900e0"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">DELETE /_pit
+{
+    "id" : "46ToAwEPbXktaW5kZXgtMDAwMDAxFnVzaTVuenpUVGQ2TFNheUxVUG5LVVEAFldicVdzOFFtVHZTZDFoWWowTGkwS0EAAAAAAAAAAAQURzZzcUszUUJ5U1NMX3Jyak5ET0wBFnVzaTVuenpUVGQ2TFNheUxVUG5LVVEAAA=="
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/656.console"></div>
 <h3><a id="scroll-search-results"></a>Scroll search results<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/search/search-your-data/paginate-search-results.asciidoc">edit</a></h3>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>We no longer recommend using the scroll API for deep pagination. If
+you need to preserve the index state while paging through more than 10,000 hits,
+use the <a class="xref" href="paginate-search-results.html#search-after" title="Search after"><code class="literal">search_after</code></a> parameter with a point in time (PIT).</p>
+</div>
+</div>
 <p>While a <code class="literal">search</code> request returns a single &#8220;page&#8221; of results, the <code class="literal">scroll</code>
 API can be used to retrieve large numbers of results (or even all results)
 from a single search request, in much the same way as you would use a cursor
@@ -177,7 +360,7 @@ should keep the &#8220;search context&#8221; alive (see <a class="xref" href="pa
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/653.console"></div>
+<div class="console_widget" data-snippet="snippets/657.console"></div>
 <p>The result from the above request includes a <code class="literal">_scroll_id</code>, which should
 be passed to the <code class="literal">scroll</code> API in order to retrieve the next batch of
 results.</p>
@@ -202,18 +385,18 @@ fmt.Println(res, err)</pre>
 </div>
 <a id="add240aa149d8b11139947502b279ee0"></a>
 <div class="pre_wrapper lang-console default has-ruby has-go">
-<pre class="programlisting prettyprint lang-console default has-ruby has-go">POST /_search/scroll                                                               <a id="CO174-1"></a><i class="conum" data-value="1"></i>
+<pre class="programlisting prettyprint lang-console default has-ruby has-go">POST /_search/scroll                                                               <a id="CO177-1"></a><i class="conum" data-value="1"></i>
 {
-  "scroll" : "1m",                                                                 <a id="CO174-2"></a><i class="conum" data-value="2"></i>
-  "scroll_id" : "DXF1ZXJ5QW5kRmV0Y2gBAAAAAAAAAD4WYm9laVYtZndUQlNsdDcwakFMNjU1QQ==" <a id="CO174-3"></a><i class="conum" data-value="3"></i>
+  "scroll" : "1m",                                                                 <a id="CO177-2"></a><i class="conum" data-value="2"></i>
+  "scroll_id" : "DXF1ZXJ5QW5kRmV0Y2gBAAAAAAAAAD4WYm9laVYtZndUQlNsdDcwakFMNjU1QQ==" <a id="CO177-3"></a><i class="conum" data-value="3"></i>
 }</pre>
 </div>
-<div class="console_widget has-ruby has-go" data-snippet="snippets/654.console"></div>
+<div class="console_widget has-ruby has-go" data-snippet="snippets/658.console"></div>
 <div class="calloutlist default has-ruby has-go lang-console">
 <table border="0" summary="Callout list">
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO174-1"><i class="conum" data-value="1"></i></a></p>
+<p><a href="#CO177-1"><i class="conum" data-value="1"></i></a></p>
 </td>
 <td align="left" valign="top">
 <p><code class="literal">GET</code> or <code class="literal">POST</code> can be used and the URL should not include the <code class="literal">index</code>
@@ -222,7 +405,7 @@ name&#8201;&#8212;&#8201;this is specified in the original <code class="literal"
 </tr>
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO174-2"><i class="conum" data-value="2"></i></a></p>
+<p><a href="#CO177-2"><i class="conum" data-value="2"></i></a></p>
 </td>
 <td align="left" valign="top">
 <p>The <code class="literal">scroll</code> parameter tells Elasticsearch to keep the search context open
@@ -231,7 +414,7 @@ for another <code class="literal">1m</code>.</p>
 </tr>
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO174-3"><i class="conum" data-value="3"></i></a></p>
+<p><a href="#CO177-3"><i class="conum" data-value="3"></i></a></p>
 </td>
 <td align="left" valign="top">
 <p>The <code class="literal">scroll_id</code> parameter</p>
@@ -332,7 +515,7 @@ console.log(response)</pre>
   ]
 }</pre>
 </div>
-<div class="console_widget has-php has-csharp has-python has-ruby has-go has-js" data-snippet="snippets/655.console"></div>
+<div class="console_widget has-php has-csharp has-python has-ruby has-go has-js" data-snippet="snippets/659.console"></div>
 <h4><a id="scroll-search-context"></a>Keeping the search context alive<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/search/search-your-data/paginate-search-results.asciidoc">edit</a></h4>
 <p>A scroll returns all the documents which matched the search at the time of the
 initial search request. It ignores any subsequent changes to these documents.
@@ -418,7 +601,7 @@ console.log(response)</pre>
 <div class="pre_wrapper lang-console default has-php has-csharp has-python has-ruby has-go has-js">
 <pre class="programlisting prettyprint lang-console default has-php has-csharp has-python has-ruby has-go has-js">GET /_nodes/stats/indices/search</pre>
 </div>
-<div class="console_widget has-php has-csharp has-python has-ruby has-go has-js" data-snippet="snippets/656.console"></div>
+<div class="console_widget has-php has-csharp has-python has-ruby has-go has-js" data-snippet="snippets/660.console"></div>
 <h4><a id="clear-scroll"></a>Clear scroll<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/search/search-your-data/paginate-search-results.asciidoc">edit</a></h4>
 <p>Search context are automatically removed when the <code class="literal">scroll</code> timeout has been
 exceeded. However keeping scrolls open has a cost, as discussed in the
@@ -448,7 +631,7 @@ fmt.Println(res, err)</pre>
   "scroll_id" : "DXF1ZXJ5QW5kRmV0Y2gBAAAAAAAAAD4WYm9laVYtZndUQlNsdDcwakFMNjU1QQ=="
 }</pre>
 </div>
-<div class="console_widget has-ruby has-go" data-snippet="snippets/657.console"></div>
+<div class="console_widget has-ruby has-go" data-snippet="snippets/661.console"></div>
 <p>Multiple scroll IDs can be passed as array:</p>
 <div class="pre_wrapper lang-ruby alternative">
 <pre class="programlisting prettyprint lang-ruby alternative">response = client.clear_scroll(
@@ -482,7 +665,7 @@ fmt.Println(res, err)</pre>
   ]
 }</pre>
 </div>
-<div class="console_widget has-ruby has-go" data-snippet="snippets/658.console"></div>
+<div class="console_widget has-ruby has-go" data-snippet="snippets/662.console"></div>
 <p>All search contexts can be cleared with the <code class="literal">_all</code> parameter:</p>
 <div class="pre_wrapper lang-php alternative">
 <pre class="programlisting prettyprint lang-php alternative">$params = [
@@ -521,7 +704,7 @@ console.log(response)</pre>
 <div class="pre_wrapper lang-console default has-php has-csharp has-python has-ruby has-go has-js">
 <pre class="programlisting prettyprint lang-console default has-php has-csharp has-python has-ruby has-go has-js">DELETE /_search/scroll/_all</pre>
 </div>
-<div class="console_widget has-php has-csharp has-python has-ruby has-go has-js" data-snippet="snippets/659.console"></div>
+<div class="console_widget has-php has-csharp has-python has-ruby has-go has-js" data-snippet="snippets/663.console"></div>
 <div class="calloutlist alternative lang-csharp">
 <table border="0" summary="Callout list">
 <tr>
@@ -580,7 +763,7 @@ console.log(response)</pre>
 <div class="pre_wrapper lang-console default has-php has-csharp has-python has-ruby has-go has-js">
 <pre class="programlisting prettyprint lang-console default has-php has-csharp has-python has-ruby has-go has-js">DELETE /_search/scroll/DXF1ZXJ5QW5kRmV0Y2gBAAAAAAAAAD4WYm9laVYtZndUQlNsdDcwakFMNjU1QQ==,DnF1ZXJ5VGhlbkZldGNoBQAAAAAAAAABFmtSWWRRWUJrU2o2ZExpSGJCVmQxYUEAAAAAAAAAAxZrUllkUVlCa1NqNmRMaUhiQlZkMWFBAAAAAAAAAAIWa1JZZFFZQmtTajZkTGlIYkJWZDFhQQAAAAAAAAAFFmtSWWRRWUJrU2o2ZExpSGJCVmQxYUEAAAAAAAAABBZrUllkUVlCa1NqNmRMaUhiQlZkMWFB</pre>
 </div>
-<div class="console_widget has-php has-csharp has-python has-ruby has-go has-js" data-snippet="snippets/660.console"></div>
+<div class="console_widget has-php has-csharp has-python has-ruby has-go has-js" data-snippet="snippets/664.console"></div>
 <div class="calloutlist alternative lang-csharp">
 <table border="0" summary="Callout list">
 <tr>
@@ -601,8 +784,8 @@ can be consumed independently:</p>
 <pre class="programlisting prettyprint lang-console">GET /my-index-000001/_search?scroll=1m
 {
   "slice": {
-    "id": 0,                      <a id="CO175-1"></a><i class="conum" data-value="1"></i>
-    "max": 2                      <a id="CO175-2"></a><i class="conum" data-value="2"></i>
+    "id": 0,                      <a id="CO178-1"></a><i class="conum" data-value="1"></i>
+    "max": 2                      <a id="CO178-2"></a><i class="conum" data-value="2"></i>
   },
   "query": {
     "match": {
@@ -623,12 +806,12 @@ GET /my-index-000001/_search?scroll=1m
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/661.console"></div>
+<div class="console_widget" data-snippet="snippets/665.console"></div>
 <div class="calloutlist">
 <table border="0" summary="Callout list">
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO175-1"><i class="conum" data-value="1"></i></a></p>
+<p><a href="#CO178-1"><i class="conum" data-value="1"></i></a></p>
 </td>
 <td align="left" valign="top">
 <p>The id of the slice</p>
@@ -636,7 +819,7 @@ GET /my-index-000001/_search?scroll=1m
 </tr>
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO175-2"><i class="conum" data-value="2"></i></a></p>
+<p><a href="#CO178-2"><i class="conum" data-value="2"></i></a></p>
 </td>
 <td align="left" valign="top">
 <p>The maximum number of slices</p>
@@ -700,7 +883,7 @@ The cardinality of the field should be high. This ensures that each slice gets a
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/662.console"></div>
+<div class="console_widget" data-snippet="snippets/666.console"></div>
 <p>For append only time-based indices, the <code class="literal">timestamp</code> field can be used safely.</p>
 <div class="note admon">
 <div class="icon"></div>
@@ -709,94 +892,6 @@ The cardinality of the field should be high. This ensures that each slice gets a
 You can update the <code class="literal">index.max_slices_per_scroll</code> index setting to bypass this limit.</p>
 </div>
 </div>
-<h3><a id="search-after"></a>Search after<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/search/search-your-data/paginate-search-results.asciidoc">edit</a></h3>
-<p>Pagination of results can be done by using the <code class="literal">from</code> and <code class="literal">size</code> but the cost becomes prohibitive when the deep pagination is reached.
-The <code class="literal">index.max_result_window</code> which defaults to 10,000 is a safeguard, search requests take heap memory and time proportional to <code class="literal">from + size</code>.
-The <a class="xref" href="paginate-search-results.html#scroll-search-results" title="Scroll search results">scroll</a> API is recommended for efficient deep scrolling but scroll contexts are costly and it is not
-recommended to use it for real time user requests.
-The <code class="literal">search_after</code> parameter circumvents this problem by providing a live cursor.
-The idea is to use the results from the previous page to help the retrieval of the next page.</p>
-<p>Suppose that the query to retrieve the first page looks like this:</p>
-<a id="eae56bd220ba3599db0a2920c4a99456"></a>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET my-index-000001/_search
-{
-  "size": 10,
-  "query": {
-    "match" : {
-      "message" : "foo"
-    }
-  },
-  "sort": [
-    {"@timestamp": "asc"},
-    {"tie_breaker_id": "asc"}      <a id="CO176-1"></a><i class="conum" data-value="1"></i>
-  ]
-}</pre>
-</div>
-<div class="console_widget" data-snippet="snippets/663.console"></div>
-<div class="calloutlist">
-<table border="0" summary="Callout list">
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO176-1"><i class="conum" data-value="1"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>A copy of the <code class="literal">_id</code> field with <code class="literal">doc_values</code> enabled</p>
-</td>
-</tr>
-</table>
-</div>
-<div class="important admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p>A field with one unique value per document should be used as the tiebreaker
-of the sort specification. Otherwise the sort order for documents that have
-the same sort values would be undefined and could lead to missing or duplicate
-results. The <a class="xref" href="mapping-id-field.html" title="_id field"><code class="literal">_id</code> field</a> has a unique value per document
-but it is not recommended to use it as a tiebreaker directly.
-Beware that <code class="literal">search_after</code> looks for the first document which fully or partially
-matches tiebreaker&#8217;s provided value. Therefore if a document has a tiebreaker value of
-<code class="literal">"654323"</code> and you <code class="literal">search_after</code> for <code class="literal">"654"</code> it would still match that document
-and return results found after it.
-<a class="xref" href="doc-values.html" title="doc_values">doc value</a> are disabled on this field so sorting on it requires
-to load a lot of data in memory. Instead it is advised to duplicate (client side
- or with a <a class="xref" href="ingest-processors.html" title="Processors">set ingest processor</a>) the content
-of the <a class="xref" href="mapping-id-field.html" title="_id field"><code class="literal">_id</code> field</a> in another field that has
-<a class="xref" href="doc-values.html" title="doc_values">doc value</a> enabled and to use this new field as the tiebreaker
-for the sort.</p>
-</div>
-</div>
-<p>The result from the above request includes an array of <code class="literal">sort values</code> for each document.
-These <code class="literal">sort values</code> can be used in conjunction with the <code class="literal">search_after</code> parameter to start returning results "after" any
-document in the result list.
-For instance we can use the <code class="literal">sort values</code> of the last document and pass it to <code class="literal">search_after</code> to retrieve the next page of results:</p>
-<a id="4fd6901469d75183aa72c5fa60d14f11"></a>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET my-index-000001/_search
-{
-  "size": 10,
-  "query": {
-    "match" : {
-      "message" : "foo"
-    }
-  },
-  "search_after": [1463538857, "654323"],
-  "sort": [
-    {"@timestamp": "asc"},
-    {"tie_breaker_id": "asc"}
-  ]
-}</pre>
-</div>
-<div class="console_widget" data-snippet="snippets/664.console"></div>
-<div class="note admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p>The parameter <code class="literal">from</code> must be set to 0 (or -1) when <code class="literal">search_after</code> is used.</p>
-</div>
-</div>
-<p><code class="literal">search_after</code> is not a solution to jump freely to a random page but rather to scroll many queries in parallel.
-It is very similar to the <code class="literal">scroll</code> API but unlike it, the <code class="literal">search_after</code> parameter is stateless, it is always resolved against the latest
- version of the searcher. For this reason the sort order may change during a walk depending on the updates and deletes of your index.</p>
 </div>
 <div class="navfooter">
 <span class="prev">
