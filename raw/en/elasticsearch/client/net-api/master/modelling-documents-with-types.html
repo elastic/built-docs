@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Modelling documents with types | Elasticsearch.Net and NEST: the .NET clients [master] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch.Net and NEST: the .NET clients [master]"/>
+<link rel="up" href="serialization.html" title="Serialization"/>
+<link rel="prev" href="extending-nest-types.html" title="Extending NEST types"/>
+<link rel="next" href="mapping.html" title="Mapping"/>
+<meta name="DC.type" content="Learn/Docs/Clients/.Net/master"/>
+<meta name="DC.subject" content="Clients"/>
+<meta name="DC.identifier" content="master"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch.Net and NEST:  the .NET clients [master]</a></span>
+»
+<span class="breadcrumb-link"><a href="nest.html">NEST - High level client</a></span>
+»
+<span class="breadcrumb-link"><a href="serialization.html">Serialization</a></span>
+»
+<span class="breadcrumb-node">Modelling documents with types</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="extending-nest-types.html">« Extending NEST types</a>
+</span>
+<span class="next">
+<a href="mapping.html">Mapping »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="modelling-documents-with-types"></a>Modelling documents with types<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/master/docs/client-concepts/high-level/serialization/modelling-documents-with-types.asciidoc">edit</a></h2>
+</div></div></div>
+<p>Elasticsearch provides search and aggregation capabilities on the documents that it is sent and indexes. These documents are sent as
+JSON objects within the request body of a HTTP request. It is natural to model documents within NEST and Elasticsearch.Net using
+<a href="https://en.wikipedia.org/wiki/Plain_Old_CLR_Object" class="ulink" target="_top">POCOs (<em>Plain Old CLR Objects</em>)</a>.</p>
+<p>This section provides an overview of how types and type hierarchies can be used to model documents.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="default-behaviour"></a>Default behaviour<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/master/docs/client-concepts/high-level/serialization/modelling-documents-with-types.asciidoc">edit</a></h3>
+</div></div></div>
+<p>NEST&#8217;s default behaviour is to serialize type property names as camelcase JSON object members.
+Given the POCO</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">public class MyDocument
+{
+    public string StringProperty { get; set; }
+}</pre>
+</div>
+<p>The following example demonstrates this behaviour</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">var indexResponse = Client.Index(
+    new MyDocument { StringProperty = "value" },
+    i =&gt; i.Index("my_documents"));</pre>
+</div>
+<p>serializing the POCO property named <code class="literal">StringProperty</code> to the JSON object member named <code class="literal">stringProperty</code></p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">{
+  "stringProperty": "value"
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="default-field-name-inferrer"></a><code class="literal">DefaultFieldNameInferrer</code> setting<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/master/docs/client-concepts/high-level/serialization/modelling-documents-with-types.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Many different systems may be indexing documents into Elasticsearch, using a different
+convention than camelcase for JSON object members. How NEST serializes
+POCO property names can be globally controlled using <code class="literal">DefaultFieldNameInferrer</code> on
+<code class="literal">ConnectionSettings</code>. The following example defines a function that applies snake casing
+to a passed string, with the function called inside a delegate passed to <code class="literal">DefaultFieldNameInferrer</code></p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">var settings = new ConnectionSettings();
+
+static string ToSnakeCase(string s) <a id="CO42-1"></a><i class="conum" data-value="1"></i>
+{
+    var builder = new StringBuilder(s.Length);
+    for (int i = 0; i &lt; s.Length; i++)
+    {
+        var c = s[i];
+        if (char.IsUpper(c))
+        {
+            if (i == 0)
+                builder.Append(char.ToLowerInvariant(c));
+            else if (char.IsUpper(s[i - 1]))
+                builder.Append(char.ToLowerInvariant(c));
+            else
+            {
+                builder.Append("_");
+                builder.Append(char.ToLowerInvariant(c));
+            }
+        }
+        else
+            builder.Append(c);
+    }
+
+    return builder.ToString();
+}
+
+settings.DefaultFieldNameInferrer(p =&gt; ToSnakeCase(p)); <a id="CO42-2"></a><i class="conum" data-value="2"></i>
+
+var client = new ElasticClient(settings);
+
+var indexResponse = client.Index(
+    new MyDocument { StringProperty = "value" },
+    i =&gt; i.Index("my_documents"));</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO42-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>function to convert a string to snake case</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO42-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>apply snake casing to <span class="strong strong"><strong>all</strong></span> POCO properties</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The above example serializes the <code class="literal">MyDocument</code> POCO to</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">{
+  "string_property": "value"
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="propertyname-attribute"></a><code class="literal">PropertyName</code> attribute<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/master/docs/client-concepts/high-level/serialization/modelling-documents-with-types.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Sometimes there may be a need to change only how specific POCO properties are serialized. The
+<code class="literal">PropertyName</code> attribute can be applied to POCO properties to control the name that the POCO
+property will serialize to and deserialize from. The following example uses the <code class="literal">PropertyName</code> attribute
+to control how the POCO property named <code class="literal">StringProperty</code> is serialized</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">public class MyDocumentWithPropertyName
+{
+    [PropertyName("string_property")]
+    public string StringProperty { get; set; }
+}
+
+var indexResponse = Client.Index(
+        new MyDocumentWithPropertyName { StringProperty = "value" },
+        i =&gt; i.Index("my_documents"));</pre>
+</div>
+<p>The above example serializes the <code class="literal">MyDocumentWithPropertyName</code> POCO to</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">{
+  "string_property": "value"
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="nest-property-attributes"></a>NEST property attributes<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/master/docs/client-concepts/high-level/serialization/modelling-documents-with-types.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The <code class="literal">PropertyName</code> attribute can be used to control how a POCO property is serialized. NEST contains
+a collection of other attributes, such as <code class="literal">Text</code> attribute, that not only control how a POCO property is serialized,
+but also control how a POCO property is mapped when using <a class="xref" href="attribute-mapping.html" title="Attribute mapping">Attribute mapping</a>. The <code class="literal">Name</code> property of
+these attributes controls how a POCO property is serialized in a similar fashion to <code class="literal">PropertyName</code> attribute.</p>
+<p>The following example uses the <code class="literal">Text</code> attribute to control how the POCO property named <code class="literal">StringProperty</code> is serialized</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">public class MyDocumentWithTextProperty
+{
+    [Text(Name = "string_property")]
+    public string StringProperty { get; set; }
+}
+
+var indexResponse = Client.Index(
+        new MyDocumentWithTextProperty { StringProperty = "value" },
+        i =&gt; i.Index("my_documents"));</pre>
+</div>
+<p>The above example serializes the <code class="literal">MyDocumentWithTextProperty</code> POCO to</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">{
+  "string_property": "value"
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="data-member-attribute"></a>DataMember attribute<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/master/docs/client-concepts/high-level/serialization/modelling-documents-with-types.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The <code class="literal">System.Runtime.Serialization.DataMember</code> attribute can be used to control how a POCO property is serialized. in a similar
+fashion to <code class="literal">PropertyName</code> attribute. The <code class="literal">DataMember</code> attribute may be preferred over <code class="literal">PropertyName</code> attribute in situations where
+the project in which the POCOs are defined does not have a dependency on NEST.</p>
+<p>The following example uses the <code class="literal">DataMember</code> attribute to control how the POCO property
+named <code class="literal">StringProperty</code> is serialized</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">public class MyDocumentWithDataMember
+{
+    [DataMember(Name = "string_property")]
+    public string StringProperty { get; set; }
+}
+
+var indexResponse = Client.Index(
+        new MyDocumentWithDataMember { StringProperty = "value" },
+        i =&gt; i.Index("my_documents"));</pre>
+</div>
+<p>The above example serializes the <code class="literal">MyDocumentWithDataMember</code> POCO to</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">{
+  "string_property": "value"
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="default-mapping-for"></a><code class="literal">DefaultMappingFor&lt;TDocument&gt;</code> setting<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-net/edit/master/docs/client-concepts/high-level/serialization/modelling-documents-with-types.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Whilst <code class="literal">DefaultFieldNameInferrer</code> applies a convention to all POCO properties, there may be occasions where
+only particular properties of a specific POCO are serialized differently. The <code class="literal">DefaultMappingFor&lt;TDocument&gt;</code> setting
+on <code class="literal">ConnectionSettings</code> can be used to change how properties are mapped for a type. The following example
+changes how the <code class="literal">StringProperty</code> is serialized for the <code class="literal">MyDocument</code> type</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">var settings = new ConnectionSettings();
+
+settings.DefaultMappingFor&lt;MyDocument&gt;(d =&gt; d
+    .PropertyName(p =&gt; p.StringProperty, nameof(MyDocument.StringProperty)) <a id="CO43-1"></a><i class="conum" data-value="1"></i>
+);
+
+var client = new ElasticClient(settings);
+
+var indexResponse = client.Index(
+    new MyDocument { StringProperty = "value" },
+    i =&gt; i.Index("my_documents"));</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO43-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>serialize the <code class="literal">StringProperty</code> type as <code class="literal">"StringProperty"</code></p>
+</td>
+</tr>
+</table>
+</div>
+<p>The above example serializes the <code class="literal">MyDocument</code> POCO to</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">{
+  "StringProperty": "value"
+}</pre>
+</div>
+<p><code class="literal">DefaultMappingFor&lt;TDocument&gt;</code>'s behaviour can be somewhat surprising when class hierarchies are involved. Consider the following
+POCOs</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">public class MyBaseDocument
+{
+    public string StringProperty { get; set; }
+}
+
+public class MyDerivedDocument : MyBaseDocument
+{
+    public int IntProperty { get; set; }
+}</pre>
+</div>
+<p>When serializing an instance of <code class="literal">MyDerivedDocument</code> with</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">var indexResponse = Client.Index(
+    new MyDerivedDocument { StringProperty = "value", IntProperty = 2 },
+    i =&gt; i.Index("my_documents"));</pre>
+</div>
+<p>it serializes to</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">{
+  "intProperty": 2,
+  "stringProperty": "value"
+}</pre>
+</div>
+<p>Now, consider what happens when <code class="literal">DefaultMappingFor&lt;TDocument&gt;</code> is used to control how <code class="literal">MyDerivedDocument</code>
+is mapped</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">var settings = new ConnectionSettings();
+
+settings.DefaultMappingFor&lt;MyDerivedDocument&gt;(d =&gt; d
+    .PropertyName(p =&gt; p.IntProperty, nameof(MyDerivedDocument.IntProperty)) <a id="CO44-1"></a><i class="conum" data-value="1"></i>
+    .Ignore(p =&gt; p.StringProperty) <a id="CO44-2"></a><i class="conum" data-value="2"></i>
+);
+
+var client = new ElasticClient(settings);
+
+var indexResponse = client.Index(
+    new MyDerivedDocument { StringProperty = "value", IntProperty = 2 },
+    i =&gt; i.Index("my_documents"));</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO44-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>serialize the <code class="literal">IntProperty</code> type as <code class="literal">"IntProperty"</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO44-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>ignore <code class="literal">StringProperty</code></p>
+</td>
+</tr>
+</table>
+</div>
+<p><code class="literal">MyDerivedDocument</code> serializes to</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">{
+  "IntProperty": 2
+}</pre>
+</div>
+<p>showing that the POCO property named <code class="literal">IntProperty</code> is serialized to JSON object member named <code class="literal">"IntProperty"</code> and
+<code class="literal">StringProperty</code> has not been serialized (ignored). This shouldn&#8217;t be surprising.</p>
+<p>Now, index an instance of the base class, <code class="literal">MyBaseDocument</code></p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">var indexResponse2 = client.Index(
+    new MyBaseDocument { StringProperty = "value" },
+    i =&gt; i.Index("my_documents"));</pre>
+</div>
+<p>This serializes to an empty JSON object</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">{}</pre>
+</div>
+<p>The <code class="literal">StringProperty</code> has not been serialized (ignored) for the base class, even though <code class="literal">DefaultMappingFor&lt;TDocument&gt;</code>
+was used with the derived class, <code class="literal">MyDerivedDocument</code></p>
+<p>This happens because <code class="literal">MyBaseDocument</code> is the <em>declaring type</em> for the <code class="literal">StringProperty</code> member; when the <code class="literal">MemberInfo</code> for
+the <code class="literal">StringProperty</code> is retrieved from the expression <code class="literal">p =&gt; p.StringProperty</code>, the <code class="literal">DeclaringType</code> is <code class="literal">MyBaseDocument</code>.
+Since <code class="literal">DefaultMappingFor&lt;TDocument&gt;</code> persists property mappings for types in a dictionary keyed on <code class="literal">MemberInfo</code>, the
+<code class="literal">PropertyName()</code> mapping defined using <code class="literal">DefaultMappingFor&lt;MyDerivedDocument&gt;</code> also applies to the base type, <code class="literal">MyBaseDocument</code>.</p>
+<p>Consider a more involved example where the base type defines a member as <code class="literal">virtual</code>, and the derived type provides an
+<code class="literal">override</code> for the member</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">public class MyBaseDocumentVirtualProperty
+{
+    public virtual string StringProperty { get; set; }
+}
+
+public class MyDerivedDocumentOverrideProperty : MyBaseDocumentVirtualProperty
+{
+    public override string StringProperty { get; set; }
+
+    public int IntProperty { get; set; }
+}</pre>
+</div>
+<p>With a similar scenario to the last example, <code class="literal">DefaultMappingFor&lt;TDocument&gt;</code> is defined for the
+derived type, <code class="literal">MyDerivedDocumentOverrideProperty</code></p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">var settings = new ConnectionSettings();
+
+settings.DefaultMappingFor&lt;MyDerivedDocumentOverrideProperty&gt;(d =&gt; d
+    .PropertyName(p =&gt; p.IntProperty, nameof(MyDerivedDocumentOverrideProperty.IntProperty))
+    .Ignore(p =&gt; p.StringProperty)
+);
+
+var client = new ElasticClient(settings);
+
+var indexResponse = client.Index(
+    new MyDerivedDocumentOverrideProperty { StringProperty = "value", IntProperty = 2 },
+    i =&gt; i.Index("my_documents"));</pre>
+</div>
+<p>The instance of <code class="literal">MyDerivedDocumentOverrideProperty</code> serializes to</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">{
+  "stringProperty": "value",
+  "IntProperty": 2
+}</pre>
+</div>
+<p>Notably, the <code class="literal">StringProperty</code> member has been serialized and not ignored, even though the
+<code class="literal">DefaultMappingFor&lt;MyDerivedDocumentOverrideProperty&gt;</code> configuration specifies to ignore it.</p>
+<p>Serializing an instance of the base type, <code class="literal">MyBaseDocumentVirtualProperty</code></p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">var indexResponse2 = client.Index(
+    new MyBaseDocumentVirtualProperty { StringProperty = "value" },
+    i =&gt; i.Index("my_documents"));</pre>
+</div>
+<p>serializes to an empty JSON object</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">{}</pre>
+</div>
+<p>This may be surprising.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>There is a difference in how <code class="literal">MemberInfo</code> that represent the members of a type are retrieved when using reflection, compared
+to how <code class="literal">MemberInfo</code> are determined from expressions.</p>
+<p>As an example, when retrieving <code class="literal">StringProperty</code> member on <code class="literal">MyDerivedDocumentOverrideProperty</code> using reflection, both
+<code class="literal">DeclaringType</code> and <code class="literal">ReflectedType</code> are <code class="literal">MyDerivedDocumentOverrideProperty</code></p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">var memberInfo = typeof(MyDerivedDocumentOverrideProperty).GetProperty("StringProperty");
+Console.WriteLine($"DeclaringType: {memberInfo.DeclaringType.Name}");
+Console.WriteLine($"ReflectedType: {memberInfo.ReflectedType.Name}");</pre>
+</div>
+<p>In contrast, when retrieving <code class="literal">StringProperty</code> member on <code class="literal">MyDerivedDocumentOverrideProperty</code> using an expression, both
+<code class="literal">DeclaringType</code> and <code class="literal">ReflectedType</code> are <code class="literal">MyBaseDocumentVirtualProperty</code></p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">public class MemberVisitor : ExpressionVisitor
+{
+       protected override Expression VisitMember(MemberExpression node)
+       {
+           Console.WriteLine($"DeclaringType: {node.Member.DeclaringType.Name}");
+           Console.WriteLine($"ReflectedType: {node.Member.ReflectedType.Name}");
+           return base.VisitMember(node);
+       }
+}
+
+Expression&lt;Func&lt;MyDerivedDocumentOverrideProperty, string&gt;&gt; memberExpression =
+    p =&gt; p.StringProperty;
+
+var visitor = new MemberVisitor();
+visitor.Visit(memberExpression);</pre>
+</div>
+<p>Crucially, this difference in how <code class="literal">MemberInfo</code> are retrieved explains the result of the previous example;
+The serialization implementation determines the members for a given type using reflection, whereas <code class="literal">DefaultMappingFor&lt;TDocument&gt;</code>
+determines the member in <code class="literal">PropertyName</code> using the expression passed.</p>
+</div>
+</div>
+<p>As another example, consider a derived type that hides a base type member, using the <code class="literal">new</code> keyword</p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">public class MyDerivedDocumentShadowProperty : MyBaseDocument
+{
+    public new string StringProperty { get; set; }
+}</pre>
+</div>
+<p>Now when configuring <code class="literal">DefaultMappingFor&lt;TDocument&gt;</code> for <code class="literal">MyDerivedDocumentShadowProperty</code></p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">var settings = new ConnectionSettings();
+
+settings.DefaultMappingFor&lt;MyDerivedDocumentShadowProperty&gt;(d =&gt; d
+    .Ignore(p =&gt; p.StringProperty)
+);
+
+var client = new ElasticClient(settings);
+
+var indexResponse = client.Index(
+    new MyDerivedDocumentShadowProperty { StringProperty = "value" },
+    i =&gt; i.Index("my_documents"));</pre>
+</div>
+<p>an instance of <code class="literal">MyDerivedDocumentShadowProperty</code> serializes to</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">{}</pre>
+</div>
+<p>Whilst the base type <code class="literal">MyBaseDocument</code></p>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">var indexResponse2 = client.Index(
+    new MyBaseDocument { StringProperty = "value" },
+    i =&gt; i.Index("my_documents"));</pre>
+</div>
+<p>serializes to</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">{
+  "stringProperty": "value"
+}</pre>
+</div>
+<p>In summary, careful consideration should be made when using type hierarchies to represent documents
+that are indexed in Elasticsearch. It is generally recommended to stick to simple POCOs, where possible.</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="extending-nest-types.html">« Extending NEST types</a>
+</span>
+<span class="next">
+<a href="mapping.html">Mapping »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
