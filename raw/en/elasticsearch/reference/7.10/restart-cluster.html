@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Full-cluster restart and rolling restart | Elasticsearch Reference [7.10] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.10]"/>
+<link rel="up" href="setup.html" title="Set up Elasticsearch"/>
+<link rel="prev" href="add-elasticsearch-nodes.html" title="Add and remove nodes in your cluster"/>
+<link rel="next" href="modules-remote-clusters.html" title="Remote clusters"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.10"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.10"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.10]</a></span>
+»
+<span class="breadcrumb-link"><a href="setup.html">Set up Elasticsearch</a></span>
+»
+<span class="breadcrumb-node">Full-cluster restart and rolling restart</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="add-elasticsearch-nodes.html">« Add and remove nodes in your cluster</a>
+</span>
+<span class="next">
+<a href="modules-remote-clusters.html">Remote clusters »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="restart-cluster"></a>Full-cluster restart and rolling restart<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/setup/restart-cluster.asciidoc">edit</a></h2>
+</div></div></div>
+<p>There may be <a href="/guide/en/elasticsearch/reference/7.10/configuring-tls.html#tls-transport" class="ulink" target="_top">situations where you want
+to perform a full-cluster restart</a> or a rolling restart. In the case of
+<a class="xref" href="restart-cluster.html#restart-cluster-full" title="Full-cluster restart">full-cluster restart</a>, you shut down and restart all the
+nodes in the cluster while in the case of
+<a class="xref" href="restart-cluster.html#restart-cluster-rolling" title="Rolling restart">rolling restart</a>, you shut down only one node at a
+time, so the service remains uninterrupted.</p>
+<h3><a id="restart-cluster-full"></a>Full-cluster restart<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/setup/restart-cluster.asciidoc">edit</a></h3>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p><span class="strong strong"><strong>Disable shard allocation.</strong></span></p>
+<p>When you shut down a node, the allocation process waits for
+<code class="literal">index.unassigned.node_left.delayed_timeout</code> (by default, one minute) before
+starting to replicate the shards on that node to other nodes in the cluster,
+which can involve a lot of I/O.  Since the node is shortly going to be
+restarted, this I/O is unnecessary. You can avoid racing the clock by
+<a class="xref" href="modules-cluster.html#cluster-routing-allocation-enable">disabling allocation</a> of replicas before
+shutting down the node:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _cluster/settings
+{
+  "persistent": {
+    "cluster.routing.allocation.enable": "primaries"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/42.console"></div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Stop indexing and perform a synced flush.</strong></span></p>
+<p>Performing a <a class="xref" href="indices-synced-flush-api.html" title="Synced flush API">synced-flush</a> speeds up shard
+recovery.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _flush/synced</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/43.console"></div>
+<p>When you perform a synced flush, check the response to make sure there are
+no failures. Synced flush operations that fail due to pending indexing
+operations are listed in the response body, although the request itself
+still returns a 200 OK status. If there are failures, reissue the request.</p>
+<p>Note that synced flush is deprecated and will be removed in 8.0. A flush
+has the same effect as a synced flush on Elasticsearch 7.6 or later.</p>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Temporarily stop the tasks associated with active machine learning jobs and datafeeds.</strong></span> (Optional)</p>
+<p>Machine learning features require specific <a href="/subscriptions" class="ulink" target="_top">subscriptions</a>.</p>
+<p>You have two options to handle machine learning jobs and datafeeds when you shut down a
+cluster:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>Temporarily halt the tasks associated with your machine learning jobs and datafeeds and
+prevent new jobs from opening by using the
+<a class="xref" href="ml-set-upgrade-mode.html" title="Set upgrade mode API">set upgrade mode API</a>:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ml/set_upgrade_mode?enabled=true</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/44.console"></div>
+<p>When you disable upgrade mode, the jobs resume using the last model state that
+was automatically saved. This option avoids the overhead of managing active jobs
+during the shutdown and is faster than explicitly stopping datafeeds and closing
+jobs.</p>
+</li>
+<li class="listitem">
+<a href="/guide/en/machine-learning/7.10/stopping-ml.html" class="ulink" target="_top">Stop all datafeeds and close all jobs</a>. This option
+saves the model state at the time of closure. When you reopen the jobs after the
+cluster restart, they use the exact same model. However, saving the latest model
+state takes longer than using upgrade mode, especially if you have a lot of jobs
+or jobs with large model states.
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Shut down all nodes.</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>If you are running Elasticsearch with <code class="literal">systemd</code>:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">sudo systemctl stop elasticsearch.service</pre>
+</div>
+</li>
+<li class="listitem">
+<p>If you are running Elasticsearch with SysV <code class="literal">init</code>:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">sudo -i service elasticsearch stop</pre>
+</div>
+</li>
+<li class="listitem">
+<p>If you are running Elasticsearch as a daemon:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kill $(cat pid)</pre>
+</div>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Perform any needed changes.</strong></span>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Restart nodes.</strong></span></p>
+<p>If you have dedicated master nodes, start them first and wait for them to
+form a cluster and elect a master before proceeding with your data nodes.
+You can check progress by looking at the logs.</p>
+<p>As soon as enough master-eligible nodes have discovered each other, they form a
+cluster and elect a master. At that point, you can use
+the <a class="xref" href="cat-health.html" title="cat health API">cat health</a> and <a class="xref" href="cat-nodes.html" title="cat nodes API">cat nodes</a> APIs to monitor nodes
+joining the cluster:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _cat/health
+
+GET _cat/nodes</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/45.console"></div>
+<p>The <code class="literal">status</code> column returned by <code class="literal">_cat/health</code> shows the health of each node
+in the cluster: <code class="literal">red</code>, <code class="literal">yellow</code>, or <code class="literal">green</code>.</p>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Wait for all nodes to join the cluster and report a status of yellow.</strong></span></p>
+<p>When a node joins the cluster, it begins to recover any primary shards that
+are stored locally. The <a class="xref" href="cat-health.html" title="cat health API"><code class="literal">_cat/health</code></a> API initially reports
+a <code class="literal">status</code> of <code class="literal">red</code>, indicating that not all primary shards have been allocated.</p>
+<p>Once a node recovers its local shards, the cluster <code class="literal">status</code> switches to
+<code class="literal">yellow</code>, indicating that all primary shards have been recovered, but not all
+replica shards are allocated. This is to be expected because you have not yet
+re-enabled allocation. Delaying the allocation of replicas until all nodes
+are <code class="literal">yellow</code> allows the master to allocate replicas to nodes that
+already have local shard copies.</p>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Re-enable allocation.</strong></span></p>
+<p>When all nodes have joined the cluster and recovered their primary shards,
+re-enable allocation by restoring <code class="literal">cluster.routing.allocation.enable</code> to its
+default:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _cluster/settings
+{
+  "persistent": {
+    "cluster.routing.allocation.enable": null
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/46.console"></div>
+<p>Once allocation is re-enabled, the cluster starts allocating replica shards to
+the data nodes. At this point it is safe to resume indexing and searching,
+but your cluster will recover more quickly if you can wait until all primary
+and replica shards have been successfully allocated and the status of all nodes
+is <code class="literal">green</code>.</p>
+<p>You can monitor progress with the <a class="xref" href="cat-health.html" title="cat health API"><code class="literal">_cat/health</code></a> and
+<a class="xref" href="cat-recovery.html" title="cat recovery API"><code class="literal">_cat/recovery</code></a> APIs:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _cat/health
+
+GET _cat/recovery</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/47.console"></div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Restart machine learning jobs.</strong></span> (Optional)</p>
+<p>If you temporarily halted the tasks associated with your machine learning jobs, use the
+<a class="xref" href="ml-set-upgrade-mode.html" title="Set upgrade mode API">set upgrade mode API</a> to return them to active states:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ml/set_upgrade_mode?enabled=false</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/48.console"></div>
+<p>If you closed all machine learning jobs before stopping the nodes, open the jobs and start
+the datafeeds from Kibana or with the <a class="xref" href="ml-open-job.html" title="Open anomaly detection jobs API">open jobs</a> and
+<a class="xref" href="ml-start-datafeed.html" title="Start datafeeds API">start datafeed</a> APIs.</p>
+</li>
+</ol>
+</div>
+<h3><a id="restart-cluster-rolling"></a>Rolling restart<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/setup/restart-cluster.asciidoc">edit</a></h3>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p><span class="strong strong"><strong>Disable shard allocation.</strong></span></p>
+<p>When you shut down a node, the allocation process waits for
+<code class="literal">index.unassigned.node_left.delayed_timeout</code> (by default, one minute) before
+starting to replicate the shards on that node to other nodes in the cluster,
+which can involve a lot of I/O.  Since the node is shortly going to be
+restarted, this I/O is unnecessary. You can avoid racing the clock by
+<a class="xref" href="modules-cluster.html#cluster-routing-allocation-enable">disabling allocation</a> of replicas before
+shutting down the node:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _cluster/settings
+{
+  "persistent": {
+    "cluster.routing.allocation.enable": "primaries"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/49.console"></div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Stop indexing and perform a synced flush.</strong></span></p>
+<p>Performing a <a class="xref" href="indices-synced-flush-api.html" title="Synced flush API">synced-flush</a> speeds up shard
+recovery.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _flush/synced</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/50.console"></div>
+<p>When you perform a synced flush, check the response to make sure there are
+no failures. Synced flush operations that fail due to pending indexing
+operations are listed in the response body, although the request itself
+still returns a 200 OK status. If there are failures, reissue the request.</p>
+<p>Note that synced flush is deprecated and will be removed in 8.0. A flush
+has the same effect as a synced flush on Elasticsearch 7.6 or later.</p>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Temporarily stop the tasks associated with active machine learning jobs and datafeeds.</strong></span> (Optional)</p>
+<p>Machine learning features require specific <a href="/subscriptions" class="ulink" target="_top">subscriptions</a>.</p>
+<p>You have two options to handle machine learning jobs and datafeeds when you shut down a
+cluster:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>Temporarily halt the tasks associated with your machine learning jobs and datafeeds and
+prevent new jobs from opening by using the
+<a class="xref" href="ml-set-upgrade-mode.html" title="Set upgrade mode API">set upgrade mode API</a>:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ml/set_upgrade_mode?enabled=true</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/51.console"></div>
+<p>When you disable upgrade mode, the jobs resume using the last model state that
+was automatically saved. This option avoids the overhead of managing active jobs
+during the shutdown and is faster than explicitly stopping datafeeds and closing
+jobs.</p>
+</li>
+<li class="listitem">
+<a href="/guide/en/machine-learning/7.10/stopping-ml.html" class="ulink" target="_top">Stop all datafeeds and close all jobs</a>. This option
+saves the model state at the time of closure. When you reopen the jobs after the
+cluster restart, they use the exact same model. However, saving the latest model
+state takes longer than using upgrade mode, especially if you have a lot of jobs
+or jobs with large model states.
+</li>
+</ul>
+</div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+If you perform a rolling restart, you can also leave your machine learning
+jobs running. When you shut down a machine learning node, its jobs automatically
+move to another node and restore the model states. This option enables your jobs
+to continue running during the shutdown but it puts increased load on the
+cluster.
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Shut down a single node in case of rolling restart.</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>If you are running Elasticsearch with <code class="literal">systemd</code>:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">sudo systemctl stop elasticsearch.service</pre>
+</div>
+</li>
+<li class="listitem">
+<p>If you are running Elasticsearch with SysV <code class="literal">init</code>:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">sudo -i service elasticsearch stop</pre>
+</div>
+</li>
+<li class="listitem">
+<p>If you are running Elasticsearch as a daemon:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kill $(cat pid)</pre>
+</div>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Perform any needed changes.</strong></span>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Restart the node you changed.</strong></span></p>
+<p>Start the node and confirm that it joins the cluster by checking the log file or
+by submitting a <code class="literal">_cat/nodes</code> request:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _cat/nodes</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/52.console"></div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Reenable shard allocation.</strong></span></p>
+<p>Once the node has joined the cluster, remove the
+<code class="literal">cluster.routing.allocation.enable</code> setting to enable shard allocation and start
+using the node:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _cluster/settings
+{
+  "persistent": {
+    "cluster.routing.allocation.enable": null
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/53.console"></div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Repeat in case of rolling restart.</strong></span></p>
+<p>When the node has recovered and the cluster is stable, repeat these steps
+for each node that needs to be changed.</p>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Restart machine learning jobs.</strong></span> (Optional)</p>
+<p>If you temporarily halted the tasks associated with your machine learning jobs, use the
+<a class="xref" href="ml-set-upgrade-mode.html" title="Set upgrade mode API">set upgrade mode API</a> to return them to active states:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ml/set_upgrade_mode?enabled=false</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/54.console"></div>
+<p>If you closed all machine learning jobs before stopping the nodes, open the jobs and start
+the datafeeds from Kibana or with the <a class="xref" href="ml-open-job.html" title="Open anomaly detection jobs API">open jobs</a> and
+<a class="xref" href="ml-start-datafeed.html" title="Start datafeeds API">start datafeed</a> APIs.</p>
+</li>
+</ol>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="add-elasticsearch-nodes.html">« Add and remove nodes in your cluster</a>
+</span>
+<span class="next">
+<a href="modules-remote-clusters.html">Remote clusters »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

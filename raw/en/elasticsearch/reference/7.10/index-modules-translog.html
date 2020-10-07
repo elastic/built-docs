@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Translog | Elasticsearch Reference [7.10] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.10]"/>
+<link rel="up" href="index-modules.html" title="Index modules"/>
+<link rel="prev" href="preload-data-to-file-system-cache.html" title="Preloading data into the file system cache"/>
+<link rel="next" href="index-modules-history-retention.html" title="History retention"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.10"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.10"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.10]</a></span>
+»
+<span class="breadcrumb-link"><a href="index-modules.html">Index modules</a></span>
+»
+<span class="breadcrumb-node">Translog</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="preload-data-to-file-system-cache.html">« Preloading data into the file system cache</a>
+</span>
+<span class="next">
+<a href="index-modules-history-retention.html">History retention »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="index-modules-translog"></a>Translog<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/index-modules/translog.asciidoc">edit</a></h2>
+</div></div></div>
+<p>Changes to Lucene are only persisted to disk during a Lucene commit, which is a
+relatively expensive operation and so cannot be performed after every index or
+delete operation. Changes that happen after one commit and before another will
+be removed from the index by Lucene in the event of process exit or hardware
+failure.</p>
+<p>Lucene commits are too expensive to perform on every individual change, so each
+shard copy also writes operations into its <em>transaction log</em> known as the
+<em>translog</em>. All index and delete operations are written to the translog after
+being processed by the internal Lucene index but before they are acknowledged.
+In the event of a crash, recent operations that have been acknowledged but not
+yet included in the last Lucene commit are instead recovered from the translog
+when the shard recovers.</p>
+<p>An Elasticsearch <a class="xref" href="indices-flush.html" title="Flush API">flush</a> is the process of performing a Lucene commit and
+starting a new translog generation. Flushes are performed automatically in the
+background in order to make sure the translog does not grow too large, which
+would make replaying its operations take a considerable amount of time during
+recovery. The ability to perform a flush manually is also exposed through an
+API, although this is rarely needed.</p>
+<h3><a id="_translog_settings"></a>Translog settings<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/index-modules/translog.asciidoc">edit</a></h3>
+<p>The data in the translog is only persisted to disk when the translog is
+<code class="literal">fsync</code>ed and committed. In the event of a hardware failure or an operating
+system crash or a JVM crash or a shard failure, any data written since the
+previous translog commit will be lost.</p>
+<p>By default, <code class="literal">index.translog.durability</code> is set to <code class="literal">request</code> meaning that
+Elasticsearch will only report success of an index, delete, update, or bulk
+request to the client after the translog has been successfully <code class="literal">fsync</code>ed and
+committed on the primary and on every allocated replica. If
+<code class="literal">index.translog.durability</code> is set to <code class="literal">async</code> then Elasticsearch <code class="literal">fsync</code>s and
+commits the translog only every <code class="literal">index.translog.sync_interval</code> which means that
+any operations that were performed just before a crash may be lost when the node
+recovers.</p>
+<p>The following <a class="xref" href="indices-update-settings.html" title="Update index settings API">dynamically updatable</a> per-index
+settings control the behaviour of the translog:</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">index.translog.sync_interval</code>
+</span>
+</dt>
+<dd>
+How often the translog is <code class="literal">fsync</code>ed to disk and committed, regardless of
+write operations. Defaults to <code class="literal">5s</code>. Values less than <code class="literal">100ms</code> are not allowed.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">index.translog.durability</code>
+</span>
+</dt>
+<dd>
+<p>Whether or not to <code class="literal">fsync</code> and commit the translog after every index, delete,
+update, or bulk request. This setting accepts the following parameters:</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">request</code>
+</span>
+</dt>
+<dd>
+(default) <code class="literal">fsync</code> and commit after every request. In the event of hardware
+failure, all acknowledged writes will already have been committed to disk.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">async</code>
+</span>
+</dt>
+<dd>
+<code class="literal">fsync</code> and commit in the background every <code class="literal">sync_interval</code>. In
+the event of a failure, all acknowledged writes since the last
+automatic commit will be discarded.
+</dd>
+</dl>
+</div>
+</dd>
+<dt>
+<span class="term">
+<code class="literal">index.translog.flush_threshold_size</code>
+</span>
+</dt>
+<dd>
+The translog stores all operations that are not yet safely persisted in Lucene
+(i.e., are not part of a Lucene commit point). Although these operations are
+available for reads, they will need to be replayed if the shard was stopped
+and had to be recovered. This setting controls the maximum total size of these
+operations, to prevent recoveries from taking too long. Once the maximum size
+has been reached a flush will happen, generating a new Lucene commit point.
+Defaults to <code class="literal">512mb</code>.
+</dd>
+</dl>
+</div>
+<h4><a id="index-modules-translog-retention"></a>Translog retention<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/index-modules/translog.asciidoc">edit</a></h4>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<h3>Deprecated in 7.4.0.</h3>
+<p>Translog retention settings are deprecated in favor of <a class="xref" href="index-modules-history-retention.html" title="History retention">soft deletes</a>. These settings are effectively ignored since 7.4 and will be removed in a future version.</p>
+</div>
+</div>
+<p>If an index is not using <a class="xref" href="index-modules-history-retention.html" title="History retention">soft deletes</a> to
+retain historical operations then Elasticsearch recovers each replica shard by replaying
+operations from the primary&#8217;s translog. This means it is important for the
+primary to preserve extra operations in its translog in case it needs to
+rebuild a replica. Moreover it is important for each replica to preserve extra
+operations in its translog in case it is promoted to primary and then needs to
+rebuild its own replicas in turn. The following settings control how much
+translog is retained for peer recoveries.</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">index.translog.retention.size</code>
+</span>
+</dt>
+<dd>
+This controls the total size of translog files to keep for each shard.
+Keeping more translog files increases the chance of performing an operation
+based sync when recovering a replica. If the translog files are not
+sufficient, replica recovery will fall back to a file based sync. Defaults to
+<code class="literal">512mb</code>. This setting is ignored, and should not be set, if soft deletes are
+enabled. Soft deletes are enabled by default in indices created in Elasticsearch
+versions 7.0.0 and later.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">index.translog.retention.age</code>
+</span>
+</dt>
+<dd>
+This controls the maximum duration for which translog files are kept by each
+shard. Keeping more translog files increases the chance of performing an
+operation based sync when recovering replicas. If the translog files are not
+sufficient, replica recovery will fall back to a file based sync. Defaults to
+<code class="literal">12h</code>. This setting is ignored, and should not be set, if soft deletes are
+enabled. Soft deletes are enabled by default in indices created in Elasticsearch
+versions 7.0.0 and later.
+</dd>
+</dl>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="preload-data-to-file-system-cache.html">« Preloading data into the file system cache</a>
+</span>
+<span class="next">
+<a href="index-modules-history-retention.html">History retention »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

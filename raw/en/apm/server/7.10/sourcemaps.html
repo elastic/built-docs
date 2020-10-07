@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>How to apply source maps to error stack traces when using minified bundles | APM Server Reference [7.10] | Elastic</title>
+<link rel="home" href="index.html" title="APM Server Reference [7.10]"/>
+<link rel="up" href="howto-guides.html" title="How-to guides"/>
+<link rel="prev" href="howto-guides.html" title="How-to guides"/>
+<link rel="next" href="ilm.html" title="Custom index lifecycle management with APM Server"/>
+<meta name="DC.type" content="Learn/Docs/APM Server/Reference/7.10"/>
+<meta name="DC.subject" content="APM"/>
+<meta name="DC.identifier" content="7.10"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">APM Server Reference [7.10]</a></span>
+»
+<span class="breadcrumb-link"><a href="howto-guides.html">How-to guides</a></span>
+»
+<span class="breadcrumb-node">How to apply source maps to error stack traces when using minified bundles</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="howto-guides.html">« How-to guides</a>
+</span>
+<span class="next">
+<a href="ilm.html">Custom index lifecycle management with APM Server »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="sourcemaps"></a>How to apply source maps to error stack traces when using minified bundles<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/7.10/docs/sourcemaps.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>Minifying JavaScript bundles in production is a common practice;
+it can greatly improve the load time and network latency of your applications.
+The problem with minifying code is that it can be hard to debug.</p>
+<p>For best results, uploading source maps should become a part of your deployment procedure,
+and not something you only do when you see unhelpful errors.
+That&#8217;s because uploading source maps after errors happen won&#8217;t make old errors magically readable —
+errors must occur again for source mapping to occur.</p>
+<p>Here&#8217;s an example of an exception stack trace in the APM app when using minified code.
+As you can see, it&#8217;s not very helpful.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/source-map-before.png" alt="APM app without source mapping">
+</div>
+</div>
+<p>With a source map, minified files are mapped back to the original source code,
+allowing you to maintain the speed advantage of minified code,
+without losing the ability to quickly and easily debug your application.
+Here&#8217;s the same example as before, but with a source map uploaded and applied:</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/source-map-after.png" alt="APM app with source mapping">
+</div>
+</div>
+<p>Follow the steps below to enable source mapping your error stack traces in the APM app:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="sourcemaps.html#sourcemap-rum-initialize" title="Initialize the RUM Agent">Initialize the RUM Agent</a>
+</li>
+<li class="listitem">
+<a class="xref" href="sourcemaps.html#sourcemap-rum-generate" title="Generate a source map">Generate a source map</a>
+</li>
+<li class="listitem">
+<a class="xref" href="sourcemaps.html#sourcemap-rum-upload" title="Upload the source map to APM Server">Upload the source map to APM Server</a>
+</li>
+</ul>
+</div>
+<h3><a id="sourcemap-rum-initialize"></a>Initialize the RUM Agent<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/7.10/docs/sourcemaps.asciidoc">edit</a></h3>
+<p>First, set the service name and version of your application when initializing the RUM Agent.
+The <code class="literal">serviceVersion</code> you choose might be the <code class="literal">version</code> from your <code class="literal">package.json</code>. For example:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">import { init as initApm } from '@elastic/apm-rum'
+const serviceVersion = require("./package.json").version
+
+const apm = initApm({
+  serviceName: 'myService',
+  serviceVersion: serviceVersion
+})</pre>
+</div>
+<p>Or, <code class="literal">serviceVersion</code> could be a git commit reference. For example:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">const git = require('git-rev-sync')
+const serviceVersion = git.short()</pre>
+</div>
+<p>It can also be any other unique string that indicates a specific version of your application.
+APM Server uses the <code class="literal">serviceVersion</code> to match the correct source map file to each stack trace.</p>
+<h3 class="child_attributes"><a id="sourcemap-rum-generate"></a>Generate a source map<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/7.10/docs/sourcemaps.asciidoc">edit</a></h3>
+<p>To be compatible with Elastic APM, source maps must follow the
+<a href="https://docs.google.com/document/d/1U1RGAehQwRypUTovF1KRlpiOFze0b-_2gc6fAH0KY0k" class="ulink" target="_top">source map revision 3 proposal spec</a>.</p>
+<p>Source maps can be generated and configured in many different ways.
+For example, if you&#8217;re using parcel, they are generated by default.
+If you are using webpack, some configuration may need to be done to generate a source map:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">const webpack = require('webpack')
+const serviceVersion = require("./package.json").version <a id="CO2-1"></a><i class="conum" data-value="1"></i>
+const TerserPlugin = require('terser-webpack-plugin');
+module.exports = {
+  entry: 'app.js',
+  output: {
+    filename: 'app.min.js',
+    path: './dist'
+  },
+  devtool: 'source-map',
+  plugins: [
+    new webpack.DefinePlugin({'serviceVersion': JSON.stringify(serviceVersion)}),
+    new TerserPlugin({
+      sourceMap: true
+    })
+  ]
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO2-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>If you&#8217;re using a different method of defining <code class="literal">serviceVersion</code>, you can set it here.</p>
+</td>
+</tr>
+</table>
+</div>
+<h3><a id="sourcemap-rum-upload"></a>Upload the source map to APM Server<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/7.10/docs/sourcemaps.asciidoc">edit</a></h3>
+<p>The APM Server exposes a <a class="xref" href="sourcemap-api.html" title="Source map upload API">source map endpoint</a> for uploading source maps.
+Source maps are cached in memory for as long as the <a class="xref" href="configuration-rum.html#rum-sourcemap-cache" title="source_mapping.cache.expiration">cache expiration</a> setting indicates.
+Source maps must be attached as a <code class="literal">file upload</code> and you can configure an API key or secret token to restrict uploads.</p>
+<p>Before uploading a source map, ensure that:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+RUM support is enabled in APM Server by setting <a class="xref" href="configuration-rum.html#rum-enable" title="enabled"><code class="literal">apm-server.rum.enabled</code></a> to <code class="literal">true</code>.
+</li>
+<li class="listitem">
+<a class="xref" href="configuration-rum.html#config-sourcemapping-enabled" title="source_mapping.enabled"><code class="literal">apm-server.rum.source_mapping.enabled</code></a> is <code class="literal">true</code> (the default).
+This means that if a source map has previously been uploaded,
+source mapping will automatically be applied to all incoming transactions and errors.
+</li>
+</ol>
+</div>
+<p>Let&#8217;s look at two different ways to upload a source map: curl and a custom application.
+Each example includes the four fields necessary for APM Server to later map minified code to its source:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">service_name</code> - Should match the <code class="literal">serviceName</code> from step one
+</li>
+<li class="listitem">
+<code class="literal">service_version</code> - Should match the <code class="literal">serviceVersion</code> from step one
+</li>
+<li class="listitem">
+<code class="literal">bundle_filepath</code> - The absolute path of the final bundle as used in the web application
+</li>
+<li class="listitem">
+<code class="literal">sourcemap</code> - The location of the source map.
+If you have multiple source maps, you&#8217;ll need to upload each individually.
+</li>
+</ul>
+</div>
+<h4><a id="sourcemap-curl"></a>Upload via curl<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/7.10/docs/sourcemaps.asciidoc">edit</a></h4>
+<p>Here’s an example curl request that uploads the source map file created in the previous step.
+This request uses an <a class="xref" href="api-key.html" title="API keys">API key</a> for authentication.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">SERVICEVERSION=`node -e "console.log(require('./package.json').version);"` &amp;&amp; \ <a id="CO3-1"></a><i class="conum" data-value="1"></i>
+curl http://localhost:8200/assets/v1/sourcemaps -X POST \
+    -F sourcemap="@./dist/app.min.js.map" \
+    -F service_version="$SERVICEVERSION" \
+    -F bundle_filepath="http://localhost/app.min.js" \
+    -F service_name="myService"
+    -H "Authorization: ApiKey &lt;token&gt;" <a id="CO3-2"></a><i class="conum" data-value="2"></i></pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO3-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This example uses the version from <code class="literal">package.json</code>.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO3-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The API key used here needs to have the <a class="xref" href="api-key.html#create-api-key-privileges" title="Privileges">sourcemap privilege</a>.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>Alternatively, you can use a <a class="xref" href="secret-token.html" title="Secret token">secret token</a> for authentication.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">    -H "Authorization: Bearer &lt;token&gt;" <a id="CO4-1"></a><i class="conum" data-value="1"></i></pre>
+</div>
+<div class="console_widget" data-snippet="snippets/2.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO4-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Omit the header entirely if you&#8217;re not using authentication.</p>
+</td>
+</tr>
+</table>
+</div>
+<h4><a id="sourcemap-custom-app"></a>Upload via a custom app<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/7.10/docs/sourcemaps.asciidoc">edit</a></h4>
+<p>To ensure uploading source maps become a part of your deployment process,
+consider automating the process with a custom application.
+Here’s an example Node.js application that uploads the source map file created in the previous step:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">console.log('Uploading sourcemaps!')
+var request = require('request')
+var filepath = './dist/app.min.js.map'
+var formData = {
+  sourcemap: fs.createReadStream(filepath),
+  service_version: require("./package.json").version, // Or use 'git-rev-sync' for git commit hash
+  bundle_filepath: 'http://localhost/app.min.js',
+  service_name: 'service-name’ <a id="CO5-1"></a><i class="conum" data-value="1"></i>
+}
+request.post({url: 'http://localhost:8200/assets/v1/sourcemaps',formData: formData}, function (err, resp, body) {
+  if (err) {
+    console.log('Error while uploading sourcemaps!', err)
+  } else {
+    console.log('Sourcemaps uploaded!')
+  }
+})</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO5-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">service_name</code> should match the service name specified when initializing the RUM Agent</p>
+</td>
+</tr>
+</table>
+</div>
+<h3><a id="sourcemap-done"></a>Next steps<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/7.10/docs/sourcemaps.asciidoc">edit</a></h3>
+<p>That&#8217;s it! The source map has been uploaded to Elasticsearch,
+and any new exception stack traces should now be correctly mapped to your source code.</p>
+<p>More information:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="sourcemap-indices.html" title="Example source map document">Source map indices</a>
+</li>
+<li class="listitem">
+<a class="xref" href="sourcemap-api.html" title="Source map upload API">Source map upload API reference</a>.
+</li>
+<li class="listitem">
+<a class="xref" href="sourcemap-api.html#sourcemap-apply" title="How source maps are applied">How source maps are applied</a>.
+</li>
+</ul>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="howto-guides.html">« How-to guides</a>
+</span>
+<span class="next">
+<a href="ilm.html">Custom index lifecycle management with APM Server »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Elasticsearch filter plugin | Logstash Reference [7.10] | Elastic</title>
+<link rel="home" href="index.html" title="Logstash Reference [7.10]"/>
+<link rel="up" href="filter-plugins.html" title="Filter plugins"/>
+<link rel="prev" href="plugins-filters-elapsed.html" title="Elapsed filter plugin"/>
+<link rel="next" href="plugins-filters-environment.html" title="Environment filter plugin"/>
+<meta name="DC.type" content="Learn/Docs/Logstash/Reference/7.10"/>
+<meta name="DC.subject" content="Logstash"/>
+<meta name="DC.identifier" content="7.10"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Logstash Reference [7.10]</a></span>
+»
+<span class="breadcrumb-link"><a href="filter-plugins.html">Filter plugins</a></span>
+»
+<span class="breadcrumb-node">Elasticsearch filter plugin</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="plugins-filters-elapsed.html">« Elapsed filter plugin</a>
+</span>
+<span class="next">
+<a href="plugins-filters-environment.html">Environment filter plugin »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="plugins-filters-elasticsearch"></a>Elasticsearch filter plugin<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h2>
+</div></div></div>
+
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Plugin version: v3.9.0
+</li>
+<li class="listitem">
+Released on: 2020-06-25
+</li>
+<li class="listitem">
+<a href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/blob/v3.9.0/CHANGELOG.md" class="ulink" target="_top">Changelog</a>
+</li>
+</ul>
+</div>
+<p>For other versions, see the
+<a href="/guide/en/logstash-versioned-plugins/current/filter-elasticsearch-index.html" class="ulink" target="_top">Versioned plugin docs</a>.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_getting_help_126"></a>Getting Help<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h3>
+</div></div></div>
+<p>For questions about the plugin, open a topic in the <a href="http://discuss.elastic.co" class="ulink" target="_top">Discuss</a> forums. For bugs or feature requests, open an issue in <a href="https://github.com/logstash-plugins/logstash-filter-elasticsearch" class="ulink" target="_top">Github</a>.
+For the list of Elastic supported plugins, please consult the <a href="/support/matrix#matrix_logstash_plugins" class="ulink" target="_top">Elastic Support Matrix</a>.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_description_124"></a>Description<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Search Elasticsearch for a previous log event and copy some fields from it
+into the current event. Below are two complete examples of how this filter might
+be used.</p>
+<p>The first example uses the legacy <em>query</em> parameter where the user is limited to an Elasticsearch query_string.
+Whenever logstash receives an "end" event, it uses this elasticsearch
+filter to find the matching "start" event based on some operation identifier.
+Then it copies the <code class="literal">@timestamp</code> field from the "start" event into a new field on
+the "end" event.  Finally, using a combination of the "date" filter and the
+"ruby" filter, we calculate the time duration in hours between the two events.</p>
+<div class="pre_wrapper lang-ruby">
+<pre class="programlisting prettyprint lang-ruby">if [type] == "end" {
+   elasticsearch {
+      hosts =&gt; ["es-server"]
+      query =&gt; "type:start AND operation:%{[opid]}"
+      fields =&gt; { "@timestamp" =&gt; "started" }
+   }
+
+   date {
+      match =&gt; ["[started]", "ISO8601"]
+      target =&gt; "[started]"
+   }
+
+   ruby {
+      code =&gt; "event.set('duration_hrs', (event.get('@timestamp') - event.get('started')) / 3600)"
+   }
+}</pre>
+</div>
+<p>The example below reproduces the above example but utilises the query_template.
+This query_template represents a full Elasticsearch query DSL and supports the
+standard Logstash field substitution syntax.  The example below issues
+the same query as the first example but uses the template shown.</p>
+<div class="pre_wrapper lang-ruby">
+<pre class="programlisting prettyprint lang-ruby">if [type] == "end" {
+      elasticsearch {
+         hosts =&gt; ["es-server"]
+         query_template =&gt; "template.json"
+         fields =&gt; { "@timestamp" =&gt; "started" }
+      }
+
+      date {
+         match =&gt; ["[started]", "ISO8601"]
+         target =&gt; "[started]"
+      }
+
+      ruby {
+         code =&gt; "event.set('duration_hrs', (event.get('@timestamp') - event.get('started')) / 3600)"
+      }
+}</pre>
+</div>
+<p>template.json:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+  "size": 1,
+  "sort" : [ { "@timestamp" : "desc" } ],
+  "query": {
+    "query_string": {
+      "query": "type:start AND operation:%{[opid]}"
+    }
+  },
+  "_source": ["@timestamp"]
+}</pre>
+</div>
+<p>As illustrated above, through the use of <em>opid</em>, fields from the Logstash
+events can be referenced within the template.
+The template will be populated per event prior to being used to query Elasticsearch.</p>
+<p>Notice also that when you use <code class="literal">query_template</code>, the Logstash attributes <code class="literal">result_size</code>
+and <code class="literal">sort</code> will be ignored. They should be specified directly in the JSON
+template, as shown in the example above.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="plugins-filters-elasticsearch-auth"></a>Authentication<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Authentication to a secure Elasticsearch cluster is possible using <em>one</em> of the following options:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-user" title="user"><code class="literal">user</code></a> AND <a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-password" title="password"><code class="literal">password</code></a>
+</li>
+<li class="listitem">
+<a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-cloud_auth" title="cloud_auth"><code class="literal">cloud_auth</code></a>
+</li>
+<li class="listitem">
+<a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-api_key" title="api_key"><code class="literal">api_key</code></a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="plugins-filters-elasticsearch-options"></a>Elasticsearch Filter Configuration Options<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h3>
+</div></div></div>
+<p>This plugin supports the following configuration options plus the <a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-common-options" title="Common Options">Common Options</a> described later.</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Setting</th>
+<th align="left" valign="top">Input type</th>
+<th align="left" valign="top">Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-aggregation_fields" title="aggregation_fields"><code class="literal">aggregation_fields</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#hash" title="Hash">hash</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-api_key" title="api_key"><code class="literal">api_key</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#password" title="Password">password</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-ca_file" title="ca_file"><code class="literal">ca_file</code></a></p></td>
+<td align="left" valign="top"><p>a valid filesystem path</p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-cloud_auth" title="cloud_auth"><code class="literal">cloud_auth</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#password" title="Password">password</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-cloud_id" title="cloud_id"><code class="literal">cloud_id</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#string" title="String">string</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-docinfo_fields" title="docinfo_fields"><code class="literal">docinfo_fields</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#hash" title="Hash">hash</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-enable_sort" title="enable_sort"><code class="literal">enable_sort</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#boolean" title="Boolean">boolean</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-fields" title="fields"><code class="literal">fields</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#array" title="Array">array</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-hosts" title="hosts"><code class="literal">hosts</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#array" title="Array">array</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-index" title="index"><code class="literal">index</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#string" title="String">string</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-password" title="password"><code class="literal">password</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#password" title="Password">password</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-proxy" title="proxy"><code class="literal">proxy</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#uri" title="URI">uri</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-query" title="query"><code class="literal">query</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#string" title="String">string</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-query_template" title="query_template"><code class="literal">query_template</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#string" title="String">string</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-result_size" title="result_size"><code class="literal">result_size</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#number" title="Number">number</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-sort" title="sort"><code class="literal">sort</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#string" title="String">string</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-ssl" title="ssl"><code class="literal">ssl</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#boolean" title="Boolean">boolean</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-tag_on_failure" title="tag_on_failure"><code class="literal">tag_on_failure</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#array" title="Array">array</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-user" title="user"><code class="literal">user</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#string" title="String">string</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Also see <a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-common-options" title="Common Options">Common Options</a> for a list of options supported by all
+filter plugins.</p>
+<p>&nbsp;</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-aggregation_fields"></a><code class="literal">aggregation_fields</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#hash" title="Hash">hash</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">{}</code>
+</li>
+</ul>
+</div>
+<p>Hash of aggregation names to copy from elasticsearch response into Logstash event fields</p>
+<p>Example:</p>
+<div class="pre_wrapper lang-ruby">
+<pre class="programlisting prettyprint lang-ruby">    filter {
+      elasticsearch {
+        aggregation_fields =&gt; {
+          "my_agg_name" =&gt; "my_ls_field"
+        }
+      }
+    }</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-api_key"></a><code class="literal">api_key</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#password" title="Password">password</a>
+</li>
+<li class="listitem">
+There is no default value for this setting.
+</li>
+</ul>
+</div>
+<p>Authenticate using Elasticsearch API key. Note that this option also requires enabling the <code class="literal">ssl</code> option.</p>
+<p>Format is <code class="literal">id:api_key</code> where <code class="literal">id</code> and <code class="literal">api_key</code> are as returned by the Elasticsearch <a href="/guide/en/elasticsearch/reference/current/security-api-create-api-key.html" class="ulink" target="_top">Create API key API</a>.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-proxy"></a><code class="literal">proxy</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#uri" title="URI">uri</a>
+</li>
+<li class="listitem">
+There is no default value for this setting.
+</li>
+</ul>
+</div>
+<p>Set the address of a forward HTTP proxy.
+An empty string is treated as if proxy was not set, and is useful when using
+environment variables e.g. <code class="literal">proxy =&gt; '${LS_PROXY:}'</code>.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-ca_file"></a><code class="literal">ca_file</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#path" title="Path">path</a>
+</li>
+<li class="listitem">
+There is no default value for this setting.
+</li>
+</ul>
+</div>
+<p>SSL Certificate Authority file</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-docinfo_fields"></a><code class="literal">docinfo_fields</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#hash" title="Hash">hash</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">{}</code>
+</li>
+</ul>
+</div>
+<p>Hash of docinfo fields to copy from old event (found via elasticsearch) into new event</p>
+<p>Example:</p>
+<div class="pre_wrapper lang-ruby">
+<pre class="programlisting prettyprint lang-ruby">    filter {
+      elasticsearch {
+        docinfo_fields =&gt; {
+          "_id" =&gt; "document_id"
+          "_index" =&gt; "document_index"
+        }
+      }
+    }</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-enable_sort"></a><code class="literal">enable_sort</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#boolean" title="Boolean">boolean</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">true</code>
+</li>
+</ul>
+</div>
+<p>Whether results should be sorted or not</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-fields"></a><code class="literal">fields</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#array" title="Array">array</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">{}</code>
+</li>
+</ul>
+</div>
+<p>An array of fields to copy from the old event (found via elasticsearch) into the
+new event, currently being processed.</p>
+<p>In the following example, the values of <code class="literal">@timestamp</code> and <code class="literal">event_id</code> on the event
+found via elasticsearch are copied to the current event&#8217;s
+<code class="literal">started</code> and <code class="literal">start_id</code> fields, respectively:</p>
+<div class="pre_wrapper lang-ruby">
+<pre class="programlisting prettyprint lang-ruby">fields =&gt; {
+  "@timestamp" =&gt; "started"
+  "event_id" =&gt; "start_id"
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-hosts"></a><code class="literal">hosts</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#array" title="Array">array</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">["localhost:9200"]</code>
+</li>
+</ul>
+</div>
+<p>List of elasticsearch hosts to use for querying.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-index"></a><code class="literal">index</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#string" title="String">string</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">""</code>
+</li>
+</ul>
+</div>
+<p>Comma-delimited list of index names to search; use <code class="literal">_all</code> or empty string to perform the operation on all indices.
+Field substitution (e.g. <code class="literal">index-name-%{date_field}</code>) is available</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-password"></a><code class="literal">password</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#password" title="Password">password</a>
+</li>
+<li class="listitem">
+There is no default value for this setting.
+</li>
+</ul>
+</div>
+<p>Basic Auth - password</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-query"></a><code class="literal">query</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#string" title="String">string</a>
+</li>
+<li class="listitem">
+There is no default value for this setting.
+</li>
+</ul>
+</div>
+<p>Elasticsearch query string. Read the Elasticsearch query string documentation.
+for more info at: <a href="/guide/en/elasticsearch/reference/master/query-dsl-query-string-query.html#query-string-syntax" class="ulink" target="_top">https://www.elastic.co/guide/en/elasticsearch/reference/master/query-dsl-query-string-query.html#query-string-syntax</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-query_template"></a><code class="literal">query_template</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#string" title="String">string</a>
+</li>
+<li class="listitem">
+There is no default value for this setting.
+</li>
+</ul>
+</div>
+<p>File path to elasticsearch query in DSL format. Read the Elasticsearch query documentation
+for more info at: <a href="/guide/en/elasticsearch/reference/current/query-dsl.html" class="ulink" target="_top">https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl.html</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-result_size"></a><code class="literal">result_size</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#number" title="Number">number</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">1</code>
+</li>
+</ul>
+</div>
+<p>How many results to return</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-sort"></a><code class="literal">sort</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#string" title="String">string</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">"@timestamp:desc"</code>
+</li>
+</ul>
+</div>
+<p>Comma-delimited list of <code class="literal">&lt;field&gt;:&lt;direction&gt;</code> pairs that define the sort order</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-ssl"></a><code class="literal">ssl</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#boolean" title="Boolean">boolean</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">false</code>
+</li>
+</ul>
+</div>
+<p>SSL</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-tag_on_failure"></a><code class="literal">tag_on_failure</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#array" title="Array">array</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">["_elasticsearch_lookup_failure"]</code>
+</li>
+</ul>
+</div>
+<p>Tags the event on failure to look up previous log event information. This can be used in later analysis.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-user"></a><code class="literal">user</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#string" title="String">string</a>
+</li>
+<li class="listitem">
+There is no default value for this setting.
+</li>
+</ul>
+</div>
+<p>Basic Auth - username</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-cloud_auth"></a><code class="literal">cloud_auth</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#password" title="Password">password</a>
+</li>
+<li class="listitem">
+There is no default value for this setting.
+</li>
+</ul>
+</div>
+<p>Cloud authentication string ("&lt;username&gt;:&lt;password&gt;" format) is an alternative for the <code class="literal">user</code>/<code class="literal">password</code> pair.</p>
+<p>For more info, check out the <a href="/guide/en/logstash/current/connecting-to-cloud.html#_cloud_auth" class="ulink" target="_top">Logstash-to-Cloud documentation</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-cloud_id"></a><code class="literal">cloud_id</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#string" title="String">string</a>
+</li>
+<li class="listitem">
+There is no default value for this setting.
+</li>
+</ul>
+</div>
+<p>Cloud ID, from the Elastic Cloud web console. If set <code class="literal">hosts</code> should not be used.</p>
+<p>For more info, check out the <a href="/guide/en/logstash/current/connecting-to-cloud.html#_cloud_id" class="ulink" target="_top">Logstash-to-Cloud documentation</a></p>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="plugins-filters-elasticsearch-common-options"></a>Common Options<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The following configuration options are supported by all filter plugins:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Setting</th>
+<th align="left" valign="top">Input type</th>
+<th align="left" valign="top">Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-add_field" title="add_field"><code class="literal">add_field</code></a></p></td>
+<td align="left" valign="top"><p><a href="/guide/en/logstash/7.10/configuration-file-structure.html#hash" class="ulink" target="_top">hash</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-add_tag" title="add_tag"><code class="literal">add_tag</code></a></p></td>
+<td align="left" valign="top"><p><a href="/guide/en/logstash/7.10/configuration-file-structure.html#array" class="ulink" target="_top">array</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-enable_metric" title="enable_metric"><code class="literal">enable_metric</code></a></p></td>
+<td align="left" valign="top"><p><a href="/guide/en/logstash/7.10/configuration-file-structure.html#boolean" class="ulink" target="_top">boolean</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-id" title="id"><code class="literal">id</code></a></p></td>
+<td align="left" valign="top"><p><a href="/guide/en/logstash/7.10/configuration-file-structure.html#string" class="ulink" target="_top">string</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-periodic_flush" title="periodic_flush"><code class="literal">periodic_flush</code></a></p></td>
+<td align="left" valign="top"><p><a href="/guide/en/logstash/7.10/configuration-file-structure.html#boolean" class="ulink" target="_top">boolean</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-remove_field" title="remove_field"><code class="literal">remove_field</code></a></p></td>
+<td align="left" valign="top"><p><a href="/guide/en/logstash/7.10/configuration-file-structure.html#array" class="ulink" target="_top">array</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-filters-elasticsearch.html#plugins-filters-elasticsearch-remove_tag" title="remove_tag"><code class="literal">remove_tag</code></a></p></td>
+<td align="left" valign="top"><p><a href="/guide/en/logstash/7.10/configuration-file-structure.html#array" class="ulink" target="_top">array</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-add_field"></a><code class="literal">add_field</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a href="/guide/en/logstash/7.10/configuration-file-structure.html#hash" class="ulink" target="_top">hash</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">{}</code>
+</li>
+</ul>
+</div>
+<p>If this filter is successful, add any arbitrary fields to this event.
+Field names can be dynamic and include parts of the event using the <code class="literal">%{field}</code>.</p>
+<p>Example:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">    filter {
+      elasticsearch {
+        add_field =&gt; { "foo_%{somefield}" =&gt; "Hello world, from %{host}" }
+      }
+    }</pre>
+</div>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">    # You can also add multiple fields at once:
+    filter {
+      elasticsearch {
+        add_field =&gt; {
+          "foo_%{somefield}" =&gt; "Hello world, from %{host}"
+          "new_field" =&gt; "new_static_value"
+        }
+      }
+    }</pre>
+</div>
+<p>If the event has field <code class="literal">"somefield" == "hello"</code> this filter, on success,
+would add field <code class="literal">foo_hello</code> if it is present, with the
+value above and the <code class="literal">%{host}</code> piece replaced with that value from the
+event. The second example would also add a hardcoded field.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-add_tag"></a><code class="literal">add_tag</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a href="/guide/en/logstash/7.10/configuration-file-structure.html#array" class="ulink" target="_top">array</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">[]</code>
+</li>
+</ul>
+</div>
+<p>If this filter is successful, add arbitrary tags to the event.
+Tags can be dynamic and include parts of the event using the <code class="literal">%{field}</code>
+syntax.</p>
+<p>Example:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">    filter {
+      elasticsearch {
+        add_tag =&gt; [ "foo_%{somefield}" ]
+      }
+    }</pre>
+</div>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">    # You can also add multiple tags at once:
+    filter {
+      elasticsearch {
+        add_tag =&gt; [ "foo_%{somefield}", "taggedy_tag"]
+      }
+    }</pre>
+</div>
+<p>If the event has field <code class="literal">"somefield" == "hello"</code> this filter, on success,
+would add a tag <code class="literal">foo_hello</code> (and the second example would of course add a <code class="literal">taggedy_tag</code> tag).</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-enable_metric"></a><code class="literal">enable_metric</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a href="/guide/en/logstash/7.10/configuration-file-structure.html#boolean" class="ulink" target="_top">boolean</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">true</code>
+</li>
+</ul>
+</div>
+<p>Disable or enable metric logging for this specific plugin instance.
+By default we record all the metrics we can, but you can disable metrics collection
+for a specific plugin.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-id"></a><code class="literal">id</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a href="/guide/en/logstash/7.10/configuration-file-structure.html#string" class="ulink" target="_top">string</a>
+</li>
+<li class="listitem">
+There is no default value for this setting.
+</li>
+</ul>
+</div>
+<p>Add a unique <code class="literal">ID</code> to the plugin configuration. If no ID is specified, Logstash will generate one.
+It is strongly recommended to set this ID in your configuration. This is particularly useful
+when you have two or more plugins of the same type, for example, if you have 2 elasticsearch filters.
+Adding a named ID in this case will help in monitoring Logstash when using the monitoring APIs.</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">    filter {
+      elasticsearch {
+        id =&gt; "ABC"
+      }
+    }</pre>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Variable substitution in the <code class="literal">id</code> field only supports environment variables
+      and does not support the use of values from the secret store.</p>
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-periodic_flush"></a><code class="literal">periodic_flush</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a href="/guide/en/logstash/7.10/configuration-file-structure.html#boolean" class="ulink" target="_top">boolean</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">false</code>
+</li>
+</ul>
+</div>
+<p>Call the filter flush method at regular interval.
+Optional.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-remove_field"></a><code class="literal">remove_field</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a href="/guide/en/logstash/7.10/configuration-file-structure.html#array" class="ulink" target="_top">array</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">[]</code>
+</li>
+</ul>
+</div>
+<p>If this filter is successful, remove arbitrary fields from this event.
+Fields names can be dynamic and include parts of the event using the %{field}
+Example:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">    filter {
+      elasticsearch {
+        remove_field =&gt; [ "foo_%{somefield}" ]
+      }
+    }</pre>
+</div>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">    # You can also remove multiple fields at once:
+    filter {
+      elasticsearch {
+        remove_field =&gt; [ "foo_%{somefield}", "my_extraneous_field" ]
+      }
+    }</pre>
+</div>
+<p>If the event has field <code class="literal">"somefield" == "hello"</code> this filter, on success,
+would remove the field with name <code class="literal">foo_hello</code> if it is present. The second
+example would remove an additional, non-dynamic field.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-filters-elasticsearch-remove_tag"></a><code class="literal">remove_tag</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-filter-elasticsearch/edit/master/docs/index.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a href="/guide/en/logstash/7.10/configuration-file-structure.html#array" class="ulink" target="_top">array</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">[]</code>
+</li>
+</ul>
+</div>
+<p>If this filter is successful, remove arbitrary tags from the event.
+Tags can be dynamic and include parts of the event using the <code class="literal">%{field}</code>
+syntax.</p>
+<p>Example:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">    filter {
+      elasticsearch {
+        remove_tag =&gt; [ "foo_%{somefield}" ]
+      }
+    }</pre>
+</div>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">    # You can also remove multiple tags at once:
+    filter {
+      elasticsearch {
+        remove_tag =&gt; [ "foo_%{somefield}", "sad_unwanted_tag"]
+      }
+    }</pre>
+</div>
+<p>If the event has field <code class="literal">"somefield" == "hello"</code> this filter, on success,
+would remove the tag <code class="literal">foo_hello</code> if it is present. The second example
+would remove a sad, unwanted tag as well.</p>
+</div>
+
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="plugins-filters-elapsed.html">« Elapsed filter plugin</a>
+</span>
+<span class="next">
+<a href="plugins-filters-environment.html">Environment filter plugin »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

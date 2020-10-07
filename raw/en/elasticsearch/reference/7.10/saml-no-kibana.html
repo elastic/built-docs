@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>SAML without Kibana | Elasticsearch Reference [7.10] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.10]"/>
+<link rel="up" href="saml-guide.html" title="Configuring SAML single-sign-on on the Elastic Stack"/>
+<link rel="prev" href="saml-troubleshooting.html" title="Troubleshooting SAML Realm Configuration"/>
+<link rel="next" href="oidc-guide.html" title="Configuring single sign-on to the Elastic Stack using OpenID Connect"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.10"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.10"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.10]</a></span>
+»
+<span class="breadcrumb-link"><a href="secure-cluster.html">Secure a cluster</a></span>
+»
+<span class="breadcrumb-link"><a href="saml-guide.html">Configuring SAML single-sign-on on the Elastic Stack</a></span>
+»
+<span class="breadcrumb-node">SAML without Kibana</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="saml-troubleshooting.html">« Troubleshooting SAML Realm Configuration</a>
+</span>
+<span class="next">
+<a href="oidc-guide.html">Configuring single sign-on to the Elastic Stack using OpenID Connect »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="saml-no-kibana"></a>SAML without Kibana<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/x-pack/docs/en/security/authentication/saml-guide.asciidoc">edit</a></h2>
+</div></div></div>
+<p>The SAML realm in Elasticsearch is designed to allow users to authenticate to Kibana and as
+such, most of the parts of the guide above make the assumption that Kibana is used.
+This section describes how a custom web application could use the relevant SAML
+REST APIs in order to authenticate the users to Elasticsearch with SAML.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This section assumes that the reader is familiar with the SAML 2.0 standard
+and more specifically with the SAML 2.0 Web Browser Single Sign On profile.</p>
+</div>
+</div>
+<p>Single sign-on realms such as OpenID Connect and SAML make use of the Token Service in
+Elasticsearch and in principle exchange a SAML or OpenID Connect Authentication response for
+an Elasticsearch access token and a refresh token. The access token is used as credentials
+for subsequent calls to Elasticsearch. The refresh token enables the user to get new Elasticsearch
+access tokens after the current one expires.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="saml-no-kibana-realm"></a>SAML realm<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/x-pack/docs/en/security/authentication/saml-guide.asciidoc">edit</a></h3>
+</div></div></div>
+<p>You must create a SAML realm and configure it accordingly
+in Elasticsearch. See <a class="xref" href="saml-guide-authentication.html" title="Configure Elasticsearch for SAML authentication">Configure Elasticsearch for SAML authentication</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="saml-no-kibana-user"></a>Service Account user for accessing the APIs<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/x-pack/docs/en/security/authentication/saml-guide.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The realm is designed with the assumption that there needs to be a privileged entity
+acting as an authentication proxy. In this case, the custom web application is the
+authentication proxy handling the authentication of end users ( more correctly,
+"delegating" the authentication to the SAML Identity Provider ). The SAML related
+APIs require authentication and the necessary authorization level for the authenticated
+user. For this reason, you must create a Service Account user and assign it a role
+that gives it the <code class="literal">manage_saml</code> cluster privilege. The use of the <code class="literal">manage_token</code>
+cluster privilege will be necessary after the authentication takes place, so that the
+the service account user can maintain access in order refresh access tokens on
+behalf of the authenticated users or to subsequently log them out.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/role/saml-service-role
+{
+  "cluster" : ["manage_saml", "manage_token"]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1429.console"></div>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/user/saml-service-user
+{
+  "password" : "&lt;somePasswordHere&gt;",
+  "roles"    : ["saml-service-role"]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1430.console"></div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="saml-no-kibana-sp-init-sso"></a>Handling the SP-initiated authentication flow<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/x-pack/docs/en/security/authentication/saml-guide.asciidoc">edit</a></h3>
+</div></div></div>
+<p>On a high level, the custom web application would need to perform the
+following steps in order to authenticate a user with SAML against Elasticsearch:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Make an HTTP POST request to <code class="literal">_security/saml/prepare</code>, authenticating as
+the <code class="literal">saml-service-user</code> user. Use either the name of the SAML realm in the Elasticsearch configuration or the value for
+the Assertion Consumer Service URL in the request body.
+See the <a class="xref" href="security-api-saml-prepare-authentication.html" title="SAML prepare authentication API">SAML prepare authentication API</a> for more details.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/saml/prepare
+{
+  "realm" : "saml1"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1431.console"></div>
+</li>
+<li class="listitem">
+Handle the response from <code class="literal">/_security/saml/prepare</code>. The response from Elasticsearch will contain 3 parameters:
+  <code class="literal">redirect</code>, <code class="literal">realm</code> and <code class="literal">id</code>. The custom web application would need to store the value for <code class="literal">id</code>
+ in the user&#8217;s session (client side in a cookie or server side if session information is
+persisted this way). It must also redirect the user&#8217;s browser to the URL that  was returned in the
+  <code class="literal">redirect</code> parameter. The <code class="literal">id</code> value should not be disregarded as it is used as a nonce in SAML in
+order to mitigate against replay attacks.
+</li>
+<li class="listitem">
+<p>Handle a subsequent response from the SAML IdP. After the user is successfully authenticated with the
+Identity Provider they will be redirected back to the Assertion Consumer Service URL. This <code class="literal">sp.acs</code> needs to be
+defined as a URL which the custom web application handles. When it receives this HTTP POST request, the
+custom web application must parse it and make an HTTP POST request itself to the
+<code class="literal">_security/saml/authenticate</code> API. It must authenticate as the <code class="literal">saml-service-user</code> user and pass
+the Base64 encoded SAML Response that was sent as the body of the request. It must also pass the value for <code class="literal">id</code> that it had saved in the user&#8217;s session previously.</p>
+<p>See <a class="xref" href="security-api-saml-authenticate.html" title="SAML authenticate API">SAML authenticate API</a> for more details.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/saml/authenticate
+{
+  "content" : "PHNhbWxwOlJlc3BvbnNlIHhtbG5zOnNhbWxwPSJ1cm46b2FzaXM6bmFtZXM6dGM6U0FNTDoyLjA6cHJvdG9jb2wiIHhtbG5zOnNhbWw9InVybjpvYXNpczpuYW1lczp0YzpTQU1MOjIuMD.....",
+  "ids" : ["4fee3b046395c4e751011e97f8900b5273d56685"]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1432.console"></div>
+<p>Elasticsearch will validate this and if all is correct will respond with an access token that can be used
+as a <code class="literal">Bearer</code> token for subsequent requests. It also supplies a refresh token that can be later used to refresh the given
+access token as described in <a class="xref" href="security-api-get-token.html" title="Get token API">get token API</a>.</p>
+</li>
+<li class="listitem">
+The response to calling <code class="literal">/_security/saml/authenticate</code> will contain only the username of the authenticated
+user. If you need to get the values for the SAML Attributes that were contained in the SAML
+Response for that user, you can call the Authenticate API <code class="literal">/_security/_authenticate/</code> using the access token as a <code class="literal">Bearer</code> token
+and the SAML attribute values will be contained in the response as part of the <a class="xref" href="saml-user-metadata.html" title="User metadata">User metadata</a>.
+</li>
+</ol>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="saml-no-kibana-idp-init-sso"></a>Handling the IdP-initiated authentication flow<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/x-pack/docs/en/security/authentication/saml-guide.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Elasticsearch can also handle the IdP-initiated Single Sign On flow of the SAML 2 Web Browser SSO profile. In this
+case the authentication starts with an unsolicited authentication response from the SAML Identity
+Provider. The difference with the <a class="xref" href="saml-no-kibana.html#saml-no-kibana-sp-init-sso" title="Handling the SP-initiated authentication flow">SP initiated SSO</a> is that the web application needs to handle
+requests to the <code class="literal">sp.acs</code> that will not come as responses to previous redirections. As such, it will not have a session
+for the user already, and it will not have any stored values for the <code class="literal">id</code> parameter. The request to the
+<code class="literal">_security/saml/authenticate</code> API will look like the one below in this case:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/saml/authenticate
+{
+  "content" : "PHNhbWxwOlJlc3BvbnNlIHhtbG5zOnNhbWxwPSJ1cm46b2FzaXM6bmFtZXM6dGM6U0FNTDoyLjA6cHJvdG9jb2wiIHhtbG5zOnNhbWw9InVybjpvYXNpczpuYW1lczp0YzpTQU1MOjIuMD.....",
+  "ids" : []
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1433.console"></div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="saml-no-kibana-slo"></a>Handling the logout flow<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/x-pack/docs/en/security/authentication/saml-guide.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>At some point, if necessary, the custom web application can log the user out by using the
+<a class="xref" href="security-api-saml-logout.html" title="SAML logout API">SAML logout API</a> and passing the access token and refresh token as parameters. For example:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/saml/logout
+{
+  "token" : "46ToAxZVaXVVZTVKOVF5YU04ZFJVUDVSZlV3",
+  "refresh_token": "mJdXLtmvTUSpoLwMvdBt_w"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1434.console"></div>
+<p>If the SAML realm is configured accordingly and the IdP supports it (see <a class="xref" href="saml-guide-authentication.html#saml-logout" title="SAML logout">SAML logout</a>), this request will trigger a SAML
+SP-initiated Single Logout. In this case, the response will include a <code class="literal">redirect</code>
+parameter indicating where the user needs to be redirected at the IdP in order to complete the logout.</p>
+</li>
+<li class="listitem">
+<p>Alternatively, the IdP might initiate the Single Logout flow at some point. In order to handle this,
+the Logout URL (<code class="literal">sp.logout</code>) needs to be handled by the custom web app. The query part of the URL that the
+user will be redirected to will contain a SAML Logout request and this query part needs to be relayed to Elasticsearch
+using the <a class="xref" href="security-api-saml-invalidate.html" title="SAML invalidate API">SAML invalidate API</a></p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/saml/invalidate
+{
+  "query" : "SAMLRequest=nZFda4MwFIb%2FiuS%2BmviRpqFaClKQdbvo2g12M2KMraCJ9cRR9utnW4Wyi13sMie873MeznJ1aWrnS3VQGR0j4mLkKC1NUeljjA77zYyhVbIE0dR%2By7fmaHq7U%2BdegXWGpAZ%2B%2F4pR32luBFTAtWgUcCv56%2Fp5y30X87Yz1khTIycdgpUW9kY7WdsC9zxoXTvMvWuVV98YyMnSGH2SYE5pwALBIr9QKiwDGpW0oGVUznGeMyJZKFkQ4jBf5HnhUymjIhzCAL3KNFihbYx8TBYzzGaY7EnIyZwHzCWMfiDnbRIftkSjJr%2BFu0e9v%2B0EgOquRiiZjKpiVFp6j50T4WXoyNJ%2FEWC9fdqc1t%2F1%2B2F3aUpjzhPiXpqMz1%2FHSn4A&amp;SigAlg=http%3A%2F%2Fwww.w3.org%2F2001%2F04%2Fxmldsig-more%23rsa-sha256&amp;Signature=MsAYz2NFdovMG2mXf6TSpu5vlQQyEJAg%2B4KCwBqJTmrb3yGXKUtIgvjqf88eCAK32v3eN8vupjPC8LglYmke1ZnjK0%2FKxzkvSjTVA7mMQe2AQdKbkyC038zzRq%2FYHcjFDE%2Bz0qISwSHZY2NyLePmwU7SexEXnIz37jKC6NMEhus%3D",
+  "realm" : "saml1"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1435.console"></div>
+<p>The custom web application will then need to also handle the response, which will include a <code class="literal">redirect</code>
+parameter with a URL in the IdP that contains the SAML Logout response. The application should redirect the user
+there to complete the logout.</p>
+</li>
+</ol>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="saml-troubleshooting.html">« Troubleshooting SAML Realm Configuration</a>
+</span>
+<span class="next">
+<a href="oidc-guide.html">Configuring single sign-on to the Elastic Stack using OpenID Connect »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

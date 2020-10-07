@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Filter search results | Elasticsearch Reference [7.10] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.10]"/>
+<link rel="up" href="search-your-data.html" title="Search your data"/>
+<link rel="prev" href="collapse-search-results.html" title="Collapse search results"/>
+<link rel="next" href="highlighting.html" title="Highlighting"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.10"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.10"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.10]</a></span>
+»
+<span class="breadcrumb-link"><a href="search-your-data.html">Search your data</a></span>
+»
+<span class="breadcrumb-node">Filter search results</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="collapse-search-results.html">« Collapse search results</a>
+</span>
+<span class="next">
+<a href="highlighting.html">Highlighting »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="filter-search-results"></a>Filter search results<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/search/search-your-data/filter-search-results.asciidoc">edit</a></h2>
+</div></div></div>
+<p>You can use two methods to filter search results:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Use a boolean query with a <code class="literal">filter</code> clause. Search requests apply
+<a class="xref" href="query-dsl-bool-query.html" title="Boolean query">boolean filters</a> to both search hits and
+<a class="xref" href="search-aggregations.html" title="Aggregations">aggregations</a>.
+</li>
+<li class="listitem">
+<p>Use the search API&#8217;s <code class="literal">post_filter</code> parameter. Search requests apply
+<a class="xref" href="filter-search-results.html#post-filter" title="Post filter">post filters</a> only to search hits, not aggregations. You can use
+a post filter to calculate aggregations based on a broader result set, and then
+further narrow the results.</p>
+<p>You can also <a class="xref" href="filter-search-results.html#rescore" title="Rescore filtered search results">rescore</a> hits after the post filter to
+improve relevance and reorder results.</p>
+</li>
+</ul>
+</div>
+<h3><a id="post-filter"></a>Post filter<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/search/search-your-data/filter-search-results.asciidoc">edit</a></h3>
+<p>When you use the <code class="literal">post_filter</code> parameter to filter search results, the search
+hits are filtered after the aggregations are calculated. A post filter has no
+impact on the aggregation results.</p>
+<p>For example, you are selling shirts that have the following properties:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT /shirts
+{
+  "mappings": {
+    "properties": {
+      "brand": { "type": "keyword"},
+      "color": { "type": "keyword"},
+      "model": { "type": "keyword"}
+    }
+  }
+}
+
+PUT /shirts/_doc/1?refresh
+{
+  "brand": "gucci",
+  "color": "red",
+  "model": "slim"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/646.console"></div>
+<p>Imagine a user has specified two filters:</p>
+<p><code class="literal">color:red</code> and <code class="literal">brand:gucci</code>.  You only want to show them red shirts made by
+Gucci in the search results.  Normally you would do this with a
+<a class="xref" href="query-dsl-bool-query.html" title="Boolean query"><code class="literal">bool</code> query</a>:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /shirts/_search
+{
+  "query": {
+    "bool": {
+      "filter": [
+        { "term": { "color": "red"   }},
+        { "term": { "brand": "gucci" }}
+      ]
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/647.console"></div>
+<p>However, you would also like to use <em>faceted navigation</em> to display a list of
+other options that the user could click on.  Perhaps you have a <code class="literal">model</code> field
+that would allow the user to limit their search results to red Gucci
+<code class="literal">t-shirts</code> or <code class="literal">dress-shirts</code>.</p>
+<p>This can be done with a
+<a class="xref" href="search-aggregations-bucket-terms-aggregation.html" title="Terms Aggregation"><code class="literal">terms</code> aggregation</a>:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /shirts/_search
+{
+  "query": {
+    "bool": {
+      "filter": [
+        { "term": { "color": "red"   }},
+        { "term": { "brand": "gucci" }}
+      ]
+    }
+  },
+  "aggs": {
+    "models": {
+      "terms": { "field": "model" } <a id="CO177-1"></a><i class="conum" data-value="1"></i>
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/648.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO177-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Returns the most popular models of red shirts by Gucci.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>But perhaps you would also like to tell the user how many Gucci shirts are
+available in <span class="strong strong"><strong>other colors</strong></span>. If you just add a <code class="literal">terms</code> aggregation on the
+<code class="literal">color</code> field, you will only get back the color <code class="literal">red</code>, because your query
+returns only red shirts by Gucci.</p>
+<p>Instead, you want to include shirts of all colors during aggregation, then
+apply the <code class="literal">colors</code> filter only to the search results.  This is the purpose of
+the <code class="literal">post_filter</code>:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /shirts/_search
+{
+  "query": {
+    "bool": {
+      "filter": {
+        "term": { "brand": "gucci" } <a id="CO178-1"></a><i class="conum" data-value="1"></i>
+      }
+    }
+  },
+  "aggs": {
+    "colors": {
+      "terms": { "field": "color" } <a id="CO178-2"></a><i class="conum" data-value="2"></i>
+    },
+    "color_red": {
+      "filter": {
+        "term": { "color": "red" } <a id="CO178-3"></a><i class="conum" data-value="3"></i>
+      },
+      "aggs": {
+        "models": {
+          "terms": { "field": "model" } <a id="CO178-4"></a><i class="conum" data-value="3"></i>
+        }
+      }
+    }
+  },
+  "post_filter": { <a id="CO178-5"></a><i class="conum" data-value="4"></i>
+    "term": { "color": "red" }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/649.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO178-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The main query now finds all shirts by Gucci, regardless of color.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO178-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">colors</code> agg returns popular colors for shirts by Gucci.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO178-3"><i class="conum" data-value="3"></i></a><a href="#CO178-4"></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">color_red</code> agg limits the <code class="literal">models</code> sub-aggregation
+to <span class="strong strong"><strong>red</strong></span> Gucci shirts.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO178-5"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Finally, the <code class="literal">post_filter</code> removes colors other than red
+from the search <code class="literal">hits</code>.</p>
+</td>
+</tr>
+</table>
+</div>
+<h3><a id="rescore"></a>Rescore filtered search results<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/search/search-your-data/filter-search-results.asciidoc">edit</a></h3>
+<p>Rescoring can help to improve precision by reordering just the top (eg
+100 - 500) documents returned by the
+<a class="xref" href="search-search.html#request-body-search-query"><code class="literal">query</code></a> and
+<a class="xref" href="filter-search-results.html#post-filter" title="Post filter"><code class="literal">post_filter</code></a> phases, using a
+secondary (usually more costly) algorithm, instead of applying the
+costly algorithm to all documents in the index.</p>
+<p>A <code class="literal">rescore</code> request is executed on each shard before it returns its
+results to be sorted by the node handling the overall search request.</p>
+<p>Currently the rescore API has only one implementation: the query
+rescorer, which uses a query to tweak the scoring. In the future,
+alternative rescorers may be made available, for example, a pair-wise rescorer.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>An error will be thrown if an explicit <a class="xref" href="sort-search-results.html" title="Sort search results"><code class="literal">sort</code></a>
+(other than <code class="literal">_score</code> in descending order) is provided with a <code class="literal">rescore</code> query.</p>
+</div>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>when exposing pagination to your users, you should not change
+<code class="literal">window_size</code> as you step through each page (by passing different
+<code class="literal">from</code> values) since that can alter the top hits causing results to
+confusingly shift as the user steps through pages.</p>
+</div>
+</div>
+<h4><a id="query-rescorer"></a>Query rescorer<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/search/search-your-data/filter-search-results.asciidoc">edit</a></h4>
+<p>The query rescorer executes a second query only on the Top-K results
+returned by the <a class="xref" href="search-search.html#request-body-search-query"><code class="literal">query</code></a> and
+<a class="xref" href="filter-search-results.html#post-filter" title="Post filter"><code class="literal">post_filter</code></a> phases. The
+number of docs which will be examined on each shard can be controlled by
+the <code class="literal">window_size</code> parameter, which defaults to 10.</p>
+<p>By default the scores from the original query and the rescore query are
+combined linearly to produce the final <code class="literal">_score</code> for each document. The
+relative importance of the original query and of the rescore query can
+be controlled with the <code class="literal">query_weight</code> and <code class="literal">rescore_query_weight</code>
+respectively. Both default to <code class="literal">1</code>.</p>
+<p>For example:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_search
+{
+   "query" : {
+      "match" : {
+         "message" : {
+            "operator" : "or",
+            "query" : "the quick brown"
+         }
+      }
+   },
+   "rescore" : {
+      "window_size" : 50,
+      "query" : {
+         "rescore_query" : {
+            "match_phrase" : {
+               "message" : {
+                  "query" : "the quick brown",
+                  "slop" : 2
+               }
+            }
+         },
+         "query_weight" : 0.7,
+         "rescore_query_weight" : 1.2
+      }
+   }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/650.console"></div>
+<p>The way the scores are combined can be controlled with the <code class="literal">score_mode</code>:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Score Mode</th>
+<th align="left" valign="top">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">total</code></p></td>
+<td align="left" valign="top"><p>Add the original score and the rescore query score.  The default.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">multiply</code></p></td>
+<td align="left" valign="top"><p>Multiply the original score by the rescore query score.  Useful
+for <a class="xref" href="query-dsl-function-score-query.html" title="Function score query"><code class="literal">function query</code></a> rescores.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">avg</code></p></td>
+<td align="left" valign="top"><p>Average the original score and the rescore query score.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">max</code></p></td>
+<td align="left" valign="top"><p>Take the max of original score and the rescore query score.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">min</code></p></td>
+<td align="left" valign="top"><p>Take the min of the original score and the rescore query score.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h4><a id="multiple-rescores"></a>Multiple rescores<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/search/search-your-data/filter-search-results.asciidoc">edit</a></h4>
+<p>It is also possible to execute multiple rescores in sequence:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_search
+{
+   "query" : {
+      "match" : {
+         "message" : {
+            "operator" : "or",
+            "query" : "the quick brown"
+         }
+      }
+   },
+   "rescore" : [ {
+      "window_size" : 100,
+      "query" : {
+         "rescore_query" : {
+            "match_phrase" : {
+               "message" : {
+                  "query" : "the quick brown",
+                  "slop" : 2
+               }
+            }
+         },
+         "query_weight" : 0.7,
+         "rescore_query_weight" : 1.2
+      }
+   }, {
+      "window_size" : 10,
+      "query" : {
+         "score_mode": "multiply",
+         "rescore_query" : {
+            "function_score" : {
+               "script_score": {
+                  "script": {
+                    "source": "Math.log10(doc.count.value + 2)"
+                  }
+               }
+            }
+         }
+      }
+   } ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/651.console"></div>
+<p>The first one gets the results of the query then the second one gets the
+results of the first, etc.  The second rescore will "see" the sorting done
+by the first rescore so it is possible to use a large window on the first
+rescore to pull documents into a smaller window for the second rescore.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="collapse-search-results.html">« Collapse search results</a>
+</span>
+<span class="next">
+<a href="highlighting.html">Highlighting »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

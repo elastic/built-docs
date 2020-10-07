@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Resilience in larger clusters | Elasticsearch Reference [7.10] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.10]"/>
+<link rel="up" href="high-availability-cluster-design.html" title="Designing for resilience"/>
+<link rel="prev" href="high-availability-cluster-small-clusters.html" title="Resilience in small clusters"/>
+<link rel="next" href="backup-cluster.html" title="Back up a cluster"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.10"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.10"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.10]</a></span>
+»
+<span class="breadcrumb-link"><a href="high-availability.html">Set up a cluster for high availability</a></span>
+»
+<span class="breadcrumb-link"><a href="high-availability-cluster-design.html">Designing for resilience</a></span>
+»
+<span class="breadcrumb-node">Resilience in larger clusters</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="high-availability-cluster-small-clusters.html">« Resilience in small clusters</a>
+</span>
+<span class="next">
+<a href="backup-cluster.html">Back up a cluster »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="high-availability-cluster-design-large-clusters"></a>Resilience in larger clusters<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/high-availability/cluster-design.asciidoc">edit</a></h2>
+</div></div></div>
+<p>It is not unusual for nodes to share some common infrastructure, such as a power
+supply or network router. If so, you should plan for the failure of this
+infrastructure and ensure that such a failure would not affect too many of your
+nodes. It is common practice to group all the nodes sharing some infrastructure
+into <em>zones</em> and to plan for the failure of any whole zone at once.</p>
+<p>Your cluster’s zones should all be contained within a single data centre. Elasticsearch
+expects its node-to-node connections to be reliable and have low latency and
+high bandwidth. Connections between data centres typically do not meet these
+expectations. Although Elasticsearch will behave correctly on an unreliable or slow
+network, it will not necessarily behave optimally. It may take a considerable
+length of time for a cluster to fully recover from a network partition since it
+must resynchronize any missing data and rebalance the cluster once the
+partition heals. If you want your data to be available in multiple data centres,
+deploy a separate cluster in each data centre and use
+<a class="xref" href="modules-cross-cluster-search.html" title="Search across clusters">cross-cluster search</a> or <a class="xref" href="xpack-ccr.html" title="Cross-cluster replication">cross-cluster replication</a> to link the
+clusters together. These features are designed to perform well even if the
+cluster-to-cluster connections are less reliable or slower than the network
+within each cluster.</p>
+<p>After losing a whole zone&#8217;s worth of nodes, a properly-designed cluster may be
+functional but running with significantly reduced capacity. You may need
+to provision extra nodes to restore acceptable performance in your
+cluster when handling such a failure.</p>
+<p>For resilience against whole-zone failures, it is important that there is a copy
+of each shard in more than one zone, which can be achieved by placing data
+nodes in multiple zones and configuring <a class="xref" href="allocation-awareness.html" title="Shard allocation awareness">shard allocation
+awareness</a>. You should also ensure that client requests are sent to nodes in
+more than one zone.</p>
+<p>You should consider all node roles and ensure that each role is split
+redundantly across two or more zones. For instance, if you are using
+<a class="xref" href="ingest.html" title="Ingest node">ingest pipelines</a> or machine learning, you should have ingest or machine learning nodes in two
+or more zones. However, the placement of master-eligible nodes requires a little
+more care because a resilient cluster needs at least two of the three
+master-eligible nodes in order to function. The following sections explore the
+options for placing master-eligible nodes across multiple zones.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="high-availability-cluster-design-two-zones"></a>Two-zone clusters<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/high-availability/cluster-design.asciidoc">edit</a></h3>
+</div></div></div>
+<p>If you have two zones, you should have a different number of
+master-eligible nodes in each zone so that the zone with more nodes will
+contain a majority of them and will be able to survive the loss of the other
+zone. For instance, if you have three master-eligible nodes then you may put
+all of them in one zone or you may put two in one zone and the third in the
+other zone. You should not place an equal number of master-eligible nodes in
+each zone. If you place the same number of master-eligible nodes in each zone,
+neither zone has a majority of its own. Therefore, the cluster may not survive
+the loss of either zone.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="high-availability-cluster-design-two-zones-plus"></a>Two-zone clusters with a tiebreaker<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/high-availability/cluster-design.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The two-zone deployment described above is tolerant to the loss of one of its
+zones but not to the loss of the other one because master elections are
+majority-based. You cannot configure a two-zone cluster so that it can tolerate
+the loss of <em>either</em> zone because this is theoretically impossible. You might
+expect that if either zone fails then Elasticsearch can elect a node from the remaining
+zone as the master but it is impossible to tell the difference between the
+failure of a remote zone and a mere loss of connectivity between the zones. If
+both zones were capable of running independent elections then a loss of
+connectivity would lead to a
+<a href="https://en.wikipedia.org/wiki/Split-brain_(computing)" class="ulink" target="_top">split-brain problem</a> and
+therefore data loss. Elasticsearch avoids this and protects your data by not electing
+a node from either zone as master until that node can be sure that it has the
+latest cluster state and that there is no other master in the cluster. This may
+mean there is no master at all until connectivity is restored.</p>
+<p>You can solve this by placing one master-eligible node in each of your two
+zones and adding a single extra master-eligible node in an independent third
+zone. The extra master-eligible node acts as a tiebreaker in cases
+where the two original zones are disconnected from each other. The extra
+tiebreaker node should be a <a class="xref" href="modules-node.html#voting-only-node" title="Voting-only master-eligible node">dedicated voting-only
+master-eligible node</a>, also known as a dedicated tiebreaker. A dedicated
+tiebreaker need not be as powerful as the other two nodes since it has no other
+roles and will not perform any searches nor coordinate any client requests nor
+be elected as the master of the cluster.</p>
+<p>You should use <a class="xref" href="allocation-awareness.html" title="Shard allocation awareness">shard allocation awareness</a> to ensure
+that there is a copy of each shard in each zone. This means either zone remains
+fully available if the other zone fails.</p>
+<p>All master-eligible nodes, including voting-only nodes, are on the critical path
+for publishing cluster state updates. Because of this, these nodes require
+reasonably fast persistent storage and a reliable, low-latency network
+connection to the rest of the cluster. If you add a tiebreaker node in a third
+independent zone then you must make sure it has adequate resources and good
+connectivity to the rest of the cluster.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="high-availability-cluster-design-three-zones"></a>Clusters with three or more zones<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/high-availability/cluster-design.asciidoc">edit</a></h3>
+</div></div></div>
+<p>If you have three zones then you should have one master-eligible node in each
+zone. If you have more than three zones then you should choose three of the
+zones and put a master-eligible node in each of these three zones. This will
+mean that the cluster can still elect a master even if one of the zones fails.</p>
+<p>As always, your indices should have at least one replica in case a node fails.
+You should also use <a class="xref" href="allocation-awareness.html" title="Shard allocation awareness">shard allocation awareness</a> to
+limit the number of copies of each shard in each zone. For instance, if you have
+an index with one or two replicas configured then allocation awareness will
+ensure that the replicas of the shard are in a different zone from the primary.
+This means that a copy of every shard will still be available if one zone
+fails. The availability of this shard will not be affected by such a
+failure.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="high-availability-cluster-design-large-cluster-summary"></a>Summary<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/high-availability/cluster-design.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The cluster will be resilient to the loss of any zone as long as:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+The <a class="xref" href="cluster-health.html" title="Cluster health API">cluster health status</a> is <code class="literal">green</code>.
+</li>
+<li class="listitem">
+There are at least two zones containing data nodes.
+</li>
+<li class="listitem">
+Every index has at least one replica of each shard, in addition to the
+primary.
+</li>
+<li class="listitem">
+Shard allocation awareness is configured to avoid concentrating all copies of
+a shard within a single zone.
+</li>
+<li class="listitem">
+The cluster has at least three master-eligible nodes. At least two of these
+nodes are not voting-only master-eligible nodes, and they are spread evenly
+across at least three zones.
+</li>
+<li class="listitem">
+Clients are configured to send their requests to nodes in more than one zone
+or are configured to use a load balancer that balances the requests across an
+appropriate set of nodes. The <a href="/cloud/elasticsearch-service/signup?baymax=docs-body&amp;elektra=docs" class="ulink" target="_top">Elastic Cloud</a> service provides such
+a load balancer.
+</li>
+</ul>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="high-availability-cluster-small-clusters.html">« Resilience in small clusters</a>
+</span>
+<span class="next">
+<a href="backup-cluster.html">Back up a cluster »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

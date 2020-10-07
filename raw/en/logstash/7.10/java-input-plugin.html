@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>How to write a Java input plugin | Logstash Reference [7.10] | Elastic</title>
+<link rel="home" href="index.html" title="Logstash Reference [7.10]"/>
+<link rel="up" href="contributing-java-plugin.html" title="Contributing a Java Plugin"/>
+<link rel="prev" href="contributing-java-plugin.html" title="Contributing a Java Plugin"/>
+<link rel="next" href="java-codec-plugin.html" title="How to write a Java codec plugin"/>
+<meta name="DC.type" content="Learn/Docs/Logstash/Reference/7.10"/>
+<meta name="DC.subject" content="Logstash"/>
+<meta name="DC.identifier" content="7.10"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Logstash Reference [7.10]</a></span>
+»
+<span class="breadcrumb-link"><a href="contributing-java-plugin.html">Contributing a Java Plugin</a></span>
+»
+<span class="breadcrumb-node">How to write a Java input plugin</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="contributing-java-plugin.html">« Contributing a Java Plugin</a>
+</span>
+<span class="next">
+<a href="java-codec-plugin.html">How to write a Java codec plugin »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="java-input-plugin"></a>How to write a Java input plugin<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h2>
+</div></div></div>
+<p>To develop a new Java input for Logstash, you write a new Java class that
+conforms to the Logstash Java Inputs API, package it, and install it with the
+logstash-plugin utility. We&#8217;ll go through each of those steps.</p>
+<h3><a id="_set_up_your_environment"></a>Set up your environment<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h3>
+<h4><a id="_copy_the_example_repo"></a>Copy the example repo<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h4>
+<p>Start by copying the <a href="https://github.com/logstash-plugins/logstash-input-java_input_example" class="ulink" target="_top">example input plugin</a>. The plugin API is currently part of the
+Logstash codebase so you must have a local copy of that available. You can
+obtain a copy of the Logstash codebase with the following <code class="literal">git</code> command:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">git clone --branch &lt;branch_name&gt; --single-branch https://github.com/elastic/logstash.git &lt;target_folder&gt;</pre>
+</div>
+<p>The <code class="literal">branch_name</code> should correspond to the version of Logstash containing the
+preferred revision of the Java plugin API.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The GA version of the Java plugin API is available in the <code class="literal">7.1</code>
+and later branches of the Logstash codebase.</p>
+</div>
+</div>
+<p>Specify the <code class="literal">target_folder</code> for your local copy of the Logstash codebase. If you
+do not specify <code class="literal">target_folder</code>, it defaults to a new folder called <code class="literal">logstash</code>
+under your current folder.</p>
+<h4><a id="_generate_the_jar_file"></a>Generate the .jar file<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h4>
+<p>After you have obtained a copy of the appropriate revision of the Logstash
+codebase, you need to compile it to generate the .jar file containing the Java
+plugin API. From the root directory of your Logstash codebase ($LS_HOME), you
+can compile it with <code class="literal">./gradlew assemble</code> (or <code class="literal">gradlew.bat assemble</code> if you&#8217;re
+running on Windows). This should produce the
+<code class="literal">$LS_HOME/logstash-core/build/libs/logstash-core-x.y.z.jar</code> where <code class="literal">x</code>, <code class="literal">y</code>, and
+<code class="literal">z</code> refer to the version of Logstash.</p>
+<p>After you have successfully compiled Logstash, you need to tell your Java plugin
+where to find the <code class="literal">logstash-core-x.y.z.jar</code> file. Create a new file named
+<code class="literal">gradle.properties</code> in the root folder of your plugin project. That file should
+have a single line:</p>
+<div class="pre_wrapper lang-txt">
+<pre class="programlisting prettyprint lang-txt">LOGSTASH_CORE_PATH=&lt;target_folder&gt;/logstash-core</pre>
+</div>
+<p>where <code class="literal">target_folder</code> is the root folder of your local copy of the Logstash codebase.</p>
+<h3><a id="_code_the_plugin"></a>Code the plugin<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h3>
+<p>The example input plugin generates a configurable number of simple events before
+terminating. Let&#8217;s look at the main class in the  example input.</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">@LogstashPlugin(name="java_input_example")
+public class JavaInputExample implements Input {
+
+    public static final PluginConfigSpec&lt;Long&gt; EVENT_COUNT_CONFIG =
+            PluginConfigSpec.numSetting("count", 3);
+
+    public static final PluginConfigSpec&lt;String&gt; PREFIX_CONFIG =
+            PluginConfigSpec.stringSetting("prefix", "message");
+
+    private String id;
+    private long count;
+    private String prefix;
+    private final CountDownLatch done = new CountDownLatch(1);
+    private volatile boolean stopped;
+
+
+    public JavaInputExample(String id, Configuration config, Context context) {
+            this.id = id;
+        count = config.get(EVENT_COUNT_CONFIG);
+        prefix = config.get(PREFIX_CONFIG);
+    }
+
+    @Override
+    public void start(Consumer&lt;Map&lt;String, Object&gt;&gt; consumer) {
+        int eventCount = 0;
+        try {
+            while (!stopped &amp;&amp; eventCount &lt; count) {
+                eventCount++;
+                consumer.accept.push(Collections.singletonMap("message",
+                        prefix + " " + StringUtils.center(eventCount + " of " + count, 20)));
+            }
+        } finally {
+            stopped = true;
+            done.countDown();
+        }
+    }
+
+    @Override
+    public void stop() {
+        stopped = true; // set flag to request cooperative stop of input
+    }
+
+    @Override
+    public void awaitStop() throws InterruptedException {
+        done.await(); // blocks until input has stopped
+    }
+
+    @Override
+    public Collection&lt;PluginConfigSpec&lt;?&gt;&gt; configSchema() {
+        return Arrays.asList(EVENT_COUNT_CONFIG, PREFIX_CONFIG);
+    }
+
+    @Override
+    public String getId() {
+        return this.id;
+    }
+}</pre>
+</div>
+<p>Let&#8217;s step through and examine each part of that class.</p>
+<h4><a id="_class_declaration_5"></a>Class declaration<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h4>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">@LogstashPlugin(name="java_input_example")
+public class JavaInputExample implements Input {</pre>
+</div>
+<p>Notes about the class declaration:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>All Java plugins must be annotated with the <code class="literal">@LogstashPlugin</code> annotation. Additionally:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+The <code class="literal">name</code> property of the annotation must be supplied and defines the name of the plugin as it will be used
+in the Logstash pipeline definition. For example, this input would be referenced in the input section of the
+Logstash pipeline defintion as <code class="literal">input { java_input_example =&gt; { .... } }</code>
+</li>
+<li class="listitem">
+The value of the <code class="literal">name</code> property must match the name of the class excluding casing and underscores.
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+The class must implement the <code class="literal">co.elastic.logstash.api.Input</code> interface.
+</li>
+<li class="listitem">
+Java plugins may not be created in the <code class="literal">org.logstash</code> or <code class="literal">co.elastic.logstash</code> packages to prevent potential
+clashes with classes in Logstash itself.
+</li>
+</ul>
+</div>
+<h4><a id="_plugin_settings"></a>Plugin settings<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h4>
+<p>The snippet below contains both the setting definition and the method referencing it.</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">public static final PluginConfigSpec&lt;Long&gt; EVENT_COUNT_CONFIG =
+        PluginConfigSpec.numSetting("count", 3);
+
+public static final PluginConfigSpec&lt;String&gt; PREFIX_CONFIG =
+        PluginConfigSpec.stringSetting("prefix", "message");
+
+@Override
+public Collection&lt;PluginConfigSpec&lt;?&gt;&gt; configSchema() {
+    return Arrays.asList(EVENT_COUNT_CONFIG, PREFIX_CONFIG);
+}</pre>
+</div>
+<p>The <code class="literal">PluginConfigSpec</code> class allows developers to specify the settings that a
+plugin supports complete with setting  name, data type, deprecation status,
+required status, and default value. In this example, the <code class="literal">count</code> setting defines
+the number of events that will be generated and the <code class="literal">prefix</code> setting defines an
+optional prefix to include in the event field. Neither setting is required and
+if it is not explicitly set, the settings default to <code class="literal">3</code> and  <code class="literal">message</code>,
+respectively.</p>
+<p>The <code class="literal">configSchema</code> method must return a list of all settings that the plugin
+supports. In a future phase of the Java plugin project, the Logstash execution
+engine will validate that all required settings are present and that no
+unsupported settings are present.</p>
+<h4><a id="_constructor_and_initialization"></a>Constructor and initialization<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h4>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">private String id;
+private long count;
+private String prefix;
+
+public JavaInputExample(String id, Configuration config, Context context) {
+    this.id = id;
+    count = config.get(EVENT_COUNT_CONFIG);
+    prefix = config.get(PREFIX_CONFIG);
+}</pre>
+</div>
+<p>All Java input plugins must have a constructor taking a <code class="literal">String</code> id and
+<code class="literal">Configuration</code> and <code class="literal">Context</code> argument. This is the constructor that will be
+used to instantiate them at runtime. The retrieval and validation of all plugin
+settings should occur in this constructor. In this example, the values of the
+two plugin settings are retrieved and stored in local variables for later use in
+the <code class="literal">start</code> method.</p>
+<p>Any additional initialization may occur in the constructor as well. If there are
+any unrecoverable errors encountered in the configuration or initialization of
+the input plugin, a descriptive exception should be thrown. The exception will
+be logged and will prevent Logstash from starting.</p>
+<h4><a id="_start_method"></a>Start method<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h4>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">@Override
+public void start(Consumer&lt;Map&lt;String, Object&gt;&gt; consumer) {
+    int eventCount = 0;
+    try {
+        while (!stopped &amp;&amp; eventCount &lt; count) {
+            eventCount++;
+            consumer.accept.push(Collections.singletonMap("message",
+                    prefix + " " + StringUtils.center(eventCount + " of " + count, 20)));
+        }
+    } finally {
+        stopped = true;
+        done.countDown();
+    }
+}</pre>
+</div>
+<p>The <code class="literal">start</code> method begins the event-producing loop in an input. Inputs are flexible and may produce events through
+many different mechanisms including:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+a pull mechanism such as periodic queries of external database
+</li>
+<li class="listitem">
+a push mechanism such as events sent from clients to a local network port
+</li>
+<li class="listitem">
+a timed computation such as a heartbeat
+</li>
+<li class="listitem">
+any other mechanism that produces a useful stream of events. Event streams may be either finite or infinite.
+If the input produces an infinite stream of events, this method should loop until a stop request is made through
+the <code class="literal">stop</code> method. If the input produces a finite stream of events, this method should terminate when the last
+event in the stream is produced or a stop request is made, whichever comes first.
+</li>
+</ul>
+</div>
+<p>Events should be constructed as instances of <code class="literal">Map&lt;String, Object&gt;</code> and pushed into the event pipeline via the
+<code class="literal">Consumer&lt;Map&lt;String, Object&gt;&gt;.accept()</code> method. To reduce allocations and GC pressure, inputs may reuse the same
+map instance by modifying its fields between calls to <code class="literal">Consumer&lt;Map&lt;String, Object&gt;&gt;.accept()</code> because the event
+pipeline will create events based on a copy of the map&#8217;s data.</p>
+<h4><a id="_stop_and_awaitstop_methods"></a>Stop and awaitStop methods<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h4>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">private final CountDownLatch done = new CountDownLatch(1);
+private volatile boolean stopped;
+
+@Override
+public void stop() {
+    stopped = true; // set flag to request cooperative stop of input
+}
+
+@Override
+public void awaitStop() throws InterruptedException {
+    done.await(); // blocks until input has stopped
+}</pre>
+</div>
+<p>The <code class="literal">stop</code> method notifies the input to stop producing events. The stop
+mechanism may be implemented in any way that honors the API contract though a
+<code class="literal">volatile boolean</code> flag works well for many use cases.</p>
+<p>Inputs stop both asynchronously and cooperatively. Use the <code class="literal">awaitStop</code> method to
+block until the input has  completed the stop process. Note that this method
+should <span class="strong strong"><strong>not</strong></span> signal the input to stop as the <code class="literal">stop</code> method does. The
+awaitStop mechanism may be implemented in any way that honors the API contract
+though a <code class="literal">CountDownLatch</code> works well for many use cases.</p>
+<h4><a id="_getid_method"></a>getId method<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h4>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">@Override
+public String getId() {
+    return id;
+}</pre>
+</div>
+<p>For input plugins, the <code class="literal">getId</code> method should always return the id that was provided to the plugin through its
+constructor at instantiation time.</p>
+<h4><a id="_unit_tests"></a>Unit tests<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h4>
+<p>Lastly, but certainly not least importantly, unit tests are strongly encouraged.
+The example input plugin includes an
+<a href="https://github.com/logstash-plugins/logstash-input-java_input_example/blob/master/src/test/java/org/logstash/javaapi/JavaInputExampleTest.java" class="ulink" target="_top">example unit
+test</a> that you can use as a template for your own.</p>
+<h3><a id="_package_and_deploy"></a>Package and deploy<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h3>
+<p>Java plugins are packaged as Ruby gems for dependency management and
+interoperability with Ruby plugins. Once they are packaged as gems, they may
+be installed with the <code class="literal">logstash-plugin</code> utility just as Ruby plugins are.
+Because no knowledge of Ruby or its toolchain should be required for Java
+plugin development, the procedure for packaging Java plugins as Ruby gems
+has been automated through a custom task in the Gradle build file provided
+with the example Java plugins. The following sections describe how to
+configure and execute that packaging task as well as how to install the
+packaged Java plugin in Logstash.</p>
+<h4><a id="_configuring_the_gradle_packaging_task"></a>Configuring the Gradle packaging task<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h4>
+<p>The following section appears near the top of the <code class="literal">build.gradle</code> file supplied
+with the example Java plugins:</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">// ===========================================================================
+// plugin info
+// ===========================================================================
+group                      'org.logstashplugins' // must match the package of the main plugin class
+version                    "${file("VERSION").text.trim()}" // read from required VERSION file
+description                = "Example Java filter implementation"
+pluginInfo.licenses        = ['Apache-2.0'] // list of SPDX license IDs
+pluginInfo.longDescription = "This gem is a Logstash plugin required to be installed on top of the Logstash core pipeline using \$LS_HOME/bin/logstash-plugin install gemname. This gem is not a stand-alone program"
+pluginInfo.authors         = ['Elasticsearch']
+pluginInfo.email           = ['info@elastic.co']
+pluginInfo.homepage        = "http://www.elastic.co/guide/en/logstash/current/index.html"
+pluginInfo.pluginType      = "filter"
+pluginInfo.pluginClass     = "JavaFilterExample"
+pluginInfo.pluginName      = "java_filter_example"
+// ===========================================================================</pre>
+</div>
+<p>You should configure the values above for your plugin.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+The <code class="literal">version</code> value will be automatically read from the <code class="literal">VERSION</code> file in the
+root of your plugin&#8217;s codebase.
+</li>
+<li class="listitem">
+<code class="literal">pluginInfo.pluginType</code> should be set to one of <code class="literal">input</code>, <code class="literal">filter</code>, <code class="literal">codec</code>,
+or <code class="literal">output</code>.
+</li>
+<li class="listitem">
+<code class="literal">pluginInfo.pluginName</code> must match the name specified on the <code class="literal">@LogstashPlugin</code>
+annotation on the main plugin class. The Gradle packaging task will validate
+that and return an error if they do not match.
+</li>
+</ul>
+</div>
+<h4><a id="_running_the_gradle_packaging_task"></a>Running the Gradle packaging task<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h4>
+<p>Several Ruby source files along with a <code class="literal">gemspec</code> file and a <code class="literal">Gemfile</code> are
+required to package the plugin as a Ruby gem. These Ruby files are used only
+for defining the Ruby gem structure or at Logstash startup time to register
+the Java plugin. They are not used during runtime event processing. The
+Gradle packaging task automatically generates all of these files based on
+the values configured in the section above.</p>
+<p>You run the Gradle packaging task with the following command:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">./gradlew gem</pre>
+</div>
+<p>For Windows platforms: Substitute <code class="literal">gradlew.bat</code> for <code class="literal">./gradlew</code> as appropriate in the command.</p>
+<p>That task will produce a gem file in the root directory of your
+plugin&#8217;s codebase with the name <code class="literal">logstash-{plugintype}-&lt;pluginName&gt;-&lt;version&gt;.gem</code></p>
+<h4><a id="_installing_the_java_plugin_in_logstash"></a>Installing the Java plugin in Logstash<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h4>
+<p>After you have packaged your Java plugin as a Ruby gem, you can install it in
+Logstash with this command:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">bin/logstash-plugin install --no-verify --local /path/to/javaPlugin.gem</pre>
+</div>
+<p>For Windows platforms: Substitute backslashes for forward slashes as appropriate in the command.</p>
+<h3><a id="_running_logstash_with_the_java_input_plugin"></a>Running Logstash with the Java input plugin<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h3>
+<p>The following is a minimal Logstash configuration that can be used to test that
+the Java input plugin is correctly installed and functioning.</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">input {
+  java_input_example {}
+}
+output {
+  stdout { codec =&gt; rubydebug }
+}</pre>
+</div>
+<p>Copy the above Logstash configuration to a file such as <code class="literal">java_input.conf</code>.
+Start Logstash with:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">bin/logstash -f /path/to/java_input.conf</pre>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The Java execution engine, the default execution engine since Logstash 7.0, is required
+as Java plugins are not supported in the Ruby execution engine.</p>
+</div>
+</div>
+<p>The expected Logstash output (excluding initialization) with the configuration above is:</p>
+<div class="pre_wrapper lang-txt">
+<pre class="programlisting prettyprint lang-txt">{
+      "@version" =&gt; "1",
+       "message" =&gt; "message        1 of 3       ",
+    "@timestamp" =&gt; yyyy-MM-ddThh:mm:ss.SSSZ
+}
+{
+      "@version" =&gt; "1",
+       "message" =&gt; "message        2 of 3       ",
+    "@timestamp" =&gt; yyyy-MM-ddThh:mm:ss.SSSZ
+}
+{
+      "@version" =&gt; "1",
+       "message" =&gt; "message        3 of 3       ",
+    "@timestamp" =&gt; yyyy-MM-ddThh:mm:ss.SSSZ
+}</pre>
+</div>
+<h3><a id="_feedback"></a>Feedback<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/7.10/docs/static/contributing-java-plugin.asciidoc">edit</a></h3>
+<p>If you have any feedback on Java plugin support in Logstash, please comment on our
+<a href="https://github.com/elastic/logstash/issues/9215" class="ulink" target="_top">main Github issue</a> or post in the
+<a href="https://discuss.elastic.co/c/logstash" class="ulink" target="_top">Logstash forum</a>.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="contributing-java-plugin.html">« Contributing a Java Plugin</a>
+</span>
+<span class="next">
+<a href="java-codec-plugin.html">How to write a Java codec plugin »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
