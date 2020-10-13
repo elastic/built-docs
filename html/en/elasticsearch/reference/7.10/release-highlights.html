@@ -158,7 +158,7 @@ document.</p>
 setting to tell Elasticsearch how aggressively to compress stored fields. Both
 supported values <code class="literal">default</code> and <code class="literal">best_compression</code> will get better compression
 with this change.</p>
-<h3><a id="data-tier-formalization"></a>Data Tier Formalization<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/release-notes/highlights.asciidoc">edit</a></h3>
+<h3><a id="data-tier-formalization"></a>Data tiers<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/release-notes/highlights.asciidoc">edit</a></h3>
 <p>7.10 introduces the concept of formalized data tiers within Elasticsearch. <a class="xref" href="data-tiers.html" title="Data tiers">Data tiers</a>
 are a simple, integrated approach that gives users control over optimizing for cost,
 performance, and breadth/depth of data. Prior to this formalization, many users configured their own
@@ -173,6 +173,142 @@ through the phases of its lifecycle.</p>
 the <code class="literal">data_hot</code> tier automatically, while standalone indices will be allocated to
 the <code class="literal">data_content</code> tier automatically. Nodes with the pre-existing <code class="literal">data</code> role are
 considered to be part of all tiers.</p>
+<h3><a id="points-in-time-for-search"></a>Points in time (PITs) for search<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/release-notes/highlights.asciidoc">edit</a></h3>
+<p>In 7.10, we&#8217;re introducing points in time (PITs), a lightweight way to preserve
+index state over searches. PITs improve end-user experience by making UIs more
+reactive.</p>
+<p>By default, a search request waits for complete results before returning a
+response. For example, a search that retrieves top hits and aggregations returns
+a response only after both top hits and aggregations are computed. However,
+aggregations are usually slower and more expensive to compute than top hits.
+Instead of sending a combined request, you can send two separate requests: one
+for top hits and another one for aggregations. With separate search requests, a
+UI can display top hits as soon as they&#8217;re available and display aggregation
+data after the slower aggregation request completes. You can use a PIT to ensure
+both search requests run on the same data and index state.</p>
+<p>To use a PIT in a search, you must first explicitly create the PIT using the new
+<a href="/guide/en/elasticsearch/reference/7.10/point-in-time-api.html" class="ulink" target="_top">open PIT API</a>. PITs get automatically garbage-collected
+after <code class="literal">keep_alive</code> if no follow-up request extends their duration.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /my-index-000001/_pit?keep_alive=1m</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1.console"></div>
+<p>The API returns a PIT ID you can use in search requests. You can also
+configure by how long to extend your PIT&#8217;s lifespan using the search request&#8217;s
+<code class="literal">keep_alive</code> parameter.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_search
+{
+    "size": 100,
+    "query": {
+        "match" : {
+            "title" : "elasticsearch"
+        }
+    },
+    "pit": {
+	    "id":  "46ToAwMDaWR4BXV1aWQxAgZub2RlXzEAAAAAAAAAAAEBYQNpZHkFdXVpZDIrBm5vZGVfMwAAAAAAAAAAKgFjA2lkeQV1dWlkMioGbm9kZV8yAAAAAAAAAAAMAWICBXV1aWQyAAAFdXVpZDEAAQltYXRjaF9hbGw_gAAAAA==",
+	    "keep_alive": "1m"
+    }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/2.console"></div>
+<p>PITs automatically close when their <code class="literal">keep_alive</code> period ends. You can
+also manually close PITs you no longer need using the
+<a href="/guide/en/elasticsearch/reference/7.10/point-in-time-api.html" class="ulink" target="_top">close PIT API</a>. Closing a PIT releases the
+resources needed to maintain the PIT&#8217;s index state.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">DELETE /_pit
+{
+    "id" : "46ToAwMDaWR4BXV1aWQxAgZub2RlXzEAAAAAAAAAAAEBYQNpZHkFdXVpZDIrBm5vZGVfMwAAAAAAAAAAKgFjA2lkeQV1dWlkMioGbm9kZV8yAAAAAAAAAAAMAWIBBXV1aWQyAAA="
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3.console"></div>
+<p>For more information about using PITs in search, see
+<a href="/guide/en/elasticsearch/reference/7.10/paginate-search-results.html#search-after" class="ulink" target="_top">Paginate search results with
+<code class="literal">search_after</code></a> or the <a href="/guide/en/elasticsearch/reference/7.10/point-in-time-api.html" class="ulink" target="_top">PIT API documentation</a>.</p>
+<h3><a id="support-for-request-level-circuit-breakers"></a>Request-level circuit breakers on coordinating nodes<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/release-notes/highlights.asciidoc">edit</a></h3>
+<p>You can now use a coordinating node to account for memory used to perform
+partial and final reduce of aggregations in the request circuit breaker. The
+search coordinator adds the memory that it used to save and reduce the results
+of shard aggregations in the request circuit breaker. Before any partial or
+final reduce, the memory needed to reduce the aggregations is estimated and a
+CircuitBreakingException is thrown if exceeds the maximum memory allowed in this
+breaker.</p>
+<p>This size is estimated as roughly 1.5 times the size of the serialized
+aggregations that need to be reduced. This estimation can be completely off for
+some aggregations but it is corrected with the real size after the reduce
+completes. If the reduce is successful, we update the circuit breaker to remove
+the size of the source aggregations and replace the estimation with the
+serialized size of the newly reduced result.</p>
+<h3><a id="eql-case-sensitivity-operator"></a>EQL: Case-sensitivity and the <code class="literal">:</code> operator<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/release-notes/highlights.asciidoc">edit</a></h3>
+<p>In 7.10, we made most EQL operators and functions case-sensitive by default.
+We&#8217;ve also added <code class="literal">:</code>, a new case-insensitive equal operator. Designed for
+security use cases, you can use the <code class="literal">:</code> operator to search for strings in
+Windows event logs and other event data containing a mix of letter cases.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /my-index-000001/_eql/search
+{
+  "query": """
+    process where process.executable : "c:\\\\windows\\\\system32\\\\cmd.exe"
+  """
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/4.console"></div>
+<p>For more information, see the <a href="/guide/en/elasticsearch/reference/7.10/eql-syntax.html" class="ulink" target="_top">EQL
+syntax documentation</a>.</p>
+<h3><a id="deprecate-rest-api-access-to-system-indices"></a>REST API access to system indices is deprecated<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/release-notes/highlights.asciidoc">edit</a></h3>
+<p>We are deprecating REST API access to system indices. Most REST API
+requests that attempt to access system indices will return the following
+deprecation warning:</p>
+<div class="pre_wrapper lang-text">
+<pre class="programlisting prettyprint lang-text">this request accesses system indices: [.system_index_name], but in a future
+major version, direct access to system indices will be prevented by default</pre>
+</div>
+<p>The following REST API endpoints access system indices as part of their
+implementation and will not return the deprecation warning:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">GET _cluster/health</code>
+</li>
+<li class="listitem">
+<code class="literal">GET {index}/_recovery</code>
+</li>
+<li class="listitem">
+<code class="literal">GET _cluster/allocation/explain</code>
+</li>
+<li class="listitem">
+<code class="literal">GET _cluster/state</code>
+</li>
+<li class="listitem">
+<code class="literal">POST _cluster/reroute</code>
+</li>
+<li class="listitem">
+<code class="literal">GET {index}/_stats</code>
+</li>
+<li class="listitem">
+<code class="literal">GET {index}/_segments</code>
+</li>
+<li class="listitem">
+<code class="literal">GET {index}/_shard_stores</code>
+</li>
+<li class="listitem">
+<code class="literal">GET _cat/[indices,aliases,health,recovery,shards,segments]</code>
+</li>
+</ul>
+</div>
+<p>We are also adding a new metadata flag to track indices. Elasticsearch will automatically
+add this flag to any existing system indices during upgrade.</p>
+<h3><a id="add-system-read-thread-pool"></a>New thread pools for system indices<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.10/docs/reference/release-notes/highlights.asciidoc">edit</a></h3>
+<p>We&#8217;ve added two new thread pools for system indices: <code class="literal">system_read</code> and
+<code class="literal">system_write</code>. These thread pools ensure system indices critical to the Elastic
+Stack, such as those used by security or Kibana, remain responsive when
+a cluster is under heavy query or indexing load.</p>
+<p><code class="literal">system_read</code> is a <code class="literal">fixed</code> thread pool used to manage resources for
+read operations targeting system indices. Similarly, <code class="literal">system_write</code> is a
+<code class="literal">fixed</code> thread pool used to manage resources for write operations targeting
+system indices. Both have a maximum number of threads equal to <code class="literal">5</code>
+or half of the available processors, whichever is smaller.</p>
 </div>
 <div class="navfooter">
 <span class="prev">
