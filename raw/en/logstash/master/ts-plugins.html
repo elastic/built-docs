@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Troubleshooting specific plugins | Logstash Reference [master] | Elastic</title>
+<link rel="home" href="index.html" title="Logstash Reference [master]"/>
+<link rel="up" href="troubleshooting.html" title="Troubleshooting"/>
+<link rel="prev" href="ts-plugins-general.html" title="Troubleshooting plugins"/>
+<link rel="next" href="contributing-to-logstash.html" title="Contributing to Logstash"/>
+<meta name="DC.type" content="Learn/Docs/Logstash/Reference/master"/>
+<meta name="DC.subject" content="Logstash"/>
+<meta name="DC.identifier" content="master"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Logstash Reference [master]</a></span>
+»
+<span class="breadcrumb-link"><a href="troubleshooting.html">Troubleshooting</a></span>
+»
+<span class="breadcrumb-node">Troubleshooting specific plugins</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="ts-plugins-general.html">« Troubleshooting plugins</a>
+</span>
+<span class="next">
+<a href="contributing-to-logstash.html">Contributing to Logstash »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="ts-plugins"></a>Troubleshooting specific plugins<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/master/docs/static/troubleshoot/ts-plugins.asciidoc">edit</a></h2>
+</div></div></div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="ts-kafka"></a>Kafka issues and solutions<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/master/docs/static/troubleshoot/ts-kafka.asciidoc">edit</a></h3>
+</div></div></div>
+<h5><a id="ts-kafka-timeout"></a>Kafka session timeout issues (input)<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/master/docs/static/troubleshoot/ts-kafka.asciidoc">edit</a></h5>
+<p><span class="strong strong"><strong>Symptoms</strong></span></p>
+<p>Throughput issues and duplicate event processing Logstash logs warnings:</p>
+<pre class="screen">[2017-10-18T03:37:59,302][WARN][org.apache.kafka.clients.consumer.internals.ConsumerCoordinator]
+Auto offset commit failed for group clap_tx1: Commit cannot be completed since
+the group has already rebalanced and assigned the partitions to another member.</pre>
+<p>The time between subsequent calls to <code class="literal">poll()</code> was longer than the
+configured <code class="literal">session.timeout.ms</code>, which typically implies that the poll loop is
+spending too much time processing messages. You can address this by
+increasing the session timeout or by reducing the maximum size of batches
+returned in <code class="literal">poll()</code> with <code class="literal">max.poll.records</code>.</p>
+<pre class="screen">[INFO][org.apache.kafka.clients.consumer.internals.ConsumerCoordinator] Revoking
+previously assigned partitions [] for group log-ronline-node09
+`[2018-01-29T14:54:06,485][INFO]`[org.apache.kafka.clients.consumer.internals.ConsumerCoordinator]
+Setting newly assigned partitions [elk-pmbr-9] for group log-pmbr</pre>
+<p><span class="strong strong"><strong>Background</strong></span></p>
+<p>Kafka tracks the individual consumers in a consumer group (for example, a number
+of Logstash instances) and tries to give each consumer one or more specific
+partitions of data in the topic they’re consuming. In order to achieve this,
+Kafka tracks whether or not a consumer (Logstash Kafka input thread) is making
+progress on their assigned partition, and reassigns partitions that have not
+made progress in a set timeframe.</p>
+<p>When Logstash requests more events from the Kafka Broker than it can process within
+the timeout, it triggers reassignment of partitions. Reassignment of partitions
+takes time, and can cause duplicate processing of events and significant
+throughput problems.</p>
+<p><span class="strong strong"><strong>Possible solutions</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Reduce the number of records per request that Logstash polls from the Kafka Broker in one request,
+</li>
+<li class="listitem">
+Reduce the number of Kafka input threads, and/or
+</li>
+<li class="listitem">
+Increase the relevant timeouts in the Kafka Consumer configuration.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Details</strong></span></p>
+<p>The <code class="literal">max_poll_records</code> option sets the number of records to be pulled in one request.
+If it exceeds the default value of 500, try reducing it.</p>
+<p>The <code class="literal">consumer_threads</code> option sets the number of input threads. If the value exceeds
+the number of pipeline workers configured in the <code class="literal">logstash.yml</code> file, it should
+certainly be reduced.
+If the value is greater than 4, try reducing it to <code class="literal">4</code> or less if the client has
+the time/resources for it. Try starting with a value of <code class="literal">1</code>, and then
+incrementing from there to find the optimal performance.</p>
+<p>The <code class="literal">session_timeout_ms</code> option sets the relevant timeout. Set it to a value
+that ensures that the number of events in <code class="literal">max_poll_records</code> can be safely
+processed within the time limit.</p>
+<pre class="screen">EXAMPLE
+Pipeline throughput is `10k/s` and `max_poll_records` is set to 1k =&gt;. The value
+must be at least 100ms if `consumer_threads` is set to `1`. If it is set to a
+higher value `n`, then the minimum session timeout increases proportionally to
+`n * 100ms`.</pre>
+<p>In practice the value must be set much higher than the theoretical value because
+the behavior of the outputs and filters in a pipeline follows a distribution.
+The value should also be higher than the maximum time you expect your outputs to
+stall. The default setting is <code class="literal">10s == 10000ms</code>. If you are experiencing
+periodic problems with an output that can stall because of load or similar
+effects (such as the Elasticsearch output), there is little downside to
+increasing this value significantly to say <code class="literal">60s</code>.</p>
+<p>From a performance perspective, decreasing the <code class="literal">max_poll_records</code> value is preferable
+to increasing the timeout value. Increasing the timeout is your only option if the
+client’s issues are caused by periodically stalling outputs. Check logs for
+evidence of stalling outputs, such as <code class="literal">ES output logging status 429</code>.</p>
+<h5><a id="ts-kafka-many-offset-commits"></a>Large number of offset commits (input)<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/master/docs/static/troubleshoot/ts-kafka.asciidoc">edit</a></h5>
+<p><span class="strong strong"><strong>Symptoms</strong></span></p>
+<p>Logstash’s Kafka Input is causing a much higher number of commits to
+the offset topic than expected. Often the complaint also mentions redundant
+offset commits where the same offset is committed repeatedly.</p>
+<p><span class="strong strong"><strong>Solution</strong></span></p>
+<p>For Kafka Broker versions 0.10.2.1 to 1.0.x: The problem is caused by a bug in
+Kafka. <a href="https://issues.apache.org/jira/browse/KAFKA-6362" class="ulink" target="_top">https://issues.apache.org/jira/browse/KAFKA-6362</a> The client’s best option
+is upgrading their Kafka Brokers to version 1.1 or newer.</p>
+<p>For older versions of
+Kafka or if the above does not fully resolve the issue: The problem can also be
+caused by setting the value for <code class="literal">poll_timeout_ms</code> too low relative to the rate
+at which the Kafka Brokers receive events themselves (or if Brokers periodically
+idle between receiving bursts of events). Increasing the value set for
+<code class="literal">poll_timeout_ms</code> proportionally decreases the number of offsets commits in
+this scenario. For example, raising it by 10x will lead to 10x fewer offset commits.</p>
+<h5><a id="ts-kafka-codec-errors-input"></a>Codec Errors in Kafka Input (before Plugin Version 6.3.4 only)<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/master/docs/static/troubleshoot/ts-kafka.asciidoc">edit</a></h5>
+<p><span class="strong strong"><strong>Symptoms</strong></span></p>
+<p>Logstash Kafka input randomly logs errors from the configured codec and/or reads
+events incorrectly (partial reads, mixing data between multiple events etc.).</p>
+<pre class="screen">Log example:  [2018-02-05T13:51:25,773][FATAL][logstash.runner          ] An
+unexpected error occurred! {:error=&gt;#&lt;TypeError: can't convert nil into String&gt;,
+:backtrace=&gt;["org/jruby/RubyArray.java:1892:in `join'",
+"org/jruby/RubyArray.java:1898:in `join'",
+"/usr/share/logstash/logstash-core/lib/logstash/util/buftok.rb:87:in `extract'",
+"/usr/share/logstash/vendor/bundle/jruby/1.9/gems/logstash-codec-line-3.0.8/lib/logstash/codecs/line.rb:38:in
+`decode'",
+"/usr/share/logstash/vendor/bundle/jruby/1.9/gems/logstash-input-kafka-5.1.11/lib/logstash/inputs/kafka.rb:241:in
+`thread_runner'",
+"file:/usr/share/logstash/vendor/jruby/lib/jruby.jar!/jruby/java/java_ext/java.lang.rb:12:in
+`each'",
+"/usr/share/logstash/vendor/bundle/jruby/1.9/gems/logstash-input-kafka-5.1.11/lib/logstash/inputs/kafka.rb:240:in
+`thread_runner'"]}</pre>
+<p><span class="strong strong"><strong>Background</strong></span></p>
+<p>There was a bug in the way the Kafka Input plugin was handling codec instances
+when running on multiple threads (<code class="literal">consumer_threads</code> set to &gt; 1).
+<a href="https://github.com/logstash-plugins/logstash-input-kafka/issues/210" class="ulink" target="_top">https://github.com/logstash-plugins/logstash-input-kafka/issues/210</a></p>
+<p><span class="strong strong"><strong>Solution</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Upgrade Kafka Input plugin to v. 6.3.4 or later.
+</li>
+<li class="listitem">
+If (and only if) upgrading is not possible, set <code class="literal">consumer_threads</code> to <code class="literal">1</code>.
+</li>
+</ul>
+</div>
+<h2><a id="ts-other"></a>Other issues<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/master/docs/static/troubleshoot/ts-other-issues.asciidoc">edit</a></h2>
+<p>Coming soon, and you can help! If you have something to add, please:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+create an issue at
+<a href="https://github.com/elastic/logstash/issues" class="ulink" target="_top">https://github.com/elastic/logstash/issues</a>, or
+</li>
+<li class="listitem">
+create a pull request with your proposed changes at <a href="https://github.com/elastic/logstash" class="ulink" target="_top">https://github.com/elastic/logstash</a>.
+</li>
+</ul>
+</div>
+<p>Also check out the <a href="https://discuss.elastic.co/c/logstash" class="ulink" target="_top">Logstash discussion
+forum</a>.</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="ts-plugins-general.html">« Troubleshooting plugins</a>
+</span>
+<span class="next">
+<a href="contributing-to-logstash.html">Contributing to Logstash »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
