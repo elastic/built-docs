@@ -176,11 +176,103 @@ the output has to wait for more events to become available.</p>
 <p>Maximum wait time for <code class="literal">flush.min_events</code> to be fulfilled. If set to 0s, events
 will be immediately available for consumption.</p>
 <p>The default value is 1s.</p>
+<h3><a id="configuration-internal-queue-disk"></a>Configure the disk queue<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.10/libbeat/docs/queueconfig.asciidoc">edit</a></h3>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This functionality is in beta and is subject to change. The design and code is less mature than official GA features and is being provided as-is with no warranties. Beta features are not subject to the support SLA of official GA features.</p>
+</div>
+</div>
+<p>The disk queue stores pending events on the disk rather than main memory.
+This allows Beats to queue a larger number of events than is possible with
+the memory queue, and to save events when a Beat or device is restarted.
+This increased reliability comes with a performance tradeoff, as every
+incoming event must be written and read from the device&#8217;s disk. However,
+for setups where the disk is not the main bottleneck, the disk queue gives
+a simple and relatively low-overhead way to add a layer of robustness to
+incoming event data.</p>
+<p>The disk queue is expected to replace the file spool in a future release.</p>
+<p>To enable the disk queue with default settings, specify a maximum size:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">queue.disk:
+  max_size: 10GB</pre>
+</div>
+<p>The queue will use up to the specified maximum size on disk. It will only
+use as much space as required. For example, if the queue is only storing
+1GB of events, then it will only occupy 1GB on disk no matter how high the
+maximum is. Queue data is deleted from disk after it has been successfully
+sent to the output.</p>
+<h4><a id="configuration-internal-queue-disk-reference"></a>Configuration options<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.10/libbeat/docs/queueconfig.asciidoc">edit</a></h4>
+<p>You can specify the following options in the <code class="literal">queue.disk</code> section of the
+<code class="literal">journalbeat.yml</code> config file:</p>
+<h5><a id="_path"></a><code class="literal">path</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.10/libbeat/docs/queueconfig.asciidoc">edit</a></h5>
+<p>The path to the directory where the disk queue should store its data files.
+The directory is created on startup if it doesn&#8217;t exist.</p>
+<p>The default value is <code class="literal">"${path.data}/diskqueue"</code>.</p>
+<h5><a id="_max_size_required"></a><code class="literal">max_size</code> (required)<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.10/libbeat/docs/queueconfig.asciidoc">edit</a></h5>
+<p>The maximum size the queue should use on disk. Events that exceed this
+maximum will either pause their input or be discarded, depending on
+the input&#8217;s configuration.</p>
+<p>A value of <code class="literal">0</code> means that no maximum size is enforced, and the queue can
+grow up to the amount of free space on the disk. This value should be used
+with caution, as completely filling a system&#8217;s main disk can make it
+inoperable. It is best to use this setting only with a dedicated data or
+backup partition that will not interfere with Journalbeat or the rest
+of the host system.</p>
+<p>The default value is <code class="literal">10GB</code>.</p>
+<h5><a id="_segment_size"></a><code class="literal">segment_size</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.10/libbeat/docs/queueconfig.asciidoc">edit</a></h5>
+<p>Data added to the queue is stored in segment files. Each segment contains
+some number of events waiting to be sent to the outputs, and is deleted when
+all its events are sent. By default, segment size is limited to 1/10 of the
+maximum queue size. Using a smaller size means that the queue will use more
+data files, but they will be deleted more quickly after use. Using a larger
+size means some data will take longer to delete, but the queue will use
+fewer auxiliary files. It is usually fine to leave this value unchanged.</p>
+<p>The default value is <code class="literal">max_size / 10</code>.</p>
+<h5><a id="_read_ahead"></a><code class="literal">read_ahead</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.10/libbeat/docs/queueconfig.asciidoc">edit</a></h5>
+<p>The number of events that should be read from disk into memory while
+waiting for an output to request them. If you find outputs are slowing
+down because they can&#8217;t read as many events at a time, adjusting this
+setting upward may help, at the cost of higher memory usage.</p>
+<p>The default value is <code class="literal">512</code>.</p>
+<h5><a id="_write_ahead"></a><code class="literal">write_ahead</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.10/libbeat/docs/queueconfig.asciidoc">edit</a></h5>
+<p>The number of events the queue should accept and store in memory while
+waiting for them to be written to disk. If you find the queue&#8217;s memory
+use is too high because events are waiting too long to be written to
+disk, adjusting this setting downward may help, at the cost of reduced
+event throughput. On the other hand, if inputs are waiting or discarding
+events because they are being produced faster than the disk can handle,
+adjusting this setting upward may help, at the cost of higher memory
+usage.</p>
+<p>The default value is <code class="literal">2048</code>.</p>
+<h5><a id="_retry_interval"></a><code class="literal">retry_interval</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.10/libbeat/docs/queueconfig.asciidoc">edit</a></h5>
+<p>Some disk errors may block operation of the queue, for example a permission
+error writing to the data directory, or a disk full error while writing an
+event. In this case, the queue reports the error and retries after pausing
+for the time specified in <code class="literal">retry_interval</code>.</p>
+<p>The default value is <code class="literal">1s</code> (one second).</p>
+<h5><a id="_max_retry_interval"></a><code class="literal">max_retry_interval</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.10/libbeat/docs/queueconfig.asciidoc">edit</a></h5>
+<p>When there are multiple consecutive errors writing to the disk, the queue
+increases the retry interval by factors of 2 up to a maximum of
+<code class="literal">max_retry_interval</code>. Increase this value if you are concerned about logging
+too many errors or overloading the host system if the target disk becomes
+unavailable for an extended time.</p>
+<p>The default value is <code class="literal">30s</code> (thirty seconds).</p>
 <h3><a id="configuration-internal-queue-spool"></a>Configure the file spool queue<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.10/libbeat/docs/queueconfig.asciidoc">edit</a></h3>
 <div class="warning admon">
 <div class="icon"></div>
 <div class="admon_content">
 <p>This functionality is in beta and is subject to change. The design and code is less mature than official GA features and is being provided as-is with no warranties. Beta features are not subject to the support SLA of official GA features.</p>
+</div>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The disk queue offers similar functionality to the file spool with a
+streamlined configuration and lower overhead. It is expected to replace the
+file spool in a future release. While the file spool is still included for
+backward compatibility, new configurations should use the disk queue
+when possible.</p>
 </div>
 </div>
 <p>The file spool queue stores all events in an on disk ring buffer. The spool
