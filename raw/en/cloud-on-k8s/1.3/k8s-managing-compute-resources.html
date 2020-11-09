@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Manage compute resources | Elastic Cloud on Kubernetes [1.3] | Elastic</title>
+<link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [1.3]"/>
+<link rel="up" href="k8s-orchestrating-elastic-stack-applications.html" title="Orchestrating Elastic Stack applications"/>
+<link rel="prev" href="k8s-customize-pods.html" title="Customize Pods"/>
+<link rel="next" href="k8s-upgrading-stack.html" title="Upgrade the Elastic Stack version"/>
+<meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/1.3"/>
+<meta name="DC.subject" content="ECK"/>
+<meta name="DC.identifier" content="1.3"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes [1.3]</a></span>
+»
+<span class="breadcrumb-link"><a href="k8s-orchestrating-elastic-stack-applications.html">Orchestrating Elastic Stack applications</a></span>
+»
+<span class="breadcrumb-node">Manage compute resources</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="k8s-customize-pods.html">« Customize Pods</a>
+</span>
+<span class="next">
+<a href="k8s-upgrading-stack.html">Upgrade the Elastic Stack version »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="k8s-managing-compute-resources"></a>Manage compute resources<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.3/docs/orchestrating-elastic-stack-applications/managing-compute-resources.asciidoc">edit</a></h2>
+</div></div></div>
+<p>To help the Kubernetes scheduler correctly place Pods in available Kubernetes nodes and ensure quality of service (QoS), it is recommended to specify the CPU and memory requirements for objects managed by the operator (Elasticsearch, Kibana or APM Server). In Kubernetes, <code class="literal">requests</code> defines the minimum amount of resources that must be available for a Pod to be scheduled; <code class="literal">limits</code> defines the maximum amount of resources that a Pod is allowed to consume. For more information about how Kubernetes uses these concepts, see: <a href="https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/" class="ulink" target="_top">Managing Compute Resources for Containers</a>.</p>
+<h3><a id="k8s-compute-resources"></a>Set compute resources<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.3/docs/orchestrating-elastic-stack-applications/managing-compute-resources.asciidoc">edit</a></h3>
+<p>You can set compute resource constraints in the <code class="literal">podTemplate</code> of objects managed by the operator.</p>
+<h4><a id="k8s-compute-resources-elasticsearch"></a>Set compute resources for Elasticsearch<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.3/docs/orchestrating-elastic-stack-applications/managing-compute-resources.asciidoc">edit</a></h4>
+<p>For Elasticsearch objects, make sure to consider the heap size when you set resource requirements.
+A good rule of thumb is to size it to half the size of RAM allocated to the Pod.</p>
+<p>To minimize disruption caused by Pod evictions due to resource contention, you can run Elasticsearch pods at the "Guaranteed" QoS level by setting both <code class="literal">requests</code> and <code class="literal">limits</code> to the same value.</p>
+<p>The value set for cpu requests directly impacts Elasticsearch <code class="literal">node.processors</code> setting. For example, with <code class="literal">resources.requests.cpu: 1</code>, Elasticsearch effectively relies on a single core, which may significantly limit performance. Consider setting a higher value that matches the desired number of cores Elasticsearch can use. You can also set your own value for <code class="literal">node.processors</code> in the Elasticsearch config.</p>
+<p>Consider also that Kubernetes throttles containers exceeding the CPU limit defined in the <code class="literal">limits</code> section. Do not set this value too low or it would affect the performance of Elasticsearch, even if you have enough resources available in the Kubernetes cluster.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>A <a href="https://github.com/kubernetes/kubernetes/issues/51135" class="ulink" target="_top">known Kubernetes issue</a> may lead to over-aggressive CPU limits throttling. If the host Linux Kernel does not include <a href="https://github.com/kubernetes/kubernetes/issues/67577" class="ulink" target="_top">this CFS quota fix</a>, you may want to:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+not set any CPU limit in the Elasticsearch resource (Burstable QoS)
+</li>
+<li class="listitem">
+<a href="https://github.com/kubernetes/kubernetes/pull/63437" class="ulink" target="_top">reduce the CFS quota period</a> in kubelet configuration
+</li>
+<li class="listitem">
+<a href="https://github.com/kubernetes/kubernetes/issues/51135#issuecomment-386319185" class="ulink" target="_top">disable CFS quotas</a> in kubelet configuration
+</li>
+</ul>
+</div>
+</div>
+</div>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: quickstart
+spec:
+  version: 7.9.3
+  nodeSets:
+  - name: default
+    count: 1
+    podTemplate:
+      spec:
+        containers:
+        - name: elasticsearch
+          env:
+          - name: ES_JAVA_OPTS
+            value: -Xms2g -Xmx2g
+          resources:
+            requests:
+              memory: 4Gi
+              cpu: 8
+            limits:
+              memory: 4Gi</pre>
+</div>
+<h4><a id="k8s-compute-resources-kibana-and-apm"></a>Set compute resources for Kibana and APM Server<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.3/docs/orchestrating-elastic-stack-applications/managing-compute-resources.asciidoc">edit</a></h4>
+<p>For Kibana or APM Server objects, the <code class="literal">podTemplate</code> can be configured as follows:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: kibana.k8s.elastic.co/v1
+kind: Kibana
+metadata:
+  name: quickstart
+spec:
+  version: 7.9.3
+  podTemplate:
+    spec:
+      containers:
+      - name: kibana
+        resources:
+          requests:
+            memory: 1Gi
+            cpu: 0.5
+          limits:
+            memory: 2Gi
+            cpu: 2</pre>
+</div>
+<p>For the container name, you can use <code class="literal">apm-server</code> or <code class="literal">kibana</code> as appropriate.</p>
+<h3><a id="k8s-default-behavior"></a>Default behavior<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.3/docs/orchestrating-elastic-stack-applications/managing-compute-resources.asciidoc">edit</a></h3>
+<p>If <code class="literal">resources</code> is not defined in the specification of an object, then the operator applies a default memory limit to ensure that pods have enough resources to start correctly. As the operator cannot make assumptions about the available CPU resources in the cluster, no CPU limits will be set&#8201;&#8212;&#8201;resulting in the pods having the "Burstable" QoS class. Check if this is acceptable for your use case and follow the instructions in <a class="xref" href="k8s-managing-compute-resources.html#k8s-compute-resources" title="Set compute resources">Set compute resources</a> to configure appropriate limits.</p>
+<div class="table">
+<p class="title"><strong>Table 1. Default limits applied by the operator</strong></p>
+<div class="table-contents">
+<table border="1" cellpadding="4px" summary="Default limits applied by the operator">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Type</th>
+<th align="left" valign="top">Requests</th>
+<th align="left" valign="top">Limits</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>APM Server</strong></span></p></td>
+<td align="left" valign="top"><p><code class="literal">512Mi</code></p></td>
+<td align="left" valign="top"><p><code class="literal">512Mi</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Elasticsearch</strong></span></p></td>
+<td align="left" valign="top"><p><code class="literal">2Gi</code></p></td>
+<td align="left" valign="top"><p><code class="literal">2Gi</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Kibana</strong></span></p></td>
+<td align="left" valign="top"><p><code class="literal">1Gi</code></p></td>
+<td align="left" valign="top"><p><code class="literal">1Gi</code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<p>If the Kubernetes cluster is configured with <a href="https://kubernetes.io/docs/tasks/administer-cluster/manage-resources/memory-default-namespace/" class="ulink" target="_top">LimitRanges</a> that enforce a minimum memory constraint, they could interfere with the operator defaults and cause object creation to fail.</p>
+<p>For example, you might have a <code class="literal">LimitRange</code> that enforces a default and minimum memory limit on containers as follows:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-mem-per-container
+spec:
+  limits:
+  - min:
+      memory: "3Gi"
+    defaultRequest:
+      memory: "3Gi"
+    type: Container</pre>
+</div>
+<p>With the above restriction in place, if you create an Elasticsearch object without defining the <code class="literal">resources</code> section, you will get the following error:</p>
+<pre class="literallayout">Cannot create pod elasticsearch-sample-es-ldbgj48c7r: pods "elasticsearch-sample-es-ldbgj48c7r" is forbidden: minimum memory usage per Container is 3Gi, but request is 2Gi</pre>
+
+<p>To avoid this, explicitly define the requests and limits mandated by your environment in the resource specification. It will prevent the operator from applying the built-in defaults.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="k8s-customize-pods.html">« Customize Pods</a>
+</span>
+<span class="next">
+<a href="k8s-upgrading-stack.html">Upgrade the Elastic Stack version »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
