@@ -3,14 +3,14 @@
   <head>
     
 <meta charset="UTF-8">
-<title>Traffic Splitting | Elastic Cloud on Kubernetes [1.2] | Elastic</title>
-<link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [1.2]"/>
+<title>Traffic Splitting | Elastic Cloud on Kubernetes [1.3] | Elastic</title>
+<link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [1.3]"/>
 <link rel="up" href="k8s-advanced-topics.html" title="Advanced topics"/>
 <link rel="prev" href="k8s-service-mesh-linkerd.html" title="Linkerd"/>
-<link rel="next" href="k8s-reference.html" title="Reference"/>
-<meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/1.2"/>
+<link rel="next" href="k8s-network-policies.html" title="Network policies"/>
+<meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/1.3"/>
 <meta name="DC.subject" content="ECK"/>
-<meta name="DC.identifier" content="1.2"/>
+<meta name="DC.identifier" content="1.3"/>
 
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
@@ -108,7 +108,7 @@
                   
 <div id="content">
 <div class="breadcrumbs">
-<span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes [1.2]</a></span>
+<span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes [1.3]</a></span>
 »
 <span class="breadcrumb-link"><a href="k8s-advanced-topics.html">Advanced topics</a></span>
 »
@@ -119,71 +119,56 @@
 <a href="k8s-service-mesh-linkerd.html">« Linkerd</a>
 </span>
 <span class="next">
-<a href="k8s-reference.html">Reference »</a>
+<a href="k8s-network-policies.html">Network policies »</a>
 </span>
 </div>
 <div class="chapter">
 <div class="titlepage"><div><div>
-<h2 class="title"><a id="k8s-traffic-splitting"></a>Traffic Splitting<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.2/docs/advanced-topics/traffic-splitting.asciidoc">edit</a></h2>
+<h2 class="title"><a id="k8s-traffic-splitting"></a>Traffic Splitting<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.3/docs/advanced-topics/traffic-splitting.asciidoc">edit</a></h2>
 </div></div></div>
-<p>The default Kubernetes service created by ECK&#8201;&#8212;&#8201;named <code class="literal">&lt;cluster_name&gt;-es-http</code>&#8201;&#8212;&#8201;is configured to include all the Elasticsearch nodes in that cluster. This configuration is good enough to get started and adequate for most simple use cases. However, if you are operating an Elasticsearch cluster with <a href="/guide/en/elasticsearch/reference/current/modules-node.html" class="ulink" target="_top">different node types</a> and want control over which nodes handle which types of traffic, you should create additional Kubernetes services yourself to do so. Alternatively, you could make use of features provided by third-party software such as service meshes and ingress controllers to achieve more advanced traffic management configurations.</p>
-<div class="note admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p>The <a href="https://github.com/elastic/cloud-on-k8s/tree/1.2/config/recipes" class="ulink" target="_top">recipes directory</a> in the ECK source repository contains several examples of using third-party service meshes and ingress controllers for managing traffic to ECK resources.</p>
-</div>
-</div>
-<p>The service configurations shown in the following sections are based on this definition of an Elasticsearch cluster:</p>
+<p>The default Kubernetes service created by ECK, named <code class="literal">&lt;cluster_name&gt;-es-http</code>, is configured to include all the Elasticsearch nodes in that cluster. This configuration is good to get started and is adequate for most use cases. However, if you are operating an Elasticsearch cluster with <a href="/guide/en/elasticsearch/reference/current/modules-node.html" class="ulink" target="_top">different node types</a> and want control over which nodes handle which types of traffic, you should create additional Kubernetes services yourself.</p>
+<p>As an alternative, you can use features provided by third-party software such as service meshes and ingress controllers to achieve more advanced traffic management configurations. Check the <a href="https://github.com/elastic/cloud-on-k8s/tree/1.3/config/recipes" class="ulink" target="_top">recipes directory</a> in the ECK source repository for a few examples.</p>
+<p>The service configurations shown in these sections are based on the following Elasticsearch cluster definition:</p>
 <div class="pre_wrapper lang-yaml">
 <pre class="programlisting prettyprint lang-yaml">apiVersion: elasticsearch.k8s.elastic.co/v1
 kind: Elasticsearch
 metadata:
   name: hulk
 spec:
-  version: 7.9.3
+  version: 7.10.0
   nodeSets:
   # Dedicated master nodes
   - name: master
     count: 3
     config:
-      node.master: true
-      node.data: false
-      node.ingest: false
-      node.ml: false
+      node.roles: ["master"]
   # Dedicated data nodes
   - name: data
     count: 6
     config:
-      node.master: false
-      node.data: true
-      node.ingest: false
-      node.ml: false
+      node.roles: ["data"]
   # Dedicated ingest nodes
   - name: ingest
     count: 3
     config:
-      node.master: false
-      node.data: false
-      node.ingest: true
-      node.ml: false
+      node.roles: ["ingest"]
   # Dedicated coordinator nodes
   - name: coordinator
     count: 3
     config:
-      node.master: false
-      node.data: false
-      node.ingest: false
-      node.ml: false
+      node.roles: !!seq ""
   # Dedicated machine learning nodes
   - name: ml
     count: 3
     config:
-      node.master: false
-      node.data: false
-      node.ingest: false
-      node.ml: true</pre>
+      node.roles: ["ml"]
+  # Dedicated transform nodes
+  - name: transform
+    count: 3
+    config:
+      node.roles: ["transform"]</pre>
 </div>
-<h3><a id="k8s-traffic-splitting-by-node-type"></a>Create services for exposing different node types<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.2/docs/advanced-topics/traffic-splitting.asciidoc">edit</a></h3>
+<h3><a id="k8s-traffic-splitting-by-node-type"></a>Create services for exposing different node types<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.3/docs/advanced-topics/traffic-splitting.asciidoc">edit</a></h3>
 <p>The following examples illustrate how to create services for accessing different types of Elasticsearch nodes. The procedure for exposing services publicly is the same as described in <a class="xref" href="k8s-services.html#k8s-allow-public-access" title="Allow public access">Allow public access</a>.</p>
 <p><strong>Coordinator nodes</strong><a id="k8s-traffic-splitting-coordinator-nodes"></a></p>
 <div class="pre_wrapper lang-yaml">
@@ -201,7 +186,8 @@ spec:
     elasticsearch.k8s.elastic.co/node-master: "false"
     elasticsearch.k8s.elastic.co/node-data: "false"
     elasticsearch.k8s.elastic.co/node-ingest: "false"
-    elasticsearch.k8s.elastic.co/node-ml: "false"</pre>
+    elasticsearch.k8s.elastic.co/node-ml: "false"
+    elasticsearch.k8s.elastic.co/node-transform: "false"</pre>
 </div>
 <p><strong>Ingest nodes</strong><a id="k8s-traffic-splitting-ingest-nodes"></a></p>
 <div class="pre_wrapper lang-yaml">
@@ -239,7 +225,7 @@ spec:
 <a href="k8s-service-mesh-linkerd.html">« Linkerd</a>
 </span>
 <span class="next">
-<a href="k8s-reference.html">Reference »</a>
+<a href="k8s-network-policies.html">Network policies »</a>
 </span>
 </div>
 </div>
