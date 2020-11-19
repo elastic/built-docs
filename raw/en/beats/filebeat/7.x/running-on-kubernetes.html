@@ -125,6 +125,70 @@ filebeat   32        32        0         32           0           &lt;none&gt;  
 </div>
 <p>Log events should start flowing to Elasticsearch. The events are annotated with
 metadata added by the <a class="xref" href="add-kubernetes-metadata.html" title="Add Kubernetes metadata">add_kubernetes_metadata</a> processor.</p>
+<h4><a id="_parsing_json_logs"></a>Parsing json logs<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.x/filebeat/docs/running-on-kubernetes.asciidoc">edit</a></h4>
+<p>It is common case when collecting logs from workloads running on Kubernetes that these
+applications are logging in json format. In these case, special handling can be applied so as to
+parse these json logs properly and decode them into fields. Bellow there are provided 2 different ways
+of configuring <a class="xref" href="configuration-autodiscover.html" title="Autodiscover">filebeat&#8217;s autodiscover</a> so as to identify and parse json logs.
+We will use an example of one Pod with 2 containers where only one of these logs in json format.</p>
+<p>Example log:</p>
+<pre class="screen">{"type":"log","@timestamp":"2020-11-16T14:30:13+00:00","tags":["warning","plugins","licensing"],"pid":7,"message":"License information could not be obtained from Elasticsearch due to Error: No Living connections error"}</pre>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Using <code class="literal">json.*</code> options with templates</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">filebeat.autodiscover:
+  providers:
+      - type: kubernetes
+        node: ${NODE_NAME}
+        templates:
+          - condition:
+              contains:
+                kubernetes.container.name: "no-json-logging"
+            config:
+              - type: container
+                paths:
+                  - "/var/log/containers/*-${data.kubernetes.container.id}.log"
+          - condition:
+              contains:
+                kubernetes.container.name: "json-logging"
+            config:
+              - type: container
+                paths:
+                  - "/var/log/containers/*-${data.kubernetes.container.id}.log"
+                json.keys_under_root: true
+                json.add_error_key: true
+                json.message_key: message</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Using <code class="literal">json.*</code> options with hints</p>
+<p>Key part here is to properly annotate the Pod to only parse logs of the correct container
+as json logs. In this, annotation should be constructed like this:</p>
+<p><code class="literal">co.elastic.logs.&lt;container_name&gt;/json.keys_under_root: "true"</code></p>
+<p>Autodiscovery configuration:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">filebeat.autodiscover:
+  providers:
+    - type: kubernetes
+      node: ${NODE_NAME}
+      hints.enabled: true
+      hints.default_config:
+        type: container
+        paths:
+          - /var/log/containers/*${data.kubernetes.container.id}.log</pre>
+</div>
+<p>Then annotate the pod properly:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">annotations:
+    co.elastic.logs.json-logging/json.keys_under_root: "true"
+    co.elastic.logs.json-logging/json.add_error_key: "true"
+    co.elastic.logs.json-logging/json.message_key: "message"</pre>
+</div>
+</li>
+</ol>
+</div>
 </div>
 <div class="navfooter">
 <span class="prev">
