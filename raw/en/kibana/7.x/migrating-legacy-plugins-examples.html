@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Migration Examples | Kibana Guide [7.x] | Elastic</title>
+<link rel="home" href="index.html" title="Kibana Guide [7.x]"/>
+<link rel="up" href="external-plugin-development.html" title="External plugin development"/>
+<link rel="prev" href="migrating-legacy-plugins.html" title="Migrating legacy plugins to the Kibana Platform"/>
+<link rel="next" href="external-plugin-functional-tests.html" title="Functional Tests for Plugins outside the Kibana repo"/>
+<meta name="DC.type" content="Learn/Docs/Kibana/Reference/7.x"/>
+<meta name="DC.subject" content="Kibana"/>
+<meta name="DC.identifier" content="7.x"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Kibana Guide [7.x]</a></span>
+»
+<span class="breadcrumb-link"><a href="development.html">Developer guide</a></span>
+»
+<span class="breadcrumb-link"><a href="external-plugin-development.html">External plugin development</a></span>
+»
+<span class="breadcrumb-node">Migration Examples</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="migrating-legacy-plugins.html">« Migrating legacy plugins to the Kibana Platform</a>
+</span>
+<span class="next">
+<a href="external-plugin-functional-tests.html">Functional Tests for Plugins outside the Kibana repo »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="migrating-legacy-plugins-examples"></a>Migration Examples<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h2>
+</div></div></div>
+<p>This document is a list of examples of how to migrate plugin code from
+legacy APIs to their Kibana Platform equivalents.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="config-migration"></a>Configuration<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_declaring_config_schema"></a>Declaring config schema<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Declaring the schema of your configuration fields is similar to the
+Legacy Platform, but uses the <code class="literal">@kbn/config-schema</code> package instead of
+Joi. This package has full TypeScript support out-of-the-box.</p>
+<p><span class="strong strong"><strong>Legacy config schema</strong></span></p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">import Joi from 'joi';
+
+new kibana.Plugin({
+  config() {
+    return Joi.object({
+      enabled: Joi.boolean().default(true),
+      defaultAppId: Joi.string().default('home'),
+      index: Joi.string().default('.kibana'),
+      disableWelcomeScreen: Joi.boolean().default(false),
+      autocompleteTerminateAfter: Joi.number().integer().min(1).default(100000),
+    })
+  }
+});</pre>
+</div>
+<p><span class="strong strong"><strong>Kibana Platform equivalent</strong></span></p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">import { schema, TypeOf } from '@kbn/config-schema';
+
+export const config = {
+  schema: schema.object({
+    enabled: schema.boolean({ defaultValue: true }),
+    defaultAppId: schema.string({ defaultValue: true }),
+    index: schema.string({ defaultValue: '.kibana' }),
+    disableWelcomeScreen: schema.boolean({ defaultValue: false }),
+    autocompleteTerminateAfter: schema.duration({ min: 1, defaultValue: 100000 }),
+  })
+};
+
+// @kbn/config-schema is written in TypeScript, so you can use your schema
+// definition to create a type to use in your plugin code.
+export type MyPluginConfig = TypeOf&lt;typeof config.schema&gt;;</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_using_kibana_config_in_a_new_plugin"></a>Using Kibana config in a new plugin<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h4>
+</div></div></div>
+<p>After setting the config schema for your plugin, you might want to read
+configuration values from your plugin. It is provided as part of the
+<a href="https://github.com/elastic/kibana//tree/7.x/docs/development/core/server/kibana-plugin-core-server.plugininitializercontext.md" class="ulink" target="_top">PluginInitializerContext</a>
+in the <em>constructor</em> of the plugin:</p>
+<p><span class="strong strong"><strong>plugins/my_plugin/(public|server)/index.ts</strong></span></p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">import type { PluginInitializerContext } from 'kibana/server';
+import { MyPlugin } from './plugin';
+
+export function plugin(initializerContext: PluginInitializerContext) {
+  return new MyPlugin(initializerContext);
+}</pre>
+</div>
+<p><span class="strong strong"><strong>plugins/my_plugin/(public|server)/plugin.ts</strong></span></p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">import type { Observable } from 'rxjs';
+import { first } from 'rxjs/operators';
+import { CoreSetup, Logger, Plugin, PluginInitializerContext, PluginName } from 'kibana/server';
+import type { MyPluginConfig } from './config';
+
+export class MyPlugin implements Plugin {
+  private readonly config$: Observable&lt;MyPluginConfig&gt;;
+  private readonly log: Logger;
+
+  constructor(private readonly initializerContext: PluginInitializerContext) {
+    this.log = initializerContext.logger.get();
+    this.config$ = initializerContext.config.create();
+  }
+
+  public async setup(core: CoreSetup, deps: Record&lt;PluginName, unknown&gt;) {
+    const isEnabled = await this.config$.pipe(first()).toPromise();
+  }
+}</pre>
+</div>
+<p>Additionally, some plugins need to access the runtime env configuration.</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">export class MyPlugin implements Plugin {
+  public async setup(core: CoreSetup, deps: Record&lt;PluginName, unknown&gt;) {
+    const { mode: { dev }, packageInfo: { version } } = this.initializerContext.env
+  }</pre>
+</div>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_creating_a_kibana_platform_plugin"></a>Creating a Kibana Platform plugin<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h3>
+</div></div></div>
+<p>For example, if you want to move the legacy <code class="literal">demoplugin</code> plugin&#8217;s
+configuration to the Kibana Platform, you could create the Kibana Platform plugin with the
+same name in <code class="literal">plugins/demoplugin</code> with the following files:</p>
+<p><span class="strong strong"><strong>plugins/demoplugin/kibana.json</strong></span></p>
+<div class="pre_wrapper lang-json5">
+<pre class="programlisting prettyprint lang-json5">{
+  "id": "demoplugin",
+  "server": true
+}</pre>
+</div>
+<p><span class="strong strong"><strong>plugins/demoplugin/server/index.ts</strong></span></p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">import { schema, TypeOf } from '@kbn/config-schema';
+import type { PluginInitializerContext } from 'kibana/server';
+import { DemoPlugin } from './plugin';
+
+export const config = {
+  schema: schema.object({
+    enabled: schema.boolean({ defaultValue: true }),
+  });
+}
+
+export const plugin = (initContext: PluginInitializerContext) =&gt; new DemoPlugin(initContext);
+
+export type DemoPluginConfig = TypeOf&lt;typeof config.schema&gt;;
+export { DemoPluginSetup } from './plugin';</pre>
+</div>
+<p><span class="strong strong"><strong>plugins/demoplugin/server/plugin.ts</strong></span></p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">import type { PluginInitializerContext, Plugin, CoreSetup } from 'kibana/server';
+import type { DemoPluginConfig } from '.';
+export interface DemoPluginSetup {};
+
+export class DemoPlugin implements Plugin&lt;DemoPluginSetup&gt; {
+  constructor(private readonly initContext: PluginInitializerContext) {}
+
+  public setup(core: CoreSetup) {
+    return {};
+  }
+
+  public start() {}
+  public stop() {}
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="http-routes-migration"></a>HTTP Routes<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h3>
+</div></div></div>
+<p>In the legacy platform, plugins have direct access to the Hapi <code class="literal">server</code>
+object, which gives full access to all of Hapi’s API. In the New
+Platform, plugins have access to the
+<a href="https://github.com/elastic/kibana//tree/7.x/docs/development/core/server/kibana-plugin-core-server.httpservicesetup.md" class="ulink" target="_top">HttpServiceSetup</a>
+interface, which is exposed via the
+<a href="https://github.com/elastic/kibana//tree/7.x/docs/development/core/server/kibana-plugin-core-server.coresetup.md" class="ulink" target="_top">CoreSetup</a>
+object injected into the <code class="literal">setup</code> method of server-side plugins.</p>
+<p>This interface has a different API with slightly different behaviors.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+All input (body, query parameters, and URL parameters) must be
+validated using the <code class="literal">@kbn/config-schema</code> package. If no validation
+schema is provided, these values will be empty objects.
+</li>
+<li class="listitem">
+All exceptions thrown by handlers result in 500 errors. If you need a
+specific HTTP error code, catch any exceptions in your handler and
+construct the appropriate response using the provided response factory.
+While you can continue using the <code class="literal">Boom</code> module internally in your
+plugin, the framework does not have native support for converting Boom
+exceptions into HTTP responses.
+</li>
+</ul>
+</div>
+<p>Migrate legacy route registration:
+<span class="strong strong"><strong>legacy/plugins/demoplugin/index.ts</strong></span></p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">import Joi from 'joi';
+
+new kibana.Plugin({
+  init(server) {
+    server.route({
+      path: '/api/demoplugin/search',
+      method: 'POST',
+      options: {
+        validate: {
+          payload: Joi.object({
+            field1: Joi.string().required(),
+          }),
+        }
+      },
+      handler(req, h) {
+        return { message: `Received field1: ${req.payload.field1}` };
+      }
+    });
+  }
+});</pre>
+</div>
+<p>to the Kibana platform format:
+<span class="strong strong"><strong>plugins/demoplugin/server/plugin.ts</strong></span></p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">import { schema } from '@kbn/config-schema';
+import type { CoreSetup } from 'kibana/server';
+
+export class DemoPlugin {
+  public setup(core: CoreSetup) {
+    const router = core.http.createRouter();
+    router.post(
+      {
+        path: '/api/demoplugin/search',
+        validate: {
+          body: schema.object({
+            field1: schema.string(),
+          }),
+        }
+      },
+      (context, req, res) =&gt; {
+        return res.ok({
+          body: {
+            message: `Received field1: ${req.body.field1}`
+          }
+        });
+      }
+    )
+  }
+}</pre>
+</div>
+<p>If your plugin still relies on throwing Boom errors from routes, you can
+use the <code class="literal">router.handleLegacyErrors</code> as a temporary solution until error
+migration is complete:</p>
+<p><span class="strong strong"><strong>plugins/demoplugin/server/plugin.ts</strong></span></p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">import { schema } from '@kbn/config-schema';
+import { CoreSetup } from 'kibana/server';
+import Boom from 'boom';
+
+export class DemoPlugin {
+  public setup(core: CoreSetup) {
+    const router = core.http.createRouter();
+    router.post(
+      {
+        path: '/api/demoplugin/search',
+        validate: {
+          body: schema.object({
+            field1: schema.string(),
+          }),
+        }
+      },
+      router.handleLegacyErrors((context, req, res) =&gt; {
+        throw Boom.notFound('not there'); // will be converted into proper Platform error
+      })
+    )
+  }
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_accessing_services"></a>Accessing Services<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Services in the Legacy Platform were typically available via methods on
+either <code class="literal">server.plugins.*</code>, <code class="literal">server.*</code>, or <code class="literal">req.*</code>. In the Kibana Platform,
+all services are available via the <code class="literal">context</code> argument to the route
+handler. The type of this argument is the
+<a href="https://github.com/elastic/kibana//tree/7.x/docs/development/core/server/kibana-plugin-core-server.requesthandlercontext.md" class="ulink" target="_top">RequestHandlerContext</a>.
+The APIs available here will include all Core services and any services registered by plugins this plugin depends on.</p>
+<p><span class="strong strong"><strong>legacy/plugins/demoplugin/index.ts</strong></span></p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">new kibana.Plugin({
+  init(server) {
+    const { callWithRequest } = server.plugins.elasticsearch.getCluster('data');
+
+    server.route({
+      path: '/api/my-plugin/my-route',
+      method: 'POST',
+      async handler(req, h) {
+        const results = await callWithRequest(req, 'search', query);
+        return { results };
+      }
+    });
+  }
+});</pre>
+</div>
+<p><span class="strong strong"><strong>plugins/demoplugin/server/plugin.ts</strong></span></p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">export class DemoPlugin {
+  public setup(core) {
+    const router = core.http.createRouter();
+    router.post(
+      {
+        path: '/api/my-plugin/my-route',
+      },
+      async (context, req, res) =&gt; {
+        const results = await context.core.elasticsearch.client.asCurrentUser.search(query);
+        return res.ok({
+          body: { results }
+        });
+      }
+    )
+  }
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_migrating_hapi_pre_handlers"></a>Migrating Hapi pre-handlers<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h3>
+</div></div></div>
+<p>In the Legacy Platform, routes could provide a <code class="literal">pre</code> option in their
+config to register a function that should be run before the route
+handler. These <code class="literal">pre</code> handlers allow routes to share some business
+logic that may do some pre-work or validation. In Kibana, these are
+often used for license checks.</p>
+<p>The Kibana Platform’s HTTP interface does not provide this
+functionality. However, it is simple enough to port over using
+a higher-order function that can wrap the route handler.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_simple_example"></a>Simple example<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h4>
+</div></div></div>
+<p>In this simple example, a pre-handler is used to either abort the
+request with an error or continue as normal. This is a simple
+<code class="literal">gate-keeping</code> pattern.</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">// Legacy pre-handler
+const licensePreRouting = (request) =&gt; {
+  const licenseInfo = getMyPluginLicenseInfo(request.server.plugins.xpack_main);
+  if (!licenseInfo.isOneOf(['gold', 'platinum', 'trial'])) {
+    throw Boom.forbidden(`You don't have the right license for MyPlugin!`);
+  }
+}
+
+server.route({
+  method: 'GET',
+  path: '/api/my-plugin/do-something',
+  config: {
+    pre: [{ method: licensePreRouting }]
+  },
+  handler: (req) =&gt; {
+    return doSomethingInteresting();
+  }
+})</pre>
+</div>
+<p>In the Kibana Platform, the same functionality can be achieved by
+creating a function that takes a route handler (or factory for a route
+handler) as an argument and either successfully invokes it or
+returns an error response.</p>
+<p>This a <code class="literal">high-order handler</code> similar to the <code class="literal">high-order
+component</code> pattern common in the React ecosystem.</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">// Kibana Platform high-order handler
+const checkLicense = &lt;P, Q, B&gt;(
+  handler: RequestHandler&lt;P, Q, B, RouteMethod&gt;
+): RequestHandler&lt;P, Q, B, RouteMethod&gt; =&gt; {
+  return (context, req, res) =&gt; {
+    const licenseInfo = getMyPluginLicenseInfo(context.licensing.license);
+
+    if (licenseInfo.hasAtLeast('gold')) {
+      return handler(context, req, res);
+    } else {
+      return res.forbidden({ body: `You don't have the right license for MyPlugin!` });
+    }
+  }
+}
+
+router.get(
+  { path: '/api/my-plugin/do-something', validate: false },
+  checkLicense(async (context, req, res) =&gt; {
+    const results = doSomethingInteresting();
+    return res.ok({ body: results });
+  }),
+)</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_full_example"></a>Full Example<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h4>
+</div></div></div>
+<p>In some cases, the route handler may need access to data that the
+pre-handler retrieves. In this case, you can utilize a handler <em>factory</em>
+rather than a raw handler.</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">// Legacy pre-handler
+const licensePreRouting = (request) =&gt; {
+  const licenseInfo = getMyPluginLicenseInfo(request.server.plugins.xpack_main);
+  if (licenseInfo.isOneOf(['gold', 'platinum', 'trial'])) {
+    // In this case, the return value of the pre-handler is made available on
+    // whatever the 'assign' option is in the route config.
+    return licenseInfo;
+  } else {
+    // In this case, the route handler is never called and the user gets this
+    // error message
+    throw Boom.forbidden(`You don't have the right license for MyPlugin!`);
+  }
+}
+
+server.route({
+  method: 'GET',
+  path: '/api/my-plugin/do-something',
+  config: {
+    pre: [{ method: licensePreRouting, assign: 'licenseInfo' }]
+  },
+  handler: (req) =&gt; {
+    const licenseInfo = req.pre.licenseInfo;
+    return doSomethingInteresting(licenseInfo);
+  }
+})</pre>
+</div>
+<p>In many cases, it may be simpler to duplicate the function call to
+retrieve the data again in the main handler. In other cases, you
+can utilize a handler <em>factory</em> rather than a raw handler as the
+argument to your high-order handler. This way, the high-order handler can
+pass arbitrary arguments to the route handler.</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">// Kibana Platform high-order handler
+const checkLicense = &lt;P, Q, B&gt;(
+  handlerFactory: (licenseInfo: MyPluginLicenseInfo) =&gt; RequestHandler&lt;P, Q, B, RouteMethod&gt;
+): RequestHandler&lt;P, Q, B, RouteMethod&gt; =&gt; {
+  return (context, req, res) =&gt; {
+    const licenseInfo = getMyPluginLicenseInfo(context.licensing.license);
+
+    if (licenseInfo.hasAtLeast('gold')) {
+      const handler = handlerFactory(licenseInfo);
+      return handler(context, req, res);
+    } else {
+      return res.forbidden({ body: `You don't have the right license for MyPlugin!` });
+    }
+  }
+}
+
+router.get(
+  { path: '/api/my-plugin/do-something', validate: false },
+  checkLicense(licenseInfo =&gt; async (context, req, res) =&gt; {
+    const results = doSomethingInteresting(licenseInfo);
+    return res.ok({ body: results });
+  }),
+)</pre>
+</div>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_chrome"></a>Chrome<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h3>
+</div></div></div>
+<p>In the Legacy Platform, the <code class="literal">ui/chrome</code> import contained APIs for a very
+wide range of features. In the Kibana Platform, some of these APIs have
+changed or moved elsewhere. See <a class="xref" href="migrating-legacy-plugins.html#client-side-core-migration-table">Core services</a>.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_updating_an_application_navlink"></a>Updating an application navlink<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h4>
+</div></div></div>
+<p>In the legacy platform, the navlink could be updated using
+<code class="literal">chrome.navLinks.update</code>.</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">uiModules.get('xpack/ml').run(() =&gt; {
+  const showAppLink = xpackInfo.get('features.ml.showLinks', false);
+  const isAvailable = xpackInfo.get('features.ml.isAvailable', false);
+
+  const navLinkUpdates = {
+    // hide by default, only show once the xpackInfo is initialized
+    hidden: !showAppLink,
+    disabled: !showAppLink || (showAppLink &amp;&amp; !isAvailable),
+  };
+
+  npStart.core.chrome.navLinks.update('ml', navLinkUpdates);
+});</pre>
+</div>
+<p>In the Kibana Platform, navlinks should not be updated directly. Instead,
+it is now possible to add an <code class="literal">updater</code> when registering an application
+to change the application or the navlink state at runtime.</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">// my_plugin has a required dependencie to the `licensing` plugin
+interface MyPluginSetupDeps {
+  licensing: LicensingPluginSetup;
+}
+
+export class MyPlugin implements Plugin {
+  setup({ application }, { licensing }: MyPluginSetupDeps) {
+    const updater$ = licensing.license$.pipe(
+      map(license =&gt; {
+        const { hidden, disabled } = calcStatusFor(license);
+        if (hidden) return { navLinkStatus: AppNavLinkStatus.hidden };
+        if (disabled) return { navLinkStatus: AppNavLinkStatus.disabled };
+        return { navLinkStatus: AppNavLinkStatus.default };
+      })
+    );
+
+    application.register({
+      id: 'my-app',
+      title: 'My App',
+      updater$,
+      async mount(params) {
+        const { renderApp } = await import('./application');
+        return renderApp(params);
+      },
+    });
+  }</pre>
+</div>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_chromeless_applications"></a>Chromeless Applications<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h3>
+</div></div></div>
+<p>In Kibana, a <code class="literal">chromeless</code> application is one where the primary Kibana
+UI components such as header or navigation can be hidden. In the legacy
+platform, these were referred to as <code class="literal">hidden</code> applications and were set
+via the <code class="literal">hidden</code> property in a Kibana plugin. Chromeless applications
+are also not displayed in the left navbar.</p>
+<p>To mark an application as chromeless, specify <code class="literal">chromeless: false</code> when
+registering your application to hide the chrome UI when the application
+is mounted:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">application.register({
+  id: 'chromeless',
+  chromeless: true,
+  async mount(context, params) {
+    /* ... */
+  },
+});</pre>
+</div>
+<p>If you wish to render your application at a route that does not follow
+the <code class="literal">/app/${appId}</code> pattern, this can be done via the <code class="literal">appRoute</code>
+property. Doing this currently requires you to register a server route
+where you can return a bootstrapped HTML page for your application
+bundle.</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">application.register({
+  id: 'chromeless',
+  appRoute: '/chromeless',
+  chromeless: true,
+  async mount(context, params) {
+    /* ... */
+  },
+});</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="render-html-migration"></a>Render HTML Content<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h3>
+</div></div></div>
+<p>You can return a blank HTML page bootstrapped with the core application
+bundle from an HTTP route handler via the <code class="literal">httpResources</code> service. You
+may wish to do this if you are rendering a chromeless application with a
+custom application route or have other custom rendering needs.</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">httpResources.register(
+  { path: '/chromeless', validate: false },
+  (context, request, response) =&gt; {
+    //... some logic
+    return response.renderCoreApp();
+  }
+);</pre>
+</div>
+<p>You can also exclude user data from the bundle metadata. User
+data comprises all UI Settings that are <em>user provided</em>, then injected
+into the page. You may wish to exclude fetching this data if not
+authorized or to slim the page size.</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">httpResources.register(
+  { path: '/', validate: false, options: { authRequired: false } },
+  (context, request, response) =&gt; {
+    //... some logic
+    return response.renderAnonymousCoreApp();
+  }
+);</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="saved-objects-migration"></a>Saved Objects types<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h3>
+</div></div></div>
+<p>In the legacy platform, saved object types were registered using static
+definitions in the <code class="literal">uiExports</code> part of the plugin manifest.</p>
+<p>In the Kibana Platform, all these registrations are performed
+programmatically during your plugin’s <code class="literal">setup</code> phase, using the core
+<code class="literal">savedObjects</code>’s <code class="literal">registerType</code> setup API.</p>
+<p>The most notable difference is that in the Kibana Platform, the type
+registration is performed in a single call to <code class="literal">registerType</code>, passing a
+new <code class="literal">SavedObjectsType</code> structure that is a superset of the legacy
+<code class="literal">schema</code>, <code class="literal">migrations</code> <code class="literal">mappings</code> and <code class="literal">savedObjectsManagement</code>.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_concrete_example"></a>Concrete example<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Suppose you have the following in a legacy plugin:</p>
+<p><span class="strong strong"><strong>legacy/plugins/demoplugin/index.ts</strong></span></p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">import mappings from './mappings.json';
+import { migrations } from './migrations';
+
+new kibana.Plugin({
+  init(server){
+    // [...]
+  },
+  uiExports: {
+    mappings,
+    migrations,
+    savedObjectSchemas: {
+      'first-type': {
+        isNamespaceAgnostic: true,
+      },
+      'second-type': {
+        isHidden: true,
+      },
+    },
+    savedObjectsManagement: {
+      'first-type': {
+        isImportableAndExportable: true,
+        icon: 'myFirstIcon',
+        defaultSearchField: 'title',
+        getTitle(obj) {
+          return obj.attributes.title;
+        },
+        getEditUrl(obj) {
+          return `/some-url/${encodeURIComponent(obj.id)}`;
+        },
+      },
+      'second-type': {
+        isImportableAndExportable: false,
+        icon: 'mySecondIcon',
+        getTitle(obj) {
+          return obj.attributes.myTitleField;
+        },
+        getInAppUrl(obj) {
+          return {
+            path: `/some-url/${encodeURIComponent(obj.id)}`,
+            uiCapabilitiesPath: 'myPlugin.myType.show',
+          };
+        },
+      },
+    },
+  },
+})</pre>
+</div>
+<p><span class="strong strong"><strong>legacy/plugins/demoplugin/mappings.json</strong></span></p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+  "first-type": {
+    "properties": {
+      "someField": {
+        "type": "text"
+      },
+      "anotherField": {
+        "type": "text"
+      }
+    }
+  },
+  "second-type": {
+    "properties": {
+      "textField": {
+        "type": "text"
+      },
+      "boolField": {
+        "type": "boolean"
+      }
+    }
+  }
+}</pre>
+</div>
+<p><span class="strong strong"><strong>legacy/plugins/demoplugin/migrations.js</strong></span></p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">export const migrations = {
+  'first-type': {
+    '1.0.0': migrateFirstTypeToV1,
+    '2.0.0': migrateFirstTypeToV2,
+  },
+  'second-type': {
+    '1.5.0': migrateSecondTypeToV15,
+  }
+}</pre>
+</div>
+<p>To migrate this, you have to regroup the declaration per-type.</p>
+<p>First type:
+<span class="strong strong"><strong>plugins/demoplugin/server/saved_objects/first_type.ts</strong></span></p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">import type { SavedObjectsType } from 'kibana/server';
+
+export const firstType: SavedObjectsType = {
+  name: 'first-type',
+  hidden: false,
+  namespaceType: 'agnostic',
+  mappings: {
+    properties: {
+      someField: {
+        type: 'text',
+      },
+      anotherField: {
+        type: 'text',
+      },
+    },
+  },
+  migrations: {
+    '1.0.0': migrateFirstTypeToV1,
+    '2.0.0': migrateFirstTypeToV2,
+  },
+  management: {
+    importableAndExportable: true,
+    icon: 'myFirstIcon',
+    defaultSearchField: 'title',
+    getTitle(obj) {
+      return obj.attributes.title;
+    },
+    getEditUrl(obj) {
+      return `/some-url/${encodeURIComponent(obj.id)}`;
+    },
+  },
+};</pre>
+</div>
+<p>Second type:
+<span class="strong strong"><strong>plugins/demoplugin/server/saved_objects/second_type.ts</strong></span></p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">import type { SavedObjectsType } from 'kibana/server';
+
+export const secondType: SavedObjectsType = {
+  name: 'second-type',
+  hidden: true,
+  namespaceType: 'single',
+  mappings: {
+    properties: {
+      textField: {
+        type: 'text',
+      },
+      boolField: {
+        type: 'boolean',
+      },
+    },
+  },
+  migrations: {
+    '1.5.0': migrateSecondTypeToV15,
+  },
+  management: {
+    importableAndExportable: false,
+    icon: 'mySecondIcon',
+    getTitle(obj) {
+      return obj.attributes.myTitleField;
+    },
+    getInAppUrl(obj) {
+      return {
+        path: `/some-url/${encodeURIComponent(obj.id)}`,
+        uiCapabilitiesPath: 'myPlugin.myType.show',
+      };
+    },
+  },
+};</pre>
+</div>
+<p>Registration in the plugin’s setup phase:
+<span class="strong strong"><strong>plugins/demoplugin/server/plugin.ts</strong></span></p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">import { firstType, secondType } from './saved_objects';
+
+export class DemoPlugin implements Plugin {
+  setup({ savedObjects }) {
+    savedObjects.registerType(firstType);
+    savedObjects.registerType(secondType);
+  }
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_changes_in_structure_compared_to_legacy"></a>Changes in structure compared to legacy<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h4>
+</div></div></div>
+<p>The Kibana Platform <code class="literal">registerType</code> expected input is very close to the legacy format.
+However, there are some minor changes:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+The <code class="literal">schema.isNamespaceAgnostic</code> property has been renamed:
+<code class="literal">SavedObjectsType.namespaceType</code>. It no longer accepts a boolean but
+instead an enum of <code class="literal">single</code>, <code class="literal">multiple</code>, or <code class="literal">agnostic</code> (see
+<a href="https://github.com/elastic/kibana//tree/7.x/docs/development/core/server/kibana-plugin-core-server.savedobjectsnamespacetype.md" class="ulink" target="_top">SavedObjectsNamespaceType</a>).
+</li>
+<li class="listitem">
+The <code class="literal">schema.indexPattern</code> was accepting either a <code class="literal">string</code> or a
+<code class="literal">(config: LegacyConfig) =&gt; string</code>. <code class="literal">SavedObjectsType.indexPattern</code> only
+accepts a string, as you can access the configuration during your
+plugin’s setup phase.
+</li>
+<li class="listitem">
+The <code class="literal">savedObjectsManagement.isImportableAndExportable</code> property has
+been renamed: <code class="literal">SavedObjectsType.management.importableAndExportable</code>.
+</li>
+<li class="listitem">
+The migration function signature has changed: In legacy, it used to be
+</li>
+</ul>
+</div>
+<pre class="screen">`(doc: SavedObjectUnsanitizedDoc, log: SavedObjectsMigrationLogger) =&gt; SavedObjectUnsanitizedDoc;`</pre>
+<p>In Kibana Platform, it is</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">`(doc: SavedObjectUnsanitizedDoc, context: SavedObjectMigrationContext) =&gt; SavedObjectUnsanitizedDoc;`</pre>
+</div>
+<p>With context being:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">export interface SavedObjectMigrationContext {
+  log: SavedObjectsMigrationLogger;
+}</pre>
+</div>
+<p>The changes is very minor though. The legacy migration:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">const migration = (doc, log) =&gt; {...}</pre>
+</div>
+<p>Would be converted to:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">const migration: SavedObjectMigrationFn&lt;OldAttributes, MigratedAttributes&gt; = (doc, { log }) =&gt; {...}</pre>
+</div>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_uisettings"></a>UiSettings<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h3>
+</div></div></div>
+<p>UiSettings defaults registration performed during <code class="literal">setup</code> phase via
+<code class="literal">core.uiSettings.register</code> API.</p>
+<p><span class="strong strong"><strong>legacy/plugins/demoplugin/index.js</strong></span></p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">uiExports: {
+  uiSettingDefaults: {
+    'my-plugin:my-setting': {
+      name: 'just-work',
+      value: true,
+      description: 'make it work',
+      category: ['my-category'],
+    },
+  }
+}</pre>
+</div>
+<p><span class="strong strong"><strong>plugins/demoplugin/server/plugin.ts</strong></span></p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">setup(core: CoreSetup){
+  core.uiSettings.register({
+    'my-plugin:my-setting': {
+      name: 'just-work',
+      value: true,
+      description: 'make it work',
+      category: ['my-category'],
+      schema: schema.boolean(),
+    },
+  })
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_elasticsearch_client"></a>Elasticsearch client<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The new elasticsearch client is a thin wrapper around
+<code class="literal">@elastic/elasticsearch</code>’s <code class="literal">Client</code> class. Even if the API is quite
+close to the legacy client Kibana was previously using, there are some
+subtle changes to take into account during migration.</p>
+<p><a href="/guide/en/elasticsearch/client/javascript-api/current/index.html" class="ulink" target="_top">Official
+client documentation</a></p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_client_api_changes"></a>Client API Changes<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Refer to the
+<a href="/guide/en/elasticsearch/client/javascript-api/current/breaking-changes.html" class="ulink" target="_top">Breaking
+changes list</a> for more information about the changes between the legacy
+and new client.</p>
+<p>The most significant changes on the Kibana side for the consumers are the following:</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="_user_client_accessor"></a>User client accessor<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h5>
+</div></div></div>
+<p>Internal /current user client accessors has been renamed and are now
+properties instead of functions:
+<span class="strong strong"><strong> <code class="literal">callAsInternalUser('ping')</code> &#8594; <code class="literal">asInternalUser.ping()</code>
+</strong></span> <code class="literal">callAsCurrentUser('ping')</code> &#8594; <code class="literal">asCurrentUser.ping()</code>
+* the API now reflects the <code class="literal">Client</code>’s instead of leveraging the
+string-based endpoint names the <code class="literal">LegacyAPICaller</code> was using.</p>
+<p>Before:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">const body = await client.callAsInternalUser('indices.get', { index: 'id' });</pre>
+</div>
+<p>After:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">const { body } = await client.asInternalUser.indices.get({ index: 'id' });</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="_response_object"></a>Response object<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h5>
+</div></div></div>
+<p>Calling any ES endpoint now returns the whole response object instead
+of only the body payload.</p>
+<p>Before:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">const body = await legacyClient.callAsInternalUser('get', { id: 'id' });</pre>
+</div>
+<p>After:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">const { body } = await client.asInternalUser.get({ id: 'id' });</pre>
+</div>
+<p>Note that more information from the ES response is available:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">const {
+  body,        // response payload
+  statusCode,  // http status code of the response
+  headers,     // response headers
+  warnings,    // warnings returned from ES
+  meta         // meta information about the request, such as request parameters, number of attempts and so on
+} = await client.asInternalUser.get({ id: 'id' });</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="_response_type"></a>Response Type<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h5>
+</div></div></div>
+<p>All API methods are now generic to allow specifying the response body.
+type</p>
+<p>Before:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">const body: GetResponse = await legacyClient.callAsInternalUser('get', { id: 'id' });</pre>
+</div>
+<p>After:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">// body is of type `GetResponse`
+const { body } = await client.asInternalUser.get&lt;GetResponse&gt;({ id: 'id' });
+// fallback to `Record&lt;string, any&gt;` if unspecified
+const { body } = await client.asInternalUser.get({ id: 'id' });</pre>
+</div>
+<p>The new client doesn’t provide exhaustive typings for the response
+object yet. You might have to copy response type definitions from the
+Legacy Elasticsearch library until the additional announcements.</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">// Kibana provides a few typings for internal purposes
+import type { SearchResponse } from 'kibana/server';
+type SearchSource = {...};
+type SearchBody = SearchResponse&lt;SearchSource&gt;;
+const { body } = await client.search&lt;SearchBody&gt;(...);
+interface Info {...}
+const { body } = await client.info&lt;Info&gt;(...);</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="_errors"></a>Errors<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h5>
+</div></div></div>
+<p>The returned error types changed.</p>
+<p>There are no longer specific errors for every HTTP status code (such as
+<code class="literal">BadRequest</code> or <code class="literal">NotFound</code>). A generic <code class="literal">ResponseError</code> with the specific
+<code class="literal">statusCode</code> is thrown instead.</p>
+<p>Before:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">import { errors } from 'elasticsearch';
+try {
+  await legacyClient.callAsInternalUser('ping');
+} catch(e) {
+  if(e instanceof errors.NotFound) {
+    // do something
+  }
+  if(e.status === 401) {}
+}</pre>
+</div>
+<p>After:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">import { errors } from '@elastic/elasticsearch';
+try {
+  await client.asInternalUser.ping();
+} catch(e) {
+  if(e instanceof errors.ResponseError &amp;&amp; e.statusCode === 404) {
+    // do something
+  }
+  // also possible, as all errors got a name property with the name of the class,
+  // so this slightly better in term of performances
+  if(e.name === 'ResponseError' &amp;&amp; e.statusCode === 404) {
+    // do something
+  }
+  if(e.statusCode === 401) {...}
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="_parameter_naming_format"></a>Parameter naming format<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h5>
+</div></div></div>
+<p>The parameter property names changed from camelCase to snake_case</p>
+<p>Even if technically, the JavaScript client accepts both formats, the
+TypeScript definitions are only defining snake_case properties.</p>
+<p>Before:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">legacyClient.callAsCurrentUser('get', {
+  id: 'id',
+  storedFields: ['some', 'fields'],
+})</pre>
+</div>
+<p>After:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">client.asCurrentUser.get({
+  id: 'id',
+  stored_fields: ['some', 'fields'],
+})</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="_request_abortion"></a>Request abortion<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h5>
+</div></div></div>
+<p>The request abortion API changed</p>
+<p>All promises returned from the client API calls now have an <code class="literal">abort</code>
+method that can be used to cancel the request.</p>
+<p>Before:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">const controller = new AbortController();
+legacyClient.callAsCurrentUser('ping', {}, {
+  signal: controller.signal,
+})
+// later
+controller.abort();</pre>
+</div>
+<p>After:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">const request = client.asCurrentUser.ping();
+// later
+request.abort();</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="_headers"></a>Headers<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h5>
+</div></div></div>
+<p>It is now possible to override headers when performing specific API
+calls.</p>
+<p>Note that doing so is strongly discouraged due to potential side effects
+with the ES service internal behavior when scoping as the internal or as
+the current user.</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">const request = client.asCurrentUser.ping({}, {
+  headers: {
+    authorization: 'foo',
+    custom: 'bar',
+  }
+});</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="_functional_tests"></a>Functional tests<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h5>
+</div></div></div>
+<p>Functional tests are subject to migration to the new client as well.</p>
+<p>Before:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">const client = getService('legacyEs');</pre>
+</div>
+<p>After:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">const client = getService('es');</pre>
+</div>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_accessing_the_client_from_a_route_handler"></a>Accessing the client from a route handler<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Apart from the API format change, accessing the client from within a
+route handler did not change. As it was done for the legacy client, a
+preconfigured <a class="xref" href="_patterns.html#scoped-services" title="Scoped services">scoped client</a> bound to an incoming request is accessible using
+the <code class="literal">core</code> context provider:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">router.get(
+  {
+    path: '/my-route',
+  },
+  async (context, req, res) =&gt; {
+    const { client } = context.core.elasticsearch;
+    // call as current user
+    const res = await client.asCurrentUser.ping();
+    // call as internal user
+    const res2 = await client.asInternalUser.search(options);
+    return res.ok({ body: 'ok' });
+  }
+);</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_creating_a_custom_client"></a>Creating a custom client<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.x/docs/developer/plugin/migrating-legacy-plugins-examples.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Note that the <code class="literal">plugins</code> option is no longer available on the new
+client. As the API is now exhaustive, adding custom endpoints using
+plugins should no longer be necessary.</p>
+<p>The API to create custom clients did not change much:</p>
+<p>Before:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">const customClient = coreStart.elasticsearch.legacy.createClient('my-custom-client', customConfig);
+// do something with the client, such as
+await customClient.callAsInternalUser('ping');
+// custom client are closable
+customClient.close();</pre>
+</div>
+<p>After:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">const customClient = coreStart.elasticsearch.createClient('my-custom-client', customConfig);
+// do something with the client, such as
+await customClient.asInternalUser.ping();
+// custom client are closable
+customClient.close();</pre>
+</div>
+<p>If, for any reasons, you still need to reach an endpoint not listed on
+the client API, using <code class="literal">request.transport</code> is still possible:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">const { body } = await client.asCurrentUser.transport.request({
+  method: 'get',
+  path: '/my-custom-endpoint',
+  body: { my: 'payload'},
+  querystring: { param: 'foo' }
+})</pre>
+</div>
+</div>
+
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="migrating-legacy-plugins.html">« Migrating legacy plugins to the Kibana Platform</a>
+</span>
+<span class="next">
+<a href="external-plugin-functional-tests.html">Functional Tests for Plugins outside the Kibana repo »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

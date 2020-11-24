@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Patterns | Kibana Guide [7.10] | Elastic</title>
+<link rel="home" href="index.html" title="Kibana Guide [7.10]"/>
+<link rel="up" href="kibana-architecture.html" title="Architecture"/>
+<link rel="prev" href="kibana-platform-api.html" title="Kibana Core API"/>
+<link rel="next" href="development-security.html" title="Security"/>
+<meta name="DC.type" content="Learn/Docs/Kibana/Reference/7.10"/>
+<meta name="DC.subject" content="Kibana"/>
+<meta name="DC.identifier" content="7.10"/>
+</head>
+<body>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Kibana Guide [7.10]</a></span>
+»
+<span class="breadcrumb-link"><a href="development.html">Developer guide</a></span>
+»
+<span class="breadcrumb-link"><a href="kibana-architecture.html">Architecture</a></span>
+»
+<span class="breadcrumb-node">Patterns</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="kibana-platform-api.html">« Kibana Core API</a>
+</span>
+<span class="next">
+<a href="development-security.html">Security »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="_patterns"></a>Patterns<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/architecture/core/index.asciidoc">edit</a></h2>
+</div></div></div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="scoped-services"></a>Scoped services<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/architecture/core/index.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Whenever Kibana needs to get access to data saved in elasticsearch, it
+should perform a check whether an end-user has access to the data. In
+the legacy platform, Kibana requires binding elasticsearch related API
+with an incoming request to access elasticsearch service on behalf of a
+user.</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">async function handler(req, res) {
+  const dataCluster = server.plugins.elasticsearch.getCluster('data');
+  const data = await dataCluster.callWithRequest(req, 'ping');
+}</pre>
+</div>
+<p>The Kibana Platform introduced a handler interface on the server-side to perform that association
+internally. Core services, that require impersonation with an incoming
+request, are exposed via <code class="literal">context</code> argument of
+<a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.requesthandler.md" class="ulink" target="_top">the
+request handler interface.</a> The above example looks in the Kibana Platform
+as</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">async function handler(context, req, res) {
+  const data = await context.core.elasticsearch.client.asCurrentUser('ping');
+}</pre>
+</div>
+<p>The
+<a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.requesthandlercontext.md" class="ulink" target="_top">request
+handler context</a> exposed the next scoped <span class="strong strong"><strong>core</strong></span> services:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px" width="100%">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Legacy Platform</th>
+<th align="left" valign="top">Kibana Platform</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">request.getSavedObjectsClient</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsclient.md" class="ulink" target="_top"><code class="literal">context.savedObjects.client</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">server.plugins.elasticsearch.getCluster('admin')</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.iscopedclusterclient.md" class="ulink" target="_top"><code class="literal">context.elasticsearch.client</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">server.plugins.elasticsearch.getCluster('data')</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.iscopedclusterclient.md" class="ulink" target="_top"><code class="literal">context.elasticsearch.client</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">request.getUiSettingsService</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.iuisettingsclient.md" class="ulink" target="_top"><code class="literal">context.uiSettings.client</code></a></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_declare_a_custom_scoped_service"></a>Declare a custom scoped service<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/architecture/core/index.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Plugins can extend the handler context with a custom API that will be
+available to the plugin itself and all dependent plugins. For example,
+the plugin creates a custom elasticsearch client and wants to use it via
+the request handler context:</p>
+<div class="pre_wrapper lang-typescript">
+<pre class="programlisting prettyprint lang-typescript">import type { CoreSetup, IScopedClusterClient } from 'kibana/server';
+
+export interface MyPluginContext {
+  client: IScopedClusterClient;
+}
+
+// extend RequestHandlerContext when a dependent plugin imports MyPluginContext from the file
+declare module 'kibana/server' {
+  interface RequestHandlerContext {
+    myPlugin?: MyPluginContext;
+  }
+}
+
+class MyPlugin {
+  setup(core: CoreSetup) {
+    const client = core.elasticsearch.createClient('myClient');
+    core.http.registerRouteHandlerContext('myPlugin', (context, req, res) =&gt; {
+      return { client: client.asScoped(req) };
+    });
+    const router = core.http.createRouter();
+    router.get(
+      { path: '/api/my-plugin/', validate: … },
+      async (context, req, res) =&gt; {
+        const data = await context.myPlugin.client.asCurrentUser('endpoint');
+      }
+    );
+  }</pre>
+</div>
+</div>
+
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="kibana-platform-api.html">« Kibana Core API</a>
+</span>
+<span class="next">
+<a href="development-security.html">Security »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

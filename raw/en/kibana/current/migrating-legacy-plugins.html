@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Migrating legacy plugins to the Kibana Platform | Kibana Guide [7.10] | Elastic</title>
+<link rel="home" href="index.html" title="Kibana Guide [7.10]"/>
+<link rel="up" href="external-plugin-development.html" title="External plugin development"/>
+<link rel="prev" href="plugin-tooling.html" title="Plugin tooling"/>
+<link rel="next" href="migrating-legacy-plugins-examples.html" title="Migration Examples"/>
+<meta name="DC.type" content="Learn/Docs/Kibana/Reference/7.10"/>
+<meta name="DC.subject" content="Kibana"/>
+<meta name="DC.identifier" content="7.10"/>
+</head>
+<body>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Kibana Guide [7.10]</a></span>
+»
+<span class="breadcrumb-link"><a href="development.html">Developer guide</a></span>
+»
+<span class="breadcrumb-link"><a href="external-plugin-development.html">External plugin development</a></span>
+»
+<span class="breadcrumb-node">Migrating legacy plugins to the Kibana Platform</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="plugin-tooling.html">« Plugin tooling</a>
+</span>
+<span class="next">
+<a href="migrating-legacy-plugins-examples.html">Migration Examples »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="migrating-legacy-plugins"></a>Migrating legacy plugins to the Kibana Platform<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h2>
+</div></div></div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>In Kibana 7.10, support for legacy-style Kibana plugins was completely removed.
+Moving forward, all plugins must be built on the new Kibana Platform Plugin API.
+This guide is intended to assist plugin authors in migrating their legacy plugin
+to the Kibana Platform Plugin API.</p>
+</div>
+</div>
+<p>Make no mistake, it is going to take a lot of work to move certain
+plugins to the Kibana Platform.</p>
+<p>The goal of this document is to guide developers through the recommended
+process of migrating at a high level. Every plugin is different, so
+developers should tweak this plan based on their unique requirements.</p>
+<p>First, we recommend you read <a class="xref" href="kibana-platform-plugin-api.html" title="Kibana Plugin API">Kibana Plugin API</a> to get an overview
+of how plugins work in the Kibana Platform. Then continue here to follow our
+generic plan of action that can be applied to any legacy plugin.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_challenges_to_overcome_with_legacy_plugins"></a>Challenges to overcome with legacy plugins<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Kibana Platform plugins have an identical architecture in the browser and on
+the server. Legacy plugins have one architecture that they use in the
+browser and an entirely different architecture that they use on the
+server.</p>
+<p>This means that there are unique sets of challenges for migrating to the
+Kibana Platform, depending on whether the legacy plugin code is on the
+server or in the browser.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_challenges_on_the_server"></a>Challenges on the server<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h4>
+</div></div></div>
+<p>The general architecture of legacy server-side code is similar to
+the Kibana Platform architecture in one important way: most legacy
+server-side plugins define an <code class="literal">init</code> function where the bulk of their
+business logic begins, and they access both <code class="literal">core</code> and
+<code class="literal">plugin-provided</code> functionality through the arguments given to <code class="literal">init</code>.
+Rarely does legacy server-side code share stateful services via import
+statements.</p>
+<p>Although not exactly the same, legacy plugin <code class="literal">init</code> functions behave
+similarly today as Kibana Platform <code class="literal">setup</code> functions. <code class="literal">KbnServer</code> also
+exposes an <code class="literal">afterPluginsInit</code> method, which behaves similarly to <code class="literal">start</code>.
+There is no corresponding legacy concept of <code class="literal">stop</code>.</p>
+<p>Despite their similarities, server-side plugins pose a formidable
+challenge: legacy core and plugin functionality is retrieved from either
+the hapi.js <code class="literal">server</code> or <code class="literal">request</code> god objects. Worse, these objects are
+often passed deeply throughout entire plugins, which directly couples
+business logic with hapi. And the worst of it all is, these objects are
+mutable at any time.</p>
+<p>The key challenge to overcome with legacy server-side plugins will
+decoupling from hapi.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_challenges_in_the_browser"></a>Challenges in the browser<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h4>
+</div></div></div>
+<p>The legacy plugin system in the browser is fundamentally incompatible
+with the Kibana Platform. There is no client-side plugin definition. There
+are no services that get passed to plugins at runtime. There really
+isn’t even a concrete notion of <code class="literal">core</code>.</p>
+<p>When a legacy browser plugin needs to access functionality from another
+plugin, say to register a UI section to render within another plugin, it
+imports a stateful (global singleton) JavaScript module and performs
+some sort of state mutation. Sometimes this module exists inside the
+plugin itself, and it gets imported via the <code class="literal">plugin/</code> webpack alias.
+Sometimes this module exists outside the context of plugins entirely and
+gets imported via the <code class="literal">ui/</code> webpack alias. Neither of these concepts
+exists in the Kibana Platform.</p>
+<p>Legacy browser plugins rely on the feature known as <code class="literal">uiExports/</code>, which
+integrates directly with our build system to ensure that plugin code is
+bundled together in such a way to enable that global singleton module
+state. There is no corresponding feature in the Kibana Platform, and in
+the fact we intend down the line to build Kibana Platform plugins as immutable
+bundles that can not share state in this way.</p>
+<p>The key challenge to overcome with legacy browser-side plugins will be
+converting all imports from <code class="literal">plugin/</code>, <code class="literal">ui/</code>, <code class="literal">uiExports</code>, and relative
+imports from other plugins into a set of services that originate at
+runtime during plugin initialization and get passed around throughout
+the business logic of the plugin as function arguments.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_plan_of_action"></a>Plan of action<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h4>
+</div></div></div>
+<p>To move a legacy plugin to the new plugin system, the
+challenges on the server and in the browser must be addressed.</p>
+<p>The approach and level of effort varies significantly between server and
+browser plugins, but at a high level, the approach is the same.</p>
+<p>First, decouple your plugin’s business logic from the dependencies that
+are not exposed through the Kibana Platform, hapi.js, and Angular.js. Then
+introduce plugin definitions that more accurately reflect how plugins
+are defined in the Kibana Platform. Finally, replace the functionality you
+consume from the core and other plugins with their Kibana Platform equivalents.</p>
+<p>Once those things are finished for any given plugin, it can officially
+be switched to the new plugin system.</p>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_server_side_plan_of_action"></a>Server-side plan of action<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Legacy server-side plugins access functionality from the core and other
+plugins at runtime via function arguments, which is similar to how they
+must be architected to use the new plugin system. This greatly
+simplifies the plan of action for migrating server-side plugins.
+The main challenge here is to de-couple plugin logic from hapi.js server and request objects.</p>
+<p>For migration examples, see <a class="xref" href="migrating-legacy-plugins-examples.html" title="Migration Examples">Migration Examples</a>.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_browser_side_plan_of_action"></a>Browser-side plan of action<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h3>
+</div></div></div>
+<p>It is generally a much greater challenge preparing legacy browser-side
+code for the Kibana Platform than it is server-side, and as such there are
+a few more steps. The level of effort here is proportional to the extent
+to which a plugin is dependent on Angular.js.</p>
+<p>To complicate matters further, a significant amount of the business
+logic in Kibana client-side code exists inside the <code class="literal">ui/public</code>
+directory (aka ui modules), and all of that must be migrated as well.</p>
+<p>Because the usage of Angular and <code class="literal">ui/public</code> modules varies widely between
+legacy plugins, there is no <code class="literal">one size fits all</code> solution to migrating
+your browser-side code to the Kibana Platform.</p>
+<p>For migration examples, see <a class="xref" href="migrating-legacy-plugins-examples.html" title="Migration Examples">Migration Examples</a>.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_frequently_asked_questions"></a>Frequently asked questions<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_do_plugins_need_to_be_converted_to_typescript"></a>Do plugins need to be converted to TypeScript?<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h4>
+</div></div></div>
+<p>No. That said, the migration process will require a lot of refactoring,
+and TypeScript will make this dramatically easier and less risky.</p>
+<p>Although it&#8217;s not strictly necessary, we encourage any plugin that exposes an extension point to do so
+with first-class type support so downstream plugins that <em>are</em> using
+TypeScript can depend on those types.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_how_can_i_avoid_passing_core_services_deeply_within_my_ui_component_tree"></a>How can I avoid passing core services deeply within my UI component tree?<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Some core services are purely presentational, for example
+<code class="literal">core.overlays.openModal()</code>, where UI
+code does need access to these deeply within your application. However,
+passing these services down as props throughout your application leads
+to lots of boilerplate. To avoid this, you have three options:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Use an abstraction layer, like Redux, to decouple your UI code from
+core (<span class="strong strong"><strong>this is the highly preferred option</strong></span>).
+</li>
+<li class="listitem">
+<a href="https://github.com/reduxjs/redux-thunk#injecting-a-custom-argument" class="ulink" target="_top">redux-thunk</a>
+and
+<a href="https://redux-saga.js.org/docs/api/#createsagamiddlewareoptions" class="ulink" target="_top">redux-saga</a>
+already have ways to do this.
+</li>
+<li class="listitem">
+Use React Context to provide these services to large parts of your
+React tree.
+</li>
+<li class="listitem">
+Create a high-order-component that injects core into a React
+component.
+</li>
+<li class="listitem">
+This would be a stateful module that holds a reference to core, but
+provides it as props to components with a <code class="literal">withCore(MyComponent)</code>
+interface. This can make testing components simpler. (Note: this module
+cannot be shared across plugin boundaries, see above).
+</li>
+<li class="listitem">
+Create a global singleton module that gets imported into each module
+that needs it. This module cannot be shared across plugin
+boundaries.
+<a href="https://gist.github.com/epixa/06c8eeabd99da3c7545ab295e49acdc3" class="ulink" target="_top">Example</a>.
+</li>
+</ul>
+</div>
+<p>If you find that you need many different core services throughout your
+application, this might indicate a problem in your code and could lead to pain down the
+road. For instance, if you need access to an HTTP Client or
+SavedObjectsClient in many places in your React tree, it’s likely that a
+data layer abstraction (like Redux) could make developing your plugin
+much simpler.</p>
+<p>Without such an abstraction, you will need to mock out core services
+throughout your test suite and will couple your UI code very tightly to
+core. However, if you can contain all of your integration points with
+core to Redux middleware and reducers, you only need to mock core
+services once and benefit from being able to change those integrations
+with core in one place rather than many. This will become incredibly
+handy when core APIs have breaking changes.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_how_is_the_common_code_shared_on_both_the_client_and_the_server"></a>How is the <em>common</em> code shared on both the client and the server?<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h4>
+</div></div></div>
+<p>There is no formal notion of <code class="literal">common</code> code that can safely be imported
+from either client-side or server-side code. However, if a plugin author
+wishes to maintain a set of code in their plugin in a single place and
+then expose it to both server-side and client-side code, they can do so
+by exporting the index files for both the <code class="literal">server</code> and <code class="literal">public</code>
+directories.</p>
+<p>Plugins <em>should not</em> ever import code from deeply inside another plugin
+(e.g. <code class="literal">my_plugin/public/components</code>) or from other top-level directories
+(e.g. <code class="literal">my_plugin/common/constants</code>) as these are not checked for breaking
+changes and are considered unstable and subject to change at any time.
+You can have other top-level directories like <code class="literal">my_plugin/common</code>, but
+our tooling will not treat these as a stable API, and linter rules will
+prevent importing from these directories <em>from outside the plugin</em>.</p>
+<p>The benefit of this approach is that the details of where code lives and
+whether it is accessible in multiple runtimes is an implementation
+detail of the plugin itself. A plugin consumer that is writing
+client-side code only ever needs to concern themselves with the
+client-side contracts being exposed, and the same can be said for
+server-side contracts on the server.</p>
+<p>A plugin author, who decides some set of code should diverge from having
+a single <code class="literal">common</code> definition, can now safely change the implementation
+details without impacting downstream consumers.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_how_do_i_find_kibana_platform_services"></a>How do I find Kibana Platform services?<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Most of the utilities you used to build legacy plugins are available
+in the Kibana Platform or Kibana Platform plugins. To help you find the new
+home for new services, use the tables below to find where the Kibana
+Platform equivalent lives.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="_client_side_2"></a>Client-side<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h5>
+</div></div></div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h6 class="title"><a id="_core_services"></a>Core services<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h6>
+</div></div></div>
+<p>In client code, <code class="literal">core</code> can be imported in legacy plugins via the
+<code class="literal">ui/new_platform</code> module.</p>
+<div class="informaltable">
+<a id="client-side-core-migration-table"></a>
+<table border="1" cellpadding="4px" width="100%">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Legacy Platform</th>
+<th align="left" valign="top">Kibana Platform</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">chrome.addBasePath</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana//tree/7.10/docs/development/core/public/kibana-plugin-core-public.ibasepath.md" class="ulink" target="_top"><code class="literal">core.http.basePath.prepend</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">chrome.breadcrumbs.set</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana//tree/7.10/docs/development/core/public/kibana-plugin-core-public.chromestart.setbreadcrumbs.md" class="ulink" target="_top"><code class="literal">core.chrome.setBreadcrumbs</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">chrome.getUiSettingsClient</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana//tree/7.10/docs/development/core/public/kibana-plugin-core-public.corestart.uisettings.md" class="ulink" target="_top"><code class="literal">core.uiSettings</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">chrome.helpExtension.set</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana//tree/7.10/docs/development/core/public/kibana-plugin-core-public.chromestart.sethelpextension.md" class="ulink" target="_top"><code class="literal">core.chrome.setHelpExtension</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">chrome.setVisible</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana//tree/7.10/docs/development/core/public/kibana-plugin-core-public.chromestart.setisvisible.md" class="ulink" target="_top"><code class="literal">core.chrome.setIsVisible</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">chrome.getInjected</code></p></td>
+<td align="left" valign="top"><p>Request Data with your plugin REST HTTP API.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">chrome.setRootTemplate</code> / <code class="literal">chrome.setRootController</code></p></td>
+<td align="left" valign="top"><p>Use application mounting via <a href="https://github.com/elastic/kibana//tree/7.10/docs/development/core/public/kibana-plugin-core-public.applicationsetup.register.md" class="ulink" target="_top"><code class="literal">core.application.register</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">chrome.navLinks.update</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana//tree/7.10/docs/development/core/public/kibana-plugin-core-public.app.updater_.md" class="ulink" target="_top"><code class="literal">core.appbase.updater</code></a>. Use the <code class="literal">updater$</code> property when registering your application via
+<code class="literal">core.application.register</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">import { recentlyAccessed } from 'ui/persisted_log'</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/public/kibana-plugin-core-public.chromerecentlyaccessed.md" class="ulink" target="_top"><code class="literal">core.chrome.recentlyAccessed</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/capabilities</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/public/kibana-plugin-core-public.capabilities.md" class="ulink" target="_top"><code class="literal">core.application.capabilities</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/documentation_links</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/public/kibana-plugin-core-public.doclinksstart.md" class="ulink" target="_top"><code class="literal">core.docLinks</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/kfetch</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/public/kibana-plugin-core-public.httpsetup.md" class="ulink" target="_top"><code class="literal">core.http</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/notify</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/public/kibana-plugin-core-public.notificationsstart.md" class="ulink" target="_top"><code class="literal">core.notifications</code></a>
+and
+<a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/public/kibana-plugin-core-public.overlaystart.md" class="ulink" target="_top"><code class="literal">core.overlays</code></a>. Toast messages are in <code class="literal">notifications</code>, banners are in <code class="literal">overlays</code>.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/routes</code></p></td>
+<td align="left" valign="top"><p>There is no global routing mechanism. Each app
+<a href="https://github.com/elastic/kibana/blob/7.10/rfcs/text/0004_application_service_mounting.md#complete-example" class="ulink" target="_top">configures
+its own routing</a>.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/saved_objects</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/public/kibana-plugin-core-public.savedobjectsstart.md" class="ulink" target="_top"><code class="literal">core.savedObjects</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/doc_title</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/public/kibana-plugin-core-public.chromedoctitle.md" class="ulink" target="_top"><code class="literal">core.chrome.docTitle</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">uiExports/injectedVars</code> / <code class="literal">chrome.getInjected</code></p></td>
+<td align="left" valign="top"><p><a class="xref" href="kibana-platform-api.html#configuration-service" title="Configuration service">Configuration service</a>. Can only be used to expose configuration properties</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><em>See also:
+<a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/public/kibana-plugin-core-public.corestart.md" class="ulink" target="_top">Public’s
+CoreStart API Docs</a></em></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h6 class="title"><a id="_plugins_for_shared_application_services"></a>Plugins for shared application services<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h6>
+</div></div></div>
+<p>In client code, we have a series of plugins that house shared
+application services, which are not technically part of <code class="literal">core</code>, but are
+often used in Kibana plugins.</p>
+<p>This table maps some of the most commonly used legacy items to their Kibana
+Platform locations. For the API provided by Kibana Plugins see <a class="xref" href="plugin-list.html" title="List of Kibana plugins">the plugin list</a>.</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px" width="100%">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Legacy Platform</th>
+<th align="left" valign="top">Kibana Platform</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">import 'ui/apply_filters'</code></p></td>
+<td align="left" valign="top"><p>N/A. Replaced by triggering an
+<a href="https://github.com/elastic/kibana/blob/7.10/docs/development/plugins/data/public/kibana-plugin-plugins-data-public.action_global_apply_filter.md" class="ulink" target="_top">APPLY_FILTER_TRIGGER trigger</a>. Directive is deprecated.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">import 'ui/filter_bar'</code></p></td>
+<td align="left" valign="top"><p><code class="literal">import { FilterBar } from 'plugins/data/public'</code>. Directive is deprecated.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">import 'ui/query_bar'</code></p></td>
+<td align="left" valign="top"><p><code class="literal">import { QueryStringInput } from 'plugins/data/public'</code> <a href="https://github.com/elastic/kibana/blob/7.10/docs/development/plugins/data/public/kibana-plugin-plugins-data-public.querystringinput.md" class="ulink" target="_top">QueryStringInput</a>. Directives are deprecated.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">import 'ui/search_bar'</code></p></td>
+<td align="left" valign="top"><p><code class="literal">import { SearchBar } from 'plugins/data/public'</code> <a href="https://github.com/elastic/kibana/blob/7.10/docs/development/plugins/data/public/kibana-plugin-plugins-data-public.datapublicpluginstartui.searchbar.md" class="ulink" target="_top">SearchBar</a>. Directive is deprecated.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">import 'ui/kbn_top_nav'</code></p></td>
+<td align="left" valign="top"><p><code class="literal">import { TopNavMenu } from 'plugins/navigation/public'</code>. Directive was removed.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/saved_objects/saved_object_finder</code></p></td>
+<td align="left" valign="top"><p><code class="literal">import { SavedObjectFinder } from 'plugins/saved_objects/public'</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">core_plugins/interpreter</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/plugins/expressions/public/kibana-plugin-plugins-expressions-public.md" class="ulink" target="_top"><code class="literal">plugins.data.expressions</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/courier</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/plugins/data/public/kibana-plugin-plugins-data-public.datapublicpluginsetup.search.md" class="ulink" target="_top"><code class="literal">plugins.data.search</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/agg_types</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/plugins/data/public/kibana-plugin-plugins-data-public.searchsourcefields.aggs.md" class="ulink" target="_top"><code class="literal">plugins.data.search.aggs</code></a>. Most code is available for
+static import. Stateful code is part of the <code class="literal">search</code> service.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/embeddable</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/plugins/embeddable/public/kibana-plugin-plugins-embeddable-public.embeddablesetup.md" class="ulink" target="_top"><code class="literal">plugins.embeddables</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/filter_manager</code></p></td>
+<td align="left" valign="top"><p><code class="literal">import { FilterManager } from 'plugins/data/public'</code> <a href="https://github.com/elastic/kibana/blob/7.10/docs/development/plugins/data/public/kibana-plugin-plugins-data-public.filtermanager.md" class="ulink" target="_top"><code class="literal">FilterManager</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/index_patterns</code></p></td>
+<td align="left" valign="top"><p><code class="literal">import { IndexPatternsService } from 'plugins/data/public'</code> <a href="https://github.com/elastic/kibana/blob/7.10/docs/development/plugins/data/public/kibana-plugin-plugins-data-public.indexpatternsservice.md" class="ulink" target="_top">IndexPatternsService</a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">import 'ui/management'</code></p></td>
+<td align="left" valign="top"><p><code class="literal">plugins.management.sections</code>. Management plugin <code class="literal">setup</code> contract.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">import 'ui/registry/field_format_editors'</code></p></td>
+<td align="left" valign="top"><p><code class="literal">plugins.indexPatternManagement.fieldFormatEditors</code> indexPatternManagement plugin <code class="literal">setup</code> contract.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/registry/field_formats</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/plugins/data/public/kibana-plugin-plugins-data-public.fieldformats.md" class="ulink" target="_top"><code class="literal">plugins.data.fieldFormats</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/registry/feature_catalogue</code></p></td>
+<td align="left" valign="top"><p><code class="literal">plugins.home.featureCatalogue.register</code>  home plugin <code class="literal">setup</code> contract</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/registry/vis_types</code></p></td>
+<td align="left" valign="top"><p><code class="literal">plugins.visualizations</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/vis</code></p></td>
+<td align="left" valign="top"><p><code class="literal">plugins.visualizations</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/share</code></p></td>
+<td align="left" valign="top"><p><code class="literal">plugins.share</code>. share plugin <code class="literal">start</code> contract. <code class="literal">showShareContextMenu</code> is now called
+<code class="literal">toggleShareContextMenu</code>, <code class="literal">ShareContextMenuExtensionsRegistryProvider</code>
+is now called <code class="literal">register</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/vis/vis_factory</code></p></td>
+<td align="left" valign="top"><p><code class="literal">plugins.visualizations</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/vis/vis_filters</code></p></td>
+<td align="left" valign="top"><p><code class="literal">plugins.visualizations.filters</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ui/utils/parse_es_interval</code></p></td>
+<td align="left" valign="top"><p><code class="literal">import { search: { aggs: { parseEsInterval } } } from 'plugins/data/public'</code>. <code class="literal">parseEsInterval</code>, <code class="literal">ParsedInterval</code>, <code class="literal">InvalidEsCalendarIntervalError</code>,
+<code class="literal">InvalidEsIntervalFormatError</code> items were moved to the <code class="literal">Data Plugin</code> as
+a static code</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="_server_side_2"></a>Server-side<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h5>
+</div></div></div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h6 class="title"><a id="_core_services_2"></a>Core services<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h6>
+</div></div></div>
+<p>In server code, <code class="literal">core</code> can be accessed from either <code class="literal">server.newPlatform</code>
+or <code class="literal">kbnServer.newPlatform</code>:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px" width="100%">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Legacy Platform</th>
+<th align="left" valign="top">Kibana Platform</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">server.config()</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.plugininitializercontext.config.md" class="ulink" target="_top"><code class="literal">initializerContext.config.create()</code></a>. Must also define schema. See <a class="xref" href="migrating-legacy-plugins-examples.html#config-migration" title="Configuration">Configuration</a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">server.route</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.httpservicesetup.createrouter.md" class="ulink" target="_top"><code class="literal">core.http.createRouter</code></a>. See <a class="xref" href="migrating-legacy-plugins-examples.html#http-routes-migration" title="HTTP Routes">HTTP routes migration</a>.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">server.renderApp()</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.httpresourcesservicetoolkit.rendercoreapp.md" class="ulink" target="_top"><code class="literal">response.renderCoreApp()</code></a>. See <a class="xref" href="migrating-legacy-plugins-examples.html#render-html-migration" title="Render HTML Content">Render HTML migration</a>.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">server.renderAppWithDefaultConfig()</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.httpresourcesservicetoolkit.renderanonymouscoreapp.md" class="ulink" target="_top"><code class="literal">response.renderAnonymousCoreApp()</code></a>. See <a class="xref" href="migrating-legacy-plugins-examples.html#render-html-migration" title="Render HTML Content">Render HTML migration</a>.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">request.getBasePath()</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.httpservicesetup.basepath.md" class="ulink" target="_top"><code class="literal">core.http.basePath.get</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">server.plugins.elasticsearch.getCluster('data')</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.iscopedclusterclient.md" class="ulink" target="_top"><code class="literal">context.core.elasticsearch.client</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">server.plugins.elasticsearch.getCluster('admin')</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.iscopedclusterclient.md" class="ulink" target="_top"><code class="literal">context.core.elasticsearch.client</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">server.plugins.elasticsearch.createCluster(...)</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.elasticsearchservicestart.createclient.md" class="ulink" target="_top"><code class="literal">core.elasticsearch.createClient</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">server.savedObjects.setScopedSavedObjectsClientFactory</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsservicesetup.setclientfactoryprovider.md" class="ulink" target="_top"><code class="literal">core.savedObjects.setClientFactoryProvider</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">server.savedObjects.addScopedSavedObjectsClientWrapperFactory</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsservicesetup.addclientwrapper.md" class="ulink" target="_top"><code class="literal">core.savedObjects.addClientWrapper</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">server.savedObjects.getSavedObjectsRepository</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsservicestart.createinternalrepository.md" class="ulink" target="_top"><code class="literal">core.savedObjects.createInternalRepository</code></a>
+<a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsservicestart.createscopedrepository.md" class="ulink" target="_top"><code class="literal">core.savedObjects.createScopedRepository</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">server.savedObjects.getScopedSavedObjectsClient</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsservicestart.getscopedclient.md" class="ulink" target="_top"><code class="literal">core.savedObjects.getScopedClient</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">request.getSavedObjectsClient</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.requesthandlercontext.core.md" class="ulink" target="_top"><code class="literal">context.core.savedObjects.client</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">request.getUiSettingsService</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.iuisettingsclient.md" class="ulink" target="_top"><code class="literal">context.core.uiSettings.client</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">kibana.Plugin.deprecations</code></p></td>
+<td align="left" valign="top"><p><a class="xref" href="kibana-platform-api.html#handle-plugin-configuration-deprecations" title="Handle plugin configuration deprecations">Handle plugin configuration deprecations</a> and <a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.pluginconfigdescriptor.md" class="ulink" target="_top"><code class="literal">PluginConfigDescriptor.deprecations</code></a>. Deprecations from Kibana Platform are not applied to legacy configuration</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">kibana.Plugin.savedObjectSchemas</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsservicesetup.registertype.md" class="ulink" target="_top"><code class="literal">core.savedObjects.registerType</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">kibana.Plugin.mappings</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsservicesetup.registertype.md" class="ulink" target="_top"><code class="literal">core.savedObjects.registerType</code></a>. Learn more in <a class="xref" href="migrating-legacy-plugins-examples.html#saved-objects-migration" title="Saved Objects types">SavedObjects migration</a>.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">kibana.Plugin.migrations</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsservicesetup.registertype.md" class="ulink" target="_top"><code class="literal">core.savedObjects.registerType</code></a>. Learn more in <a class="xref" href="migrating-legacy-plugins-examples.html#saved-objects-migration" title="Saved Objects types">SavedObjects migration</a>.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">kibana.Plugin.savedObjectsManagement</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsservicesetup.registertype.md" class="ulink" target="_top"><code class="literal">core.savedObjects.registerType</code></a>. Learn more in <a class="xref" href="migrating-legacy-plugins-examples.html#saved-objects-migration" title="Saved Objects types">SavedObjects migration</a>.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><em>See also:
+<a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.coresetup.md" class="ulink" target="_top">Server’s
+CoreSetup API Docs</a></em></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h6 class="title"><a id="_plugin_services"></a>Plugin services<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h6>
+</div></div></div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" width="100%">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Legacy Platform</th>
+<th align="left" valign="top">Kibana Platform</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">xpack_main.registerFeature</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/x-pack/plugins/features/server/plugin.ts" class="ulink" target="_top"><code class="literal">plugins.features.registerKibanaFeature</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">xpack_main.feature(pluginID).registerLicenseCheckResultsGenerator</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/x-pack/plugins/licensing/README.md" class="ulink" target="_top"><code class="literal">x-pack licensing plugin</code></a></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="_ui_exports"></a>UI Exports<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h5>
+</div></div></div>
+<p>The legacy platform used a set of <code class="literal">uiExports</code> to inject modules from
+one plugin into other plugins. This mechanism is not necessary for the
+Kibana Platform because <em>all plugins are executed on the page at once</em>,
+though only one application is rendered at a time.</p>
+<p>This table shows where these uiExports have moved to in the Kibana
+Platform.</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px" width="100%">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Legacy Platform</th>
+<th align="left" valign="top">Kibana Platform</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">aliases</code></p></td>
+<td align="left" valign="top"><p><code class="literal">N/A</code>.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">app</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/public/kibana-plugin-core-public.applicationsetup.register.md" class="ulink" target="_top"><code class="literal">core.application.register</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">canvas</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/x-pack/plugins/canvas/README.md" class="ulink" target="_top">Canvas plugin API</a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">chromeNavControls</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/public/kibana-plugin-core-public.chromenavcontrols.md" class="ulink" target="_top"><code class="literal">core.chrome.navControls.register{Left,Right}</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">docViews</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/src/plugins/discover/public/" class="ulink" target="_top"><code class="literal">discover.docViews.addDocView</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">embeddableActions</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/src/plugins/embeddable/README.asciidoc" class="ulink" target="_top"><code class="literal">embeddable plugin</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">embeddableFactories</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/src/plugins/embeddable/README.asciidoc" class="ulink" target="_top"><code class="literal">embeddable plugin</code></a>, <a href="https://github.com/elastic/kibana/blob/7.10/docs/development/plugins/embeddable/server/kibana-plugin-plugins-embeddable-server.embeddablesetup.registerembeddablefactory.md" class="ulink" target="_top"><code class="literal">embeddable.registerEmbeddableFactory</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">fieldFormatEditors</code>, <code class="literal">fieldFormats</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/plugins/data/public/kibana-plugin-plugins-data-public.fieldformats.md" class="ulink" target="_top"><code class="literal">data.fieldFormats</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">hacks</code></p></td>
+<td align="left" valign="top"><p><code class="literal">N/A</code>. Just run the code in your plugin’s <code class="literal">start</code> method.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">home</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/src/plugins/embeddable/README.asciidoc" class="ulink" target="_top"><code class="literal">home plugin</code></a> <a href="https://github.com/elastic/kibana/blob/7.10/src/plugins/home/public/services/feature_catalogue" class="ulink" target="_top"><code class="literal">home.featureCatalogue.register</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">indexManagement</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/x-pack/plugins/index_management/README.md" class="ulink" target="_top"><code class="literal">index management plugin</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">injectDefaultVars</code></p></td>
+<td align="left" valign="top"><p><code class="literal">N/A</code>. Plugins will only be able to allow config values for the frontend. See<a class="xref" href="kibana-platform-api.html#configuration-service" title="Configuration service">Configuration service</a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">inspectorViews</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/src/plugins/inspector/README.md" class="ulink" target="_top"><code class="literal">inspector plugin</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">interpreter</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/plugins/expressions/public/kibana-plugin-plugins-expressions-public.md" class="ulink" target="_top"><code class="literal">plugins.data.expressions</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">links</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/public/kibana-plugin-core-public.applicationsetup.register.md" class="ulink" target="_top"><code class="literal">core.application.register</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">managementSections</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/src/plugins/management/README.md" class="ulink" target="_top"><code class="literal">plugins.management.sections.register</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">mappings</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsservicesetup.registertype.md" class="ulink" target="_top"><code class="literal">core.savedObjects.registerType</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">migrations</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsservicesetup.registertype.md" class="ulink" target="_top"><code class="literal">core.savedObjects.registerType</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">navbarExtensions</code></p></td>
+<td align="left" valign="top"><p><code class="literal">N/A</code>. Deprecated.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">savedObjectSchemas</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsservicesetup.registertype.md" class="ulink" target="_top"><code class="literal">core.savedObjects.registerType</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">savedObjectsManagement</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsservicesetup.registertype.md" class="ulink" target="_top"><code class="literal">core.savedObjects.registerType</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">savedObjectTypes</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsservicesetup.registertype.md" class="ulink" target="_top"><code class="literal">core.savedObjects.registerType</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">search</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/plugins/data/public/kibana-plugin-plugins-data-public.search.md" class="ulink" target="_top"><code class="literal">data.search</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">shareContextMenuExtensions</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/src/plugins/share/README.md" class="ulink" target="_top"><code class="literal">plugins.share</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">taskDefinitions</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/x-pack/plugins/task_manager/README.md" class="ulink" target="_top"><code class="literal">taskManager plugin</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">uiCapabilities</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/public/kibana-plugin-core-public.applicationsetup.register.md" class="ulink" target="_top"><code class="literal">core.application.register</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">uiSettingDefaults</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.uisettingsservicesetup.md" class="ulink" target="_top"><code class="literal">core.uiSettings.register</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">validations</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.savedobjectsservicesetup.registertype.md" class="ulink" target="_top"><code class="literal">core.savedObjects.registerType</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">visEditorTypes</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/src/plugins/visualizations" class="ulink" target="_top"><code class="literal">visualizations plugin</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">visTypeEnhancers</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/src/plugins/visualizations" class="ulink" target="_top"><code class="literal">visualizations plugin</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">visTypes</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/src/plugins/visualizations" class="ulink" target="_top"><code class="literal">visualizations plugin</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">visualize</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/src/plugins/visualize/README.md" class="ulink" target="_top"><code class="literal">visualize plugin</code></a></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="_plugin_spec"></a>Plugin Spec<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h5>
+</div></div></div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" width="100%">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Legacy Platform</th>
+<th align="left" valign="top">Kibana Platform</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">id</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.pluginmanifest.md" class="ulink" target="_top"><code class="literal">manifest.id</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">require</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.pluginmanifest.md" class="ulink" target="_top"><code class="literal">manifest.requiredPlugins</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">version</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.pluginmanifest.md" class="ulink" target="_top"><code class="literal">manifest.version</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">kibanaVersion</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.pluginmanifest.md" class="ulink" target="_top"><code class="literal">manifest.kibanaVersion</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">configPrefix</code></p></td>
+<td align="left" valign="top"><p><a href="https://github.com/elastic/kibana/blob/7.10/docs/development/core/server/kibana-plugin-core-server.pluginmanifest.md" class="ulink" target="_top"><code class="literal">manifest.configPath</code></a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">config</code></p></td>
+<td align="left" valign="top"><p><a class="xref" href="kibana-platform-api.html#configuration-service" title="Configuration service">Configuration service</a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">deprecations</code></p></td>
+<td align="left" valign="top"><p><a class="xref" href="kibana-platform-api.html#configuration-service" title="Configuration service">Configuration service</a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">uiExports</code></p></td>
+<td align="left" valign="top"><p><code class="literal">N/A</code>. Use platform &amp; plugin public contracts</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">publicDir</code></p></td>
+<td align="left" valign="top"><p><code class="literal">N/A</code>. Kibana Platform serves static assets from <code class="literal">/public/assets</code> folder under <code class="literal">/plugins/{id}/assets/{path*}</code> URL.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">preInit</code>, <code class="literal">init</code>, <code class="literal">postInit</code></p></td>
+<td align="left" valign="top"><p><code class="literal">N/A</code>. Use Kibana Platform <a class="xref" href="kibana-platform-plugin-api.html#plugin-lifecycles" title="Lifecycles &amp; Core Services">plugin-lifecycles</a></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_see_also"></a>See also<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/7.10/docs/developer/plugin/migrating-legacy-plugins.asciidoc">edit</a></h3>
+</div></div></div>
+<p>For examples on how to migrate from specific legacy APIs, see <a class="xref" href="migrating-legacy-plugins-examples.html" title="Migration Examples">Migration Examples</a>.</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="plugin-tooling.html">« Plugin tooling</a>
+</span>
+<span class="next">
+<a href="migrating-legacy-plugins-examples.html">Migration Examples »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
