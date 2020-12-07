@@ -146,11 +146,12 @@ an ingest pipeline or in a pipeline aggregation within a search query. For more
 information about this process, see <a class="xref" href="ml-supervised-workflow.html" title="Introduction to supervised learning">Introduction to supervised learning</a> and
 <a class="xref" href="ml-inference.html" title="Inference">Inference</a>.</p>
 <p>You can also supply trained models that are not created by data frame analytics job but
-adhere to the appropriate <a href="https://github.com/elastic/ml-json-schemas" class="ulink" target="_top">JSON schema</a>.
-If you want to use these trained models in the Elastic Stack, you must store them in
-Elasticsearch documents by using the <a href="/guide/en/elasticsearch/reference/7.x/put-trained-models.html" class="ulink" target="_top">create trained models API</a>.</p>
-<p>In Kibana, you can view and manage your trained models within
-<span class="strong strong"><strong>Machine Learning</strong></span> &gt; <span class="strong strong"><strong>Data Frame Analytics</strong></span>:</p>
+adhere to the appropriate
+<a href="https://github.com/elastic/ml-json-schemas" class="ulink" target="_top">JSON schema</a>. If you want to use
+these trained models in the Elastic Stack, you must store them in Elasticsearch documents by
+using the <a href="/guide/en/elasticsearch/reference/7.x/put-trained-models.html" class="ulink" target="_top">create trained models API</a>.</p>
+<p>In Kibana, you can view and manage your trained models within <span class="strong strong"><strong>Machine Learning</strong></span> &gt; <span class="strong strong"><strong>Data
+Frame Analytics</strong></span>:</p>
 <div class="imageblock screenshot">
 <div class="content">
 <img src="images/trained-model-management.png" alt="List of trained models in the Machine Learning app in Kibana">
@@ -159,6 +160,126 @@ Elasticsearch documents by using the <a href="/guide/en/elasticsearch/reference/
 <p>Alternatively, you can use APIs like
 <a href="/guide/en/elasticsearch/reference/7.x/get-trained-models.html" class="ulink" target="_top">get trained models</a> and
 <a href="/guide/en/elasticsearch/reference/7.x/delete-trained-models.html" class="ulink" target="_top">delete trained models</a>.</p>
+<h4><a id="move-between-clusters"></a>Moving a trained model between clusters<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.x/docs/en/stack/ml/df-analytics/ml-trained-models.asciidoc">edit</a></h4>
+<p>It is a common scenario that the machine learning models are trained in a development or
+test environment and then used in a production environment. In this case, you
+need to move your trained model from one cluster to another. The trained model
+APIs enable you to move your trained model between clusters. The following
+description shows you the process step by step.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>(Optional) In the cluster where you trained the model, make the call below by
+using the console in <span class="strong strong"><strong>Dev Tools</strong></span> to get the configuration information of your
+trained models.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _ml/trained_models/</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/40.console"></div>
+<p>The API response contains the <code class="literal">model_id</code> of the trained models. Check the
+<code class="literal">model_id</code> of the trained model you want to move, you need to add it to the API
+call in the next step.</p>
+</li>
+<li class="listitem">
+<p>Use the <a href="/guide/en/elasticsearch/reference/7.x/get-trained-models.html" class="ulink" target="_top">GET trained model API</a> to get the
+trained model definition. You need to specify the following query parameters in
+the call:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">for_export</code>: This parameter allows the model to be in an acceptable format to
+be retrieved and then added to another cluster. Set it to <code class="literal">true</code>.
+</li>
+<li class="listitem">
+<code class="literal">include</code>: Set this to <code class="literal">definition</code> for the API to include the definition in
+the response.
+</li>
+<li class="listitem">
+<code class="literal">decompress_definition</code>: It specifies in what format the included model
+definition should be returned. Set it to <code class="literal">false</code> for getting a custom compressed
+format. It is also valid to use the JSON format, but it is not optimal. As the
+decompressed definition may be significantly larger, it is recommended to use
+the compressed format.
+</li>
+</ul>
+</div>
+<p>The following call is an example to get the trained model definition. (Replace
+<code class="literal">&lt;model_id&gt;</code> with the actual ID of the trained model.)</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _ml/trained_models/&lt;model_id&gt;?for_export=true&amp;include=definition&amp;decompress_definition=false</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/41.console"></div>
+<p>The API response returns a <code class="literal">trained_model_configs</code> array that contains a
+<code class="literal">compressed_definition</code> object and the analytics and inference configuration
+information.</p>
+</li>
+<li class="listitem">
+Copy the content of <code class="literal">trained_model_configs</code>.
+</li>
+<li class="listitem">
+Use the <a href="/guide/en/elasticsearch/reference/7.x/put-trained-models.html" class="ulink" target="_top">Create trained model API</a> in the
+cluster you want to move the trained model to. Paste the content of the
+<code class="literal">trained_model_configs</code> to the request body of the API call. The API response
+contains the model information with metadata.
+</li>
+</ol>
+</div>
+<p>Your trained model is ready to be used as a <a class="xref" href="ml-inference.html#ml-inference-processor" title="Inference processor">processor</a>
+in an ingest pipeline or as an <a class="xref" href="ml-inference.html#ml-inference-aggregation" title="Inference aggregation">aggregation</a>.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The trained model definition can be so large that it may take a long time for a
+computer clipboard to copy and paste it. It is recommended to do it
+programmatically, for example via a bash script or via Client code. You can find
+examples below.</p>
+</div>
+</div>
+<p>The following Python snippet exports the trained model that you reference to a
+JSON file:</p>
+<div class="pre_wrapper lang-py">
+<pre class="programlisting prettyprint lang-py">import json
+from elasticsearch import Elasticsearch
+from elasticsearch.client.ml import MlClient
+es_client = Elasticsearch('URL to your ES instance', http_auth=(username, password), use_ssl=True)
+ml_client = MlClient(es_client)
+result = ml_client.get_trained_models(model_id='your-model-id', decompress_definition=False, include=definition)
+compressed_df = result['trained_model_configs'][0]
+with open('model_filename.json', 'w') as handle:
+    handle.write(json.dumps(compressed_df))</pre>
+</div>
+<p>The following Python snippet imports the model that stored in the JSON file to
+a cluster:</p>
+<div class="pre_wrapper lang-py">
+<pre class="programlisting prettyprint lang-py">import json
+from elasticsearch import Elasticsearch
+from elasticsearch.client.ml import MlClient
+es_client = Elasticsearch(args.es, http_auth=(username, password), use_ssl=True, timeout=60)
+ml_client = MlClient(es_client)
+with open(filename, 'r') as handle:
+  compressed_model = json.loads(handle.read())
+for field in ('version', 'create_time', 'estimated_heap_memory_usage_bytes', 'estimated_operations', 'license_level', 'id','created_by'):
+  if field in compressed_model:
+    del compressed_model[field]
+ml_client.put_trained_model(model_id=model_id, body=compressed_model)</pre>
+</div>
+<p>You can achieve the same by running a bash script. Populate the environment
+variables:</p>
+<p><code class="literal">ES_ADDRESS="https://username:password@elasticsearch-address"</code></p>
+<p><code class="literal">MODEL="my_model_name"</code></p>
+<p>Then run the script:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">curl -H 'Content-Type: application/json' -XPUT "$ES_ADDRESS/_ml/inference/$MODEL" -d@$MODEL.json</pre>
+</div>
+<h5><a id="move-trained-model-to-es"></a>Moving a model to the Elastic Stack<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/7.x/docs/en/stack/ml/df-analytics/ml-trained-models.asciidoc">edit</a></h5>
+<p>It is possible to add a model to your Elasticsearch cluster even if the model is not
+trained by Elastic data frame analytics.</p>
+<p>You can find an example of training a model, then adding it to Elasticsearch by using
+eland
+<a href="https://eland.readthedocs.io/en/latest/examples/introduction_to_eland_webinar.html#Machine-Learning-Demo" class="ulink" target="_top">in eland docs</a>.
+The example uses Python to train and move the model, however, you can use any
+Client as long as the format of your trained model meets
+<a href="https://github.com/elastic/ml-json-schemas" class="ulink" target="_top">the required schema</a>.</p>
 </div>
 <div class="navfooter">
 <span class="prev">
