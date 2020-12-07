@@ -165,6 +165,17 @@ setting only applies if multiple nodes are started on the same machine.
 <div class="titlepage"><div><div>
 <h3 class="title"><a id="shards-rebalancing-settings"></a>Shard rebalancing settings<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/modules/cluster/shards_allocation.asciidoc">edit</a></h3>
 </div></div></div>
+<p>A cluster is <em>balanced</em> when it has an equal number of shards on each node
+without having a concentration of shards from any index on any node. Elasticsearch runs
+an automatic process called <em>rebalancing</em> which moves shards between the nodes
+in your cluster to improve its balance. Rebalancing obeys all other shard
+allocation rules such as <a class="xref" href="modules-cluster.html#cluster-shard-allocation-filtering" title="Cluster-level shard allocation filtering">allocation
+filtering</a> and <a class="xref" href="modules-cluster.html#forced-awareness" title="Forced awareness">forced awareness</a> which may prevent it from
+completely balancing the cluster. In that case, rebalancing strives to acheve
+the most balanced cluster possible within the rules you have configured. If you
+are using <a class="xref" href="data-tiers.html" title="Data tiers">data tiers</a> then Elasticsearch automatically applies allocation
+filtering rules to place each shard within the appropriate tier. These rules
+mean that the balancer works independently within each tier.</p>
 <p>You can use the following settings to control the rebalancing of shards across
 the cluster:</p>
 <div class="variablelist">
@@ -238,9 +249,13 @@ filtering</a> or <a class="xref" href="modules-cluster.html#forced-awareness" ti
 <div class="titlepage"><div><div>
 <h3 class="title"><a id="shards-rebalancing-heuristics"></a>Shard balancing heuristics settings<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/modules/cluster/shards_allocation.asciidoc">edit</a></h3>
 </div></div></div>
-<p>The following settings are used together to determine where to place each
-shard.  The cluster is balanced when no allowed rebalancing operation can bring the weight
-of any node closer to the weight of any other node by more than the <code class="literal">balance.threshold</code>.</p>
+<p>Rebalancing works by computing a <em>weight</em> for each node based on its allocation
+of shards, and then moving shards between nodes to reduce the weight of the
+heavier nodes and increase the weight of the lighter ones. The cluster is
+balanced when there is no possible shard movement that can bring the weight of
+any node closer to the weight of any other node by more than a configurable
+threshold. The following settings allow you to control the details of these
+calculations.</p>
 <div class="variablelist">
 <dl class="variablelist">
 <dt>
@@ -292,9 +307,69 @@ not be allowed due to forced awareness or allocation filtering.</p>
 <div class="titlepage"><div><div>
 <h3 class="title"><a id="disk-based-shard-allocation"></a>Disk-based shard allocation settings<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/modules/cluster/disk_allocator.asciidoc">edit</a></h3>
 </div></div></div>
-<p><a id="disk-based-shard-allocation-description"></a>Elasticsearch considers the available disk space on a node before deciding
-whether to allocate new shards to that node or to actively relocate shards away
-from that node.</p>
+<p><a id="disk-based-shard-allocation-description"></a>The disk-based shard allocator ensures that all nodes have enough disk space
+without performing more shard movements than necessary. It allocates shards
+based on a pair of thresholds known as the <em>low watermark</em> and the <em>high
+watermark</em>. Its primary goal is to ensure that no node exceeds the high
+watermark, or at least that any such overage is only temporary. If a node
+exceeds the high watermark then Elasticsearch will solve this by moving some of its
+shards onto other nodes in the cluster.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>It is normal for nodes to temporarily exceed the high watermark from time
+to time.</p>
+</div>
+</div>
+<p>The allocator also tries to keep nodes clear of the high watermark by
+forbidding the allocation of more shards to a node that exceeds the low
+watermark. Importantly, if all of your nodes have exceeded the low watermark
+then no new shards can be allocated and Elasticsearch will not be able to move any
+shards between nodes in order to keep the disk usage below the high watermark.
+You must ensure that your cluster has enough disk space in total and that there
+are always some nodes below the low watermark.</p>
+<p>Shard movements triggered by the disk-based shard allocator must also satisfy
+all other shard allocation rules such as
+<a class="xref" href="modules-cluster.html#cluster-shard-allocation-filtering" title="Cluster-level shard allocation filtering">allocation filtering</a> and
+<a class="xref" href="modules-cluster.html#forced-awareness" title="Forced awareness">forced awareness</a>. If these rules are too strict then they
+can also prevent the shard movements needed to keep the nodes' disk usage under
+control. If you are using <a class="xref" href="data-tiers.html" title="Data tiers">data tiers</a> then Elasticsearch automatically
+configures allocation filtering rules to place shards within the appropriate
+tier, which means that the disk-based shard allocator works independently
+within each tier.</p>
+<p>If a node is filling up its disk faster than Elasticsearch can move shards elsewhere
+then there is a risk that the disk will completely fill up. To prevent this, as
+a last resort, once the disk usage reaches the <em>flood-stage</em> watermark Elasticsearch
+will block writes to indices with a shard on the affected node. It will also
+continue to move shards onto the other nodes in the cluster.  When disk usage
+on the affected node drops below the high watermark, Elasticsearch automatically removes
+the write block.</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<a id="disk-based-shard-allocation-does-not-balance"></a>
+<p>It is normal for the nodes in your cluster to be using very different amounts
+of disk space. The <a class="xref" href="modules-cluster.html#shards-rebalancing-settings" title="Shard rebalancing settings">balance</a> of the cluster
+depends only on the number of shards on each node and the indices to which
+those shards belong. It considers neither the sizes of these shards nor the
+available disk space on each node, for the following reasons:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Disk usage changes over time. Balancing the disk usage of individual nodes
+would require a lot more shard movements, perhaps even wastefully undoing
+earlier movements. Moving a shard consumes resources such as I/O and network
+bandwidth and may evict data from the filesystem cache. These resources are
+better spent handling your searches and indexing where possible.
+</li>
+<li class="listitem">
+A cluster with equal disk usage on every node typically performs no better
+than one that has unequal disk usage, as long as no disk is too full.
+</li>
+</ul>
+</div>
+</div>
+</div>
 <p>You can use the following settings to control disk-based allocation:</p>
 <div class="variablelist">
 <a id="cluster-routing-disk-threshold"></a>
