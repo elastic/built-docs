@@ -66,126 +66,117 @@ Frame Analytics</strong></span>:</p>
 <p>Alternatively, you can use APIs like
 <a href="/guide/en/elasticsearch/reference/master/get-trained-models.html" class="ulink" target="_top">get trained models</a> and
 <a href="/guide/en/elasticsearch/reference/master/delete-trained-models.html" class="ulink" target="_top">delete trained models</a>.</p>
-<h4><a id="move-between-clusters"></a>Moving a trained model between clusters<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/master/docs/en/stack/ml/df-analytics/ml-trained-models.asciidoc">edit</a></h4>
-<p>It is a common scenario that the machine learning models are trained in a development or
-test environment and then used in a production environment. In this case, you
-need to move your trained model from one cluster to another. The trained model
-APIs enable you to move your trained model between clusters. The following
-description shows you the process step by step.</p>
+<h4><a id="export-import"></a>Exporting and importing models<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/master/docs/en/stack/ml/df-analytics/ml-trained-models.asciidoc">edit</a></h4>
+<p>Models trained in Elasticsearch are portable and can be transferred between
+clusters. This is particularly useful when models are trained in isolation from
+the cluster where they are used for inference. The following instructions show
+how to use <a href="https://curl.se/" class="ulink" target="_top"><code class="literal">curl</code></a> and <a href="https://stedolan.github.io/jq/" class="ulink" target="_top"><code class="literal">jq</code></a> to
+export a model as JSON and import it to another cluster.</p>
 <div class="olist orderedlist">
 <ol class="orderedlist">
 <li class="listitem">
-<p>(Optional) In the cluster where you trained the model, make the call below by
-using the console in <span class="strong strong"><strong>Dev Tools</strong></span> to get the configuration information of your
-trained models.</p>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET _ml/trained_models/</pre>
+<p>Given a model <em>name</em>, find the model <em>ID</em>. You can use <code class="literal">curl</code> to call the
+<a href="/guide/en/elasticsearch/reference/master/get-trained-models.html" class="ulink" target="_top">get trained model API</a> to list all models with
+their IDs.</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">curl -s -u username:password \
+  -X GET "http://localhost:9200/_ml/trained_models" \
+    | jq . -C \
+    | more</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/37.console"></div>
-<p>The API response contains the <code class="literal">model_id</code> of the trained models. Check the
-<code class="literal">model_id</code> of the trained model you want to move, you need to add it to the API
-call in the next step.</p>
+<p>If you want to show just the model IDs available, use <code class="literal">jq</code> to select a subset.</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">curl -s -u username:password \
+  -X GET "http://localhost:9200/_ml/trained_models" \
+    | jq -C -r '.trained_model_configs[].model_id'</pre>
+</div>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">flights1-1607953694065
+flights0-1607953585123
+lang_ident_model_1</pre>
+</div>
+<p>In this example, you are exporting the model with ID <code class="literal">flights1-1607953694065</code>.</p>
 </li>
 <li class="listitem">
-<p>Use the <a href="/guide/en/elasticsearch/reference/master/get-trained-models.html" class="ulink" target="_top">GET trained model API</a> to get the
-trained model definition. You need to specify the following query parameters in
-the call:</p>
+<p>Using <code class="literal">curl</code> from the command line, again use the
+<a href="/guide/en/elasticsearch/reference/master/get-trained-models.html" class="ulink" target="_top">get trained models API</a> to export the entire model
+definition and save it to a JSON file.</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">curl -u username:password \
+  -X GET "http://localhost:9200/_ml/trained_models/flights1-1607953694065?exclude_generated=true&amp;include=definition&amp;decompress_definition=false" \
+    | jq '.trained_model_configs[0] | del(.model_id)' \
+    &gt; flights1.json</pre>
+</div>
+<p>A few observations:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<code class="literal">for_export</code>: This parameter allows the model to be in an acceptable format to
-be retrieved and then added to another cluster. Set it to <code class="literal">true</code>.
+Exporting models requires using <code class="literal">curl</code> or a similar tool that can <span class="strong strong"><strong>stream</strong></span>
+the model over HTTP into a file. If you use the Kibana Console, the
+browser might be unresponsive due to the size of exported models.
 </li>
 <li class="listitem">
-<code class="literal">include</code>: Set this to <code class="literal">definition</code> for the API to include the definition in
-the response.
+Note the query parameters that are used during export. These parameters are necessary to
+export the model in a way that it can later be imported again and used for
+inference.
 </li>
 <li class="listitem">
-<code class="literal">decompress_definition</code>: It specifies in what format the included model
-definition should be returned. Set it to <code class="literal">false</code> for getting a custom compressed
-format. It is also valid to use the JSON format, but it is not optimal. As the
-decompressed definition may be significantly larger, it is recommended to use
-the compressed format.
+You must unnest the JSON object by one level to extract just the model
+definition. You must also remove the existing model ID in order to not have
+ID collisions when you import again. You can do these steps using <code class="literal">jq</code> inline or
+alternatively it can be done to the resulting JSON file after downloading using
+<code class="literal">jq</code> or other tools.
 </li>
 </ul>
 </div>
-<p>The following call is an example to get the trained model definition. (Replace
-<code class="literal">&lt;model_id&gt;</code> with the actual ID of the trained model.)</p>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET _ml/trained_models/&lt;model_id&gt;?for_export=true&amp;include=definition&amp;decompress_definition=false</pre>
+</li>
+<li class="listitem">
+<p>Import the saved model using <code class="literal">curl</code> to upload the JSON file to the
+<a href="/guide/en/elasticsearch/reference/master/put-trained-models.html" class="ulink" target="_top">created trained model API</a>. When you specify the URL,
+you can also set the model ID to something new using the last path part of the
+URL.</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">curl -u username:password \
+  -H 'Content-Type: application/json' \
+  -X PUT "http://localhost:9200/_ml/trained_models/flights1-imported" \
+  --data-binary @flights1.json</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/38.console"></div>
-<p>The API response returns a <code class="literal">trained_model_configs</code> array that contains a
-<code class="literal">compressed_definition</code> object and the analytics and inference configuration
-information.</p>
-</li>
-<li class="listitem">
-Copy the content of <code class="literal">trained_model_configs</code>.
-</li>
-<li class="listitem">
-Use the <a href="/guide/en/elasticsearch/reference/master/put-trained-models.html" class="ulink" target="_top">Create trained model API</a> in the
-cluster you want to move the trained model to. Paste the content of the
-<code class="literal">trained_model_configs</code> to the request body of the API call. The API response
-contains the model information with metadata.
 </li>
 </ol>
 </div>
-<p>Your trained model is ready to be used as a <a class="xref" href="ml-inference.html#ml-inference-processor" title="Inference processor">processor</a>
-in an ingest pipeline or as an <a class="xref" href="ml-inference.html#ml-inference-aggregation" title="Inference aggregation">aggregation</a>.</p>
 <div class="note admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>The trained model definition can be so large that it may take a long time for a
-computer clipboard to copy and paste it. It is recommended to do it
-programmatically, for example via a bash script or via Client code. You can find
-examples below.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Models exported from the <a href="/guide/en/elasticsearch/reference/master/get-trained-models.html" class="ulink" target="_top">get trained models API</a>
+are limited in size by the
+<a href="/guide/en/elasticsearch/reference/master/modules-http.html#_http_settings" class="ulink" target="_top">http.max_content_length</a>
+global configuration value in Elasticsearch. The default value is <code class="literal">100mb</code> and
+may need to be increased depending on the size of model being exported.
+</li>
+<li class="listitem">
+Connection timeouts can occur when either the source or destination
+cluster is under load, or when model sizes are very large. Increasing
+<a href="https://ec.haxx.se/usingcurl/usingcurl-timeouts" class="ulink" target="_top">timeout configurations</a> for
+<code class="literal">curl</code> (e.g. <code class="literal">curl --max-time 600</code>) or your client of choice will help
+alleviate the problem. In rare cases you may need to reduce load on the
+Elasticsearch cluster, for example by adding nodes.
+</li>
+</ul>
 </div>
 </div>
-<p>The following Python snippet exports the trained model that you reference to a
-JSON file:</p>
-<div class="pre_wrapper lang-py">
-<pre class="programlisting prettyprint lang-py">import json
-from elasticsearch import Elasticsearch
-from elasticsearch.client.ml import MlClient
-es_client = Elasticsearch('URL to your ES instance', http_auth=(username, password), use_ssl=True)
-ml_client = MlClient(es_client)
-result = ml_client.get_trained_models(model_id='your-model-id', decompress_definition=False, include=definition)
-compressed_df = result['trained_model_configs'][0]
-with open('model_filename.json', 'w') as handle:
-    handle.write(json.dumps(compressed_df))</pre>
 </div>
-<p>The following Python snippet imports the model that stored in the JSON file to
-a cluster:</p>
-<div class="pre_wrapper lang-py">
-<pre class="programlisting prettyprint lang-py">import json
-from elasticsearch import Elasticsearch
-from elasticsearch.client.ml import MlClient
-es_client = Elasticsearch(args.es, http_auth=(username, password), use_ssl=True, timeout=60)
-ml_client = MlClient(es_client)
-with open(filename, 'r') as handle:
-  compressed_model = json.loads(handle.read())
-for field in ('version', 'create_time', 'estimated_heap_memory_usage_bytes', 'estimated_operations', 'license_level', 'id','created_by'):
-  if field in compressed_model:
-    del compressed_model[field]
-ml_client.put_trained_model(model_id=model_id, body=compressed_model)</pre>
-</div>
-<p>You can achieve the same by running a bash script. Populate the environment
-variables:</p>
-<p><code class="literal">ES_ADDRESS="https://username:password@elasticsearch-address"</code></p>
-<p><code class="literal">MODEL="my_model_name"</code></p>
-<p>Then run the script:</p>
-<div class="pre_wrapper lang-bash">
-<pre class="programlisting prettyprint lang-bash">curl -H 'Content-Type: application/json' -XPUT "$ES_ADDRESS/_ml/inference/$MODEL" -d@$MODEL.json</pre>
-</div>
-<h4><a id="move-trained-model-to-es"></a>Moving a model to the Elastic Stack<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/master/docs/en/stack/ml/df-analytics/ml-trained-models.asciidoc">edit</a></h4>
-<p>It is possible to add a model to your Elasticsearch cluster even if the model is not
+<h4><a id="import-external-model-to-es"></a>Importing an external model to the Elastic Stack<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/master/docs/en/stack/ml/df-analytics/ml-trained-models.asciidoc">edit</a></h4>
+<p>It is possible to import a model to your Elasticsearch cluster even if the model is not
 trained by Elastic data frame analytics.</p>
-<p>You can find an example of training a model, then adding it to Elasticsearch by using
-eland
-<a href="https://eland.readthedocs.io/en/latest/examples/introduction_to_eland_webinar.html#Machine-Learning-Demo" class="ulink" target="_top">in eland docs</a>.
-The example uses Python to train and move the model, however, you can use any
-Client as long as the format of your trained model meets
-<a href="https://github.com/elastic/ml-json-schemas" class="ulink" target="_top">the required schema</a>.</p>
+<p>You can find an example of training a model, then importing it to Elasticsearch with
+<code class="literal">eland</code> in the
+<a href="https://eland.readthedocs.io/en/latest/examples/introduction_to_eland_webinar.html#Machine-Learning-Demo" class="ulink" target="_top">eland machine learning demo</a>.
+The example uses Python to train, save and import the model. However, you can
+use any client as long as the model conforms to the
+<a href="https://github.com/elastic/ml-json-schemas" class="ulink" target="_top">schema</a>.</p>
 </div>
 <div class="navfooter">
 <span class="prev">
