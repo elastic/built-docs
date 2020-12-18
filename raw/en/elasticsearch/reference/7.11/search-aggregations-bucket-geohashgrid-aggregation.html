@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Geohash grid aggregation | Elasticsearch Reference [7.11] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.11]"/>
+<link rel="up" href="search-aggregations-bucket.html" title="Bucket Aggregations"/>
+<link rel="prev" href="search-aggregations-bucket-geodistance-aggregation.html" title="Geo-distance aggregation"/>
+<link rel="next" href="search-aggregations-bucket-geotilegrid-aggregation.html" title="Geotile grid aggregation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.11"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.11"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.11]</a></span>
+»
+<span class="breadcrumb-link"><a href="search-aggregations.html">Aggregations</a></span>
+»
+<span class="breadcrumb-link"><a href="search-aggregations-bucket.html">Bucket Aggregations</a></span>
+»
+<span class="breadcrumb-node">Geohash grid aggregation</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="search-aggregations-bucket-geodistance-aggregation.html">« Geo-distance aggregation</a>
+</span>
+<span class="next">
+<a href="search-aggregations-bucket-geotilegrid-aggregation.html">Geotile grid aggregation »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="search-aggregations-bucket-geohashgrid-aggregation"></a>Geohash grid aggregation<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/geohashgrid-aggregation.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>A multi-bucket aggregation that groups <a class="xref" href="geo-point.html" title="Geo-point field type"><code class="literal">geo_point</code></a> and
+<a class="xref" href="geo-shape.html" title="Geo-shape field type"><code class="literal">geo_shape</code></a> values into buckets that represent a grid.
+The resulting grid can be sparse and only contains cells that have matching data. Each cell is labeled using a <a href="https://en.wikipedia.org/wiki/Geohash" class="ulink" target="_top">geohash</a> which is of user-definable precision.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+High precision geohashes have a long string length and represent cells that cover only a small area.
+</li>
+<li class="listitem">
+Low precision geohashes have a short string length and represent cells that each cover a large area.
+</li>
+</ul>
+</div>
+<p>Geohashes used in this aggregation can have a choice of precision between 1 and 12.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The highest-precision geohash of length 12 produces cells that cover less than a square metre of land and so high-precision requests can be very costly in terms of RAM and result sizes.
+Please see the example below on how to first filter the aggregation to a smaller geographic area before requesting high-levels of detail.</p>
+</div>
+</div>
+<p>You can only use <code class="literal">geohash_grid</code> to aggregate an explicitly mapped <code class="literal">geo_point</code> or
+<code class="literal">geo_shape</code> field. If the <code class="literal">geo_point</code> field contains an array, <code class="literal">geohash_grid</code>
+aggregates all the array values.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_simple_low_precision_request"></a>Simple low-precision request<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/geohashgrid-aggregation.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT /museums
+{
+  "mappings": {
+    "properties": {
+      "location": {
+        "type": "geo_point"
+      }
+    }
+  }
+}
+
+POST /museums/_bulk?refresh
+{"index":{"_id":1}}
+{"location": "52.374081,4.912350", "name": "NEMO Science Museum"}
+{"index":{"_id":2}}
+{"location": "52.369219,4.901618", "name": "Museum Het Rembrandthuis"}
+{"index":{"_id":3}}
+{"location": "52.371667,4.914722", "name": "Nederlands Scheepvaartmuseum"}
+{"index":{"_id":4}}
+{"location": "51.222900,4.405200", "name": "Letterenhuis"}
+{"index":{"_id":5}}
+{"location": "48.861111,2.336389", "name": "Musée du Louvre"}
+{"index":{"_id":6}}
+{"location": "48.860000,2.327000", "name": "Musée d'Orsay"}
+
+POST /museums/_search?size=0
+{
+  "aggregations": {
+    "large-grid": {
+      "geohash_grid": {
+        "field": "location",
+        "precision": 3
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1039.console"></div>
+<p>Response:</p>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  ...
+  "aggregations": {
+  "large-grid": {
+    "buckets": [
+      {
+        "key": "u17",
+        "doc_count": 3
+      },
+      {
+        "key": "u09",
+        "doc_count": 2
+      },
+      {
+        "key": "u15",
+        "doc_count": 1
+      }
+    ]
+  }
+}
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_high_precision_requests"></a>High-precision requests<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/geohashgrid-aggregation.asciidoc">edit</a></h3>
+</div></div></div>
+<p>When requesting detailed buckets (typically for displaying a "zoomed in" map) a filter like <a class="xref" href="query-dsl-geo-bounding-box-query.html" title="Geo-bounding box query">geo_bounding_box</a> should be applied to narrow the subject area otherwise potentially millions of buckets will be created and returned.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /museums/_search?size=0
+{
+  "aggregations": {
+    "zoomed-in": {
+      "filter": {
+        "geo_bounding_box": {
+          "location": {
+            "top_left": "52.4, 4.9",
+            "bottom_right": "52.3, 5.0"
+          }
+        }
+      },
+      "aggregations": {
+        "zoom1": {
+          "geohash_grid": {
+            "field": "location",
+            "precision": 8
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1040.console"></div>
+<p>The geohashes returned by the <code class="literal">geohash_grid</code> aggregation can be also used for zooming in. To zoom into the
+first geohash <code class="literal">u17</code> returned in the previous example, it should be specified as both <code class="literal">top_left</code> and <code class="literal">bottom_right</code> corner:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /museums/_search?size=0
+{
+  "aggregations": {
+    "zoomed-in": {
+      "filter": {
+        "geo_bounding_box": {
+          "location": {
+            "top_left": "u17",
+            "bottom_right": "u17"
+          }
+        }
+      },
+      "aggregations": {
+        "zoom1": {
+          "geohash_grid": {
+            "field": "location",
+            "precision": 8
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1041.console"></div>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  ...
+  "aggregations": {
+    "zoomed-in": {
+      "doc_count": 3,
+      "zoom1": {
+        "buckets": [
+          {
+            "key": "u173zy3j",
+            "doc_count": 1
+          },
+          {
+            "key": "u173zvfz",
+            "doc_count": 1
+          },
+          {
+            "key": "u173zt90",
+            "doc_count": 1
+          }
+        ]
+      }
+    }
+  }
+}</pre>
+</div>
+<p>For "zooming in" on the system that don&#8217;t support geohashes, the bucket keys should be translated into bounding boxes using
+one of available geohash libraries. For example, for javascript the <a href="https://github.com/sunng87/node-geohash" class="ulink" target="_top">node-geohash</a> library
+can be used:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">var geohash = require('ngeohash');
+
+// bbox will contain [ 52.03125, 4.21875, 53.4375, 5.625 ]
+//                   [   minlat,  minlon,  maxlat, maxlon]
+var bbox = geohash.decode_bbox('u17');</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_requests_with_additional_bounding_box_filtering"></a>Requests with additional bounding box filtering<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/geohashgrid-aggregation.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The <code class="literal">geohash_grid</code> aggregation supports an optional <code class="literal">bounds</code> parameter
+that restricts the points considered to those that fall within the
+bounds provided. The <code class="literal">bounds</code> parameter accepts the bounding box in
+all the same <a class="xref" href="query-dsl-geo-bounding-box-query.html#query-dsl-geo-bounding-box-query-accepted-formats" title="Accepted Formats">accepted formats</a> of the
+bounds specified in the Geo Bounding Box Query. This bounding box can be used with or
+without an additional <code class="literal">geo_bounding_box</code> query filtering the points prior to aggregating.
+It is an independent bounding box that can intersect with, be equal to, or be disjoint
+to any additional <code class="literal">geo_bounding_box</code> queries defined in the context of the aggregation.</p>
+<a id="geohashgrid-aggregation-with-bounds"></a><div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /museums/_search?size=0
+{
+  "aggregations": {
+    "tiles-in-bounds": {
+      "geohash_grid": {
+        "field": "location",
+        "precision": 8,
+        "bounds": {
+          "top_left": "53.4375, 4.21875",
+          "bottom_right": "52.03125, 5.625"
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1042.console"></div>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  ...
+  "aggregations": {
+    "tiles-in-bounds": {
+      "buckets": [
+        {
+          "key": "u173zy3j",
+          "doc_count": 1
+        },
+        {
+          "key": "u173zvfz",
+          "doc_count": 1
+        },
+        {
+          "key": "u173zt90",
+          "doc_count": 1
+        }
+      ]
+    }
+  }
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_cell_dimensions_at_the_equator"></a>Cell dimensions at the equator<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/geohashgrid-aggregation.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The table below shows the metric dimensions for cells covered by various string lengths of geohash.
+Cell dimensions vary with latitude and so the table is for the worst-case scenario at the equator.</p>
+<div class="informaltable">
+<table border="0" cellpadding="4px">
+<colgroup>
+<col/>
+<col/>
+</colgroup>
+<tbody valign="top">
+<tr>
+<td valign="top">
+<p>
+<span class="strong strong"><strong>GeoHash length</strong></span>
+</p>
+</td>
+<td valign="top">
+<p>
+<span class="strong strong"><strong>Area width x height</strong></span>
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+1
+</p>
+</td>
+<td valign="top">
+<p>
+5,009.4km x 4,992.6km
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+2
+</p>
+</td>
+<td valign="top">
+<p>
+1,252.3km x 624.1km
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+3
+</p>
+</td>
+<td valign="top">
+<p>
+156.5km x 156km
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+4
+</p>
+</td>
+<td valign="top">
+<p>
+39.1km x 19.5km
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+5
+</p>
+</td>
+<td valign="top">
+<p>
+4.9km x 4.9km
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+6
+</p>
+</td>
+<td valign="top">
+<p>
+1.2km x 609.4m
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+7
+</p>
+</td>
+<td valign="top">
+<p>
+152.9m x 152.4m
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+8
+</p>
+</td>
+<td valign="top">
+<p>
+38.2m x 19m
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+9
+</p>
+</td>
+<td valign="top">
+<p>
+4.8m x 4.8m
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+10
+</p>
+</td>
+<td valign="top">
+<p>
+1.2m x 59.5cm
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+11
+</p>
+</td>
+<td valign="top">
+<p>
+14.9cm x 14.9cm
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+12
+</p>
+</td>
+<td valign="top">
+<p>
+3.7cm x 1.9cm
+</p>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h4 class="xpack"><a id="_aggregating_geo_shape_fields"></a>Aggregating <code class="literal">geo_shape</code> fields<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/geohashgrid-aggregation.asciidoc">edit</a><a class="xpack_tag" href="/subscriptions"></a></h4>
+<p>Aggregating on <a class="xref" href="geo-shape.html" title="Geo-shape field type">Geo-shape</a> fields works just as it does for points, except that a single
+shape can be counted for in multiple tiles. A shape will contribute to the count of matching values
+if any part of its shape intersects with that tile. Below is an image that demonstrates this:</p>
+<p><span class="image"><img src="images/spatial/geoshape_grid.png" alt="geoshape grid"></span></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_options_3"></a>Options<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/geohashgrid-aggregation.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="informaltable">
+<table border="0" cellpadding="4px">
+<colgroup>
+<col/>
+<col/>
+</colgroup>
+<tbody valign="top">
+<tr>
+<td valign="top">
+<p>
+field
+</p>
+</td>
+<td valign="top">
+<p>
+Mandatory. The name of the field indexed with GeoPoints.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+precision
+</p>
+</td>
+<td valign="top">
+<p>
+Optional. The string length of the geohashes used to define
+cells/buckets in the results. Defaults to 5.
+The precision can either be defined in terms of the integer
+precision levels mentioned above. Values outside of [1,12] will
+be rejected.
+Alternatively, the precision level can be approximated from a
+distance measure like "1km", "10m". The precision level is
+calculate such that cells will not exceed the specified
+size (diagonal) of the required precision. When this would lead
+to precision levels higher than the supported 12 levels,
+(e.g. for distances &lt;5.6cm) the value is rejected.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+bounds
+</p>
+</td>
+<td valign="top">
+<p>
+Optional. The bounding box to filter the points in the bucket.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+size
+</p>
+</td>
+<td valign="top">
+<p>
+Optional. The maximum number of geohash buckets to return
+(defaults to 10,000). When results are trimmed, buckets are
+prioritised based on the volumes of documents they contain.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+shard_size
+</p>
+</td>
+<td valign="top">
+<p>
+Optional. To allow for more accurate counting of the top cells
+returned in the final result the aggregation defaults to
+returning <code class="literal">max(10,(size x number-of-shards))</code> buckets from each
+shard. If this heuristic is undesirable, the number considered
+from each shard can be over-ridden using this parameter.
+</p>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="search-aggregations-bucket-geodistance-aggregation.html">« Geo-distance aggregation</a>
+</span>
+<span class="next">
+<a href="search-aggregations-bucket-geotilegrid-aggregation.html">Geotile grid aggregation »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

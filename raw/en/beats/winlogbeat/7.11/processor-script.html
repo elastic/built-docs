@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Script Processor | Winlogbeat Reference [7.11] | Elastic</title>
+<link rel="home" href="index.html" title="Winlogbeat Reference [7.11]"/>
+<link rel="up" href="filtering-and-enhancing-data.html" title="Filter and enhance data with processors"/>
+<link rel="prev" href="rename-fields.html" title="Rename fields from events"/>
+<link rel="next" href="processor-timestamp.html" title="Timestamp"/>
+<meta name="DC.type" content="Learn/Docs/Winlogbeat/Reference/7.11"/>
+<meta name="DC.subject" content="Winlogbeat"/>
+<meta name="DC.identifier" content="7.11"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Winlogbeat Reference [7.11]</a></span>
+»
+<span class="breadcrumb-link"><a href="configuring-howto-winlogbeat.html">Configure Winlogbeat</a></span>
+»
+<span class="breadcrumb-link"><a href="filtering-and-enhancing-data.html">Filter and enhance data with processors</a></span>
+»
+<span class="breadcrumb-node">Script Processor</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="rename-fields.html">« Rename fields from events</a>
+</span>
+<span class="next">
+<a href="processor-timestamp.html">Timestamp »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="processor-script"></a>Script Processor<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.11/libbeat/processors/script/docs/script.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>The <code class="literal">script</code> processor executes Javascript code to process an event. The processor
+uses a pure Go implementation of ECMAScript 5.1 and has no external
+dependencies. This can be useful in situations where one of the other processors
+doesn&#8217;t provide the functionality you need to filter events.</p>
+<p>The processor can be configured by embedding Javascript in your configuration
+file or by pointing the processor at external file(s).</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">processors:
+  - script:
+      lang: javascript
+      id: my_filter
+      source: &gt;
+        function process(event) {
+            event.Tag("js");
+        }</pre>
+</div>
+<p>This loads <code class="literal">filter.js</code> from disk.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">processors:
+  - script:
+      lang: javascript
+      id: my_filter
+      file: ${path.config}/filter.js</pre>
+</div>
+<p>Parameters can be passed to the script by adding <code class="literal">params</code> to the config.
+This allows for a script to be made reusable. When using <code class="literal">params</code> the
+code must define a <code class="literal">register(params)</code> function to receive the parameters.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">processors:
+  - script:
+      lang: javascript
+      id: my_filter
+      params:
+        threshold: 15
+      source: &gt;
+        var params = {threshold: 42};
+        function register(scriptParams) {
+            params = scriptParams;
+        }
+        function process(event) {
+            if (event.Get("severity") &lt; params.threshold) {
+                event.Cancel();
+            }
+        }</pre>
+</div>
+<p>If the script defines a <code class="literal">test()</code> function it will be invoked when the processor
+is loaded. Any exceptions thrown will cause the processor to fail to load. This
+can be used to make assertions about the behavior of the script.</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">function process(event) {
+    if (event.Get("event.code") === 1102) {
+        event.Put("event.action", "cleared");
+    }
+}
+
+function test() {
+    var event = process(new Event({event: {code: 1102}));
+    if (event.Get("event.action") !== "cleared") {
+        throw "expected event.action === cleared";
+    }
+}</pre>
+</div>
+<h4><a id="_configuration_options_14"></a>Configuration options<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.11/libbeat/processors/script/docs/script.asciidoc">edit</a></h4>
+<p>The <code class="literal">script</code> processor has the following configuration settings:</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">lang</code>
+</span>
+</dt>
+<dd>
+This field is required and its value must be <code class="literal">javascript</code>.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">tag</code>
+</span>
+</dt>
+<dd>
+This is an optional identifier that is added to log messages. If defined
+it enables metrics logging for this instance of the processor. The metrics
+include the number of exceptions and a histogram of the execution times for
+the <code class="literal">process</code> function.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">source</code>
+</span>
+</dt>
+<dd>
+Inline Javascript source code.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">file</code>
+</span>
+</dt>
+<dd>
+Path to a script file to load. Relative paths are interpreted as
+relative to the <code class="literal">path.config</code> directory. Globs are expanded.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">files</code>
+</span>
+</dt>
+<dd>
+List of script files to load. The scripts are concatenated together.
+Relative paths are interpreted as relative to the <code class="literal">path.config</code> directory.
+And globs are expanded.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">params</code>
+</span>
+</dt>
+<dd>
+A dictionary of parameters that are passed to the <code class="literal">register</code> of the
+script.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">tag_on_exception</code>
+</span>
+</dt>
+<dd>
+Tag to add to events in case the Javascript code causes an
+exception while processing an event. Defaults to <code class="literal">_js_exception</code>.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">timeout</code>
+</span>
+</dt>
+<dd>
+This sets an execution timeout for the <code class="literal">process</code> function. When
+the <code class="literal">process</code> function takes longer than the <code class="literal">timeout</code> period the function
+is interrupted. You can set this option to prevent a script from running for
+too long (like preventing an infinite <code class="literal">while</code> loop). By default there is no
+timeout.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">max_cached_sessions</code>
+</span>
+</dt>
+<dd>
+This sets the maximum number of Javascript VM sessions
+that will be cached to avoid reallocation. The default is <code class="literal">4</code>.
+</dd>
+</dl>
+</div>
+<h4><a id="_event_api"></a>Event API<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.11/libbeat/processors/script/docs/script.asciidoc">edit</a></h4>
+<p>The <code class="literal">Event</code> object passed to the <code class="literal">process</code> method has the following API.</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Method</th>
+<th align="left" valign="top">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">Get(string)</code></p></td>
+<td align="left" valign="top"><p>Get a value from the event (either a scalar or an object). If the key does not
+exist <code class="literal">null</code> is returned. If no key is provided then an object containing all
+fields is returned.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">var value = event.Get(key);</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">Put(string, value)</code></p></td>
+<td align="left" valign="top"><p>Put a value into the event. If the key was already set then the
+previous value is returned. It throws an exception if the key cannot be set
+because one of the intermediate values is not an object.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">var old = event.Put(key, value);</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">Rename(string, string)</code></p></td>
+<td align="left" valign="top"><p>Rename a key in the event. The target key must not exist. It
+returns true if the source key was successfully renamed to the target key.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">var success = event.Rename("source", "target");</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">Delete(string)</code></p></td>
+<td align="left" valign="top"><p>Delete a field from the event. It returns true on success.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">var deleted = event.Delete("user.email");</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">Cancel()</code></p></td>
+<td align="left" valign="top"><p>Flag the event as cancelled which causes the processor to drop
+event.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">event.Cancel(); return;</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">Tag(string)</code></p></td>
+<td align="left" valign="top"><p>Append a tag to the <code class="literal">tags</code> field if the tag does not already
+exist. Throws an exception if <code class="literal">tags</code> exists and is not a string or a list of
+strings.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">event.Tag("user_event");</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">AppendTo(string, string)</code></p></td>
+<td align="left" valign="top"><p><code class="literal">AppendTo</code> is a specialized <code class="literal">Put</code> method that converts the existing value to an
+array and appends the value if it does not already exist. If there is an
+existing value that&#8217;s not a string or array of strings then an exception is
+thrown.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">event.AppendTo("error.message", "invalid file hash");</code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="rename-fields.html">« Rename fields from events</a>
+</span>
+<span class="next">
+<a href="processor-timestamp.html">Timestamp »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

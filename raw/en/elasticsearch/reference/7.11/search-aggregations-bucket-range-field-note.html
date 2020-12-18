@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Subtleties of bucketing range fields | Elasticsearch Reference [7.11] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.11]"/>
+<link rel="up" href="search-aggregations-bucket.html" title="Bucket Aggregations"/>
+<link rel="prev" href="search-aggregations-bucket-variablewidthhistogram-aggregation.html" title="Variable width histogram aggregation"/>
+<link rel="next" href="search-aggregations-metrics.html" title="Metrics Aggregations"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.11"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.11"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.11]</a></span>
+»
+<span class="breadcrumb-link"><a href="search-aggregations.html">Aggregations</a></span>
+»
+<span class="breadcrumb-link"><a href="search-aggregations-bucket.html">Bucket Aggregations</a></span>
+»
+<span class="breadcrumb-node">Subtleties of bucketing range fields</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="search-aggregations-bucket-variablewidthhistogram-aggregation.html">« Variable width histogram aggregation</a>
+</span>
+<span class="next">
+<a href="search-aggregations-metrics.html">Metrics Aggregations »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="search-aggregations-bucket-range-field-note"></a>Subtleties of bucketing range fields<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/range-field-note.asciidoc">edit</a></h2>
+</div></div></div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_documents_are_counted_for_each_bucket_they_land_in"></a>Documents are counted for each bucket they land in<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/range-field-note.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Since a range represents multiple values, running a bucket aggregation over a
+range field can result in the same document landing in multiple buckets. This
+can lead to surprising behavior, such as the sum of bucket counts being higher
+than the number of matched documents.  For example, consider the following
+index:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT range_index
+{
+  "settings": {
+    "number_of_shards": 2
+  },
+  "mappings": {
+    "properties": {
+      "expected_attendees": {
+        "type": "integer_range"
+      },
+      "time_frame": {
+        "type": "date_range",
+        "format": "yyyy-MM-dd||epoch_millis"
+      }
+    }
+  }
+}
+
+PUT range_index/_doc/1?refresh
+{
+  "expected_attendees" : {
+    "gte" : 10,
+    "lte" : 20
+  },
+  "time_frame" : {
+    "gte" : "2019-10-28",
+    "lte" : "2019-11-04"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1114.console"></div>
+<p>The range is wider than the interval in the following aggregation, and thus the
+document will land in multiple buckets.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /range_index/_search?size=0
+{
+  "aggs": {
+    "range_histo": {
+      "histogram": {
+        "field": "expected_attendees",
+        "interval": 5
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1115.console"></div>
+<p>Since the interval is <code class="literal">5</code> (and the offset is <code class="literal">0</code> by default), we expect buckets <code class="literal">10</code>,
+<code class="literal">15</code>, and <code class="literal">20</code>. Our range document will fall in all three of these buckets.</p>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  ...
+  "aggregations" : {
+    "range_histo" : {
+      "buckets" : [
+        {
+          "key" : 10.0,
+          "doc_count" : 1
+        },
+        {
+          "key" : 15.0,
+          "doc_count" : 1
+        },
+        {
+          "key" : 20.0,
+          "doc_count" : 1
+        }
+      ]
+    }
+  }
+}</pre>
+</div>
+<p>A document cannot exist partially in a bucket; For example, the above document
+cannot count as one-third in each of the above three buckets. In this example,
+since the document&#8217;s range landed in multiple buckets, the full value of that
+document would also be counted in any sub-aggregations for each bucket as well.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_query_bounds_are_not_aggregation_filters"></a>Query bounds are not aggregation filters<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/range-field-note.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Another unexpected behavior can arise when a query is used to filter on the
+field being aggregated. In this case, a document could match the query but
+still have one or both of the endpoints of the range outside the query.
+Consider the following aggregation on the above document:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /range_index/_search?size=0
+{
+  "query": {
+    "range": {
+      "time_frame": {
+        "gte": "2019-11-01",
+        "format": "yyyy-MM-dd"
+      }
+    }
+  },
+  "aggs": {
+    "november_data": {
+      "date_histogram": {
+        "field": "time_frame",
+        "calendar_interval": "day",
+        "format": "yyyy-MM-dd"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1116.console"></div>
+<p>Even though the query only considers days in November, the aggregation
+generates 8 buckets (4 in October, 4 in November) because the aggregation is
+calculated over the ranges of all matching documents.</p>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  ...
+  "aggregations" : {
+    "november_data" : {
+      "buckets" : [
+              {
+          "key_as_string" : "2019-10-28",
+          "key" : 1572220800000,
+          "doc_count" : 1
+        },
+        {
+          "key_as_string" : "2019-10-29",
+          "key" : 1572307200000,
+          "doc_count" : 1
+        },
+        {
+          "key_as_string" : "2019-10-30",
+          "key" : 1572393600000,
+          "doc_count" : 1
+        },
+        {
+          "key_as_string" : "2019-10-31",
+          "key" : 1572480000000,
+          "doc_count" : 1
+        },
+        {
+          "key_as_string" : "2019-11-01",
+          "key" : 1572566400000,
+          "doc_count" : 1
+        },
+        {
+          "key_as_string" : "2019-11-02",
+          "key" : 1572652800000,
+          "doc_count" : 1
+        },
+        {
+          "key_as_string" : "2019-11-03",
+          "key" : 1572739200000,
+          "doc_count" : 1
+        },
+        {
+          "key_as_string" : "2019-11-04",
+          "key" : 1572825600000,
+          "doc_count" : 1
+        }
+      ]
+    }
+  }
+}</pre>
+</div>
+<p>Depending on the use case, a <code class="literal">CONTAINS</code> query could limit the documents to only
+those that fall entirely in the queried range.  In this example, the one
+document would not be included and the aggregation would be empty.  Filtering
+the buckets after the aggregation is also an option, for use cases where the
+document should be counted but the out of bounds data can be safely ignored.</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="search-aggregations-bucket-variablewidthhistogram-aggregation.html">« Variable width histogram aggregation</a>
+</span>
+<span class="next">
+<a href="search-aggregations-metrics.html">Metrics Aggregations »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

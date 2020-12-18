@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Diversified sampler aggregation | Elasticsearch Reference [7.11] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.11]"/>
+<link rel="up" href="search-aggregations-bucket.html" title="Bucket Aggregations"/>
+<link rel="prev" href="search-aggregations-bucket-daterange-aggregation.html" title="Date range aggregation"/>
+<link rel="next" href="search-aggregations-bucket-filter-aggregation.html" title="Filter aggregation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.11"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.11"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.11]</a></span>
+»
+<span class="breadcrumb-link"><a href="search-aggregations.html">Aggregations</a></span>
+»
+<span class="breadcrumb-link"><a href="search-aggregations-bucket.html">Bucket Aggregations</a></span>
+»
+<span class="breadcrumb-node">Diversified sampler aggregation</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="search-aggregations-bucket-daterange-aggregation.html">« Date range aggregation</a>
+</span>
+<span class="next">
+<a href="search-aggregations-bucket-filter-aggregation.html">Filter aggregation »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="search-aggregations-bucket-diversified-sampler-aggregation"></a>Diversified sampler aggregation<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/diversified-sampler-aggregation.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>Like the <code class="literal">sampler</code> aggregation this is a filtering aggregation used to limit any sub aggregations' processing to a sample of the top-scoring documents.
+The <code class="literal">diversified_sampler</code> aggregation adds the ability to limit the number of matches that share a common value such as an "author".</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Any good market researcher will tell you that when working with samples of data it is important
+that the sample represents a healthy variety of opinions rather than being skewed by any single voice.
+The same is true with aggregations and sampling with these diversify settings can offer a way to remove the bias in your content (an over-populated geography,
+a large spike in a timeline or an over-active forum spammer).</p>
+</div>
+</div>
+<div class="ulist itemizedlist">
+<p class="title"><strong>Example use cases:</strong></p>
+<ul class="itemizedlist">
+<li class="listitem">
+Tightening the focus of analytics to high-relevance matches rather than the potentially very long tail of low-quality matches
+</li>
+<li class="listitem">
+Removing bias from analytics by ensuring fair representation of content from different sources
+</li>
+<li class="listitem">
+Reducing the running cost of aggregations that can produce useful results using only samples e.g. <code class="literal">significant_terms</code>
+</li>
+</ul>
+</div>
+<p>A choice of <code class="literal">field</code> or <code class="literal">script</code> setting is used to provide values used for de-duplication and the <code class="literal">max_docs_per_value</code> setting controls the maximum
+number of documents collected on any one shard which share a common value. The default setting for <code class="literal">max_docs_per_value</code> is 1.</p>
+<p>The aggregation will throw an error if the choice of <code class="literal">field</code> or <code class="literal">script</code> produces multiple values for a single document (de-duplication using multi-valued fields is not supported due to efficiency concerns).</p>
+<p>Example:</p>
+<p>We might want to see which tags are strongly associated with <code class="literal">#elasticsearch</code> on StackOverflow
+forum posts but ignoring the effects of some prolific users with a tendency to misspell #Kibana as #Cabana.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /stackoverflow/_search?size=0
+{
+  "query": {
+    "query_string": {
+      "query": "tags:elasticsearch"
+    }
+  },
+  "aggs": {
+    "my_unbiased_sample": {
+      "diversified_sampler": {
+        "shard_size": 200,
+        "field": "author"
+      },
+      "aggs": {
+        "keywords": {
+          "significant_terms": {
+            "field": "tags",
+            "exclude": [ "elasticsearch" ]
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1028.console"></div>
+<p>Response:</p>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  ...
+  "aggregations": {
+    "my_unbiased_sample": {
+      "doc_count": 151,           <a id="CO242-1"></a><i class="conum" data-value="1"></i>
+      "keywords": {               <a id="CO242-2"></a><i class="conum" data-value="2"></i>
+        "doc_count": 151,
+        "bg_count": 650,
+        "buckets": [
+          {
+            "key": "kibana",
+            "doc_count": 150,
+            "score": 2.213,
+            "bg_count": 200
+          }
+        ]
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO242-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>151 documents were sampled in total.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO242-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The results of the significant_terms aggregation are not skewed by any single author&#8217;s quirks because we asked for a maximum of one post from any one author in our sample.</p>
+</td>
+</tr>
+</table>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_scripted_example"></a>Scripted example:<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/diversified-sampler-aggregation.asciidoc">edit</a></h3>
+</div></div></div>
+<p>In this scenario we might want to diversify on a combination of field values. We can use a <code class="literal">script</code> to produce a hash of the
+multiple values in a tags field to ensure we don&#8217;t have a sample that consists of the same repeated combinations of tags.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /stackoverflow/_search?size=0
+{
+  "query": {
+    "query_string": {
+      "query": "tags:kibana"
+    }
+  },
+  "aggs": {
+    "my_unbiased_sample": {
+      "diversified_sampler": {
+        "shard_size": 200,
+        "max_docs_per_value": 3,
+        "script": {
+          "lang": "painless",
+          "source": "doc['tags'].hashCode()"
+        }
+      },
+      "aggs": {
+        "keywords": {
+          "significant_terms": {
+            "field": "tags",
+            "exclude": [ "kibana" ]
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1029.console"></div>
+<p>Response:</p>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  ...
+  "aggregations": {
+    "my_unbiased_sample": {
+      "doc_count": 6,
+      "keywords": {
+        "doc_count": 6,
+        "bg_count": 650,
+        "buckets": [
+          {
+            "key": "logstash",
+            "doc_count": 3,
+            "score": 2.213,
+            "bg_count": 50
+          },
+          {
+            "key": "elasticsearch",
+            "doc_count": 3,
+            "score": 1.34,
+            "bg_count": 200
+          }
+        ]
+      }
+    }
+  }
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_shard_size"></a>shard_size<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/diversified-sampler-aggregation.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The <code class="literal">shard_size</code> parameter limits how many top-scoring documents are collected in the sample processed on each shard.
+The default value is 100.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_max_docs_per_value"></a>max_docs_per_value<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/diversified-sampler-aggregation.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The <code class="literal">max_docs_per_value</code> is an optional parameter and limits how many documents are permitted per choice of de-duplicating value.
+The default setting is "1".</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_execution_hint"></a>execution_hint<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/diversified-sampler-aggregation.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The optional <code class="literal">execution_hint</code> setting can influence the management of the values used for de-duplication.
+Each option will hold up to <code class="literal">shard_size</code> values in memory while performing de-duplication but the type of value held can be controlled as follows:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+hold field values directly (<code class="literal">map</code>)
+</li>
+<li class="listitem">
+hold ordinals of the field as determined by the Lucene index (<code class="literal">global_ordinals</code>)
+</li>
+<li class="listitem">
+hold hashes of the field values - with potential for hash collisions (<code class="literal">bytes_hash</code>)
+</li>
+</ul>
+</div>
+<p>The default setting is to use <a class="xref" href="eager-global-ordinals.html" title="eager_global_ordinals"><code class="literal">global_ordinals</code></a> if this information is available from the Lucene index and reverting to <code class="literal">map</code> if not.
+The <code class="literal">bytes_hash</code> setting may prove faster in some cases but introduces the possibility of false positives in de-duplication logic due to the possibility of hash collisions.
+Please note that Elasticsearch will ignore the choice of execution hint if it is not applicable and that there is no backward compatibility guarantee on these hints.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_limitations_5"></a>Limitations<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/diversified-sampler-aggregation.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="div-sampler-breadth-first-nested-agg"></a>Cannot be nested under <code class="literal">breadth_first</code> aggregations<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/diversified-sampler-aggregation.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Being a quality-based filter the diversified_sampler aggregation needs access to the relevance score produced for each document.
+It therefore cannot be nested under a <code class="literal">terms</code> aggregation which has the <code class="literal">collect_mode</code> switched from the default <code class="literal">depth_first</code> mode to <code class="literal">breadth_first</code> as this discards scores.
+In this situation an error will be thrown.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="_limited_de_dup_logic"></a>Limited de-dup logic.<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/diversified-sampler-aggregation.asciidoc">edit</a></h4>
+</div></div></div>
+<p>The de-duplication logic applies only at a shard level so will not apply across shards.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="spec-syntax-geo-date-fields"></a>No specialized syntax for geo/date fields<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/aggregations/bucket/diversified-sampler-aggregation.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Currently the syntax for defining the diversifying values is defined by a choice of <code class="literal">field</code> or
+<code class="literal">script</code> - there is no added syntactical sugar for expressing geo or date units such as "7d" (7
+days). This support may be added in a later release and users will currently have to create these
+sorts of values using a script.</p>
+</div>
+
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="search-aggregations-bucket-daterange-aggregation.html">« Date range aggregation</a>
+</span>
+<span class="next">
+<a href="search-aggregations-bucket-filter-aggregation.html">Filter aggregation »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

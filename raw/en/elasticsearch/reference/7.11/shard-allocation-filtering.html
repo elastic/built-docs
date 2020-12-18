@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Index-level shard allocation filtering | Elasticsearch Reference [7.11] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.11]"/>
+<link rel="up" href="index-modules-allocation.html" title="Index Shard Allocation"/>
+<link rel="prev" href="index-modules-allocation.html" title="Index Shard Allocation"/>
+<link rel="next" href="delayed-allocation.html" title="Delaying allocation when a node leaves"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.11"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.11"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.11]</a></span>
+»
+<span class="breadcrumb-link"><a href="index-modules.html">Index modules</a></span>
+»
+<span class="breadcrumb-link"><a href="index-modules-allocation.html">Index Shard Allocation</a></span>
+»
+<span class="breadcrumb-node">Index-level shard allocation filtering</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="index-modules-allocation.html">« Index Shard Allocation</a>
+</span>
+<span class="next">
+<a href="delayed-allocation.html">Delaying allocation when a node leaves »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="shard-allocation-filtering"></a>Index-level shard allocation filtering<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/index-modules/allocation/filtering.asciidoc">edit</a></h2>
+</div></div></div>
+<p>You can use shard allocation filters to control where Elasticsearch allocates shards of
+a particular index. These per-index filters are applied in conjunction with
+<a class="xref" href="modules-cluster.html#cluster-shard-allocation-filtering" title="Cluster-level shard allocation filtering">cluster-wide allocation filtering</a> and
+<a class="xref" href="modules-cluster.html#shard-allocation-awareness" title="Shard allocation awareness">allocation awareness</a>.</p>
+<p>Shard allocation filters can be based on custom node attributes or the built-in
+<code class="literal">_name</code>, <code class="literal">_host_ip</code>, <code class="literal">_publish_ip</code>, <code class="literal">_ip</code>, <code class="literal">_host</code>, <code class="literal">_id</code>, <code class="literal">_tier</code> and <code class="literal">_tier_preference</code>
+attributes. <a class="xref" href="index-lifecycle-management.html" title="ILM: Manage the index lifecycle">Index lifecycle management</a> uses filters based
+on custom node attributes to determine how to reallocate shards when moving
+between phases.</p>
+<p>The <code class="literal">cluster.routing.allocation</code> settings are dynamic, enabling live indices to
+be moved from one set of nodes to another. Shards are only relocated if it is
+possible to do so without breaking another routing constraint, such as never
+allocating a primary and replica shard on the same node.</p>
+<p>For example, you could use a custom node attribute to indicate a node&#8217;s
+performance characteristics and use shard allocation filtering to route shards
+for a particular index to the most appropriate class of hardware.</p>
+<h4><a id="index-allocation-filters"></a>Enabling index-level shard allocation filtering<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/index-modules/allocation/filtering.asciidoc">edit</a></h4>
+<p>To filter based on a custom node attribute:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Specify the filter characteristics with a custom node attribute in each
+node&#8217;s <code class="literal">elasticsearch.yml</code> configuration file. For example, if you have <code class="literal">small</code>,
+<code class="literal">medium</code>, and <code class="literal">big</code> nodes, you could add a <code class="literal">size</code> attribute to filter based
+on node size.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">node.attr.size: medium</pre>
+</div>
+<p>You can also set custom attributes when you start a node:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">`./bin/elasticsearch -Enode.attr.size=medium</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Add a routing allocation filter to the index. The <code class="literal">index.routing.allocation</code>
+settings support three types of filters: <code class="literal">include</code>, <code class="literal">exclude</code>, and <code class="literal">require</code>.
+For example, to tell Elasticsearch to allocate shards from the <code class="literal">test</code> index to either
+<code class="literal">big</code> or <code class="literal">medium</code> nodes, use <code class="literal">index.routing.allocation.include</code>:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT test/_settings
+{
+  "index.routing.allocation.include.size": "big,medium"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/76.console"></div>
+<p>If you specify multiple filters the following conditions must be satisfied
+simultaneously by a node in order for shards to be relocated to it:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+If any <code class="literal">require</code> type conditions are specified, all of them must be satisfied
+</li>
+<li class="listitem">
+If any <code class="literal">exclude</code> type conditions are specified, none of them may be satisfied
+</li>
+<li class="listitem">
+If any <code class="literal">include</code> type conditions are specified, at least one of them must be
+satisfied
+</li>
+</ul>
+</div>
+<p>For example, to move the <code class="literal">test</code> index to <code class="literal">big</code> nodes in <code class="literal">rack1</code>, you could
+specify:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT test/_settings
+{
+  "index.routing.allocation.require.size": "big",
+  "index.routing.allocation.require.rack": "rack1"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/77.console"></div>
+</li>
+</ol>
+</div>
+<h4><a id="index-allocation-settings"></a>Index allocation filter settings<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/index-modules/allocation/filtering.asciidoc">edit</a></h4>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">index.routing.allocation.include.{attribute}</code>
+</span>
+</dt>
+<dd>
+Assign the index to a node whose <code class="literal">{attribute}</code> has at least one of the
+comma-separated values.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">index.routing.allocation.require.{attribute}</code>
+</span>
+</dt>
+<dd>
+Assign the index to a node whose <code class="literal">{attribute}</code> has <em>all</em> of the
+comma-separated values.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">index.routing.allocation.exclude.{attribute}</code>
+</span>
+</dt>
+<dd>
+Assign the index to a node whose <code class="literal">{attribute}</code> has <em>none</em> of the
+comma-separated values.
+</dd>
+</dl>
+</div>
+<p>The index allocation settings support the following built-in attributes:</p>
+<div class="informaltable">
+<table border="0" cellpadding="4px">
+<colgroup>
+<col/>
+<col/>
+</colgroup>
+<tbody valign="top">
+<tr>
+<td valign="top">
+<p>
+<code class="literal">_name</code>
+</p>
+</td>
+<td valign="top">
+<p>
+Match nodes by node name
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<code class="literal">_host_ip</code>
+</p>
+</td>
+<td valign="top">
+<p>
+Match nodes by host IP address (IP associated with hostname)
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<code class="literal">_publish_ip</code>
+</p>
+</td>
+<td valign="top">
+<p>
+Match nodes by publish IP address
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<code class="literal">_ip</code>
+</p>
+</td>
+<td valign="top">
+<p>
+Match either <code class="literal">_host_ip</code> or <code class="literal">_publish_ip</code>
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<code class="literal">_host</code>
+</p>
+</td>
+<td valign="top">
+<p>
+Match nodes by hostname
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<code class="literal">_id</code>
+</p>
+</td>
+<td valign="top">
+<p>
+Match nodes by node id
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<code class="literal">_tier</code>
+</p>
+</td>
+<td valign="top">
+<p>
+Match nodes by the node&#8217;s <a class="xref" href="data-tiers.html" title="Data tiers">data tier</a> role.
+For more details see <a class="xref" href="data-tier-shard-filtering.html" title="Index-level data tier allocation filtering">data tier allocation filtering</a>
+</p>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><code class="literal">_tier</code> filtering is based on <a class="xref" href="modules-node.html" title="Node">node</a> roles. Only
+a subset of roles are <a class="xref" href="data-tiers.html" title="Data tiers">data tier</a> roles, and the generic
+<a class="xref" href="modules-node.html#data-node" title="Data node">data role</a> will match any tier filtering.</p>
+</div>
+</div>
+<p>You can use wildcards when specifying attribute values, for example:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT test/_settings
+{
+  "index.routing.allocation.include._ip": "192.168.2.*"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/78.console"></div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="index-modules-allocation.html">« Index Shard Allocation</a>
+</span>
+<span class="next">
+<a href="delayed-allocation.html">Delaying allocation when a node leaves »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

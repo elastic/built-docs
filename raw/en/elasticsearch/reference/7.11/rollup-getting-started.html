@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Getting started with rollups | Elasticsearch Reference [7.11] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.11]"/>
+<link rel="up" href="xpack-rollup.html" title="Rolling up historical data"/>
+<link rel="prev" href="rollup-api-quickref.html" title="Rollup API quick reference"/>
+<link rel="next" href="rollup-understanding-groups.html" title="Understanding groups"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.11"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.11"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.11]</a></span>
+»
+<span class="breadcrumb-link"><a href="data-rollup-transform.html">Roll up or transform your data</a></span>
+»
+<span class="breadcrumb-link"><a href="xpack-rollup.html">Rolling up historical data</a></span>
+»
+<span class="breadcrumb-node">Getting started with rollups</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="rollup-api-quickref.html">« Rollup API quick reference</a>
+</span>
+<span class="next">
+<a href="rollup-understanding-groups.html">Understanding groups »</a>
+</span>
+</div>
+<div class="section xpack">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="rollup-getting-started"></a>Getting started with rollups<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/rollup/rollup-getting-started.asciidoc">edit</a><a class="xpack_tag" href="/subscriptions"></a></h2>
+</div></div></div>
+
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This functionality is experimental and may be changed or removed completely in a future release. Elastic will take a best effort approach to fix any issues, but experimental features are not subject to the support SLA of official GA features.</p>
+</div>
+</div>
+<p>To use the Rollup feature, you need to create one or more "Rollup Jobs".  These jobs run continuously in the background
+and rollup the index or indices that you specify, placing the rolled documents in a secondary index (also of your choosing).</p>
+<p>Imagine you have a series of daily indices that hold sensor data (<code class="literal">sensor-2017-01-01</code>, <code class="literal">sensor-2017-01-02</code>, etc).  A sample document might
+look like this:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+  "timestamp": 1516729294000,
+  "temperature": 200,
+  "voltage": 5.2,
+  "node": "a"
+}</pre>
+</div>
+<h4><a id="_creating_a_rollup_job"></a>Creating a rollup job<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/rollup/rollup-getting-started.asciidoc">edit</a></h4>
+<p>We&#8217;d like to rollup these documents into hourly summaries, which will allow us to generate reports and dashboards with any time interval
+one hour or greater.  A rollup job might look like this:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _rollup/job/sensor
+{
+  "index_pattern": "sensor-*",
+  "rollup_index": "sensor_rollup",
+  "cron": "*/30 * * * * ?",
+  "page_size": 1000,
+  "groups": {
+    "date_histogram": {
+      "field": "timestamp",
+      "fixed_interval": "60m"
+    },
+    "terms": {
+      "fields": [ "node" ]
+    }
+  },
+  "metrics": [
+    {
+      "field": "temperature",
+      "metrics": [ "min", "max", "sum" ]
+    },
+    {
+      "field": "voltage",
+      "metrics": [ "avg" ]
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1386.console"></div>
+<p>We give the job the ID of "sensor" (in the url: <code class="literal">PUT _rollup/job/sensor</code>), and tell it to rollup the index pattern <code class="literal">"sensor-*"</code>.
+This job will find and rollup any index that matches that pattern. Rollup summaries are then stored in the <code class="literal">"sensor_rollup"</code> index.</p>
+<p>The <code class="literal">cron</code> parameter controls when and how often the job activates.  When a rollup job&#8217;s cron schedule triggers, it will begin rolling up
+from where it left off after the last activation.  So if you configure the cron to run every 30 seconds, the job will process the last 30
+seconds worth of data that was indexed into the <code class="literal">sensor-*</code> indices.</p>
+<p>If instead the cron was configured to run once a day at midnight, the job would process the last 24 hours worth of data.  The choice is largely
+preference, based on how "realtime" you want the rollups, and if you wish to process continuously or move it to off-peak hours.</p>
+<p>Next, we define a set of <code class="literal">groups</code>. Essentially, we are defining the dimensions
+that we wish to pivot on at a later date when querying the data. The grouping in
+this job allows us to use <code class="literal">date_histogram</code> aggregations on the <code class="literal">timestamp</code> field,
+rolled up at hourly intervals. It also allows us to run terms aggregations on
+the <code class="literal">node</code> field.</p>
+<div class="sidebar">
+<div class="titlepage"><div><div>
+<p class="title"><strong>Date histogram interval vs cron schedule</strong></p>
+</div></div></div>
+<p>You&#8217;ll note that the job&#8217;s cron is configured to run every 30 seconds, but the date_histogram is configured to
+rollup at 60 minute intervals.  How do these relate?</p>
+<p>The date_histogram controls the granularity of the saved data.  Data will be rolled up into hourly intervals, and you will be unable
+to query with finer granularity.  The cron simply controls when the process looks for new data to rollup.  Every 30 seconds it will see
+if there is a new hour&#8217;s worth of data and roll it up.  If not, the job goes back to sleep.</p>
+<p>Often, it doesn&#8217;t make sense to define such a small cron (30s) on a large interval (1h), because the majority of the activations will
+simply go back to sleep.  But there&#8217;s nothing wrong with it either, the job will do the right thing.</p>
+</div>
+<p>After defining which groups should be generated for the data, you next configure
+which metrics should be collected. By default, only the <code class="literal">doc_counts</code> are
+collected for each group. To make rollup useful, you will often add metrics
+like averages, mins, maxes, etc. In this example, the metrics are fairly
+straightforward: we want to save the min/max/sum of the <code class="literal">temperature</code>
+field, and the average of the <code class="literal">voltage</code> field.</p>
+<div class="sidebar">
+<div class="titlepage"><div><div>
+<p class="title"><strong>Averages aren&#8217;t composable?!</strong></p>
+</div></div></div>
+<p>If you&#8217;ve worked with rollups before, you may be cautious around averages. If an
+average is saved for a 10 minute interval, it usually isn&#8217;t useful for larger
+intervals. You cannot average six 10-minute averages to find a hourly average;
+the average of averages is not equal to the total average.</p>
+<p>For this reason, other systems tend to either omit the ability to average or
+store the average at multiple intervals to support more flexible querying.</p>
+<p>Instead, the data rollup features save the <code class="literal">count</code> and <code class="literal">sum</code> for the defined time
+interval. This allows us to reconstruct the average at any interval greater-than
+or equal to the defined interval. This gives maximum flexibility for minimal
+storage costs&#8230;&#8203; and you don&#8217;t have to worry about average accuracies (no
+average of averages here!)</p>
+</div>
+<p>For more details about the job syntax, see <a class="xref" href="rollup-put-job.html" title="Create rollup jobs API">Create rollup jobs</a>.</p>
+<p>After you execute the above command and create the job, you&#8217;ll receive the following response:</p>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "acknowledged": true
+}</pre>
+</div>
+<h4><a id="_starting_the_job"></a>Starting the job<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/rollup/rollup-getting-started.asciidoc">edit</a></h4>
+<p>After the job is created, it will be sitting in an inactive state.  Jobs need to be started before they begin processing data (this allows
+you to stop them later as a way to temporarily pause, without deleting the configuration).</p>
+<p>To start the job, execute this command:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _rollup/job/sensor/_start</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1387.console"></div>
+<h4><a id="_searching_the_rolled_results"></a>Searching the rolled results<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/rollup/rollup-getting-started.asciidoc">edit</a></h4>
+<p>After the job has run and processed some data, we can use the <a class="xref" href="rollup-search.html" title="Rollup search">Rollup search</a> endpoint to do some searching.  The Rollup feature is designed
+so that you can use the same Query DSL syntax that you are accustomed to&#8230;&#8203; it just happens to run on the rolled up data instead.</p>
+<p>For example, take this query:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /sensor_rollup/_rollup_search
+{
+  "size": 0,
+  "aggregations": {
+    "max_temperature": {
+      "max": {
+        "field": "temperature"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1388.console"></div>
+<p>It&#8217;s a simple aggregation that calculates the maximum of the <code class="literal">temperature</code> field.  But you&#8217;ll notice that is is being sent to the <code class="literal">sensor_rollup</code>
+index instead of the raw <code class="literal">sensor-*</code> indices.  And you&#8217;ll also notice that it is using the <code class="literal">_rollup_search</code> endpoint.  Otherwise the syntax
+is exactly as you&#8217;d expect.</p>
+<p>If you were to execute that query, you&#8217;d receive a result that looks like a normal aggregation response:</p>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "took" : 102,
+  "timed_out" : false,
+  "terminated_early" : false,
+  "_shards" : ... ,
+  "hits" : {
+    "total" : {
+        "value": 0,
+        "relation": "eq"
+    },
+    "max_score" : 0.0,
+    "hits" : [ ]
+  },
+  "aggregations" : {
+    "max_temperature" : {
+      "value" : 202.0
+    }
+  }
+}</pre>
+</div>
+<p>The only notable difference is that Rollup search results have zero <code class="literal">hits</code>, because we aren&#8217;t really searching the original, live data any
+more.  Otherwise it&#8217;s identical syntax.</p>
+<p>There are a few interesting takeaways here.  Firstly, even though the data was rolled up with hourly intervals and partitioned by
+node name, the query we ran is just calculating the max temperature across all documents.  The <code class="literal">groups</code> that were configured in the job
+are not mandatory elements of a query, they are just extra dimensions you can partition on.  Second, the request and response syntax
+is nearly identical to normal DSL, making it easy to integrate into dashboards and applications.</p>
+<p>Finally, we can use those grouping fields we defined to construct a more complicated query:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /sensor_rollup/_rollup_search
+{
+  "size": 0,
+  "aggregations": {
+    "timeline": {
+      "date_histogram": {
+        "field": "timestamp",
+        "fixed_interval": "7d"
+      },
+      "aggs": {
+        "nodes": {
+          "terms": {
+            "field": "node"
+          },
+          "aggs": {
+            "max_temperature": {
+              "max": {
+                "field": "temperature"
+              }
+            },
+            "avg_voltage": {
+              "avg": {
+                "field": "voltage"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1389.console"></div>
+<p>Which returns a corresponding response:</p>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+   "took" : 93,
+   "timed_out" : false,
+   "terminated_early" : false,
+   "_shards" : ... ,
+   "hits" : {
+     "total" : {
+        "value": 0,
+        "relation": "eq"
+     },
+     "max_score" : 0.0,
+     "hits" : [ ]
+   },
+   "aggregations" : {
+     "timeline" : {
+       "meta" : { },
+       "buckets" : [
+         {
+           "key_as_string" : "2018-01-18T00:00:00.000Z",
+           "key" : 1516233600000,
+           "doc_count" : 6,
+           "nodes" : {
+             "doc_count_error_upper_bound" : 0,
+             "sum_other_doc_count" : 0,
+             "buckets" : [
+               {
+                 "key" : "a",
+                 "doc_count" : 2,
+                 "max_temperature" : {
+                   "value" : 202.0
+                 },
+                 "avg_voltage" : {
+                   "value" : 5.1499998569488525
+                 }
+               },
+               {
+                 "key" : "b",
+                 "doc_count" : 2,
+                 "max_temperature" : {
+                   "value" : 201.0
+                 },
+                 "avg_voltage" : {
+                   "value" : 5.700000047683716
+                 }
+               },
+               {
+                 "key" : "c",
+                 "doc_count" : 2,
+                 "max_temperature" : {
+                   "value" : 202.0
+                 },
+                 "avg_voltage" : {
+                   "value" : 4.099999904632568
+                 }
+               }
+             ]
+           }
+         }
+       ]
+     }
+   }
+}</pre>
+</div>
+<p>In addition to being more complicated (date histogram and a terms aggregation, plus an additional average metric), you&#8217;ll notice
+the date_histogram uses a <code class="literal">7d</code> interval instead of <code class="literal">60m</code>.</p>
+<h4><a id="_conclusion"></a>Conclusion<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/rollup/rollup-getting-started.asciidoc">edit</a></h4>
+<p>This quickstart should have provided a concise overview of the core functionality that Rollup exposes.  There are more tips and things
+to consider when setting up Rollups, which you can find throughout the rest of this section.  You may also explore the <a class="xref" href="rollup-api-quickref.html" title="Rollup API quick reference">REST API</a>
+for an overview of what is available.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="rollup-api-quickref.html">« Rollup API quick reference</a>
+</span>
+<span class="next">
+<a href="rollup-understanding-groups.html">Understanding groups »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

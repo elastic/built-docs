@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Kerberos authentication | Elasticsearch Reference [7.11] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.11]"/>
+<link rel="up" href="setting-up-authentication.html" title="User authentication"/>
+<link rel="prev" href="saml-realm.html" title="SAML authentication"/>
+<link rel="next" href="custom-realms.html" title="Integrating with other authentication systems"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.11"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.11"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.11]</a></span>
+»
+<span class="breadcrumb-link"><a href="secure-cluster.html">Secure a cluster</a></span>
+»
+<span class="breadcrumb-link"><a href="setting-up-authentication.html">User authentication</a></span>
+»
+<span class="breadcrumb-node">Kerberos authentication</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="saml-realm.html">« SAML authentication</a>
+</span>
+<span class="next">
+<a href="custom-realms.html">Integrating with other authentication systems »</a>
+</span>
+</div>
+<div class="section xpack">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="kerberos-realm"></a>Kerberos authentication<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/x-pack/docs/en/security/authentication/kerberos-realm.asciidoc">edit</a><a class="xpack_tag" href="/subscriptions"></a></h2>
+</div></div></div>
+<p>You can configure the Elastic Stack security features to support Kerberos V5
+authentication, an industry standard protocol to authenticate users in Elasticsearch.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>You cannot use the Kerberos realm to authenticate on the transport network layer.</p>
+</div>
+</div>
+<p>To authenticate users with Kerberos, you need to configure a Kerberos realm and
+map users to roles. For more information on realm settings, see
+<a class="xref" href="security-settings.html#ref-kerberos-settings" title="Kerberos realm settings">Kerberos realm settings</a>.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="kerberos-terms"></a>Key concepts<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/x-pack/docs/en/security/authentication/kerberos-realm.asciidoc">edit</a></h3>
+</div></div></div>
+<p>There are a few terms and concepts that you&#8217;ll encounter when you&#8217;re setting up
+Kerberos realms:</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<em>kdc</em>
+</span>
+</dt>
+<dd>
+Key Distribution Center. A service that issues Kerberos tickets.
+</dd>
+<dt>
+<span class="term">
+<em>principal</em>
+</span>
+</dt>
+<dd>
+<p>
+A Kerberos principal is a unique identity to which Kerberos can assign
+tickets. It can be used to identify a user or a service provided by a
+server.
+</p>
+<p>Kerberos V5 principal names are of format <code class="literal">primary/instance@REALM</code>, where
+<code class="literal">primary</code> is a user name.</p>
+<p><code class="literal">instance</code> is an optional string that qualifies the primary and is separated
+by a slash(<code class="literal">/</code>) from the primary. For a user, usually it is not used; for
+service hosts, it is the fully qualified domain name of the host.</p>
+<p><code class="literal">REALM</code> is the Kerberos realm. Usually it is is the domain name in upper case.
+An example of a typical user principal is <code class="literal">user@ES.DOMAIN.LOCAL</code>. An example of
+a typical service principal is <code class="literal">HTTP/es.domain.local@ES.DOMAIN.LOCAL</code>.</p>
+</dd>
+<dt>
+<span class="term">
+<em>realm</em>
+</span>
+</dt>
+<dd>
+Realms define the administrative boundary within which the authentication server
+has authority to authenticate users and services.
+</dd>
+<dt>
+<span class="term">
+<em>keytab</em>
+</span>
+</dt>
+<dd>
+A file that stores pairs of principals and encryption keys.
+</dd>
+</dl>
+</div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Anyone with read permissions to this file can use the
+credentials in the network to access other services so it is important
+to protect it with proper file permissions.</p>
+</div>
+</div>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<em>krb5.conf</em>
+</span>
+</dt>
+<dd>
+A file that contains Kerberos configuration information such as the default realm
+name, the location of Key distribution centers (KDC), realms information,
+mappings from domain names to Kerberos realms, and default configurations for
+realm session key encryption types.
+</dd>
+<dt>
+<span class="term">
+<em>ticket granting ticket (TGT)</em>
+</span>
+</dt>
+<dd>
+A TGT is an authentication ticket generated by the Kerberos authentication
+server. It contains an encrypted authenticator.
+</dd>
+</dl>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="kerberos-realm-configuration"></a>Configuring a Kerberos realm<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/x-pack/docs/en/security/authentication/kerberos-realm.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Kerberos is used to protect services and uses a ticket-based authentication
+protocol to authenticate users.
+You can configure Elasticsearch to use the Kerberos V5 authentication protocol, which is
+an industry standard protocol, to authenticate users.
+In this scenario, clients must present Kerberos tickets for authentication.</p>
+<p>In Kerberos, users authenticate with an authentication service and later
+with a ticket granting service to generate a TGT (ticket-granting ticket).
+This ticket is then presented to the service for authentication.
+Refer to your Kerberos installation documentation for more information about
+obtaining TGT. Elasticsearch clients must first obtain a TGT then initiate the process of
+authenticating with Elasticsearch.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="kerberos-realm-prereq"></a>Before you begin<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/x-pack/docs/en/security/authentication/configuring-kerberos-realm.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Deploy Kerberos.</p>
+<p>You must have the Kerberos infrastructure set up in your environment.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Kerberos requires a lot of external services to function properly, such as
+time synchronization between all machines and working forward and reverse DNS
+mappings in your domain. Refer to your Kerberos documentation for more details.</p>
+</div>
+</div>
+<p>These instructions do not cover setting up and configuring your Kerberos
+deployment. Where examples are provided, they pertain to an MIT Kerberos V5
+deployment. For more information, see
+<a href="http://web.mit.edu/kerberos/www/index.html" class="ulink" target="_top">MIT Kerberos documentation</a></p>
+</li>
+<li class="listitem">
+<p>Configure Java GSS.</p>
+<p>Elasticsearch uses Java GSS framework support for Kerberos authentication.
+To support Kerberos authentication, Elasticsearch needs the following files:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">krb5.conf</code>, a Kerberos configuration file
+</li>
+<li class="listitem">
+A <code class="literal">keytab</code> file that contains credentials for the Elasticsearch service principal
+</li>
+</ul>
+</div>
+<p>The configuration requirements depend on your Kerberos setup. Refer to your
+Kerberos documentation to configure the <code class="literal">krb5.conf</code> file.</p>
+<p>For more information on Java GSS, see
+<a href="https://docs.oracle.com/javase/10/security/kerberos-requirements1.htm" class="ulink" target="_top">Java GSS Kerberos requirements</a></p>
+</li>
+<li class="listitem">
+<p>Enable TLS for HTTP.</p>
+<p>If your Elasticsearch cluster is operating in production mode, you must configure the
+HTTP interface to use SSL/TLS before you can enable Kerberos authentication. For
+more information, see <a class="xref" href="configuring-tls.html#tls-http" title="Encrypting HTTP client communications">Encrypting HTTP client communications</a>.</p>
+<p>This step is necessary to support Kerberos authentication via Kibana.
+It is not required for Kerberos authentication directly against the Elasticsearch Rest API.</p>
+</li>
+<li class="listitem">
+<p>Enable the token service</p>
+<p>The Elasticsearch Kerberos implementation makes use of the Elasticsearch token service. If you
+configure TLS on the HTTP interface, this service is automatically enabled. It
+can be explicitly configured by adding the following setting in your
+<code class="literal">elasticsearch.yml</code> file:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">xpack.security.authc.token.enabled: true</pre>
+</div>
+<p>This step is necessary to support Kerberos authentication via Kibana.
+It is not required for Kerberos authentication directly against the Elasticsearch Rest API.</p>
+</li>
+</ol>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="kerberos-realm-create"></a>Create a Kerberos realm<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/x-pack/docs/en/security/authentication/configuring-kerberos-realm.asciidoc">edit</a></h4>
+</div></div></div>
+<p>To configure a Kerberos realm in Elasticsearch:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Configure the JVM to find the Kerberos configuration file.</p>
+<p>Elasticsearch uses Java GSS and JAAS Krb5LoginModule to support Kerberos authentication
+using a Simple and Protected GSSAPI Negotiation Mechanism (SPNEGO) mechanism.
+The Kerberos configuration file (<code class="literal">krb5.conf</code>) provides information such as the
+default realm, the Key Distribution Center (KDC), and other configuration details
+required for Kerberos authentication. When the JVM needs some configuration
+properties, it tries to find those values by locating and loading this file. The
+JVM system property to configure the file path is <code class="literal">java.security.krb5.conf</code>. To
+configure JVM system properties see <a class="xref" href="jvm-options.html" title="Setting JVM options">Setting JVM options</a>.
+If this system property is not specified, Java tries to locate the file based on
+the conventions.</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>It is recommended that this system property be configured for Elasticsearch.
+The method for setting this property depends on your Kerberos infrastructure.
+Refer to your Kerberos documentation for more details.</p>
+</div>
+</div>
+<p>For more information, see <a href="http://web.mit.edu/kerberos/krb5-latest/doc/admin/conf_files/krb5_conf.html" class="ulink" target="_top">krb5.conf</a></p>
+</li>
+<li class="listitem">
+<p>Create a keytab for the Elasticsearch node.</p>
+<p>A keytab is a file that stores pairs of principals and encryption keys. Elasticsearch
+uses the keys from the keytab to decrypt the tickets presented by the user. You
+must create a keytab for Elasticsearch by using the tools provided by your Kerberos
+implementation. For example, some tools that create keytabs are <code class="literal">ktpass.exe</code> on
+Windows and <code class="literal">kadmin</code> for MIT Kerberos.</p>
+</li>
+<li class="listitem">
+<p>Put the keytab file in the Elasticsearch configuration directory.</p>
+<p>Make sure that this keytab file has read permissions. This file contains
+credentials, therefore you must take appropriate measures to protect it.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Elasticsearch uses Kerberos on the HTTP network layer, therefore there must be
+a keytab file for the HTTP service principal on every Elasticsearch node. The service
+principal name must have the format <code class="literal">HTTP/es.domain.local@ES.DOMAIN.LOCAL</code>.
+The keytab files are unique for each node since they include the hostname.
+An Elasticsearch node can act as any principal a client requests as long as that
+principal and its credentials are found in the configured keytab.</p>
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Create a Kerberos realm.</p>
+<p>To enable Kerberos authentication in Elasticsearch, you must add a Kerberos realm in the
+realm chain.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>You can configure only one Kerberos realm on Elasticsearch nodes.</p>
+</div>
+</div>
+<p>To configure a Kerberos realm, there are a few mandatory realm settings and
+other optional settings that you need to configure in the <code class="literal">elasticsearch.yml</code>
+configuration file. Add a realm configuration under the
+<code class="literal">xpack.security.authc.realms.kerberos</code> namespace.</p>
+<p>The most common configuration for a Kerberos realm is as follows:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">xpack.security.authc.realms.kerberos.kerb1:
+  order: 3
+  keytab.path: es.keytab
+  remove_realm_name: false</pre>
+</div>
+<p>The <code class="literal">username</code> is extracted from the ticket presented by user and usually has
+the format <code class="literal">username@REALM</code>. This <code class="literal">username</code> is used for mapping
+roles to the user. If realm setting <code class="literal">remove_realm_name</code> is
+set to <code class="literal">true</code>, the realm part (<code class="literal">@REALM</code>) is removed. The resulting <code class="literal">username</code>
+is used for role mapping.</p>
+<p>For detailed information of available realm settings,
+see <a class="xref" href="security-settings.html#ref-kerberos-settings" title="Kerberos realm settings">Kerberos realm settings</a>.</p>
+</li>
+<li class="listitem">
+Restart Elasticsearch
+</li>
+<li class="listitem">
+<p>Map Kerberos users to roles.</p>
+<p>The <code class="literal">kerberos</code> realm enables you to map Kerberos users to roles. You can
+configure these role mappings by using the
+<a class="xref" href="security-api-put-role-mapping.html" title="Create or update role mappings API">create or update role mappings API</a>. You
+identify users by their <code class="literal">username</code> field.</p>
+<p>The following example uses the role mapping API to map <code class="literal">user@REALM</code> to the roles
+<code class="literal">monitoring</code> and <code class="literal">user</code>:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/role_mapping/kerbrolemapping
+{
+  "roles" : [ "monitoring_user" ],
+  "enabled": true,
+  "rules" : {
+    "field" : { "username" : "user@REALM" }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1459.console"></div>
+<p>In case you want to support Kerberos cross realm authentication you may
+need to map roles based on the Kerberos realm name. For such scenarios
+following are the additional user metadata available for role mapping:
+- <code class="literal">kerberos_realm</code> will be set to Kerberos realm name.
+- <code class="literal">kerberos_user_principal_name</code> will be set to user principal name from the Kerberos ticket.</p>
+<p>For more information, see <a class="xref" href="mapping-roles.html" title="Mapping users and groups to roles">Mapping users and groups to roles</a>.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The Kerberos realm supports
+<a class="xref" href="realm-chains.html#authorization_realms" title="Delegating authorization to another realm">authorization realms</a> as an
+alternative to role mapping.</p>
+</div>
+</div>
+</li>
+</ol>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="kerberos-realm-kibana"></a>Configure Kibana for Kerberos<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/x-pack/docs/en/security/authentication/kerberos-realm.asciidoc">edit</a></h4>
+</div></div></div>
+<p>If you want to use Kerberos to authenticate via your browser and Kibana, you
+need to enable the relevant authentication provider in Kibana configuration. See
+<a href="/guide/en/kibana/7.11/kibana-authentication.html#kerberos" class="ulink" target="_top">kerberos single sign-on</a></p>
+</div>
+
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="saml-realm.html">« SAML authentication</a>
+</span>
+<span class="next">
+<a href="custom-realms.html">Integrating with other authentication systems »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

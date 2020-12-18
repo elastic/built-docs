@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Events Intake API | APM Server Reference [7.11] | Elastic</title>
+<link rel="home" href="index.html" title="APM Server Reference [7.11]"/>
+<link rel="up" href="intake-api.html" title="API"/>
+<link rel="prev" href="intake-api.html" title="API"/>
+<link rel="next" href="metadata-api.html" title="Metadata"/>
+<meta name="DC.type" content="Learn/Docs/APM Server/Reference/7.11"/>
+<meta name="DC.subject" content="APM"/>
+<meta name="DC.identifier" content="7.11"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">APM Server Reference [7.11]</a></span>
+»
+<span class="breadcrumb-link"><a href="intake-api.html">API</a></span>
+»
+<span class="breadcrumb-node">Events Intake API</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="intake-api.html">« API</a>
+</span>
+<span class="next">
+<a href="metadata-api.html">Metadata »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="events-api"></a>Events Intake API<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/7.11/docs/events-api.asciidoc">edit</a></h2>
+</div></div></div>
+
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Most users do not need to interact directly with the events intake API.</p>
+</div>
+</div>
+<p>The events intake API is what we call the internal protocol that APM agents use to talk to the APM Server.
+Agents communicate with the Server by sending events&#8201;&#8212;&#8201;captured pieces of information&#8201;&#8212;&#8201;in an HTTP request.
+Events can be:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Transactions
+</li>
+<li class="listitem">
+Spans
+</li>
+<li class="listitem">
+Errors
+</li>
+<li class="listitem">
+Metrics
+</li>
+</ul>
+</div>
+<p>Each event is sent as its own line in the HTTP request body.
+This is known as <a href="http://ndjson.org" class="ulink" target="_top">newline delimited JSON (NDJSON)</a>.</p>
+<p>With NDJSON, agents can open an HTTP POST request and use chunked encoding to stream events to the APM Server
+as soon as they are recorded in the agent.
+This makes it simple for agents to serialize each event to a stream of newline delimited JSON.
+The APM Server also treats the HTTP body as a compressed stream and thus reads and handles each event independently.</p>
+<p>See the <a href="/guide/en/apm/get-started/7.11/apm-data-model.html" class="ulink" target="_top">APM Data Model</a> to learn more about the different types of events.</p>
+<h3><a id="events-api-endpoint"></a>Endpoint<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/7.11/docs/events-api.asciidoc">edit</a></h3>
+<p>Send an <code class="literal">HTTP POST</code> request to the APM Server <code class="literal">intake/v2/events</code> endpoint:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">http(s)://{hostname}:{port}/intake/v2/events</pre>
+</div>
+<p>For <a class="xref" href="configuration-rum.html" title="Configure Real User Monitoring (RUM)">RUM</a> send an <code class="literal">HTTP POST</code> request to the APM Server <code class="literal">intake/v2/rum/events</code> endpoint instead:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">http(s)://{hostname}:{port}/intake/v2/rum/events</pre>
+</div>
+<h3><a id="events-api-response"></a>Response<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/7.11/docs/events-api.asciidoc">edit</a></h3>
+<p>On success, the server will respond with a 202 Accepted status code and no body.</p>
+<p>Keep in mind that events can succeed and fail independently of each other. Only if all events succeed does the server respond with a 202.</p>
+<h3><a id="events-api-errors"></a>Errors<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/7.11/docs/events-api.asciidoc">edit</a></h3>
+<p>There are two types of errors that the APM Server may return to an agent:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Event related errors (typically validation errors)
+</li>
+<li class="listitem">
+Non-event related errors
+</li>
+</ul>
+</div>
+<p>The APM Server processes events one after the other.
+If an error is encountered while processing an event,
+the error encountered as well as the document causing the error are added to an internal array.
+The APM Server will only save 5 event related errors.
+If it encounters more than 5 event related errors,
+the additional errors will not be returned to agent.
+Once all events have been processed,
+the error response is sent.</p>
+<p>Some errors, not relating to specific events,
+may terminate the request immediately.
+For example: queue is full, IP rate limit reached, wrong metadata, etc.
+If at any point one of these errors is encountered,
+it is added to the internal array and immediately returned.</p>
+<p>An example error response might look something like this:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+  "errors": [
+    {
+      "message": "&lt;json-schema-err&gt;", <a id="CO28-1"></a><i class="conum" data-value="1"></i>
+      "document": "&lt;ndjson-obj&gt;" <a id="CO28-2"></a><i class="conum" data-value="2"></i>
+    },{
+      "message": "&lt;json-schema-err&gt;",
+      "document": "&lt;ndjson-obj&gt;"
+    },{
+      "message": "&lt;json-decoding-err&gt;",
+      "document": "&lt;ndjson-obj&gt;"
+    },{
+      "message": "queue is full" <a id="CO28-3"></a><i class="conum" data-value="3"></i>
+    },
+  ],
+  "accepted": 2320 <a id="CO28-4"></a><i class="conum" data-value="4"></i>
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO28-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>An event related error</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO28-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The document causing the error</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO28-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>An immediately returning non-event related error</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO28-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The number of accepted events</p>
+</td>
+</tr>
+</table>
+</div>
+<p>If you&#8217;re developing an agent, these errors can be useful for debugging.</p>
+<h3><a id="events-api-schema-definition"></a>Event API Schemas<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/7.11/docs/events-api.asciidoc">edit</a></h3>
+<p>The APM Server uses a collection of JSON Schemas for validating requests to the intake API:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="metadata-api.html" title="Metadata">Metadata</a>
+</li>
+<li class="listitem">
+<a class="xref" href="transaction-api.html" title="Transactions">Transactions</a>
+</li>
+<li class="listitem">
+<a class="xref" href="span-api.html" title="Spans">Spans</a>
+</li>
+<li class="listitem">
+<a class="xref" href="error-api.html" title="Errors">Errors</a>
+</li>
+<li class="listitem">
+<a class="xref" href="metricset-api.html" title="Metrics">Metrics</a>
+</li>
+<li class="listitem">
+<a class="xref" href="example-intake-events.html" title="Example Request Body">Example Request Body</a>
+</li>
+</ul>
+</div>
+
+
+
+
+
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="intake-api.html">« API</a>
+</span>
+<span class="next">
+<a href="metadata-api.html">Metadata »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

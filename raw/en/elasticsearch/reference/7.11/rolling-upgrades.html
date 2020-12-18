@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Rolling upgrades | Elasticsearch Reference [7.11] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.11]"/>
+<link rel="up" href="setup-upgrade.html" title="Upgrade Elasticsearch"/>
+<link rel="prev" href="setup-upgrade.html" title="Upgrade Elasticsearch"/>
+<link rel="next" href="restart-upgrade.html" title="Full cluster restart upgrade"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.11"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.11"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.11]</a></span>
+»
+<span class="breadcrumb-link"><a href="setup-upgrade.html">Upgrade Elasticsearch</a></span>
+»
+<span class="breadcrumb-node">Rolling upgrades</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="setup-upgrade.html">« Upgrade Elasticsearch</a>
+</span>
+<span class="next">
+<a href="restart-upgrade.html">Full cluster restart upgrade »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="rolling-upgrades"></a>Rolling upgrades<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/upgrade/rolling_upgrade.asciidoc">edit</a></h2>
+</div></div></div>
+<p>A rolling upgrade allows an Elasticsearch cluster to be upgraded one node at
+a time so upgrading does not interrupt service. Running multiple versions of
+Elasticsearch in the same cluster beyond the duration of an upgrade is
+not supported, as shards cannot be replicated from upgraded nodes to nodes
+running the older version.</p>
+<p>We strongly recommend that when you upgrade you divide your cluster&#8217;s nodes
+into the following two groups and upgrade the groups in this order:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Nodes that are not <a class="xref" href="modules-node.html#master-node" title="Master-eligible node">master-eligible</a>. You can retrieve a list
+of these nodes with <code class="literal">GET /_nodes/_all,master:false</code> or by finding all the nodes
+configured with <code class="literal">node.master: false</code>.
+</li>
+<li class="listitem">
+Master-eligible nodes, which are the remaining nodes. You can retrieve a list
+of these nodes with <code class="literal">GET /_nodes/master:true</code>.
+</li>
+</ol>
+</div>
+<p>You may upgrade the nodes within each of these groups in any order.</p>
+<p>Upgrading the nodes in this order ensures that the master-ineligible nodes are
+always running a version at least as new as the master-eligible nodes. Newer
+nodes can always join a cluster with an older master, but older nodes cannot
+always join a cluster with a newer master. By upgrading the master-eligible
+nodes last you ensure that all the master-ineligible nodes will be able to join
+the cluster whether the master-eligible nodes have been upgraded or not. If you
+upgrade any master-eligible nodes before the master-ineligible nodes then there
+is a risk that the older nodes will leave the cluster and will not be able to
+rejoin until they have been upgraded.</p>
+<p>Rolling upgrades are supported:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Between minor versions
+</li>
+<li class="listitem">
+<a href="/guide/en/elastic-stack/6.8/upgrading-elastic-stack.html" class="ulink" target="_top">From 5.6 to 6.8</a>
+</li>
+<li class="listitem">
+From 6.8 to 7.11.0
+</li>
+</ul>
+</div>
+<p>Upgrading directly to 7.11.0 from 6.7 or earlier requires a
+<a class="xref" href="restart-upgrade.html" title="Full cluster restart upgrade">full cluster restart</a>.</p>
+<h3><a id="_preparing_to_upgrade"></a>Preparing to upgrade<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/upgrade/preparing_to_upgrade.asciidoc">edit</a></h3>
+<p>It is important to prepare carefully before starting an upgrade. Once you have
+started to upgrade your cluster to version 7.11.0 you must complete the
+upgrade. As soon as the cluster contains nodes of version 7.11.0 it may make
+changes to its internal state that cannot be reverted. If you cannot complete
+the upgrade then you should discard the partially-upgraded cluster, deploy an
+empty cluster of the version before the upgrade, and restore its contents from
+a snapshot.</p>
+<p>Before you start to upgrade your cluster to version 7.11.0 you should do the
+following.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Check the <a class="xref" href="logging.html#deprecation-logging" title="Deprecation logging">deprecation log</a> to see if you are using any
+deprecated features and update your code accordingly.
+</li>
+<li class="listitem">
+Review the <a class="xref" href="breaking-changes.html" title="Breaking changes">breaking changes</a> and make any necessary
+changes to your code and configuration for version 7.11.0.
+</li>
+<li class="listitem">
+If you use any plugins, make sure there is a version of each plugin that is
+compatible with Elasticsearch version 7.11.0.
+</li>
+<li class="listitem">
+Test the upgrade in an isolated environment before upgrading your production
+cluster.
+</li>
+<li class="listitem">
+<a class="xref" href="modules-snapshots.html" title="Snapshot module">Back up your data by taking a snapshot!</a>
+</li>
+</ol>
+</div>
+<h3><a id="_upgrading_your_cluster"></a>Upgrading your cluster<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/upgrade/rolling_upgrade.asciidoc">edit</a></h3>
+<p>To perform a rolling upgrade to 7.11.0:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p><span class="strong strong"><strong>Disable shard allocation</strong></span>.</p>
+<p>When you shut down a node, the allocation process waits for
+<code class="literal">index.unassigned.node_left.delayed_timeout</code> (by default, one minute) before
+starting to replicate the shards on that node to other nodes in the cluster,
+which can involve a lot of I/O.  Since the node is shortly going to be
+restarted, this I/O is unnecessary. You can avoid racing the clock by
+<a class="xref" href="modules-cluster.html#cluster-routing-allocation-enable">disabling allocation</a> of replicas before
+shutting down the node:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _cluster/settings
+{
+  "persistent": {
+    "cluster.routing.allocation.enable": "primaries"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/58.console"></div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Stop non-essential indexing and perform a synced flush.</strong></span> (Optional)</p>
+<p>While you can continue indexing during the upgrade, shard recovery
+is much faster if you temporarily stop non-essential indexing and perform a
+<a class="xref" href="indices-synced-flush-api.html" title="Synced flush API">synced-flush</a>.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _flush/synced</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/59.console"></div>
+<p>When you perform a synced flush, check the response to make sure there are
+no failures. Synced flush operations that fail due to pending indexing
+operations are listed in the response body, although the request itself
+still returns a 200 OK status. If there are failures, reissue the request.</p>
+<p>Note that synced flush is deprecated and will be removed in 8.0. A flush
+has the same effect as a synced flush on Elasticsearch 7.6 or later.</p>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Temporarily stop the tasks associated with active machine learning jobs and datafeeds.</strong></span> (Optional)</p>
+<p>If your machine learning indices were created before 6.x, you must
+<a class="xref" href="reindex-upgrade.html" title="Reindex before upgrading">reindex the indices</a>.</p>
+<p>If your machine learning indices were created in 6.x, you can:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Leave your machine learning jobs running during the upgrade. When you shut down a
+machine learning node, its jobs automatically move to another node and restore the model
+states. This option enables your jobs to continue running during the upgrade but
+it puts increased load on the cluster.
+</li>
+<li class="listitem">
+<p>Temporarily halt the tasks associated with your machine learning jobs and datafeeds and
+prevent new jobs from opening by using the
+<a class="xref" href="ml-set-upgrade-mode.html" title="Set upgrade mode API">set upgrade mode API</a>:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ml/set_upgrade_mode?enabled=true</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/60.console"></div>
+<p>When you disable upgrade mode, the jobs resume using the last model
+state that was automatically saved. This option avoids the overhead of managing
+active jobs during the upgrade and is faster than explicitly stopping datafeeds
+and closing jobs.</p>
+</li>
+<li class="listitem">
+<a href="/guide/en/machine-learning/7.11/stopping-ml.html" class="ulink" target="_top">Stop all datafeeds and close all jobs</a>. This option
+saves the model state at the time of closure. When you reopen the jobs after the
+upgrade, they use the exact same model. However, saving the latest model state
+takes longer than using upgrade mode, especially if you have a lot of jobs or
+jobs with large model states.
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p><a id="upgrade-node"></a> <span class="strong strong"><strong>Shut down a single node</strong></span>.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>If you are running Elasticsearch with <code class="literal">systemd</code>:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">sudo systemctl stop elasticsearch.service</pre>
+</div>
+</li>
+<li class="listitem">
+<p>If you are running Elasticsearch with SysV <code class="literal">init</code>:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">sudo -i service elasticsearch stop</pre>
+</div>
+</li>
+<li class="listitem">
+<p>If you are running Elasticsearch as a daemon:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kill $(cat pid)</pre>
+</div>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Upgrade the node you shut down.</strong></span></p>
+<p>To upgrade using a <a class="xref" href="deb.html" title="Install Elasticsearch with Debian Package">Debian</a> or <a class="xref" href="rpm.html" title="Install Elasticsearch with RPM">RPM</a> package:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Use <code class="literal">rpm</code> or <code class="literal">dpkg</code> to install the new package.  All files are
+installed in the appropriate location for the operating system
+and Elasticsearch config files are not overwritten.
+</li>
+</ul>
+</div>
+<p>To upgrade using a zip or compressed tarball:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Extract the zip or tarball to a <em>new</em> directory. This is critical if you
+are not using external <code class="literal">config</code> and <code class="literal">data</code> directories.
+</li>
+<li class="listitem">
+Set the <code class="literal">ES_PATH_CONF</code> environment variable to specify the location of
+your external <code class="literal">config</code> directory and <code class="literal">jvm.options</code> file. If you are not
+using an external <code class="literal">config</code> directory, copy your old configuration
+over to the new installation.
+</li>
+<li class="listitem">
+<p>Set <code class="literal">path.data</code> in <code class="literal">config/elasticsearch.yml</code> to point to your external
+data directory. If you are not using an external <code class="literal">data</code> directory, copy
+your old data directory over to the new installation.<br></p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If you use monitoring features, re-use the data directory when you upgrade
+Elasticsearch. Monitoring identifies unique Elasticsearch nodes by using the persistent UUID, which
+is stored in the data directory.</p>
+</div>
+</div>
+</li>
+<li class="listitem">
+Set <code class="literal">path.logs</code> in <code class="literal">config/elasticsearch.yml</code> to point to the location
+where you want to store your logs. If you do not specify this setting,
+logs are stored in the directory you extracted the archive to.
+</li>
+</ol>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>When you extract the zip or tarball packages, the <code class="literal">elasticsearch-n.n.n</code>
+directory contains the Elasticsearch <code class="literal">config</code>, <code class="literal">data</code>, and <code class="literal">logs</code> directories.</p>
+<p>We recommend moving these directories out of the Elasticsearch directory
+so that there is no chance of deleting them when you upgrade Elasticsearch.
+To specify the new locations, use the <code class="literal">ES_PATH_CONF</code> environment
+variable and the <code class="literal">path.data</code> and <code class="literal">path.logs</code> settings. For more information,
+see <a class="xref" href="important-settings.html" title="Important Elasticsearch configuration">Important Elasticsearch configuration</a>.</p>
+<p>The <a class="xref" href="deb.html" title="Install Elasticsearch with Debian Package">Debian</a> and <a class="xref" href="rpm.html" title="Install Elasticsearch with RPM">RPM</a> packages place these directories in the
+appropriate place for each operating system. In production, we recommend
+installing using the deb or rpm package.</p>
+</div>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<a id="rolling-upgrades-bootstrapping"></a>
+<p>You should leave <code class="literal">cluster.initial_master_nodes</code> unset while performing a
+rolling upgrade. Each upgraded node is joining an existing cluster so there is
+no need for <a class="xref" href="modules-discovery-bootstrap-cluster.html" title="Bootstrapping a cluster">cluster bootstrapping</a>. You
+must configure <a class="xref" href="modules-discovery-hosts-providers.html#built-in-hosts-providers" title="Seed hosts providers">either <code class="literal">discovery.seed_hosts</code> or
+<code class="literal">discovery.seed_providers</code></a> on every node.</p>
+</div>
+</div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Upgrade any plugins.</strong></span></p>
+<p>Use the <code class="literal">elasticsearch-plugin</code> script to install the upgraded version of each
+installed Elasticsearch plugin. All plugins must be upgraded when you upgrade
+a node.</p>
+</li>
+<li class="listitem">
+If you use Elasticsearch security features to define realms, verify that your realm
+settings are up-to-date. The format of realm settings changed in version 7.0, in
+particular, the placement of the realm type changed. See
+<a class="xref" href="security-settings.html#realm-settings" title="Realm settings">Realm settings</a>.
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Start the upgraded node.</strong></span></p>
+<p>Start the newly-upgraded node and confirm that it joins the cluster by checking
+the log file or by submitting a <code class="literal">_cat/nodes</code> request:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _cat/nodes</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/61.console"></div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Reenable shard allocation.</strong></span></p>
+<p>Once the node has joined the cluster, remove the <code class="literal">cluster.routing.allocation.enable</code>
+setting to enable shard allocation and start using the node:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _cluster/settings
+{
+  "persistent": {
+    "cluster.routing.allocation.enable": null
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/62.console"></div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Wait for the node to recover.</strong></span></p>
+<p>Before upgrading the next node, wait for the cluster to finish shard allocation.
+You can check progress by submitting a <a class="xref" href="cat-health.html" title="cat health API"><code class="literal">_cat/health</code></a> request:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _cat/health?v</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/63.console"></div>
+<p>Wait for the <code class="literal">status</code> column to switch to <code class="literal">green</code>. Once the node is <code class="literal">green</code>, all
+primary and replica shards have been allocated.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>During a rolling upgrade, primary shards assigned to a node running the new
+version cannot have their replicas assigned to a node with the old
+version. The new version might have a different data format that is
+not understood by the old version.</p>
+<p>If it is not possible to assign the replica shards to another node
+(there is only one upgraded node in the cluster), the replica
+shards remain unassigned and status stays <code class="literal">yellow</code>.</p>
+<p>In this case, you can proceed once there are no initializing or relocating shards
+(check the <code class="literal">init</code> and <code class="literal">relo</code> columns).</p>
+<p>As soon as another node is upgraded, the replicas can be assigned and the
+status will change to <code class="literal">green</code>.</p>
+</div>
+</div>
+<p>Shards that were not <a class="xref" href="indices-synced-flush-api.html" title="Synced flush API">sync-flushed</a> might take longer to
+recover.  You can monitor the recovery status of individual shards by
+submitting a <a class="xref" href="cat-recovery.html" title="cat recovery API"><code class="literal">_cat/recovery</code></a> request:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _cat/recovery</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/64.console"></div>
+<p>If you stopped indexing, it is safe to resume indexing as soon as
+recovery completes.</p>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Repeat</strong></span></p>
+<p>When  the node has recovered and the cluster is stable, repeat these steps
+for each node that needs to be updated. You can monitor the health of the cluster
+with a <a class="xref" href="cat-health.html" title="cat health API"><code class="literal">_cat/health</code></a> request:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /_cat/health?v</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/65.console"></div>
+<p>And check which nodes have been upgraded with a <a class="xref" href="cat-nodes.html" title="cat nodes API"><code class="literal">_cat/nodes</code></a> request:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /_cat/nodes?h=ip,name,version&amp;v</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/66.console"></div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Restart machine learning jobs.</strong></span></p>
+<p>If you temporarily halted the tasks associated with your machine learning jobs,
+use the <a class="xref" href="ml-set-upgrade-mode.html" title="Set upgrade mode API">set upgrade mode API</a> to return them to active
+states:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ml/set_upgrade_mode?enabled=false</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/67.console"></div>
+<p>If you closed all machine learning jobs before the upgrade, open the jobs and start the
+datafeeds from Kibana or with the <a class="xref" href="ml-open-job.html" title="Open anomaly detection jobs API">open jobs</a> and
+<a class="xref" href="ml-start-datafeed.html" title="Start datafeeds API">start datafeed</a> APIs.</p>
+</li>
+</ol>
+</div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>During a rolling upgrade, the cluster continues to operate normally. However,
+any new functionality is disabled or operates in a backward compatible mode
+until all nodes in the cluster are upgraded. New functionality becomes
+operational once the upgrade is complete and all nodes are running the new
+version. Once that has happened, there&#8217;s no way to return to operating in a
+backward compatible mode. Nodes running the previous major version will not be
+allowed to join the fully-updated cluster.</p>
+<p>In the unlikely case of a network malfunction during the upgrade process that
+isolates all remaining old nodes from the cluster, you must take the old nodes
+offline and upgrade them to enable them to join the cluster.</p>
+<p>If you stop half or more of the master-eligible nodes all at once during the
+upgrade then the cluster will become unavailable, meaning that the upgrade is
+no longer a <em>rolling</em> upgrade. If this happens, you should upgrade and restart
+all of the stopped master-eligible nodes to allow the cluster to form again, as
+if performing a <a class="xref" href="restart-upgrade.html" title="Full cluster restart upgrade">full-cluster restart upgrade</a>. It may also
+be necessary to upgrade all of the remaining old nodes before they can join the
+cluster after it re-forms.</p>
+</div>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="setup-upgrade.html">« Upgrade Elasticsearch</a>
+</span>
+<span class="next">
+<a href="restart-upgrade.html">Full cluster restart upgrade »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

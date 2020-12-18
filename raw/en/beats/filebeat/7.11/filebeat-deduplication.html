@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Deduplicate data | Filebeat Reference [7.11] | Elastic</title>
+<link rel="home" href="index.html" title="Filebeat Reference [7.11]"/>
+<link rel="up" href="howto-guides.html" title="How to guides"/>
+<link rel="prev" href="filebeat-geoip.html" title="Enrich events with geoIP information"/>
+<link rel="next" href="configuring-ingest-node.html" title="Parse data by using ingest node"/>
+<meta name="DC.type" content="Learn/Docs/Filebeat/Reference/7.11"/>
+<meta name="DC.subject" content="Filebeat"/>
+<meta name="DC.identifier" content="7.11"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Filebeat Reference [7.11]</a></span>
+»
+<span class="breadcrumb-link"><a href="howto-guides.html">How to guides</a></span>
+»
+<span class="breadcrumb-node">Deduplicate data</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="filebeat-geoip.html">« Enrich events with geoIP information</a>
+</span>
+<span class="next">
+<a href="configuring-ingest-node.html">Parse data by using ingest node »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="filebeat-deduplication"></a>Deduplicate data<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.11/libbeat/docs/shared-deduplication.asciidoc">edit</a></h2>
+</div></div></div>
+<p>The Beats framework guarantees at-least-once delivery to ensure that no data
+is lost when events are sent to outputs that support acknowledgement, such as
+Elasticsearch, Logstash, Kafka, and Redis. This is great if everything goes as planned. But
+if Filebeat shuts down during processing, or the connection is lost before
+events are acknowledged, you can end up with duplicate data.</p>
+<h3><a id="_what_causes_duplicates_in_elasticsearch"></a>What causes duplicates in Elasticsearch?<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.11/libbeat/docs/shared-deduplication.asciidoc">edit</a></h3>
+<p>When an output is blocked, the retry mechanism in Filebeat attempts to
+resend events until they are acknowledged by the output. If the output receives
+the events, but is unable to acknowledge them, the data might be sent to the
+output multiple times. Because document IDs are typically set by Elasticsearch <em>after</em> it
+receives the data from Beats, the duplicate events are indexed as new
+documents.</p>
+<h3><a id="_how_can_i_avoid_duplicates"></a>How can I avoid duplicates?<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.11/libbeat/docs/shared-deduplication.asciidoc">edit</a></h3>
+<p>Rather than allowing Elasticsearch to set the document ID, set the ID in Beats. The ID
+is stored in the Beats <code class="literal">@metadata._id</code> field and used to set the document ID
+during indexing. That way, if Beats sends the same event to Elasticsearch more than
+once, Elasticsearch overwrites the existing document rather than creating a new one.</p>
+<p>The <code class="literal">@metadata._id</code> field is passed along with the event so that you can use
+it to set the document ID after the event has been published by Filebeat
+but before it&#8217;s received by Elasticsearch. For example, see <a class="xref" href="filebeat-deduplication.html#ls-doc-id" title="Logstash pipeline example">Logstash pipeline example</a>.</p>
+<p>There are several ways to set the document ID in Beats:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p><span class="strong strong"><strong><code class="literal">add_id</code> processor</strong></span></p>
+<p>Use the <a class="xref" href="add-id.html" title="Generate an ID for an event"><code class="literal">add_id</code></a> processor when your data has no natural key field,
+and you can’t derive a unique key from existing fields.</p>
+<p>This example generates a unique ID for each event and adds it to the
+<code class="literal">@metadata._id</code> field:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">processors:
+  - add_id: ~</pre>
+</div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong><code class="literal">fingerprint</code> processor</strong></span></p>
+<p>Use the <a class="xref" href="fingerprint.html" title="Generate a fingerprint of an event"><code class="literal">fingerprint</code></a> processor to derive a unique key from
+one or more existing fields.</p>
+<p>This example uses the values of <code class="literal">field1</code> and <code class="literal">field2</code> to derive a unique key
+that it adds to the <code class="literal">@metadata._id</code> field:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">processors:
+  - fingerprint:
+      fields: ["field1", "field2"]
+      target_field: "@metadata._id"</pre>
+</div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong><code class="literal">decode_json_fields</code> processor</strong></span></p>
+<p>Use the <code class="literal">document_id</code> setting in the <a class="xref" href="decode-json-fields.html" title="Decode JSON fields"><code class="literal">decode_json_fields</code></a>
+processor when you&#8217;re decoding a JSON string that contains a natural key field.</p>
+<p>For this example, assume that the <code class="literal">message</code> field contains the JSON string
+<code class="literal">{"myid": "100", "text": "Some text"}</code>. This example takes the value of <code class="literal">myid</code>
+from the JSON string and stores it in the <code class="literal">@metadata._id</code> field:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">processors:
+  - decode_json_fields:
+      document_id: "myid"
+      fields: ["message"]
+      max_depth: 1
+      target: ""</pre>
+</div>
+<p>The resulting document ID is <code class="literal">100</code>.</p>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>JSON input settings</strong></span></p>
+<p>Use the <code class="literal">json.document_id</code> input setting if you’re ingesting JSON-formatted
+data, and the data has a natural key field.</p>
+<p>This example takes the value of <code class="literal">key1</code> from the JSON document and stores it in
+the <code class="literal">@metadata._id</code> field:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: log
+  paths:
+    - /path/to/json.log
+  json.document_id: "key1"</pre>
+</div>
+</li>
+</ul>
+</div>
+<h3><a id="ls-doc-id"></a>Logstash pipeline example<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.11/libbeat/docs/shared-deduplication.asciidoc">edit</a></h3>
+<p>For this example, assume that you&#8217;ve used one of the approaches described
+earlier to store the document ID in the Beats <code class="literal">@metadata._id</code> field. To
+preserve the ID when you send Beats data through Logstash en route to Elasticsearch,
+set the <code class="literal">document_id</code> field in the Logstash pipeline:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">input {
+  beats {
+    port =&gt; 5044
+  }
+}}
+
+output {
+  if [@metadata][_id] {
+    elasticsearch {
+      hosts =&gt; ["http://localhost:9200"]
+      document_id =&gt; "%{[@metadata][_id]}" <a id="CO24-2"></a><i class="conum" data-value="1"></i>
+      index =&gt; "%{[@metadata][beat]}-%{[@metadata][version]}"
+    }
+  } else {
+    elasticsearch {
+      hosts =&gt; ["http://localhost:9200"]
+      index =&gt; "%{[@metadata][beat]}-%{[@metadata][version]}"
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO24-1"><i class="conum" data-value="1"></i></a><a href="#CO24-2"></a></p>
+</td>
+<td align="left" valign="top">
+<p>Sets the <code class="literal">document_id</code> field in the
+<a href="/guide/en/logstash/7.11/plugins-outputs-elasticsearch.html" class="ulink" target="_top">Elasticsearch output</a> to the value
+stored in <code class="literal">@metadata._id</code>.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>When Elasticsearch indexes the document, it sets the document ID to the specified value,
+preserving the ID passed from Beats.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="filebeat-geoip.html">« Enrich events with geoIP information</a>
+</span>
+<span class="next">
+<a href="configuring-ingest-node.html">Parse data by using ingest node »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
