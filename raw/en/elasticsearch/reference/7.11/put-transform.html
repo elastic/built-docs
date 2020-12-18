@@ -75,10 +75,12 @@ destination index: <code class="literal">read</code>, <code class="literal">crea
 <h3 class="title"><a id="put-transform-desc"></a>Description<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/transform/apis/put-transform.asciidoc">edit</a></h3>
 </div></div></div>
 <p>This API defines a transform, which copies data from source indices,
-transforms it, and persists it into an entity-centric destination index. The
-entities are defined by the set of <code class="literal">group_by</code> fields in the <code class="literal">pivot</code> object. You
-can also think of the destination index as a two-dimensional tabular data
-structure (known as a data frame). The ID for each document in the
+transforms it, and persists it into an entity-centric destination index. If you
+choose to use the pivot method for your transform, the entities are defined by
+the set of <code class="literal">group_by</code> fields in the <code class="literal">pivot</code> object.  If you choose to use the
+latest method, the entities are defined by the <code class="literal">unique_key</code> field values in the
+<code class="literal">latest</code> object.</p>
+<p>You can also think of the destination index as a two-dimensional tabular data structure (known as a data frame). The ID for each document in the
 data frame is generated from a hash of the entity, so there is a unique row
 per entity. For more information, see <a class="xref" href="transforms.html" title="Transforming data"><em>Transforming data</em></a>.</p>
 <p>When the transform is created, a series of validations occur to
@@ -95,15 +97,15 @@ transform fails when it attempts unauthorized operations.</p>
 <div class="important admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>You must use Kibana or this API to create a transform.
-            Do not put a transform directly into any
-            <code class="literal">.transform-internal*</code> indices using the Elasticsearch index API.
-            If Elasticsearch security features are enabled, do not give users any
-            privileges on <code class="literal">.transform-internal*</code> indices. If you used transforms
-            prior 7.5, also do not give users any privileges on
-            <code class="literal">.data-frame-internal*</code> indices.</p>
+<p>You must use Kibana or this API to create a transform. Do not put a
+transform directly into any <code class="literal">.transform-internal*</code> indices using the Elasticsearch
+index API. If Elasticsearch security features are enabled, do not give users any
+privileges on <code class="literal">.transform-internal*</code> indices. If you used transforms prior to
+7.5, also do not give users any privileges on <code class="literal">.data-frame-internal*</code> indices.</p>
 </div>
 </div>
+<p>You must choose either the latest or pivot method for your transform; you
+cannot use both in a single transform.</p>
 </div>
 
 <div class="section">
@@ -225,14 +227,57 @@ minimum value is <code class="literal">1s</code> and the maximum is <code class=
 <dl class="variablelist">
 <dt>
 <span class="term">
+<code class="literal">latest</code>
+</span>
+</dt>
+<dd>
+<p>
+(Required<sup>*</sup>, object)
+The <code class="literal">latest</code> method transforms the data by finding the latest document for each
+unique key.
+</p>
+<details open>
+<summary class="title">Properties of <code class="literal">latest</code></summary>
+<div class="content">
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">sort</code>
+</span>
+</dt>
+<dd>
+(Required, string)
+Specifies the date field that is used to identify the latest documents.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">unique_key</code>
+</span>
+</dt>
+<dd>
+(Required, array of strings)
+Specifies an array of one or more fields that are used to group the data.
+</dd>
+</dl>
+</div>
+</div>
+</details>
+</dd>
+</dl>
+</div>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
 <code class="literal">pivot</code>
 </span>
 </dt>
 <dd>
 <p>
-(Required, object)
-The method for transforming the data. These objects define the pivot function
-<code class="literal">group by</code> fields and the aggregation to reduce the data.
+(Required<sup>*</sup>, object)
+The <code class="literal">pivot</code> method transforms the data by aggregating and grouping it. These
+objects define the <code class="literal">group by</code> fields and the aggregation to reduce the data.
 </p>
 <details open>
 <summary class="title">Properties of <code class="literal">pivot</code></summary>
@@ -530,8 +575,9 @@ delays.</p>
 <div class="titlepage"><div><div>
 <h3 class="title"><a id="put-transform-example"></a>Examples<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/reference/transform/apis/put-transform.asciidoc">edit</a></h3>
 </div></div></div>
+<p>The following transform uses the <code class="literal">pivot</code> method:</p>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">PUT _transform/ecommerce_transform
+<pre class="programlisting prettyprint lang-console">PUT _transform/ecommerce_transform1
 {
   "source": {
     "index": "kibana_sample_data_ecommerce",
@@ -561,7 +607,7 @@ delays.</p>
   },
   "description": "Maximum priced ecommerce data by customer_id in Asia",
   "dest": {
-    "index": "kibana_sample_data_ecommerce_transform",
+    "index": "kibana_sample_data_ecommerce_transform1",
     "pipeline": "add_timestamp_pipeline"
   },
   "frequency": "5m",
@@ -580,6 +626,31 @@ delays.</p>
   "acknowledged" : true
 }</pre>
 </div>
+<p>The following transform uses the <code class="literal">latest</code> method:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _transform/ecommerce_transform2
+{
+  "source": {
+    "index": "kibana_sample_data_ecommerce"
+  },
+  "latest": {
+    "unique_key": ["customer_id"],
+    "sort": "order_date"
+  },
+  "description": "Latest order for each customer",
+  "dest": {
+    "index": "kibana_sample_data_ecommerce_transform2"
+  },
+  "frequency": "5m",
+  "sync": {
+    "time": {
+      "field": "order_date",
+      "delay": "60s"
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/2380.console"></div>
 </div>
 
 </div>
