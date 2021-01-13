@@ -1,0 +1,1998 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Monitor Kubernetes: Observe the health and performance of your Kubernetes deployments | Observability Guide [master] | Elastic</title>
+<link rel="home" href="index.html" title="Observability Guide [master]"/>
+<link rel="up" href="observability-tutorials.html" title="Tutorials"/>
+<link rel="prev" href="monitor-java-app.html" title="Monitor a Java application"/>
+<meta name="DC.type" content="Learn/Docs/Observability/Guide/master"/>
+<meta name="DC.subject" content="Observability"/>
+<meta name="DC.identifier" content="master"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Observability Guide [master]</a></span>
+»
+<span class="breadcrumb-link"><a href="observability-tutorials.html">Tutorials</a></span>
+»
+<span class="breadcrumb-node">Monitor Kubernetes: Observe the health and performance of your Kubernetes deployments</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="monitor-java-app.html">« Monitor a Java application</a>
+</span>
+<span class="next">
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="monitor-kubernetes"></a>Monitor Kubernetes: Observe the health and performance of your Kubernetes deployments<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>Applications running in a containerized environment like Kubernetes pose a
+unique monitoring challenge: how do you diagnose and resolve issues with
+hundreds of microservices on thousands (or millions) of containers, running
+in ephemeral and disposable pods?</p>
+<p>A successful Kubernetes monitoring solution has a few requirements:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>Monitors all layers of your technology stack, including:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+The host systems where Kubernetes is running.
+</li>
+<li class="listitem">
+Kubernetes core components, nodes, pods, and containers running within
+the cluster.
+</li>
+<li class="listitem">
+All of the applications and services running in Kubernetes containers.
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+Automatically detects and monitors services as they appear dynamically.
+</li>
+<li class="listitem">
+Provides a way to correlate related data so that you can group and explore
+related metrics, logs, and other observability data.
+</li>
+</ul>
+</div>
+<h3><a id="_what_youll_learn_2"></a>What you’ll learn<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s.asciidoc">edit</a></h3>
+<p>This guide describes how to use Elastic Observability to observe all layers of
+your application, including the orchestration software itself:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Collect logs and metrics from Kubernetes and your applications
+</li>
+<li class="listitem">
+Collect trace data from applications deployed with Kubernetes
+</li>
+<li class="listitem">
+Centralize the data in the Elastic Stack
+</li>
+<li class="listitem">
+Explore the data in real-time using tailored dashboards and Observability UIs
+</li>
+</ul>
+</div>
+<p>This guide describes how to deploy Elastic monitoring agents as DaemonSets using
+<code class="literal">kubectl</code> and the Beats GitHub repository manifest files. For other
+deployment options, see the Kubernetes operator and custom resource definitions
+from <a href="/guide/en/cloud-on-k8s/current/index.html" class="ulink" target="_top">Elastic Cloud on Kubernetes (ECK)</a> or the
+<a href="https://github.com/elastic/helm-charts/blob/master/README.md" class="ulink" target="_top">Helm charts</a>.</p>
+<h3><a id="kubernetes-monitoring-architecture"></a>Monitoring architecture<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-overview.asciidoc">edit</a></h3>
+<p>The Elastic Stack provides 4 main components for monitoring Kubernetes:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Lightweight agents, called Beats, to collect observability data. Some
+Beats include pre-configured data collection modules to ease the collection
+and parsing of data for common applications such as Apache, MySQL, and Kafka.
+</li>
+<li class="listitem">
+APM (described later) to monitor, detect, and diagnose complex application
+performance issues.
+</li>
+<li class="listitem">
+Elasticsearch for storing and searching your data.
+</li>
+<li class="listitem">
+Observability apps in Kibana for visualizing and managing your observability
+data.
+</li>
+</ol>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/k8s-monitoring-architecture.png" alt="Kubernetes monitoring architecture">
+</div>
+</div>
+<p>Beats agents are deployed to Kubernetes as DaemonSets. This deployment
+architecture ensures that the agents are available to capture both system and
+application-level observability data.</p>
+<p><span class="strong strong"><strong>Filebeat</strong></span>: Collects logs from pods, containers, and applications running on
+Kubernetes.</p>
+<p>Filebeat communicates with the Kubernetes API server to retrieve information
+about the pods running on the host, all the metadata annotations, and the
+location of the log files.</p>
+<p>When autodiscovery is configured, Filebeat automatically discovers what
+kind of components are running in a pod and applies the logging modules needed
+to capture logs for those components.</p>
+<p><span class="strong strong"><strong>Metricbeat</strong></span>: Collects and preprocesses system and service metrics, such as
+information about running processes, as well as CPU, memory, disk, and network
+utilization numbers.</p>
+<p>Because Metricbeat runs on each node, it can collect metrics from the Kubelet
+API. These metrics provide important information about the state of the
+Kubernetes nodes, pods, containers, and other resources.</p>
+<p>For cluster-wide metrics, Metricbeat accesses the kube-state-metrics
+service directly or gets metrics scraped by Prometheus.</p>
+<p>When hints-based autodiscovery is configured, Metricbeat looks for hints
+in Kubernetes pod annotations or Docker labels and launches the proper
+configuration to collect application metrics.</p>
+<p><span class="strong strong"><strong>Other Beats (not shown)</strong></span>: Collect and process other types of data, such as
+Uptime data and network traffic.</p>
+<h4><a id="beats-metadata"></a>Metadata<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-overview.asciidoc">edit</a></h4>
+<p>All Beats agents provide processors for adding metadata to events. The
+metadata is valuable for grouping and exploring related data. For example, when
+you&#8217;re analyzing container logs, you want to know the host and container name,
+and you want to be able to correlate logs, metrics, and traces.</p>
+<p>The default deployments include processors, when needed, for enriching events
+with cloud, Kubernetes, and host metadata.</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/metadata-processors.png" alt="Metadata processors for cloud" width="Kubernetes" height="and host metadata">
+</div>
+</div>
+<p>Now that you have a basic understanding of the monitoring architecture, let&#8217;s
+learn how to deploy monitoring to your Kubernetes environment.</p>
+<h3><a id="_before_you_begin_2"></a>Before you begin<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-overview.asciidoc">edit</a></h3>
+<p>To monitor Kubernetes, you need Elasticsearch for storing and searching your
+observability data, and Kibana for visualizing and managing it. For more
+information, see <a class="xref" href="add-observability-data.html#spin-up-stack" title="Spin up the Elastic Stack">Spin up the Elastic Stack</a>.</p>
+<h3><a id="monitor-kubernetes-logs"></a>Part 1: Monitor logs<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-logs.asciidoc">edit</a></h3>
+<p>Collecting and analyzing logs of both Kubernetes Core components and various
+applications running on top of Kubernetes is a powerful tool for Kubernetes
+observability. Containers running within Kubernetes pods publish logs to stdout
+or stderr. These logs are written to a location known to Kubelet.</p>
+<p>To collect pod logs, all you need is Filebeat running as a DaemonSet
+in your Kubernetes cluster. You configure Filebeat to communicate with the
+Kubernetes API server, get the list of pods running on the current host, and
+collect the logs the pods are producing. Those logs are annotated with all the
+relevant Kubernetes metadata, such as pod ID, container name, container labels
+and annotations, and so on.</p>
+<h4><a id="_deploy_filebeat_to_collect_logs"></a>Deploy Filebeat to collect logs<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-logs.asciidoc">edit</a></h4>
+<p>To start collecting logs, deploy and run an instance of Filebeat on each
+Kubernetes host. Filebeat communicates with the Kubernetes API server to
+retrieve information about the pods running on the host and all the metadata
+annotations.</p>
+<p>To deploy Filebeat to your Kubernetes cluster:</p>
+<h5><a id="_step_1_download_the_filebeat_deployment_manifest"></a>Step 1: Download the Filebeat deployment manifest<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-logs.asciidoc">edit</a></h5>
+<p>To make deployment easier, Elastic provides a YAML file that defines all the
+required deployment settings. In many cases, you can change the connection
+details and deploy with default settings to get started quickly.</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">curl -L -O https://raw.githubusercontent.com/elastic/beats/master/deploy/kubernetes/filebeat-kubernetes.yaml</pre>
+</div>
+<h5><a id="_step_2_set_the_connection_information_for_elasticsearch"></a>Step 2: Set the connection information for Elasticsearch<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-logs.asciidoc">edit</a></h5>
+<p>By default Filebeat sends events to an existing Elasticsearch deployment on <code class="literal">elasticsearch:9200</code>, if present.
+To specify a different destination, change the following settings in the
+<code class="literal">filebeat-kubernetes.yaml</code> file:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">env:
+- name: ELASTICSEARCH_HOST
+  value: elasticsearch
+- name: ELASTICSEARCH_PORT
+  value: "9200"
+- name: ELASTICSEARCH_USERNAME
+  value: elastic <a id="CO33-1"></a><i class="conum" data-value="1"></i>
+- name: ELASTICSEARCH_PASSWORD
+  value: changeme
+- name: ELASTIC_CLOUD_ID <a id="CO33-2"></a><i class="conum" data-value="2"></i>
+  value:
+- name: ELASTIC_CLOUD_AUTH <a id="CO33-3"></a><i class="conum" data-value="2"></i>
+  value:</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO33-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This user must have the privileges required to publish events to Elasticsearch. For
+more information, see <a href="/guide/en/beats/filebeat/master/feature-roles.html" class="ulink" target="_top">Grant users access to secured resources</a>.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO33-2"><i class="conum" data-value="2"></i></a><a href="#CO33-3"></a></p>
+</td>
+<td align="left" valign="top">
+<p>Use the cloud settings if you&#8217;re sending data to Elasticsearch Service on Elastic Cloud.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>To avoid exposing sensitive data, you can base64 encode the string, then store it
+in a Kubernetes secret. For example:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">$ echo -n 'changeme' | base64
+Y2hhbmdlbWU=
+$ kubectl create secret generic es-secret --from-literal=password='Y2hhbmdlbWU=' --namespace=kube-system <a id="CO34-1"></a><i class="conum" data-value="1"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO34-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Create the secret in the namespace where you will deploy Filebeat.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>To use the secret, change the <code class="literal">env</code> setting in the manifest file:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">env:
+- name: ELASTICSEARCH_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: es-secret
+      key: password</pre>
+</div>
+<h5><a id="_step_3_collect_container_logs"></a>Step 3: Collect container logs<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-logs.asciidoc">edit</a></h5>
+<p>To collect container logs, each Filebeat instance needs access to the local
+log&#8217;s path, which is actually a log directory mounted from the host. The
+default deployment manifest already contains the configuration to do this:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: container
+  paths:
+    - /var/log/containers/*.log</pre>
+</div>
+<p>With this configuration, Filebeat can collect logs from all the files that
+exist under the <code class="literal">/var/log/containers/</code> directory.</p>
+<p>This configuration assumes you know what kinds of components are running in a
+pod and where the container logs are stored. Later you&#8217;ll learn how to use
+autodiscovery to <a class="xref" href="monitor-kubernetes.html#autodiscover-containers" title="Step 5: Automatically discover container logs (use autodiscovery)">automatically discover containers</a>.</p>
+<h5><a id="_step_4_add_metadata_to_events"></a>Step 4: Add metadata to events<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-logs.asciidoc">edit</a></h5>
+<p>Filebeat provides processors that you can use in your configuration to enrich
+events with metadata coming from Docker, Kubernetes, hosts, and cloud providers.</p>
+<p>The <code class="literal">add_kubernetes_metadata</code> processor is already specified in the default
+configuration. This processor adds Kubernetes and container-related metadata to
+the logs:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: container
+  paths:
+    - /var/log/containers/*.log
+  processors:
+    - add_kubernetes_metadata:
+        host: ${NODE_NAME}
+        matchers:
+        - logs_path:
+            logs_path: "/var/log/containers/"</pre>
+</div>
+<h5><a id="autodiscover-containers"></a>Step 5: Automatically discover container logs (use autodiscovery)<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-logs.asciidoc">edit</a></h5>
+<p>In the previous steps, you learned how to collect container logs and enrich them
+with metadata. However you can take it further by leveraging the autodiscovery
+mechanism in Filebeat. With autodiscovery, Filebeat can automatically
+discover what kind of components are running in a pod and apply the logging
+modules needed to capture logs for those components.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If you decide to use use autodiscovery, make sure you remove or comment
+out the <code class="literal">filebeat.inputs</code> configuration.</p>
+</div>
+</div>
+<p>To configure autodiscovery, you can use static templates. For example, the
+template in this example configures Filebeat to collect NGINX logs from any
+pod labeled as <code class="literal">app: nginx</code>.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">filebeat.autodiscover:
+  providers:
+    - type: kubernetes
+      node: ${NODE_NAME}
+      templates:
+        - condition:
+            equals:
+              kubernetes.labels.app: "nginx"
+          config:
+            - module: nginx
+              fileset.stdout: access
+              fileset.sterr: error</pre>
+</div>
+<p>This is good, but requires advanced knowledge of the workloads running in
+Kubernetes. Each time you want to monitor something new, you&#8217;ll need to
+re-configure and restart Filebeat. To avoid this, you can use hints-based
+autodiscovery:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">filebeat.autodiscover:
+  providers:
+    - type: kubernetes
+      node: ${NODE_NAME}
+      hints.enabled: true
+      hints.default_config:
+        type: container
+        paths:
+          - /var/log/containers/*${data.kubernetes.container.id}.log</pre>
+</div>
+<p>Then annotate the pods accordingly:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-autodiscover
+  annotations:
+    co.elastic.logs/module: nginx
+    co.elastic.logs/fileset.stdout: access
+    co.elastic.logs/fileset.stderr: error</pre>
+</div>
+<p>With this setup, Filebeat identifies the NGINX app and starts collecting its
+logs by using the <code class="literal">nginx</code> module.</p>
+<h5><a id="_step_6_optional_drop_unwanted_events"></a>Step 6: (optional) Drop unwanted events<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-logs.asciidoc">edit</a></h5>
+<p>You can enrich your configuration with additional processors to drop unwanted
+events. For example:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">processors:
+- drop_event:
+      when:
+        - equals:
+              kubernetes.container.name: "metricbeat"</pre>
+</div>
+<h5><a id="_step_7_enrich_events_with_cloud_metadata_and_host_metadata"></a>Step 7: Enrich events with cloud metadata and host metadata<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-logs.asciidoc">edit</a></h5>
+<p>You can also enrich events with cloud and host metadata by specifying the
+<code class="literal">add_cloud_metadata</code> and <code class="literal">add_host_metadata</code> processors. These processors are
+already specified in the default configuration:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">processors:
+- add_cloud_metadata:
+- add_host_metadata:</pre>
+</div>
+<h5><a id="_step_8_deploy_filebeat_as_a_daemonset_on_kubernetes"></a>Step 8: Deploy Filebeat as a DaemonSet on Kubernetes<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-logs.asciidoc">edit</a></h5>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>If you&#8217;re running Filebeat on master nodes, check to see if the nodes use
+<a href="https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/" class="ulink" target="_top">taints</a>.
+Taints limit the workloads that can run on master nodes. If necessary, update
+the DaemonSet spec to include tolerations:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">spec:
+  tolerations:
+  - key: node-role.kubernetes.io/master
+    effect: NoSchedule</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Deploy Filebeat to Kubernetes:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl create -f filebeat-kubernetes.yaml</pre>
+</div>
+<p>To check the status, run:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">$ kubectl --namespace=kube-system get ds/filebeat
+
+NAME       DESIRED   CURRENT   READY     UP-TO-DATE   AVAILABLE   NODE-SELECTOR   AGE
+filebeat   32        32        0         32           0           &lt;none&gt;          1m</pre>
+</div>
+<p>Log events should start flowing to Elasticsearch.</p>
+</li>
+</ol>
+</div>
+<h5><a id="_red_hat_openshift_configuration"></a>Red Hat OpenShift configuration<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-logs.asciidoc">edit</a></h5>
+<p>If you&#8217;re using Red Hat OpenShift, you need to specify additional settings in
+the manifest file and enable the container to run as privileged.</p>
+<details>
+<summary class="title">Click to see more</summary>
+<div class="content">
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Modify the <code class="literal">DaemonSet</code> container spec in the manifest file:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">  securityContext:
+    runAsUser: 0
+    privileged: true</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Grant the <code class="literal">filebeat</code> service account access to the privileged SCC:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">oc adm policy add-scc-to-user privileged system:serviceaccount:kube-system:filebeat</pre>
+</div>
+<p>This command enables the container to be privileged as an administrator for
+OpenShift.</p>
+</li>
+<li class="listitem">
+<p>Override the default node selector for the <code class="literal">kube-system</code> namespace (or your
+custom namespace) to allow for scheduling on any node:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">oc patch namespace kube-system -p \
+'{"metadata": {"annotations": {"openshift.io/node-selector": ""}}}'</pre>
+</div>
+<p>This command sets the node selector for the project to an empty string. If you
+don&#8217;t run this command, the default node selector will skip master nodes.</p>
+</li>
+</ol>
+</div>
+</div>
+</details>
+<h4><a id="_view_logs_in_kibana"></a>View logs in Kibana<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-logs.asciidoc">edit</a></h4>
+<p>To view the log data collected by Filebeat, open Kibana and go to
+<span class="strong strong"><strong>Observability &gt; Logs</strong></span>.</p>
+<p>The <a href="/log-monitoring" class="ulink" target="_top">Logs app</a> in Kibana allows you to
+search, filter, and tail all the logs collected into the Elastic Stack. Instead of
+having to ssh into different servers and tail individual files, all the logs are
+available in one tool under the Logs app.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/log-stream.png" alt="Logs app streaming messages collected by Filebeat">
+</div>
+</div>
+<p>Explore the Logs app:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Enter a keyword or text string in the search field to filter logs.
+</li>
+<li class="listitem">
+Use the time picker or timeline view on the side to move forward and back in
+time.
+</li>
+<li class="listitem">
+Click <span class="strong strong"><strong>Stream live</strong></span> to watch the logs update in front of you <code class="literal">tail -f</code>
+style.
+</li>
+<li class="listitem">
+Place your cursor over a log message to highlight it, then use the context
+menu to view details or view the log message in context.
+</li>
+</ul>
+</div>
+<h5><a id="_out_of_the_box_kibana_dashboards"></a>Out-of-the-box Kibana dashboards<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-logs.asciidoc">edit</a></h5>
+<p>Filebeat ships with a variety of pre-built Kibana dashboards that you can
+use to visualize logs from Kubernetes Core components and applications running
+on top of Kubernetes. If these dashboards are not already loaded into Kibana, you
+must run the Filebeat setup job.</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>To run the setup job, install Filebeat on any system that can connect to
+the Elastic Stack, enable the modules for the datasets you want to monitor, then run
+the <code class="literal">setup</code> command. To learn how, see the
+<a href="/guide/en/beats/filebeat/master/filebeat-installation-configuration.html" class="ulink" target="_top">Filebeat quick start</a>.</p>
+</div>
+</div>
+<p>After loading the dashboards, navigate to <span class="strong strong"><strong>Kibana &gt; Dashboards</strong></span>
+and search for the services you want to monitor, like MySQL or NGINX.</p>
+<p>Notice that modules capture more than logs. You can also use them to capture
+metrics.</p>
+<h3><a id="monitor-kubernetes-health-and-performance-metrics"></a>Part 2: Monitor health and performance metrics<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-metrics.asciidoc">edit</a></h3>
+<p>Collecting metrics about Kubernetes clusters and the workloads running on top of
+them is a key aspect of Kubernetes observability. However, collecting metrics
+from Kubernetes poses some challenges. You need to collect metrics about the
+resources running on "physical" machines as well as the containers and pods.
+Specifically, you need to monitor the health and performance of:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+The hosts where Kubernetes components are running. Each host produces metrics
+like CPU, memory, disk utilization, and disk and network I/O.
+</li>
+<li class="listitem">
+Kubernetes containers, which produce their own set of metrics.
+</li>
+<li class="listitem">
+The applications running as Kubernetes pods, such as application servers and
+databases, each producing its own set of metrics.
+</li>
+</ul>
+</div>
+<p>Instead of using multiple technologies to collect metrics, you deploy
+Metricbeat to monitor all layers of your technology stack.</p>
+<h4><a id="_deploy_metricbeat_to_collect_metrics"></a>Deploy Metricbeat to collect metrics<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-metrics.asciidoc">edit</a></h4>
+<p>You&#8217;ll use Metricbeat to collect metrics from pods running in your Kubernetes
+cluster as well as metrics from the Kubernetes cluster itself.</p>
+<p>Metricbeat modules provide a quick and easy way to pick up metrics from
+various sources and ship them to Elasticsearch as <a href="/guide/en/ecs/1.8/index.html" class="ulink" target="_top">ECS</a>-compatible
+events, ready to be correlated with logs, uptime, and APM data.</p>
+<p>To deploy Metricbeat to your Kubernetes cluster:</p>
+<h5><a id="_step_1_download_the_metricbeat_deployment_manifest"></a>Step 1: Download the Metricbeat deployment manifest<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-metrics.asciidoc">edit</a></h5>
+<p>To make deployment easier, Elastic provides a YAML file that defines all the
+required deployment settings. In many cases, you can change the connection
+details and deploy with default settings to get started quickly.</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">curl -L -O https://raw.githubusercontent.com/elastic/beats/master/deploy/kubernetes/metricbeat-kubernetes.yaml</pre>
+</div>
+<h5><a id="_step_2_set_the_connection_information_for_elasticsearch_2"></a>Step 2: Set the connection information for Elasticsearch<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-metrics.asciidoc">edit</a></h5>
+<p>Metricbeat sends events to an existing Elasticsearch deployment, if present.
+To specify a different destination, change the following parameters in the
+<code class="literal">metricbeat-kubernetes.yaml</code> file:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">env:
+- name: ELASTICSEARCH_HOST
+  value: elasticsearch
+- name: ELASTICSEARCH_PORT
+  value: "9200"
+- name: ELASTICSEARCH_USERNAME
+  value: elastic <a id="CO35-1"></a><i class="conum" data-value="1"></i>
+- name: ELASTICSEARCH_PASSWORD
+  value: changeme
+- name: ELASTIC_CLOUD_ID <a id="CO35-2"></a><i class="conum" data-value="2"></i>
+  value:
+- name: ELASTIC_CLOUD_AUTH <a id="CO35-3"></a><i class="conum" data-value="2"></i>
+  value:</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO35-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This user must have the privileges required to publish events to Elasticsearch. For
+more information, see <a href="/guide/en/beats/metricbeat/master/feature-roles.html" class="ulink" target="_top">Grant users access to secured resources</a>.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO35-2"><i class="conum" data-value="2"></i></a><a href="#CO35-3"></a></p>
+</td>
+<td align="left" valign="top">
+<p>Use the cloud settings if you&#8217;re sending data to Elasticsearch Service on Elastic Cloud.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>To avoid exposing sensitive data, you can base64 encode the string, then store
+it in a Kubernetes secret. For example:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">$ echo -n 'changeme' | base64
+Y2hhbmdlbWU=
+$ kubectl create secret generic es-secret --from-literal=password='Y2hhbmdlbWU=' --namespace=kube-system <a id="CO36-1"></a><i class="conum" data-value="1"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO36-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Create the secret in the namespace where you will deploy Metricbeat.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>To use the secret, change the env setting in the manifest file:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">env:
+- name: ELASTICSEARCH_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: es-secret
+      key: password</pre>
+</div>
+<h5><a id="_step_3_mount_paths"></a>Step 3: Mount paths<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-metrics.asciidoc">edit</a></h5>
+<p>Metricbeat will run on each node in the cluster as a Daemonset&#8217;s pod.
+To collect system-level metrics, key paths are mounted from the host to the pod:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">- name: proc
+  hostPath:
+  path: /proc
+- name: cgroup
+  hostPath:
+  path: /sys/fs/cgroup</pre>
+</div>
+<h5><a id="_step_4_collect_system_metrics"></a>Step 4: Collect system metrics<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-metrics.asciidoc">edit</a></h5>
+<p>To collect system-level metrics from the running node, configure the <code class="literal">system</code>
+module. The metricsets that you&#8217;re likely to want are already enabled in the
+manifest. Modify the settings as required for your environment:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">- module: system
+  period: 10s
+  metricsets:
+    - cpu
+    - load
+    - memory
+    - network
+    - process
+    - process_summary</pre>
+</div>
+<h5><a id="_step_5_collect_metrics_from_each_kubernetes_node"></a>Step 5: Collect metrics from each Kubernetes node<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-metrics.asciidoc">edit</a></h5>
+<p>Because Metricbeat is running on each node, you can collect metrics from the
+Kubelet API. These metrics provide important information about the state of the
+Kubernetes node, pods, containers, and other resources.</p>
+<p>To collect these metrics, configure the <code class="literal">kubernetes</code> module. The metricsets that
+you&#8217;re likely to want are already enabled in the manifest. Modify the settings
+as required for your environment:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">- module: kubernetes
+  metricsets:
+    - node
+    - system
+    - pod
+    - container
+    - volume</pre>
+</div>
+<p>These metricsets collect metrics from the Kubelet API and therefore require
+access to the specific endpoints. Depending on the version and configuration of
+Kubernetes nodes, kubelet might provide a read-only HTTP port (typically
+10255), which is used in some configuration examples. But in general, and
+lately, this endpoint requires SSL (HTTPS) access (to port 10250 by default) and
+token-based authentication.</p>
+<h5><a id="_step_6_collect_kubernetes_state_metrics"></a>Step 6: Collect Kubernetes state metrics<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-metrics.asciidoc">edit</a></h5>
+<p>Metricbeat gets some metrics from
+<a href="https://github.com/kubernetes/kube-state-metrics#usage" class="ulink" target="_top">kube-state-metrics</a>.
+If kube-state-metrics is not already running, deploy it now. To learn how,
+see the Kubernetes deployment
+<a href="https://github.com/kubernetes/kube-state-metrics#kubernetes-deployment" class="ulink" target="_top">docs</a>.</p>
+<p>To collect state metrics:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Enable metricsets that begin with the <code class="literal">state_</code> prefix. The metricsets that
+you&#8217;re likely to want are already enabled in the manifest.
+</li>
+<li class="listitem">
+Set the <code class="literal">hosts</code> field to point to the kube-state-metrics service within the
+cluster.
+</li>
+</ol>
+</div>
+<p>Because the kube-state-metrics service provides cluster-wide metrics, there’s no
+need to fetch them per node. To use this singleton approach, Metricbeat
+leverages a leader election method, where one pod holds a leader lock and is
+responsible for collecting cluster-wide metrics. For more information about
+leader election settings, see
+<a href="/guide/en/beats/metricbeat/master/configuration-autodiscover.html" class="ulink" target="_top">Autodiscover</a>.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">metricbeat.autodiscover:
+    providers:
+    - type: kubernetes
+      scope: cluster
+      node: ${NODE_NAME}
+      unique: true
+      templates:
+        - config:
+            - module: kubernetes
+              hosts: ["kube-state-metrics:8080"]
+              period: 10s
+              add_metadata: true
+              metricsets:
+                - state_node
+                - state_deployment
+                - state_daemonset
+                - state_replicaset
+                - state_pod
+                - state_container
+                - state_cronjob
+                - state_resourcequota
+                - state_statefulset</pre>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If your Kubernetes cluster contains a large number of large nodes, the pod
+that collects cluster-level metrics might face performance issues caused by
+resource limitations. In this case, avoid using the leader election strategy and
+instead run a dedicated, standalone Metricbeat instance using a Deployment in
+addition to the DaemonSet.</p>
+</div>
+</div>
+<h5><a id="_step_7_collect_application_specific_metrics_use_hint_based_autodiscovery"></a>Step 7: Collect application-specific metrics (use hint-based autodiscovery)<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-metrics.asciidoc">edit</a></h5>
+<p>Metricbeat supports autodiscovery based on hints from the provider. The hints
+system looks for hints in Kubernetes pod annotations or Docker labels that have
+the prefix <code class="literal">co.elastic.metrics</code>. When a container starts, Metricbeat checks
+for hints and launches the proper configuration. The hints tell Metricbeat how
+to get metrics for the given container. To enable hint-based autodiscovery, set
+<code class="literal">hints.enabled: true</code>:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">metricbeat.autodiscover:
+  providers:
+    - type: kubernetes
+      hints.enabled: true</pre>
+</div>
+<p>By labeling Kubernetes pods  with the <code class="literal">co.elastic.metrics</code> prefix you can signal Metricbeat to collect metrics from those pods using the appropriate modules:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: v1
+kind: Pod
+metadata:
+    name: nginx-autodiscover
+    annotations:
+        co.elastic.metrics/module: nginx
+        co.elastic.metrics/metricsets: stubstatus
+        co.elastic.metrics/hosts: '${data.host}:80'
+        co.elastic.metrics/period: 10s</pre>
+</div>
+<h5><a id="_step_8_collect_metrics_from_prometheus"></a>Step 8: Collect metrics from Prometheus<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-metrics.asciidoc">edit</a></h5>
+<p>To enrich your collection resources, you can use the <code class="literal">prometheus</code> module to
+collect metrics from every application that runs on the cluster and exposes a
+Prometheus exporter. For instance, let&#8217;s say that the cluster runs multiple
+applications that expose Prometheus metrics with the default Prometheus
+standards. Assuming these applications are annotated properly, you can define
+an extra autodiscovery provider to automatically identify the applications and
+start collecting exposed metrics by using the <code class="literal">prometheus</code> module:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">metricbeat.autodiscover:
+  providers:
+    - type: kubernetes
+      include_annotations: ["prometheus.io.scrape"]
+      templates:
+        - condition:
+            contains:
+              kubernetes.annotations.prometheus.io/scrape: "true"
+          config:
+            - module: prometheus
+              metricsets: ["collector"]
+              hosts: "${data.host}:${data.port}"</pre>
+</div>
+<p>This configuration launches a <code class="literal">prometheus</code> module for all containers of pods
+annotated with <code class="literal">prometheus.io/scrape: "true"</code>.</p>
+<h5><a id="_step_9_add_metadata_to_events"></a>Step 9: Add metadata to events<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-metrics.asciidoc">edit</a></h5>
+<p>Metricbeat provides processors that you can use in your configuration to
+enrich events with metadata coming from Docker, Kubernetes, hosts, and cloud
+providers.</p>
+<p>The <code class="literal">add_cloud_metadata</code> and <code class="literal">add_host_metadata</code> processors are already
+specified in the default configuration:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">processors:
+- add_cloud_metadata:
+- add_host_metadata:</pre>
+</div>
+<p>This metadata allows correlation of metrics with the hosts, Kubernetes pods,
+Docker containers, and cloud-provider infrastructure metadata and with other
+pieces of observability puzzle, such as application performance monitoring data
+and logs.</p>
+<h5><a id="_step_10_deploy_metricbeat_as_a_daemonset_on_kubernetes"></a>Step 10: Deploy Metricbeat as a DaemonSet on Kubernetes<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-metrics.asciidoc">edit</a></h5>
+<p>To deploy Metricbeat to Kubernetes, run:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">kubectl create -f metricbeat-kubernetes.yaml</pre>
+</div>
+<p>To check the status, run:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">$ kubectl --namespace=kube-system  get ds/metricbeat
+
+NAME       DESIRED   CURRENT   READY     UP-TO-DATE   AVAILABLE   NODE-SELECTOR   AGE
+metricbeat   32        32        0         32           0           &lt;none&gt;          1m</pre>
+</div>
+<p>Metrics should start flowing to Elasticsearch.</p>
+<h5><a id="_red_hat_openshift_configuration_2"></a>Red Hat OpenShift configuration<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-metrics.asciidoc">edit</a></h5>
+<p>If you&#8217;re using Red Hat OpenShift, you need to specify additional settings in
+the manifest file and enable the container to run as privileged.</p>
+<details>
+<summary class="title">Click to see more</summary>
+<div class="content">
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Modify the <code class="literal">DaemonSet</code> container spec in the manifest file:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">  securityContext:
+    runAsUser: 0
+    privileged: true</pre>
+</div>
+</li>
+<li class="listitem">
+<p>In the manifest file, edit the metricbeat-daemonset-modules ConfigMap, and
+specify the following settings under <code class="literal">kubernetes.yml</code> in the data section:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">kubernetes.yml: |-
+    - module: kubernetes
+      metricsets:
+        - node
+        - system
+        - pod
+        - container
+        - volume
+      period: 10s
+      host: ${NODE_NAME}
+      hosts: ["https://${NODE_NAME}:10250"]
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      ssl.certificate_authorities:
+        - /path/to/kubelet-service-ca.crt</pre>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><code class="literal">kubelet-service-ca.crt</code> can be any CA bundle that contains the issuer of
+the certificate used in the Kubelet API. According to each specific installation
+of Openshift this can be found either in secrets or in configmaps. In some
+installations it can be available as part of the service account secret, in
+<code class="literal">/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt</code>. If you&#8217;re using
+the
+<a href="https://github.com/openshift/installer/blob/master/docs/user/gcp/install.md" class="ulink" target="_top">Openshift
+installer</a> for GCP then the following configmap can be mounted in Metricbeat
+pod and use <code class="literal">ca-bundle.crt</code> in <code class="literal">ssl.certificate_authorities</code>:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml"> Name:         kubelet-serving-ca
+ Namespace:    openshift-kube-apiserver
+ Labels:       &lt;none&gt;
+ Annotations:  &lt;none&gt;
+
+ Data
+ ====
+ ca-bundle.crt:</pre>
+</div>
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Under the <code class="literal">metricbeat</code> ClusterRole, add the following resources:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">- nodes/metrics
+- nodes/stats</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Grant the <code class="literal">metricbeat</code> service account access to the privileged SCC:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">oc adm policy add-scc-to-user privileged system:serviceaccount:kube-system:filebeat</pre>
+</div>
+<p>This command enables the container to be privileged as an administrator for
+OpenShift.</p>
+</li>
+<li class="listitem">
+<p>Override the default node selector for the <code class="literal">kube-system</code> namespace (or your
+custom namespace) to allow for scheduling on any node:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">oc patch namespace kube-system -p \
+'{"metadata": {"annotations": {"openshift.io/node-selector": ""}}}'</pre>
+</div>
+<p>This command sets the node selector for the project to an empty string. If you
+don&#8217;t run this command, the default node selector will skip master nodes.</p>
+</li>
+</ol>
+</div>
+</div>
+</details>
+<h4><a id="_view_performance_and_health_metrics"></a>View performance and health metrics<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-metrics.asciidoc">edit</a></h4>
+<p>To view the performance and health metrics collected by Metricbeat, open
+Kibana and go to <span class="strong strong"><strong>Observability &gt; Metrics</strong></span>.</p>
+<p>On the <span class="strong strong"><strong>Inventory</strong></span> page, you can switch between different views to see an
+overview of the containers and pods running on Kubernetes:</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/metrics-inventory.png" alt="Inventory page that shows Kubernetes pods">
+</div>
+</div>
+<p>On the <span class="strong strong"><strong>Metrics Explorer</strong></span> page, you can group and analyze metrics for the
+resources that you are monitoring.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/metrics-explorer.png" alt="Metrics dashboard that shows CPU usage for Kubernetes pods">
+</div>
+</div>
+<p>Notice how everywhere you go in Kibana, there is a search bar that allows you to,
+you know, search for things. It’s a great way to filter views and zoom into
+things when you&#8217;re looking for that needle in a haystack.</p>
+<h5><a id="_out_of_the_box_kibana_dashboards_2"></a>Out-of-the-box Kibana dashboards<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-metrics.asciidoc">edit</a></h5>
+<p>Metricbeat ships with a variety of pre-built Kibana dashboards that you can
+use to visualize metrics about your Kubernetes environment. If these dashboards
+are not already loaded into Kibana, you must run the Metricbeat setup job.</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>To run the setup job, install Metricbeat on any system that can connect to
+the Elastic Stack, enable the modules for the metricsets you want to monitor, then run
+the <code class="literal">setup</code> command. To learn how, see the
+<a href="/guide/en/beats/metricbeat/master/metricbeat-installation-configuration.html" class="ulink" target="_top">Metricbeat quick start</a>.</p>
+</div>
+</div>
+<p>On the Kubernetes overview dashboard, you can see an overview of all the nodes,
+deployments, and pods running on your Kubernetes cluster:</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/k8s-overview.png" alt="Kubernetes overview dashboard">
+</div>
+</div>
+<p>You can use these dashboards as they are, or as a starting point for custom
+dashboards tailored to your needs.</p>
+<h3><a id="monitor-kubernetes-application-performance"></a>Part 3: Monitor application performance<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-application-performance.asciidoc">edit</a></h3>
+<p>Quickly triage and troubleshoot application performance problems with the help of Elastic
+application performance monitoring (APM).</p>
+<p>Think of a latency spike&#8201;&#8212;&#8201;APM can help you narrow the scope of your investigation to a single service.
+Because you&#8217;ve also ingested and correlated logs and metrics, you can then link the problem to CPU and memory utilization or error log entries of a particular Kubernetes pod.</p>
+<h4><a id="_step_1_set_up_apm_server"></a>Step 1: Set up APM Server<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-application-performance.asciidoc">edit</a></h4>
+<p>Application monitoring data is streamed from your applications running in Kubernetes to APM Server,
+where it is validated, processed, and transformed into Elasticsearch documents.</p>
+<p>There are many ways to deploy APM Server when working with Kubernetes,
+but this guide assumes that you&#8217;re using our hosted Elasticsearch Service on Elastic Cloud.
+If you haven&#8217;t done so already, enable APM Server in the <a href="https://cloud.elastic.co?baymax=docs-body&amp;elektra=docs" class="ulink" target="_top">Elasticsearch Service console</a>.</p>
+<p>If you want to manage APM Server yourself, there are a few alternative options:</p>
+<details>
+<summary class="title">Expand alternatives</summary>
+<div class="content">
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="/guide/en/cloud-on-k8s/current/" class="ulink" target="_top">Elastic Cloud on Kubernetes (ECK)</a>&#8201;&#8212;&#8201;The Elastic recommended approach for managing
+APM Server deployed with Kubernetes.
+Built on the Kubernetes Operator pattern, ECK extends basic Kubernetes orchestration capabilities
+to support the setup and management of APM Server on Kubernetes.
+</li>
+<li class="listitem">
+Deploy APM Server as a DaemonSet&#8201;&#8212;&#8201;Ensure a running instance of APM Server on each node in your cluster.
+Useful when all pods in a node should share a single APM Server instance.
+</li>
+<li class="listitem">
+Deploy APM Server as a sidecar&#8201;&#8212;&#8201;For environments that should not share an APM Server,
+like when directing traces from multiple applications to separate Elasticsearch clusters.
+</li>
+<li class="listitem">
+<a href="/guide/en/apm/server/master/installing.html" class="ulink" target="_top">Download and install APM Server</a>&#8201;&#8212;&#8201;The classic, non-Kubernetes option.
+</li>
+</ul>
+</div>
+</div>
+</details>
+<h4><a id="_step_2_save_your_secret_token"></a>Step 2: Save your secret token<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-application-performance.asciidoc">edit</a></h4>
+<p>A <a href="/guide/en/apm/server/master/secret-token.html" class="ulink" target="_top">secret token</a> is used to secure communication between APM agents
+and APM Server. On the Elastic Cloud deployment page, select <span class="strong strong"><strong>APM</strong></span> and copy your APM Server secret token.
+To avoid exposing the secret token, you can store it in a Kubernetes secret. For example:</p>
+<div class="pre_wrapper lang-cmd">
+<pre class="programlisting prettyprint lang-cmd">kubectl create secret generic apm-secret --from-literal=ELASTIC_APM_SECRET_TOKEN=asecretpassword --namespace=kube-system <a id="CO37-1"></a><i class="conum" data-value="1"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO37-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Create the secret in the same namespace that you&#8217;ll be deploying your applications in.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>If you&#8217;re managing APM Server yourself,
+see <a href="/guide/en/apm/server/master/secret-token.html" class="ulink" target="_top">secret token</a> for instructions on how to set up your secret token.</p>
+<p>If you are using ECK to set up APM Server, the operator automatically generates an <code class="literal">{APM-server-name}-apm-token</code> secret for you.</p>
+<h4><a id="_step_3_install_and_configure_apm_agents"></a>Step 3: Install and configure APM Agents<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-application-performance.asciidoc">edit</a></h4>
+<p>In most cases, setting up APM agents and thereby instrumenting your applications
+is as easy as installing a library and adding a few lines of code.</p>
+<p>Select your application&#8217;s language for details:</p>
+<div class="tabs" data-tab-group="apm-agent-kube">
+  <div role="tablist" aria-label="Install-kube">
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="go-tab-install-kube"
+            id="go-install-kube">
+      Go
+    </button>
+    <button role="tab"
+            aria-selected="true"
+            aria-controls="java-tab-install-kube"
+            id="java-install-kube"
+            tabindex="-1">
+      Java
+    </button>
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="net-tab-install-kube"
+            id="net-install-kube"
+            tabindex="-1">
+      .NET
+    </button>
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="node-tab-install-kube"
+            id="node-install-kube"
+            tabindex="-1">
+      Node.js
+    </button>
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="python-tab-install-kube"
+            id="python-install-kube"
+            tabindex="-1">
+      Python
+    </button>
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="ruby-tab-install-kube"
+            id="ruby-install-kube"
+            tabindex="-1">
+      Ruby
+    </button>
+  </div>
+  <div tabindex="0"
+       role="tabpanel"
+       id="go-tab-install-kube"
+       aria-labelledby="go-install-kube"
+       hidden="">
+<p><span class="strong strong"><strong>Install the agent</strong></span></p>
+<p>Install the APM agent packages for Go.</p>
+<div class="pre_wrapper lang-go">
+<pre class="programlisting prettyprint lang-go">go get go.elastic.co/apm</pre>
+</div>
+<p><span class="strong strong"><strong>Instrument your application</strong></span></p>
+<p>Instrument your Go application by using one of the provided instrumentation modules or by using the tracer API directly.</p>
+<div class="pre_wrapper lang-go">
+<pre class="programlisting prettyprint lang-go">import (
+	"net/http"
+
+	"go.elastic.co/apm/module/apmhttp"
+)
+
+func main() {
+	mux := http.NewServeMux()
+	...
+	http.ListenAndServe(":8080", apmhttp.Wrap(mux))
+}</pre>
+</div>
+<p><span class="strong strong"><strong>Configure the agent</strong></span></p>
+<p>Configure the agent using environment variables:</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">        # ...
+        - name: ELASTIC_APM_SERVER_URL
+          value: "apm-server-url-goes-here" <a id="CO38-1"></a><i class="conum" data-value="1"></i>
+        - name: ELASTIC_APM_SECRET_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: apm-secret
+              key: ELASTIC_APM_SECRET_TOKEN <a id="CO38-2"></a><i class="conum" data-value="2"></i>
+        - name: ELASTIC_APM_SERVICE_NAME
+          value: "service-name-goes-here" <a id="CO38-3"></a><i class="conum" data-value="3"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO38-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Defaults to <code class="literal">http://localhost:8200</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO38-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Pass in <code class="literal">ELASTIC_APM_SECRET_TOKEN</code> from the <code class="literal">apm-secret</code> keystore created previously</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO38-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Allowed characters: a-z, A-Z, 0-9, -, _, and space</p>
+</td>
+</tr>
+</table>
+</div>
+<p><span class="strong strong"><strong>Learn more in the agent reference</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="/guide/en/apm/agent/go/1.x/supported-tech.html" class="ulink" target="_top">Supported technologies</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/apm/agent/go/1.x/configuration.html" class="ulink" target="_top">Advanced configuration</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/apm/agent/go/1.x/getting-started.html" class="ulink" target="_top">Detailed guide to instrumenting Go source code</a>
+</li>
+</ul>
+</div>
+  </div>
+  <div tabindex="0"
+       role="tabpanel"
+       id="java-tab-install-kube"
+       aria-labelledby="java-install-kube">
+<p><span class="strong strong"><strong>Attach the agent</strong></span></p>
+<p>The Java agent can instrument supported technologies without
+any changes to an application image or code.
+To do this, you&#8217;ll need an
+<a href="https://kubernetes.io/docs/concepts/workloads/pods/init-containers/" class="ulink" target="_top">init container</a>
+based on an official Elastic APM docker image.</p>
+<p>Before your application starts, copy the agent from the init container into a shared volume.
+For example, with the Java agent:</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">    # ...
+    spec:
+      volumes:
+      - name: elastic-apm-agent <a id="CO39-1"></a><i class="conum" data-value="1"></i>
+        emptyDir: {}
+      initContainers:
+      - name: elastic-java-agent
+        image: docker.elastic.co/observability/apm-agent-java:1.12.0 <a id="CO39-2"></a><i class="conum" data-value="2"></i>
+        volumeMounts:
+        - mountPath: /elastic/apm/agent
+          name: elastic-apm-agent
+        command: ['cp', '-v', '/usr/agent/elastic-apm-agent.jar', '/elastic/apm/agent'] <a id="CO39-3"></a><i class="conum" data-value="3"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO39-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The shared volume</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO39-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Build the initContainer from the official Elastic Java agent image</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO39-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Copy the agent to the shared volume</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The Java command line needs a way to pick up this <code class="literal">javaagent</code> configuration.
+You can use the standard JVMTI <a href="https://docs.oracle.com/javase/8/docs/platform/jvmti/jvmti.html#tooloptions" class="ulink" target="_top">JAVA_TOOL_OPTIONS</a> environment variable to do this.
+It doesn&#8217;t have to be explicitly specified and is picked up automatically by the JVM when it starts.</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>For JVMs that don&#8217;t support this option, you can use any other environment variable&#8201;&#8212;&#8201;either one already defined in your startup script, like <code class="literal">JAVA_OPTS</code> in some servlet container scripts,
+or add a dedicated empty one that will have no effect if it&#8217;s not set.</p>
+</div>
+</div>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">      # ...
+      containers:
+      - name: your-app-container
+        env:
+        # ...
+        - name: JAVA_TOOL_OPTIONS <a id="CO40-1"></a><i class="conum" data-value="1"></i>
+          value: -javaagent:/elastic/apm/agent/elastic-apm-agent.jar</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO40-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Used for the command line to pick up the <code class="literal">javaagent</code> configuration</p>
+</td>
+</tr>
+</table>
+</div>
+<p><span class="strong strong"><strong>Configure the agent</strong></span></p>
+<p>Configure the agent using environment variables:</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">        # ...
+        - name: ELASTIC_APM_SERVER_URLS
+          value: "apm-server-url-goes-here" <a id="CO41-1"></a><i class="conum" data-value="1"></i>
+        - name: ELASTIC_APM_SECRET_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: apm-secret
+              key: ELASTIC_APM_SECRET_TOKEN <a id="CO41-2"></a><i class="conum" data-value="2"></i>
+        - name: ELASTIC_APM_SERVICE_NAME
+          value: "service-name-goes-here" <a id="CO41-3"></a><i class="conum" data-value="3"></i>
+        - name: ELASTIC_APM_APPLICATION_PACKAGES
+          value: "org.springframework.samples.petclinic" <a id="CO41-4"></a><i class="conum" data-value="4"></i>
+        - name: JAVA_TOOL_OPTIONS <a id="CO41-5"></a><i class="conum" data-value="5"></i>
+          value: -javaagent:/elastic/apm/agent/elastic-apm-agent.jar</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO41-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Defaults to <code class="literal">http://localhost:8200</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO41-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Pass in <code class="literal">ELASTIC_APM_SECRET_TOKEN</code> from the <code class="literal">apm-secret</code> keystore created previously</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO41-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Allowed characters: a-z, A-Z, 0-9, -, _, and space</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO41-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Used to determine whether a stack trace frame is an <em>in-app</em> frame or a <em>library</em> frame.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO41-5"><i class="conum" data-value="5"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Explained previously</p>
+</td>
+</tr>
+</table>
+</div>
+<p><span class="strong strong"><strong>Learn more in the agent reference</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="/guide/en/apm/agent/java/1.x/supported-technologies-details.html" class="ulink" target="_top">Supported technologies</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/apm/agent/java/1.x/configuration.html" class="ulink" target="_top">Advanced configuration</a>
+</li>
+</ul>
+</div>
+  </div>
+  <div tabindex="0"
+       role="tabpanel"
+       id="net-tab-install-kube"
+       aria-labelledby="net-install-kube"
+       hidden="">
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>These instructions are for .NET Core v2.2+.
+All other use-cases require downloading the agent from NuGet and adding it to your application.
+See <a href="/guide/en/apm/agent/dotnet/1.x/setup.html" class="ulink" target="_top">set up the Agent</a> for full details.
+Once agent set-up is complete, jump to the <span class="strong strong"><strong>Configure the agent</strong></span> section on this page.</p>
+</div>
+</div>
+<p><span class="strong strong"><strong>Use an init container to download and extract the agent</strong></span></p>
+<p>The .Net agent automatically instruments .NET Core version 2.2 and newer without
+any application code changes.
+To do this, you&#8217;ll need an
+<a href="https://kubernetes.io/docs/concepts/workloads/pods/init-containers/" class="ulink" target="_top">init container</a>
+that pulls and unzips the latest agent release:</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">    # ...
+    spec:
+      volumes:
+      - name: elastic-apm-agent <a id="CO42-1"></a><i class="conum" data-value="1"></i>
+        emptyDir: {}
+      initContainers:
+      - name: elastic-dotnet-agent
+        image: busybox
+        command: ["/bin/sh","-c"] <a id="CO42-2"></a><i class="conum" data-value="2"></i>
+        args: <a id="CO42-3"></a><i class="conum" data-value="3"></i>
+          - wget -qO './elastic-apm-agent/ElasticApmAgent.zip' https://github.com/elastic/apm-agent-dotnet/releases/download/1.7.0/ElasticApmAgent_1.7.0.zip;
+            cd elastic-apm-agent;
+            cat ElasticApmAgent.zip | busybox unzip -;
+        volumeMounts:
+        - mountPath: /elastic-apm-agent
+          name: elastic-apm-agent</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO42-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The shared volume.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO42-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Runs a shell and executes the provided <code class="literal">args</code>.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO42-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Gets the latest <code class="literal">apm-agent-dotnet</code> release and saves it to <code class="literal">elastic-apm-agent/ElasticApmAgent.zip</code>.
+Then <code class="literal">cd</code> into the directory and unzip the file&#8217;s contents. Don&#8217;t forget to update the GitHub URL in this
+command with the version of the agent you&#8217;d like to use.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>To connect the agent to your application, point the <code class="literal">DOTNET_STARTUP_HOOKS</code> environment
+variable towards <code class="literal">ElasticApmAgentStartupHook.dll</code> file that now exists in the
+<code class="literal">/elastic-apm-agent</code> directory of the <code class="literal">elastic-apm-agent</code> volume.</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">      # ...
+      containers:
+      - name: your-app-container
+        volumeMounts:
+        - mountPath: /elastic-apm-agent
+          name: elastic-apm-agent
+        env:
+        # ...
+        - name: DOTNET_STARTUP_HOOKS
+          value: "/elastic-apm-agent/ElasticApmAgentStartupHook.dll"</pre>
+</div>
+<p><span class="strong strong"><strong>Configure the agent</strong></span></p>
+<p>Configure the agent using environment variables:</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">        # ...
+        - name: ELASTIC_APM_SERVER_URLS
+          value: "apm-server-url-goes-here" <a id="CO43-1"></a><i class="conum" data-value="1"></i>
+        - name: ELASTIC_APM_SECRET_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: apm-secret
+              key: ELASTIC_APM_SECRET_TOKEN <a id="CO43-2"></a><i class="conum" data-value="2"></i>
+        - name: ELASTIC_APM_SERVICE_NAME
+          value: "service-name-goes-here" <a id="CO43-3"></a><i class="conum" data-value="3"></i>
+        - name: DOTNET_STARTUP_HOOKS <a id="CO43-4"></a><i class="conum" data-value="4"></i>
+          value: "/elastic-apm-agent/ElasticApmAgentStartupHook.dll"</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO43-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Defaults to <code class="literal">http://localhost:8200</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO43-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Pass in <code class="literal">ELASTIC_APM_SECRET_TOKEN</code> from the <code class="literal">apm-secret</code> keystore created previously</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO43-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Allowed characters: a-z, A-Z, 0-9, -, _, and space</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO43-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Explained previously and only required when using the no-code instrumentation method.</p>
+</td>
+</tr>
+</table>
+</div>
+<p><span class="strong strong"><strong>Learn more in the agent reference</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="/guide/en/apm/agent/dotnet/1.x/supported-technologies.html" class="ulink" target="_top">Supported technologies</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/apm/agent/dotnet/1.x/configuration.html" class="ulink" target="_top">Advanced configuration</a>
+</li>
+</ul>
+</div>
+  </div>
+  <div tabindex="0"
+       role="tabpanel"
+       id="node-tab-install-kube"
+       aria-labelledby="node-install-kube"
+       hidden="">
+<p><span class="strong strong"><strong>Install the APM agent</strong></span></p>
+<p>Install the APM agent for Node.js as a dependency to your application.</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">npm install elastic-apm-node --save</pre>
+</div>
+<p><span class="strong strong"><strong>Start the agent</strong></span></p>
+<p>It’s important that the agent is started before you require any other modules in your Node.js application&#8201;&#8212;&#8201;before <code class="literal">express</code>, <code class="literal">http</code>, etc.</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">var apm = require('elastic-apm-node').start()</pre>
+</div>
+<p><span class="strong strong"><strong>Configure the agent</strong></span></p>
+<p>Configure the agent using environment variables:</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">        # ...
+        - name: ELASTIC_APM_SERVER_URL
+          value: "apm-server-url-goes-here" <a id="CO44-1"></a><i class="conum" data-value="1"></i>
+        - name: ELASTIC_APM_SECRET_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: apm-secret
+              key: ELASTIC_APM_SECRET_TOKEN <a id="CO44-2"></a><i class="conum" data-value="2"></i>
+        - name: ELASTIC_APM_SERVICE_NAME
+          value: "service-name-goes-here" <a id="CO44-3"></a><i class="conum" data-value="3"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO44-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Defaults to <code class="literal">http://localhost:8200</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO44-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Pass in <code class="literal">ELASTIC_APM_SECRET_TOKEN</code> from the <code class="literal">apm-secret</code> keystore created previously</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO44-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Allowed characters: a-z, A-Z, 0-9, -, _, and space</p>
+</td>
+</tr>
+</table>
+</div>
+<p><span class="strong strong"><strong>Learn more in the agent reference</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="/guide/en/apm/agent/nodejs/3.x/supported-technologies.html" class="ulink" target="_top">Supported technologies</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/apm/agent/nodejs/3.x/advanced-setup.html" class="ulink" target="_top">Babel/ES Modules</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/apm/agent/nodejs/3.x/configuring-the-agent.html" class="ulink" target="_top">Advanced configuration</a>
+</li>
+</ul>
+</div>
+  </div>
+  <div tabindex="0"
+       role="tabpanel"
+       id="python-tab-install-kube"
+       aria-labelledby="python-install-kube"
+       hidden="">
+<p><span class="strong strong"><strong>Install the APM agent</strong></span></p>
+<p>Install the APM agent for Python as a dependency:</p>
+<div class="pre_wrapper lang-python">
+<pre class="programlisting prettyprint lang-python"># Django
+pip install elastic-apm
+
+# Flask
+pip install elastic-apm[flask]</pre>
+</div>
+<p><span class="strong strong"><strong>Add the agent to your application</strong></span></p>
+<p>For Django, Add <code class="literal">elasticapm.contrib.django</code> to <code class="literal">INSTALLED_APPS</code> in your settings:</p>
+<div class="pre_wrapper lang-python">
+<pre class="programlisting prettyprint lang-python">INSTALLED_APPS = (
+   # ...
+   'elasticapm.contrib.django',
+)</pre>
+</div>
+<p>For Flask, initialize the agent for your application using environment variables:</p>
+<div class="pre_wrapper lang-python">
+<pre class="programlisting prettyprint lang-python">from elasticapm.contrib.flask import ElasticAPM
+
+app = Flask(__name__)
+
+apm = ElasticAPM(app)</pre>
+</div>
+<p><span class="strong strong"><strong>Configure the agent</strong></span></p>
+<p>Configure the agent using environment variables:</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">        # ...
+        - name: ELASTIC_APM_SERVER_URL
+          value: "apm-server-url-goes-here" <a id="CO45-1"></a><i class="conum" data-value="1"></i>
+        - name: ELASTIC_APM_SECRET_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: apm-secret
+              key: ELASTIC_APM_SECRET_TOKEN <a id="CO45-2"></a><i class="conum" data-value="2"></i>
+        - name: ELASTIC_APM_SERVICE_NAME
+          value: "service-name-goes-here" <a id="CO45-3"></a><i class="conum" data-value="3"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO45-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Defaults to <code class="literal">http://localhost:8200</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO45-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Pass in <code class="literal">ELASTIC_APM_SECRET_TOKEN</code> from the <code class="literal">apm-secret</code> keystore created previously</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO45-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Allowed characters: a-z, A-Z, 0-9, -, _, and space</p>
+</td>
+</tr>
+</table>
+</div>
+<p><span class="strong strong"><strong>Learn more in the agent reference</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="/guide/en/apm/agent/python/5.x/supported-technologies.html" class="ulink" target="_top">Supported technologies</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/apm/agent/python/5.x/configuration.html" class="ulink" target="_top">Advanced configuration</a>
+</li>
+</ul>
+</div>
+  </div>
+  <div tabindex="0"
+       role="tabpanel"
+       id="ruby-tab-install-kube"
+       aria-labelledby="ruby-install-kube"
+       hidden="">
+<p><span class="strong strong"><strong>Install the APM agent</strong></span></p>
+<p>Add the agent to your Gemfile.</p>
+<div class="pre_wrapper lang-ruby">
+<pre class="programlisting prettyprint lang-ruby">gem 'elastic-apm'</pre>
+</div>
+<p><span class="strong strong"><strong>Start the agent</strong></span></p>
+<p>Rails: APM will automatically start when your app boots.</p>
+<p>Rack: Include the middleware and start and stop Elastic APM:</p>
+<div class="pre_wrapper lang-ruby">
+<pre class="programlisting prettyprint lang-ruby"># config.ru
+
+app = lambda do |env|
+  [200, {'Content-Type' =&gt; 'text/plain'}, ['ok']]
+end
+
+# Wraps all requests in transactions and reports exceptions
+use ElasticAPM::Middleware
+
+# Start an instance of the Agent
+ElasticAPM.start()
+
+run app
+
+# Gracefully stop the agent when process exits.
+# Makes sure any pending transactions have already sent.
+at_exit { ElasticAPM.stop }</pre>
+</div>
+<p><span class="strong strong"><strong>Configure the agent</strong></span></p>
+<p>Configure the agent using environment variables:</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">        # ...
+        - name: ELASTIC_APM_SERVER_URL
+          value: "apm-server-url-goes-here" <a id="CO46-1"></a><i class="conum" data-value="1"></i>
+        - name: ELASTIC_APM_SECRET_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: apm-secret
+              key: ELASTIC_APM_SECRET_TOKEN <a id="CO46-2"></a><i class="conum" data-value="2"></i>
+        - name: ELASTIC_APM_SERVICE_NAME
+          value: "service-name-goes-here" <a id="CO46-3"></a><i class="conum" data-value="3"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO46-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Defaults to <code class="literal">http://localhost:8200</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO46-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Pass in <code class="literal">ELASTIC_APM_SECRET_TOKEN</code> from the <code class="literal">apm-secret</code> keystore created previously</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO46-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Allowed characters: a-z, A-Z, 0-9, -, _, and space</p>
+</td>
+</tr>
+</table>
+</div>
+<p><span class="strong strong"><strong>Learn more in the agent reference</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="/guide/en/apm/agent/ruby/3.x/supported-technologies.html" class="ulink" target="_top">Supported technologies</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/apm/agent/ruby/3.x/configuration.html" class="ulink" target="_top">Advanced configuration</a>
+</li>
+</ul>
+</div>
+  </div>
+</div>
+<h4><a id="_step_4_configure_kubernetes_data"></a>Step 4: Configure Kubernetes data<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-application-performance.asciidoc">edit</a></h4>
+<p>In most instances, APM agents automatically read Kubernetes data from inside the
+container and send it to APM Server.
+If this is not the case, or if you wish to override this data,
+you can set environment variables for the agents to read.
+These environment variable are set via the <a href="https://kubernetes.io/docs/tasks/inject-data-application/environment-variable-expose-pod-information/#the-downward-api" class="ulink" target="_top">Downward API</a>
+in your kubernetes pod spec:</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">      # ...
+      containers:
+      - name: your-app-container
+        env:
+        # ...
+        - name: KUBERNETES_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: KUBERNETES_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: KUBERNETES_POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid</pre>
+</div>
+<p>The table below maps these environment variables to the APM metadata event field:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Environment variable</th>
+<th align="left" valign="top">Metadata field name</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>KUBERNETES_NODE_NAME</p></td>
+<td align="left" valign="top"><p>system.kubernetes.node.name</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>KUBERNETES_POD_NAME</p></td>
+<td align="left" valign="top"><p>system.kubernetes.pod.name</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>KUBERNETES_NAMESPACE</p></td>
+<td align="left" valign="top"><p>system.kubernetes.namespace</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>KUBERNETES_POD_UID</p></td>
+<td align="left" valign="top"><p>system.kubernetes.pod.uid</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h4><a id="_step_5_deploy_your_application"></a>Step 5: Deploy your application<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-application-performance.asciidoc">edit</a></h4>
+<p>APM agents are deployed with your application.</p>
+<details>
+<summary class="title">Resource configuration file example</summary>
+<div class="content">
+<p>A complete resource configuration file based on the previous steps.</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: &lt;&lt;your-app&gt;&gt;
+  namespace: kube-system
+  labels:
+    app: &lt;&lt;your-app&gt;&gt;
+    service: &lt;&lt;your-app&gt;&gt;
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: &lt;&lt;your-app&gt;&gt;
+  template:
+    metadata:
+      labels:
+        app: &lt;&lt;your-app&gt;&gt;
+        service: &lt;&lt;your-app&gt;&gt;
+    spec:
+      dnsPolicy: ClusterFirstWithHostNet
+      volumes:
+      - name: elastic-apm-agent
+        emptyDir: {}
+      initContainers:
+      - name: elastic-java-agent
+        image: docker.elastic.co/observability/apm-agent-java:1.12.0
+        volumeMounts:
+        - mountPath: /elastic/apm/agent
+          name: elastic-apm-agent
+        command: ['cp', '-v', '/usr/agent/elastic-apm-agent.jar', '/elastic/apm/agent']
+      containers:
+      - name: &lt;&lt;your-app&gt;&gt;
+        image: &lt;&lt;your-app&gt;&gt;
+        volumeMounts:
+        - mountPath: /elastic/apm/agent
+          name: elastic-apm-agent
+        env:
+        - name: ELASTIC_APM_SERVER_URL
+          value: "apm-server-url-goes-here"
+        - name: ELASTIC_APM_SECRET_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: apm-secret
+              key: ELASTIC_APM_SECRET_TOKEN
+        - name: ELASTIC_APM_SERVICE_NAME
+          value: "petclinic"
+        - name: ELASTIC_APM_APPLICATION_PACKAGES
+          value: "org.springframework.samples.petclinic"
+        - name: ELASTIC_APM_ENVIRONMENT
+          value: test
+        - name: JAVA_TOOL_OPTIONS
+          value: -javaagent:/elastic/apm/agent/elastic-apm-agent.jar
+        - name: KUBERNETES_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: KUBERNETES_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: KUBERNETES_POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid</pre>
+</div>
+</div>
+</details>
+<div class="pre_wrapper lang-cmd">
+<pre class="programlisting prettyprint lang-cmd">kubectl apply -f demo.yml</pre>
+</div>
+<h4><a id="_view_your_traces_in_kibana"></a>View your traces in Kibana<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s-application-performance.asciidoc">edit</a></h4>
+<p>To view your application&#8217;s trace data, open Kibana and go to <span class="strong strong"><strong>Observability</strong></span> <span class="strong strong"><strong>&gt;</strong></span> <span class="strong strong"><strong>APM</strong></span>.</p>
+<p>The APM app allows you to monitor your software services and applications in real-time:
+visualize detailed performance information on your services, identify and analyze errors,
+and monitor host-level and agent-specific metrics like JVM and Go runtime metrics.</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/spring-apm-app-2.png" alt="APM app kubernetes">
+</div>
+</div>
+<p>Having access to application-level insights with just a few clicks can drastically decrease the time you spend debugging errors, slow response times, and crashes.</p>
+<p>Best of all, because Kubernetes environment variables have been mapped to APM metadata events,
+you can filter your trace data by Kubernetes <code class="literal">namespace</code>, <code class="literal">node.name</code>, <code class="literal">pod.name</code>, and <code class="literal">pod.uid</code>.</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/apm-app-kubernetes-filter.png" alt="APM app kubernetes">
+</div>
+</div>
+<h3><a id="_whats_next_2"></a>What’s next<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/observability/monitor-k8s/monitor-k8s.asciidoc">edit</a></h3>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Want to protect your endpoints from security threats? Try
+<a href="/security" class="ulink" target="_top">Elastic Security</a>. Adding endpoint protection is
+just another integration that you add to the agent policy!
+</li>
+<li class="listitem">
+Are your eyes bleary from staring at a wall of screens?
+<a href="/guide/en/observability/master/create-alerts.html" class="ulink" target="_top">Create alerts</a> and find out about
+problems while sipping your favorite beverage poolside.
+</li>
+<li class="listitem">
+Want Elastic to do the heavy lifting? Use machine learning to
+<a href="/guide/en/observability/master/inspect-log-anomalies.html" class="ulink" target="_top">detect anomalies</a>.
+</li>
+</ul>
+</div>
+<style>
+.tabs {
+  width: 100%;
+}
+[role="tablist"] {
+  margin: 0 0 -0.1em;
+  overflow: visible;
+}
+[role="tab"] {
+  position: relative;
+  padding: 0.3em 0.5em 0.4em;
+  border: 1px solid hsl(219, 1%, 72%);
+  border-radius: 0.2em 0.2em 0 0;
+  overflow: visible;
+  font-family: inherit;
+  font-size: inherit;
+  background: hsl(220, 20%, 94%);
+}
+[role="tab"]:hover::before,
+[role="tab"]:focus::before,
+[role="tab"][aria-selected="true"]::before {
+  position: absolute;
+  bottom: 100%;
+  right: -1px;
+  left: -1px;
+  border-radius: 0.2em 0.2em 0 0;
+  border-top: 3px solid hsl(219, 1%, 72%);
+  content: '';
+}
+[role="tab"][aria-selected="true"] {
+  border-radius: 0;
+  background: hsl(220, 43%, 99%);
+  outline: 0;
+}
+[role="tab"][aria-selected="true"]:not(:focus):not(:hover)::before {
+  border-top: 5px solid hsl(218, 96%, 48%);
+}
+[role="tab"][aria-selected="true"]::after {
+  position: absolute;
+  z-index: 3;
+  bottom: -1px;
+  right: 0;
+  left: 0;
+  height: 0.3em;
+  background: hsl(220, 43%, 99%);
+  box-shadow: none;
+  content: '';
+}
+[role="tab"]:hover,
+[role="tab"]:focus,
+[role="tab"]:active {
+  outline: 0;
+  border-radius: 0;
+  color: inherit;
+}
+[role="tab"]:hover::before,
+[role="tab"]:focus::before {
+  border-color: hsl(218, 96%, 48%);
+}
+[role="tabpanel"] {
+  position: relative;
+  z-index: 2;
+  padding: 1em;
+  border: 1px solid hsl(219, 1%, 72%);
+  border-radius: 0 0.2em 0.2em 0.2em;
+  box-shadow: 0 0 0.2em hsl(219, 1%, 72%);
+  background: hsl(220, 43%, 99%);
+  margin-bottom: 1em;
+}
+[role="tabpanel"] p {
+  margin: 0;
+}
+[role="tabpanel"] * + p {
+  margin-top: 1em;
+}
+</style>
+
+<script>
+window.addEventListener("DOMContentLoaded", () => {
+  const tabs = document.querySelectorAll('[role="tab"]');
+  const tabList = document.querySelector('[role="tablist"]');
+  // Add a click event handler to each tab
+  tabs.forEach(tab => {
+    tab.addEventListener("click", changeTabs);
+  });
+  // Enable arrow navigation between tabs in the tab list
+  let tabFocus = 0;
+  tabList.addEventListener("keydown", e => {
+    // Move right
+    if (e.keyCode === 39 || e.keyCode === 37) {
+      tabs[tabFocus].setAttribute("tabindex", -1);
+      if (e.keyCode === 39) {
+        tabFocus++;
+        // If we're at the end, go to the start
+        if (tabFocus >= tabs.length) {
+          tabFocus = 0;
+        }
+        // Move left
+      } else if (e.keyCode === 37) {
+        tabFocus--;
+        // If we're at the start, move to the end
+        if (tabFocus < 0) {
+          tabFocus = tabs.length - 1;
+        }
+      }
+      tabs[tabFocus].setAttribute("tabindex", 0);
+      tabs[tabFocus].focus();
+    }
+  });
+});
+
+function setActiveTab(target) {
+  const parent = target.parentNode;
+  const grandparent = parent.parentNode;
+  // console.log(grandparent);
+  // Remove all current selected tabs
+  parent
+    .querySelectorAll('[aria-selected="true"]')
+    .forEach(t => t.setAttribute("aria-selected", false));
+  // Set this tab as selected
+  target.setAttribute("aria-selected", true);
+  // Hide all tab panels
+  grandparent
+    .querySelectorAll('[role="tabpanel"]')
+    .forEach(p => p.setAttribute("hidden", true));
+  // Show the selected panel
+  grandparent.parentNode
+    .querySelector(`#${target.getAttribute("aria-controls")}`)
+    .removeAttribute("hidden");
+}
+
+function changeTabs(e) {
+  // get the containing list of the tab that was just clicked
+  const tabList = e.target.parentNode;
+
+  // get all of the sibling tabs
+  const buttons = Array.apply(null, tabList.querySelectorAll('button'));
+
+  // loop over the siblings to discover which index thje clicked one was
+  const { index } = buttons.reduce(({ found, index }, button) => {
+    if (!found && buttons[index] === e.target) {
+      return { found: true, index };
+    } else if (!found) {
+      return { found, index: index + 1 };
+    } else {
+      return { found, index };
+    }
+  }, { found: false, index: 0 });
+
+  // get the tab container
+  const container = tabList.parentNode;
+  // read the data-tab-group value from the container, e.g. "os"
+  const { tabGroup } = container.dataset;
+  // get a list of all the tab groups that match this value on the page
+  const groups = document.querySelectorAll('[data-tab-group=' + tabGroup + ']');
+
+  // for each of the found tab groups, find the tab button at the previously discovered index and select it for each group
+  groups.forEach((group) => {
+    const target = group.querySelectorAll('button')[index];
+    setActiveTab(target);
+  });
+}
+</script>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="monitor-java-app.html">« Monitor a Java application</a>
+</span>
+<span class="next">
+</span>
+</div>
+</div>
+</body>
+</html>
