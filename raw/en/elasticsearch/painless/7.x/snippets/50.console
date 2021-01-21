@@ -1,6 +1,7 @@
 POST _watcher/watch/_execute
 {
   "watch" : {
+    "metadata" : { "min_hits": 10000 },
     "trigger" : { "schedule" : { "interval" : "24h" } },
     "input" : {
       "search" : {
@@ -24,17 +25,24 @@ POST _watcher/watch/_execute
         }
       }
     },
+    "condition" : {
+      "script" :
+      """
+        return ctx.payload.hits.total > ctx.metadata.min_hits
+      """
+    },
+    "transform" : {
+      "script" :
+      """
+        def theDate = ZonedDateTime.ofInstant(ctx.execution_time.toInstant(), ctx.execution_time.getZone());
+        return ['human_date': DateTimeFormatter.RFC_1123_DATE_TIME.format(theDate),
+                'aggregations': ctx.payload.aggregations]
+      """
+    },
     "actions" : {
       "my_log" : {
-        "condition": {                                               
-          "script" :
-          """
-            return ctx.payload.aggregations.theatres.buckets.stream()
-              .anyMatch(theatre -> theatre.money.value > 50000)      
-          """
-        },
         "logging" : {
-          "text" : "At least one play has grossed over $50,000: {{ctx.payload.aggregations.theatres.buckets}}"
+          "text" : "The watch was successfully executed on {{ctx.payload.human_date}} and contained {{ctx.payload.aggregations.theatres.buckets.size}} buckets"
         }
       }
     }
