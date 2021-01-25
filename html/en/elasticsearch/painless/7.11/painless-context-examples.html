@@ -130,20 +130,9 @@ Not what you want? See the
 <div class="titlepage"><div><div>
 <h2 class="title"><a id="painless-context-examples"></a>Context examples<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/painless/painless-contexts/painless-context-examples.asciidoc">edit</a></h2>
 </div></div></div>
-<p>To run the examples, index the sample seat data into Elasticsearch. The examples
-must be run sequentially to work correctly.</p>
-<div class="olist orderedlist">
-<ol class="orderedlist">
-<li class="listitem">
-<p>Download the
-<a href="https://download.elastic.co/demos/painless/contexts/seats.json" class="ulink" target="_top">seat data</a>. This
-data set contains booking information for a collection of plays. Each document
-represents a single seat for a play at a particular theater on a specific date
-and time.</p>
-<div class="pre_wrapper lang-js">
-<pre class="programlisting prettyprint lang-js">curl https://download.elastic.co/demos/painless/contexts/seats.json --output seats.json</pre>
-</div>
-<p>Each document contains the following fields:</p>
+<p>Complete the following steps to index the <code class="literal">seat</code> sample data into Elasticsearch. The
+examples for each context rely on this sample data.</p>
+<p>Each document in the <code class="literal">seat</code> data contains the following fields:</p>
 <div class="variablelist">
 <dl class="variablelist">
 <dt>
@@ -228,16 +217,23 @@ The time of the play as a keyword.
 </dd>
 </dl>
 </div>
-</li>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_prerequisites"></a>Prerequisites<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/painless/painless-contexts/painless-context-examples.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Start an <a href="/guide/en/elasticsearch/reference/7.11/getting-started-install.html" class="ulink" target="_top">Elasticsearch instance</a>, and then access the
+<a href="/guide/en/kibana/7.11/console-kibana.html" class="ulink" target="_top">Console</a> in Kibana.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_configure_the_seat_sample_data"></a>Configure the <code class="literal">seat</code> sample data<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.11/docs/painless/painless-contexts/painless-context-examples.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="olist orderedlist">
+<ol class="orderedlist">
 <li class="listitem">
-<a href="/guide/en/elasticsearch/guide/2.x/running-elasticsearch.html" class="ulink" target="_top">Start</a> Elasticsearch. Note these
-examples assume Elasticsearch and Kibana are running locally. To use the Console
-editor with a remote Kibana instance, click the settings icon and enter the
-Console URL. To submit a cURL request to a remote Elasticsearch instance, edit
-the request URL.
-</li>
-<li class="listitem">
-<p>Create <a href="/guide/en/elasticsearch/reference/7.11/mapping.html" class="ulink" target="_top">mappings</a> for the sample data:</p>
+<p>From the Kibana Console, create <a href="/guide/en/elasticsearch/reference/7.11/mapping.html" class="ulink" target="_top">mappings</a> for the sample
+data:</p>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">PUT /seats
 {
@@ -260,18 +256,75 @@ the request URL.
 <div class="console_widget" data-snippet="snippets/27.console"></div>
 </li>
 <li class="listitem">
-Run the <a class="xref" href="painless-ingest-processor-context.html" title="Ingest processor context">ingest processor context</a>
-example. This sets up a script ingest processor used on each document as the
-seat data is indexed.
+<p>Configure a script ingest processor that parses each document as Elasticsearch ingests
+the <code class="literal">seat</code> data:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT /_ingest/pipeline/seats
+{
+  "description": "update datetime for seats",
+  "processors": [
+    {
+      "script": {
+        "source": "String[] dateSplit = ctx.date.splitOnToken('-'); String year = dateSplit[0].trim(); String month = dateSplit[1].trim(); if (month.length() == 1) { month = '0' + month; } String day = dateSplit[2].trim(); if (day.length() == 1) { day = '0' + day; } boolean pm = ctx.time.substring(ctx.time.length() - 2).equals('PM'); String[] timeSplit = ctx.time.substring(0, ctx.time.length() - 2).splitOnToken(':'); int hours = Integer.parseInt(timeSplit[0].trim()); int minutes = Integer.parseInt(timeSplit[1].trim()); if (pm) { hours += 12; } String dts = year + '-' + month + '-' + day + 'T' + (hours &lt; 10 ? '0' + hours : '' + hours) + ':' + (minutes &lt; 10 ? '0' + minutes : '' + minutes) + ':00+08:00'; ZonedDateTime dt = ZonedDateTime.parse(dts, DateTimeFormatter.ISO_OFFSET_DATE_TIME); ctx.datetime = dt.getLong(ChronoField.INSTANT_SECONDS)*1000L;"
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/28.console"></div>
 </li>
 <li class="listitem">
-<p>Index the seat data:</p>
-<div class="pre_wrapper lang-js">
-<pre class="programlisting prettyprint lang-js">curl -XPOST "localhost:9200/seats/_bulk?pipeline=seats" -H "Content-Type: application/x-ndjson" --data-binary "@/&lt;local-file-path&gt;/seats.json"</pre>
+<p>Ingest some sample data using the <code class="literal">seats</code> ingest pipeline that you defined in
+the previous step.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST seats/_bulk?pipeline=seats&amp;refresh=true
+{"create":{"_index":"seats","_id":"1"}}
+{"theatre":"Down Port","play":"Driving","actors":["James Holland","Krissy Smith","Joe Muir","Ryan Earns"],"date":"2018-4-1","time":"3:00PM","row":1,"number":1,"cost":30,"sold":false}
+{"create":{"_index":"seats","_id":"2"}}
+{"theatre":"Down Port","play":"Driving","actors":["James Holland","Krissy Smith","Joe Muir","Ryan Earns"],"date":"2018-4-1","time":"3:00PM","row":1,"number":2,"cost":30,"sold":false}
+{"create":{"_index":"seats","_id":"3"}}
+{"theatre":"Down Port","play":"Driving","actors":["James Holland","Krissy Smith","Joe Muir","Ryan Earns"],"date":"2018-4-1","time":"3:00PM","row":1,"number":3,"cost":30,"sold":true}
+{"create":{"_index":"seats","_id":"4"}}
+{"theatre":"Down Port","play":"Driving","actors":["James Holland","Krissy Smith","Joe Muir","Ryan Earns"],"date":"2018-4-1","time":"3:00PM","row":1,"number":4,"cost":30,"sold":false}
+{"create":{"_index":"seats","_id":"5"}}
+{"theatre":"Down Port","play":"Driving","actors":["James Holland","Krissy Smith","Joe Muir","Ryan Earns"],"date":"2018-4-1","time":"3:00PM","row":1,"number":5,"cost":30,"sold":false}
+{ "create" : { "_index" : "seats", "_id" : "1070" } }
+{ "theatre" : "Down Port", "play" : "Pick It Up", "actors": [ "Joel Madigan", "Jessica Brown", "Baz Knight", "Jo Hangum", "Rachel Grass", "Phoebe Miller" ], "date": "2018-4-2", "time": "8:00PM", "row": 3, "number": 2, "cost": 27.5, "sold": false }
+{ "create" : { "_index" : "seats", "_id" : "1071" } }
+{ "theatre" : "Down Port", "play" : "Pick It Up", "actors": [ "Joel Madigan", "Jessica Brown", "Baz Knight", "Jo Hangum", "Rachel Grass", "Phoebe Miller" ], "date": "2018-4-2", "time": "8:00PM", "row": 3, "number": 3, "cost": 27.5, "sold": false }
+{ "create" : { "_index" : "seats", "_id" : "1072" } }
+{ "theatre" : "Down Port", "play" : "Pick It Up", "actors": [ "Joel Madigan", "Jessica Brown", "Baz Knight", "Jo Hangum", "Rachel Grass", "Phoebe Miller" ], "date": "2018-4-2", "time": "8:00PM", "row": 3, "number": 4, "cost": 27.5, "sold": true }
+{ "create" : { "_index" : "seats", "_id" : "1073" } }
+{ "theatre" : "Down Port", "play" : "Pick It Up", "actors": [ "Joel Madigan", "Jessica Brown", "Baz Knight", "Jo Hangum", "Rachel Grass", "Phoebe Miller" ], "date": "2018-4-2", "time": "8:00PM", "row": 3, "number": 5, "cost": 27.5, "sold": false }
+{ "create" : { "_index" : "seats", "_id" : "1074" } }
+{ "theatre" : "Down Port", "play" : "Pick It Up", "actors": [ "Joel Madigan", "Jessica Brown", "Baz Knight", "Jo Hangum", "Rachel Grass", "Phoebe Miller" ], "date": "2018-4-2", "time": "8:00PM", "row": 3, "number": 6, "cost": 27.5, "sold": false }
+{ "create" : { "_index" : "seats", "_id" : "4762" } }
+{ "theatre" : "Down Port", "play" : "Harriot", "actors": [ "Phoebe Miller", "Sarah Notch", "Brayden Green", "Joshua Iller", "Jon Hittle", "Rob Kettleman", "Laura Conrad", "Simon Hower", "Nora Blue", "Mike Candlestick", "Jacey Bell" ], "date": "2018-8-7", "time": "8:00PM", "row": 1, "number": 10, "cost": 30.0, "sold": false }
+{ "create" : { "_index" : "seats", "_id" : "4763" } }
+{ "theatre" : "Down Port", "play" : "Harriot", "actors": [ "Phoebe Miller", "Sarah Notch", "Brayden Green", "Joshua Iller", "Jon Hittle", "Rob Kettleman", "Laura Conrad", "Simon Hower", "Nora Blue", "Mike Candlestick", "Jacey Bell" ], "date": "2018-8-7", "time": "8:00PM", "row": 1, "number": 11, "cost": 30.0, "sold": false }
+{ "create" : { "_index" : "seats", "_id" : "4764" } }
+{ "theatre" : "Down Port", "play" : "Harriot", "actors": [ "Phoebe Miller", "Sarah Notch", "Brayden Green", "Joshua Iller", "Jon Hittle", "Rob Kettleman", "Laura Conrad", "Simon Hower", "Nora Blue", "Mike Candlestick", "Jacey Bell" ], "date": "2018-8-7", "time": "8:00PM", "row": 1, "number": 12, "cost": 30.0, "sold": false }
+{ "create" : { "_index" : "seats", "_id" : "4765" } }
+{ "theatre" : "Down Port", "play" : "Harriot", "actors": [ "Phoebe Miller", "Sarah Notch", "Brayden Green", "Joshua Iller", "Jon Hittle", "Rob Kettleman", "Laura Conrad", "Simon Hower", "Nora Blue", "Mike Candlestick", "Jacey Bell" ], "date": "2018-8-7", "time": "8:00PM", "row": 2, "number": 1, "cost": 28.75, "sold": true }
+{ "create" : { "_index" : "seats", "_id" : "4766" } }
+{ "theatre" : "Down Port", "play" : "Harriot", "actors": [ "Phoebe Miller", "Sarah Notch", "Brayden Green", "Joshua Iller", "Jon Hittle", "Rob Kettleman", "Laura Conrad", "Simon Hower", "Nora Blue", "Mike Candlestick", "Jacey Bell" ], "date": "2018-8-7", "time": "8:00PM", "row": 2, "number": 2, "cost": 28.75, "sold": false }
+{ "create" : { "_index" : "seats", "_id" : "29539" } }
+{ "theatre" : "Skyline", "play" : "Auntie Jo", "actors": [ "Jo Hangum", "Jon Hittle", "Rob Kettleman", "Laura Conrad", "Simon Hower", "Nora Blue" ], "date": "2018-10-2", "time": "5:40PM", "row": 7, "number": 10, "cost": 22.5, "sold": false }
+{ "create" : { "_index" : "seats", "_id" : "29540" } }
+{ "theatre" : "Skyline", "play" : "Auntie Jo", "actors": [ "Jo Hangum", "Jon Hittle", "Rob Kettleman", "Laura Conrad", "Simon Hower", "Nora Blue" ], "date": "2018-10-2", "time": "5:40PM", "row": 7, "number": 11, "cost": 22.5, "sold": false }
+{ "create" : { "_index" : "seats", "_id" : "29541" } }
+{ "theatre" : "Skyline", "play" : "Auntie Jo", "actors": [ "Jo Hangum", "Jon Hittle", "Rob Kettleman", "Laura Conrad", "Simon Hower", "Nora Blue" ], "date": "2018-10-2", "time": "5:40PM", "row": 7, "number": 12, "cost": 22.5, "sold": true }
+{ "create" : { "_index" : "seats", "_id" : "29542" } }
+{ "theatre" : "Skyline", "play" : "Auntie Jo", "actors": [ "Jo Hangum", "Jon Hittle", "Rob Kettleman", "Laura Conrad", "Simon Hower", "Nora Blue" ], "date": "2018-10-2", "time": "5:40PM", "row": 7, "number": 13, "cost": 22.5, "sold": false }
+{ "create" : { "_index" : "seats", "_id" : "29543" } }
+{ "theatre" : "Skyline", "play" : "Auntie Jo", "actors": [ "Jo Hangum", "Jon Hittle", "Rob Kettleman", "Laura Conrad", "Simon Hower", "Nora Blue" ], "date": "2018-10-2", "time": "5:40PM", "row": 7, "number": 14, "cost": 22.5, "sold": false }</pre>
 </div>
+<div class="console_widget" data-snippet="snippets/29.console"></div>
 </li>
 </ol>
 </div>
+</div>
+
 </div>
 <div class="navfooter">
 <span class="prev">
