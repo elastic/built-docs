@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Restrict cross-namespace resource associations | Elastic Cloud on Kubernetes [1.4] | Elastic</title>
+<link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [1.4]"/>
+<link rel="up" href="k8s-operating-eck.html" title="Operating ECK"/>
+<link rel="prev" href="k8s-webhook.html" title="Configure the validating webhook"/>
+<link rel="next" href="k8s-licensing.html" title="Manage licenses in ECK"/>
+<meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/1.4"/>
+<meta name="DC.subject" content="ECK"/>
+<meta name="DC.identifier" content="1.4"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes [1.4]</a></span>
+»
+<span class="breadcrumb-link"><a href="k8s-operating-eck.html">Operating ECK</a></span>
+»
+<span class="breadcrumb-node">Restrict cross-namespace resource associations</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="k8s-webhook.html">« Configure the validating webhook</a>
+</span>
+<span class="next">
+<a href="k8s-licensing.html">Manage licenses in ECK »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="k8s-restrict-cross-namespace-associations"></a>Restrict cross-namespace resource associations<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/operating-eck/restrict-cross-namespace-associations.asciidoc">edit</a></h2>
+</div></div></div>
+<p>This section describes how to restrict associations that can be created between resources managed by ECK.</p>
+<p>When using the <code class="literal">elasticsearchRef</code> field to establish a connection to Elasticsearch from Kibana, APM Server, Enterprise Search, or Beats resources, by default the association is allowed as long as both resources are deployed to namespaces managed by that particular ECK instance. The association will succeed even if the user creating the association does not have access to one of the namespaces or the Elasticsearch resource.</p>
+<p>The enforcement of access control rules for cross-namespace associations is disabled by default. Once enabled, it only enforces access control for resources deployed across two different namespaces. Associations between resources deployed in the same namespace are not affected.</p>
+<p>Associations are allowed as long as the <code class="literal">ServiceAccount</code> used by the associated resource can execute HTTP <code class="literal">GET</code> requests against the referenced Elasticsearch object.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>ECK automatically removes any associations that do not have the correct access rights. If you have existing associations, do not enable this feature without creating the required <code class="literal">Roles</code> and <code class="literal">RoleBindings</code> as described in the following sections.</p>
+</div>
+</div>
+<p>To enable the restriction of cross-namespace associations, start the operator with the <code class="literal">--enforce-rbac-on-refs</code> flag.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Create a <code class="literal">ClusterRole</code> to allow HTTP <code class="literal">GET</code> requests to be run against Elasticsearch objects:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: elasticsearch-association
+rules:
+  - apiGroups:
+      - elasticsearch.k8s.elastic.co
+    resources:
+      - elasticsearches
+    verbs:
+      - get</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Create a <code class="literal">ServiceAccount</code> and a <code class="literal">RoleBinding</code> in the Elasticsearch namespace to allow any resource using the <code class="literal">ServiceAccount</code> to associate with the Elasticsearch cluster:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">&gt; kubectl create serviceaccount associated-resource-sa</pre>
+</div>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: allow-associated-resource-from-remote-namespace
+  namespace: elasticsearch-ns
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: elasticsearch-association
+subjects:
+  - kind: ServiceAccount
+    name: associated-resource-sa
+    namespace: associated-resource-ns</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Set the <code class="literal">serviceAccountName</code> field in the associated resource to specify which <code class="literal">ServiceAccount</code> is used to create the association:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: kibana.k8s.elastic.co/v1
+kind: Kibana
+metadata:
+  name: associated-resource
+  namespace: associated-resource-ns
+spec:
+ ...
+  elasticsearchRef:
+    name: "elasticsearch-sample"
+    namespace: "elasticsearch-ns"
+  # Service account used by this resource to get access to an Elasticsearch cluster
+  serviceAccountName: associated-resource-sa</pre>
+</div>
+</li>
+</ol>
+</div>
+<p>In the above example, <code class="literal">associated-resource</code> can be of any <code class="literal">Kind</code> that requires an association to be created, for example <code class="literal">Kibana</code> or <code class="literal">ApmServer</code>.
+You can find <a href="https://github.com/elastic/cloud-on-k8s/blob/1.4/config/recipes/associations-rbac/apm_es_kibana_rbac.yaml" class="ulink" target="_top">a complete example in the ECK GitHub repository</a>.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If the <code class="literal">serviceAccountName</code> is not set, ECK uses the default service account assigned to the pod by the <a href="https://kubernetes.io/docs/reference/access-authn-authz/service-accounts-admin/#service-account-admission-controller" class="ulink" target="_top">Service Account Admission Controller</a>.</p>
+</div>
+</div>
+<p>The associated resource <code class="literal">associated-resource</code> is now allowed to create an association with any Elasticsearch cluster in the namespace <code class="literal">elasticsearch-ns</code>.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="k8s-webhook.html">« Configure the validating webhook</a>
+</span>
+<span class="next">
+<a href="k8s-licensing.html">Manage licenses in ECK »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

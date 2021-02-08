@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Common problems | Elastic Cloud on Kubernetes [1.4] | Elastic</title>
+<link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [1.4]"/>
+<link rel="up" href="k8s-troubleshooting.html" title="Troubleshoot ECK"/>
+<link rel="prev" href="k8s-troubleshooting.html" title="Troubleshoot ECK"/>
+<link rel="next" href="k8s-troubleshooting-methods.html" title="Troubleshooting methods"/>
+<meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/1.4"/>
+<meta name="DC.subject" content="ECK"/>
+<meta name="DC.identifier" content="1.4"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes [1.4]</a></span>
+»
+<span class="breadcrumb-link"><a href="k8s-operating-eck.html">Operating ECK</a></span>
+»
+<span class="breadcrumb-link"><a href="k8s-troubleshooting.html">Troubleshoot ECK</a></span>
+»
+<span class="breadcrumb-node">Common problems</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="k8s-troubleshooting.html">« Troubleshoot ECK</a>
+</span>
+<span class="next">
+<a href="k8s-troubleshooting-methods.html">Troubleshooting methods »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="k8s-common-problems"></a>Common problems<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/operating-eck/troubleshooting/common-problems.asciidoc">edit</a></h2>
+</div></div></div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s-common-problems-operator-oom"></a>Operator crashes on startup with <code class="literal">OOMKilled</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/operating-eck/troubleshooting/common-problems.asciidoc">edit</a></h3>
+</div></div></div>
+<p>On very large Kubernetes clusters with many hundreds of resources (pods, secrets, config maps, and so on), the operator may fail to start with its pod getting killed with a <code class="literal">OOMKilled</code> message. This is an issue with the <code class="literal">controller-runtime</code> framework on top of which the operator is built. Even though the operator is only interested in the resources created by itself, the framework code needs to gather information about all relevant resources in the Kubernetes cluster in order to provide the filtered view of cluster state required by the operator. On very large clusters, this information gathering can use up a lot of memory and exceed the default resource limit defined for the operator pod.</p>
+<p>The default <a href="https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#meaning-of-memory" class="ulink" target="_top">memory limit</a> for the operator pod is set to 512 MiB. You can increase (or decrease) this limit to a value suited to your cluster as follows:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl patch sts elastic-operator -n elastic-system -p '{"spec":{"template":{"spec":{"containers":[{"name":"manager", "resources":{"limits":{"memory":"768Mi"}}}]}}}}'</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s-common-problems-webhook-timeout"></a>Timeout when submitting a resource manifest<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/operating-eck/troubleshooting/common-problems.asciidoc">edit</a></h3>
+</div></div></div>
+<p>When submitting a ECK resource manifest, you may encounter an error message similar to the following:</p>
+<pre class="literallayout">Error from server (Timeout): error when creating "elasticsearch.yaml": Timeout: request did not complete within requested timeout 30s</pre>
+
+<p>This error is usually an indication of a problem communicating with the validating webhook. If you are running ECK on a private Google Kubernetes Engine (GKE) cluster, you may need to <a href="https://cloud.google.com/kubernetes-engine/docs/how-to/private-clusters#add_firewall_rules" class="ulink" target="_top">add a firewall rule</a> allowing port 9443 from the API server. Another possible cause for failure is if a strict network policy is in effect. Refer to the <a class="xref" href="k8s-webhook.html#k8s-webhook-troubleshooting-timeouts" title="Resource creation taking too long or timing out">webhook troubleshooting</a> documentation for  more details and workarounds.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s-common-problems-owner-refs"></a>Copying secrets with Owner References<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/operating-eck/troubleshooting/common-problems.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Copying the Elasticsearch Secrets generated by ECK (for instance, the certificate authority or the elastic user) into another namespace wholesale can trigger a <a href="https://github.com/kubernetes/kubernetes/issues/65200" class="ulink" target="_top">Kubernetes bug</a> which can delete all of the Elasticsearch-related resources (for instance, the data volumes). To avoid this, when copying Secrets between namespaces, remove the <code class="literal">metadata.ownerReferences</code> section. For example, a source secret might be:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">kubectl get secret quickstart-es-elastic-user -o yaml
+apiVersion: v1
+data:
+  elastic: NGw2Q2REMjgwajZrMVRRS0hxUDVUUTU0
+kind: Secret
+metadata:
+  creationTimestamp: "2020-06-09T19:11:41Z"
+  labels:
+    common.k8s.elastic.co/type: elasticsearch
+    eck.k8s.elastic.co/credentials: "true"
+    elasticsearch.k8s.elastic.co/cluster-name: quickstart
+  name: quickstart-es-elastic-user
+  namespace: default
+  ownerReferences:
+  - apiVersion: elasticsearch.k8s.elastic.co/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: Elasticsearch
+    name: quickstart
+    uid: c7a9b436-aa07-4341-a2cc-b33b3dfcbe29
+  resourceVersion: "13048277"
+  selfLink: /api/v1/namespaces/default/secrets/quickstart-es-elastic-user
+  uid: 04cdf334-77d3-4de6-a2e8-7a2b23366a27
+type: Opaque</pre>
+</div>
+<p>To copy it to a different namespace, strip the <code class="literal">metadata.ownerReferences</code> field as well as the object-specific data:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: v1
+data:
+  elastic: NGw2Q2REMjgwajZrMVRRS0hxUDVUUTU0
+kind: Secret
+metadata:
+  labels:
+    common.k8s.elastic.co/type: elasticsearch
+    eck.k8s.elastic.co/credentials: "true"
+    elasticsearch.k8s.elastic.co/cluster-name: quickstart
+  name: quickstart-es-elastic-user
+  namespace: default
+type: Opaque</pre>
+</div>
+<p>Failure to do so can cause data loss.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s-common-problems-scale-down"></a>Scale down of Elasticsearch master-eligible Pods seems stuck<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/operating-eck/troubleshooting/common-problems.asciidoc">edit</a></h3>
+</div></div></div>
+<p>If a master-eligible Elasticsarch Pod was never successfully scheduled and the Elasticsearch cluster is running version 7.8 or earlier, ECK may fail to scale down the Pod. To find out whether you are affected, check if the Pod in question is pending:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">&gt; kubectl get pods
+pod/&lt;cluster-name&gt;-es-&lt;nodeset&gt;-1                    0/1     Pending   0          26m    &lt;none&gt;        &lt;none&gt;</pre>
+</div>
+<p>Check the <a class="xref" href="k8s-troubleshooting-methods.html#k8s-get-eck-logs" title="View ECK logs">operator logs</a> for an error similar to:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">"unable to add to voting_config_exclusions: 400 Bad Request: add voting config exclusions request for [&lt;cluster-name&gt;-es-&lt;nodeset&gt;-1] matched no master-eligible nodes",</pre>
+</div>
+<p>To work around this issue, scale down the underlying StatefulSet manually. First, identify the affected StatefulSet and the number of Pods that are ready (symbolized by <code class="literal">m</code> in this example):</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">&gt; kubectl get sts -l elasticsearch.k8s.elastic.co/cluster-name=&lt;cluster-name&gt;
+NAME                       READY   AGE
+&lt;cluster-name&gt;-es-&lt;nodeset&gt;   m/n     44h</pre>
+</div>
+<p>Then, scale down the StatefulSet to the right size <code class="literal">m</code>, removing the pending Pod:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">&gt; kubectl scale --replicas=m  sts/&lt;cluster-name&gt;-es-&lt;nodeset&gt;</pre>
+</div>
+<div class="caution admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Do not use this method to scale down Pods that have already joined the Elasticsearch cluster, as additional data loss protection that ECK applies is sidestepped.</p>
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s-common-problems-pod-updates"></a>Pods are not replaced after a configuration update<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/operating-eck/troubleshooting/common-problems.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The update of an existing Elasticsearch cluster configuration can fail because the operator is unable to apply the changes required while replacing the pods of a given Elasticsearch cluster.</p>
+<p>A key indicator is when the Phase of the Elasticsearch resource is in <code class="literal">ApplyingChanges</code> state for too long:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl get es
+
+NAME                  HEALTH   NODES    VERSION   PHASE            AGE
+elasticsearch-sample  yellow   2        7.9.2     ApplyingChanges  36m</pre>
+</div>
+<p>Possible causes include:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>The Elasticsearch cluster is not healthy</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl get elasticsearch
+
+NAME                                                              HEALTH   NODES   VERSION   PHASE   AGE
+elasticsearch.elasticsearch.k8s.elastic.co/elasticsearch-sample   yellow   1       7.9.2     Ready   3m50s</pre>
+</div>
+<p>In this case, you have to <a href="/guide/en/elasticsearch/reference/7.10/cluster-allocation-explain.html" class="ulink" target="_top">check</a> and fix your shard allocations.  The <a href="/guide/en/elasticsearch/reference/7.10/cluster-health.html" class="ulink" target="_top">cluster health</a>, <a href="/guide/en/elasticsearch/reference/7.10/cat-shards.html" class="ulink" target="_top">cat shards</a>, and <a class="xref" href="k8s-deploy-elasticsearch.html#k8s-elasticsearch-monitor-cluster-health" title="Monitor cluster health and creation progress">get Elasticsearch</a> APIs can assist in tracking the shard recover process.</p>
+</li>
+<li class="listitem">
+<p>Scheduling issues</p>
+<p>The scheduling fails with the following message:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl get events --sort-by='{.lastTimestamp}' | tail
+
+LAST SEEN   TYPE      REASON             OBJECT                        MESSAGE
+10s         Warning   FailedScheduling   pod/quickstart-es-default-2   0/3 nodes are available: 3 Insufficient memory.</pre>
+</div>
+<p>As an alternative, to get more specific information about a given pod, you can use the following command:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl get pod elasticsearch-sample-es-default-2  -o go-template="{{.status}}"
+map[conditions:[map[lastProbeTime:&lt;nil&gt; lastTransitionTime:2020-12-07T09:31:06Z message:0/3 nodes are available: 3 Insufficient cpu. reason:Unschedulable status:False type:PodScheduled]] phase:Pending qosClass:Guaranteed]</pre>
+</div>
+</li>
+<li class="listitem">
+<p>The operator is not able to restart some nodes</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl -n elastic-system logs statefulset.apps/elastic-operator | tail
+
+{"log.level":"info","@timestamp":"2020-11-19T17:34:48.769Z","log.logger":"driver","message":"Cannot restart some nodes for upgrade at this time","service.version":"1.3.0+6db1914b","service.type":"eck","ecs.version":"1.4.0","namespace":"default","es_name":"quickstart","failed_predicates":{"do_not_restart_healthy_node_if_MaxUnavailable_reached":["quickstart-es-default-1","quickstart-es-default-0"]}}</pre>
+</div>
+<p>A pod is stuck in a <code class="literal">Pending</code> status:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl get pods
+
+NAME                      READY   STATUS    RESTARTS   AGE
+quickstart-es-default-0   1/1     Running   0          146m
+quickstart-es-default-1   1/1     Running   0          146m
+quickstart-es-default-2   0/1     Pending   0          134m</pre>
+</div>
+<p>In this case, you have to add more K8s nodes, or free up resources.</p>
+</li>
+</ul>
+</div>
+<p>For more information, see <a class="xref" href="k8s-troubleshooting-methods.html" title="Troubleshooting methods">Troubleshooting methods</a>.</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="k8s-troubleshooting.html">« Troubleshoot ECK</a>
+</span>
+<span class="next">
+<a href="k8s-troubleshooting-methods.html">Troubleshooting methods »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

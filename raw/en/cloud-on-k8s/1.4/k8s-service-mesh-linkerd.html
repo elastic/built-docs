@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Linkerd | Elastic Cloud on Kubernetes [1.4] | Elastic</title>
+<link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [1.4]"/>
+<link rel="up" href="k8s-service-meshes.html" title="Service meshes"/>
+<link rel="prev" href="k8s-service-mesh-istio.html" title="Istio"/>
+<link rel="next" href="k8s-traffic-splitting.html" title="Traffic Splitting"/>
+<meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/1.4"/>
+<meta name="DC.subject" content="ECK"/>
+<meta name="DC.identifier" content="1.4"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes [1.4]</a></span>
+»
+<span class="breadcrumb-link"><a href="k8s-advanced-topics.html">Advanced topics</a></span>
+»
+<span class="breadcrumb-link"><a href="k8s-service-meshes.html">Service meshes</a></span>
+»
+<span class="breadcrumb-node">Linkerd</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="k8s-service-mesh-istio.html">« Istio</a>
+</span>
+<span class="next">
+<a href="k8s-traffic-splitting.html">Traffic Splitting »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="k8s-service-mesh-linkerd"></a>Linkerd<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/advanced-topics/service-meshes.asciidoc">edit</a></h2>
+</div></div></div>
+<p>The following sections describe how to connect the operator and managed resources to the Linkerd service mesh. It is assumed that Linkerd is already installed and configured on your Kubernetes cluster. If you are new to Linkerd, refer to the <a href="https://linkerd.io" class="ulink" target="_top">product documentation</a> for more information and installation instructions.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>These instructions have been tested with Linkerd 2.7.0.</p>
+</div>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s-service-mesh-linkerd-operator-connection"></a>Connect the operator to the Linkerd service mesh<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/advanced-topics/service-meshes.asciidoc">edit</a></h3>
+</div></div></div>
+<p>In order to connect the operator to the service mesh, Linkerd sidecar must be injected into the ECK deployment. This can be done during installation as follows:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">linkerd inject https://download.elastic.co/downloads/eck/1.4.0/all-in-one.yaml | kubectl apply -f -</pre>
+</div>
+<p>Confirm that the operator is now meshed:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">linkerd stat sts/elastic-operator -n elastic-system</pre>
+</div>
+<p>If the installation was successful, the output of the above command should show <code class="literal">1/1</code> under the <code class="literal">MESHED</code> column.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s-service-mesh-linkerd-stack-connection"></a>Connect Elastic Stack applications to the Linkerd service mesh<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/advanced-topics/service-meshes.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The easiest way to connect applications to the service mesh is by adding the <code class="literal">linkerd.io/inject: enabled</code> annotation to the deployment namespace. For example, if you are planning to deploy Elastic Stack applications to a namespace named <code class="literal">elastic-stack</code>, annotate it as follows to enable <a href="https://linkerd.io/2/features/proxy-injection/" class="ulink" target="_top">automatic Linkerd sidecar injection</a>.</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl annotate namespace elastic-stack linkerd.io/inject=enabled</pre>
+</div>
+<p>Any Elasticsearch, Kibana, or APM Server resources deployed to a namespace with the above annotation will automatically join the mesh.</p>
+<p>Alternatively, if you only want specific resources to join the mesh, add the <code class="literal">linkerd.io/inject: enabled</code> annotation to the <code class="literal">podTemplate</code> (see <a class="xref" href="k8s-api-reference.html" title="API Reference">API documentation</a>) of the resource as follows:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">podTemplate:
+  metadata:
+    annotations:
+      linkerd.io/inject: enabled</pre>
+</div>
+<p>If automatic sidecar injection is enabled and <a href="https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#use-the-default-service-account-to-access-the-api-server" class="ulink" target="_top">auto mounting of service account tokens</a> is not disabled on your Kubernetes cluster, examples defined elsewhere in the ECK documentation will continue to work under Linkerd without requiring any modifications. However, as the default behaviour of ECK is to enable TLS for Elasticsearch, Kibana and APM Server resources, you will not be able to view detailed traffic information from Linkerd dashboards and command-line utilities. The following sections illustrate the optional configuration necessary to enhance the integration of Elastic Stack applications with Linkerd.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="k8s-service-mesh-linkerd-elasticsearch"></a>Elasticsearch<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/advanced-topics/service-meshes.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: elastic-linkerd
+spec:
+  version: 7.10.2
+  http:
+    tls: <a id="CO13-1"></a><i class="conum" data-value="1"></i>
+      selfSignedCertificate:
+        disabled: true
+  nodeSets:
+  - name: default
+    count: 3
+    config:
+      node.store.allow_mmap: false
+    podTemplate:
+      metadata:
+        annotations:
+          linkerd.io/inject: enabled <a id="CO13-2"></a><i class="conum" data-value="2"></i>
+      spec:
+        automountServiceAccountToken: true <a id="CO13-3"></a><i class="conum" data-value="3"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO13-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Disable automatic TLS to allow Linkerd to gather more statistics about connections (optional).</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO13-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Explicitly enable sidecar injection (optional if the namespace is already annotated).</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO13-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Enable service account token mounting to provide service identity (only required to enable mTLS if service account auto-mounting is disabled).</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="k8s-service-mesh-linkerd-kibana-apm"></a>Kibana and APM Server<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/advanced-topics/service-meshes.asciidoc">edit</a></h4>
+</div></div></div>
+<p>The configuration is almost identical for Kibana and APM Server resources.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: ...
+kind: ...
+metadata:
+  name: elastic-linkerd
+spec:
+  version: 7.10.2
+  count: 1
+  elasticsearchRef:
+    name: elastic-linkerd
+  http:
+    tls: <a id="CO14-1"></a><i class="conum" data-value="1"></i>
+      selfSignedCertificate:
+        disabled: true
+  podTemplate:
+    metadata:
+      annotations:
+        linkerd.io/inject: enabled <a id="CO14-2"></a><i class="conum" data-value="2"></i>
+    spec:
+      automountServiceAccountToken: true <a id="CO14-3"></a><i class="conum" data-value="3"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO14-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Disable automatic TLS to allow Linkerd to gather more statistics about connections (optional).</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO14-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Explicitly enable sidecar injection (optional if the namespace is already annotated).</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO14-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Enable service account token mounting to provide service identity (only required to enable mTLS if service account auto-mounting is disabled).</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="k8s-service-mesh-istio.html">« Istio</a>
+</span>
+<span class="next">
+<a href="k8s-traffic-splitting.html">Traffic Splitting »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Create automated snapshots | Elastic Cloud on Kubernetes [1.4] | Elastic</title>
+<link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [1.4]"/>
+<link rel="up" href="k8s-elasticsearch-specification.html" title="Run Elasticsearch on ECK"/>
+<link rel="prev" href="k8s-advanced-node-scheduling.html" title="Advanced Elasticsearch node scheduling"/>
+<link rel="next" href="k8s-remote-clusters.html" title="Remote clusters"/>
+<meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/1.4"/>
+<meta name="DC.subject" content="ECK"/>
+<meta name="DC.identifier" content="1.4"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes [1.4]</a></span>
+»
+<span class="breadcrumb-link"><a href="k8s-orchestrating-elastic-stack-applications.html">Orchestrating Elastic Stack applications</a></span>
+»
+<span class="breadcrumb-link"><a href="k8s-elasticsearch-specification.html">Run Elasticsearch on ECK</a></span>
+»
+<span class="breadcrumb-node">Create automated snapshots</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="k8s-advanced-node-scheduling.html">« Advanced Elasticsearch node scheduling</a>
+</span>
+<span class="next">
+<a href="k8s-remote-clusters.html">Remote clusters »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="k8s-snapshots"></a>Create automated snapshots<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/orchestrating-elastic-stack-applications/elasticsearch/snapshots.asciidoc">edit</a></h2>
+</div></div></div>
+<p>To set up automated snapshots for Elasticsearch on Kubernetes you have to:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Ensure you have the necessary Elasticsearch storage plugin installed.
+</li>
+<li class="listitem">
+Add snapshot repository credentials to the Elasticsearch keystore.
+</li>
+<li class="listitem">
+Register the snapshot repository with the Elasticsearch API.
+</li>
+<li class="listitem">
+Set up a <a href="https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/" class="ulink" target="_top">CronJob</a> to take snapshots on a schedule.
+</li>
+</ol>
+</div>
+<p>The examples below use the <a href="/guide/en/elasticsearch/plugins/master/repository-gcs.html" class="ulink" target="_top">Google Cloud Storage Repository Plugin</a>.</p>
+<p>For more information on Elasticsearch snapshots, see <a href="/guide/en/elasticsearch/reference/current/modules-snapshots.html" class="ulink" target="_top">Snapshot and Restore</a>.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s-install-plugin"></a>Install the storage repository plugin<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/orchestrating-elastic-stack-applications/elasticsearch/snapshots.asciidoc">edit</a></h3>
+</div></div></div>
+<p>To install the storage repository plugin, you can either use a <a class="xref" href="k8s-custom-images.html" title="Create custom images">custom image</a> or <a class="xref" href="k8s-init-containers-plugin-downloads.html" title="Init containers for plugin downloads">add your own init container</a> which
+installs the plugin when the Pod is created.</p>
+<p>To use your own custom image with all necessary plugins pre-installed, use an Elasticsearch resource like the following one:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: elasticsearch-sample
+spec:
+  version: 7.10.2
+  image: your/custom/image:tag
+  nodeSets:
+  - name: default
+    count: 1</pre>
+</div>
+<p>Alternatively, install the plugin when the Pod is created by using an init container:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: elasticsearch-sample
+spec:
+  version: 7.10.2
+  nodeSets:
+  - name: default
+    count: 1
+    podTemplate:
+      spec:
+        initContainers:
+        - name: install-plugins
+          command:
+          - sh
+          - -c
+          - |
+            bin/elasticsearch-plugin install --batch repository-gcs</pre>
+</div>
+<p>Assuming you stored this in a file called <code class="literal">elasticsearch.yaml</code> you can in both cases create the Elasticsearch cluster with:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl apply -f elasticsearch.yaml</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s-secure-settings"></a>Configure GCS credentials via the Elasticsearch keystore<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/orchestrating-elastic-stack-applications/elasticsearch/snapshots.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The Elasticsearch GCS repository plugin requires a JSON file that contains service account credentials. These need to be added as secure settings to the Elasticsearch keystore. For more details, see <a href="/guide/en/elasticsearch/plugins/master/repository-gcs-usage.html" class="ulink" target="_top">Google Cloud Storage Repository Plugin</a>.</p>
+<p>Using ECK, you can automatically inject secure settings into a cluster node by providing them through a secret in the Elasticsearch Spec.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Create a file containing the GCS credentials. For this example, name it <code class="literal">gcs.client.default.credentials_file</code>. The file name is important as it is reflected in the secure setting.</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+  "type": "service_account",
+  "project_id": "your-project-id",
+  "private_key_id": "...",
+  "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
+  "client_email": "service-account-for-your-repository@your-project-id.iam.gserviceaccount.com",
+  "client_id": "...",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://accounts.google.com/o/oauth2/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/your-bucket@your-project-id.iam.gserviceaccount.com"
+}</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Create a Kubernetes secret from that file:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl create secret generic gcs-credentials --from-file=gcs.client.default.credentials_file</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Edit the <code class="literal">secureSettings</code> section of the Elasticsearch resource:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: elasticsearch-sample
+spec:
+  version: 7.10.2
+  # Inject secure settings into Elasticsearch nodes from a k8s secret reference
+  secureSettings:
+  - secretName: gcs-credentials</pre>
+</div>
+<p>If you did not follow the instructions above and named your GCS credentials file differently, you can still map it to the expected name now. See <a class="xref" href="k8s-es-secure-settings.html" title="Secure settings">Secure Settings</a> for details.</p>
+</li>
+<li class="listitem">
+<p>Apply the modifications:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">kubectl apply -f elasticsearch.yml</pre>
+</div>
+</li>
+</ol>
+</div>
+<p>GCS credentials are automatically propagated into each Elasticsearch node&#8217;s keystore. It can take up to a few minutes, depending on the number of secrets in the keystore. You don&#8217;t have to restart the nodes.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s-create-repository"></a>Register the repository in Elasticsearch<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/orchestrating-elastic-stack-applications/elasticsearch/snapshots.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Create the GCS snapshot repository in Elasticsearch. You can either use the <a href="/guide/en/kibana/current/snapshot-repositories.html" class="ulink" target="_top">Snapshot and Restore UI</a> in Kibana version 7.4.0 or higher, or follow the procedure described in <a href="/guide/en/elasticsearch/reference/current/modules-snapshots.html" class="ulink" target="_top">Snapshot and Restore</a>:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">PUT /_snapshot/my_gcs_repository
+{
+  "type": "gcs",
+  "settings": {
+    "bucket": "my_bucket",
+    "client": "default"
+  }
+}</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Take a snapshot with the following HTTP request:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">PUT /_snapshot/my_gcs_repository/test-snapshot</pre>
+</div>
+</li>
+</ol>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s-setup-cronjob"></a>Periodic snapshots with Snapshot Lifecycle Management<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/orchestrating-elastic-stack-applications/elasticsearch/snapshots.asciidoc">edit</a></h3>
+</div></div></div>
+<p>You can use the <a href="/guide/en/elasticsearch/reference/current/snapshot-lifecycle-management-api.html" class="ulink" target="_top">snapshot lifecycle management APIs</a> to manage policies for the time and frequency of automatic snapshots (in version 7.4.0 or higher).</p>
+<p>The <a href="/guide/en/kibana/current/snapshot-repositories.html" class="ulink" target="_top">Snapshot and Restore UI</a> allows you to manage these policies directly in Kibana.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s_periodic_snapshots_with_a_cronjob"></a>Periodic snapshots with a CronJob<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/1.4/docs/orchestrating-elastic-stack-applications/elasticsearch/snapshots.asciidoc">edit</a></h3>
+</div></div></div>
+<p>If you are running older versions of Elasticsearch without the snapshot lifecycle management feature, you can still set up a simple CronJob to take a snapshot every day.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Make an HTTP request against the appropriate endpoint, using a daily snapshot naming format. Elasticsearch credentials are mounted as a volume into the job&#8217;s Pod:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml"># snapshotter.yml
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: elasticsearch-sample-snapshotter
+spec:
+  schedule: "@daily"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: snapshotter
+            image: centos:7
+            volumeMounts:
+              - name: es-basic-auth
+                mountPath: /mnt/elastic/es-basic-auth
+            command:
+            - /bin/bash
+            args:
+            - -c
+            - 'curl -s -i -k -u "elastic:$(&lt;/mnt/elastic/es-basic-auth/elastic)" -XPUT "https://elasticsearch-sample-es-http:9200/_snapshot/my_gcs_repository/%3Csnapshot-%7Bnow%2Fd%7D%3E" | tee /dev/stderr | grep "200 OK"'
+          restartPolicy: OnFailure
+          volumes:
+          - name: es-basic-auth
+            secret:
+              secretName: elasticsearch-sample-elastic-user</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Apply it to the Kubernetes cluster:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl apply -f snapshotter.yml</pre>
+</div>
+</li>
+</ol>
+</div>
+<p>For more details, see <a href="https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/" class="ulink" target="_top">Kubernetes CronJobs</a>.</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="k8s-advanced-node-scheduling.html">« Advanced Elasticsearch node scheduling</a>
+</span>
+<span class="next">
+<a href="k8s-remote-clusters.html">Remote clusters »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
