@@ -1,6 +1,7 @@
 POST _watcher/watch/_execute
 {
   "watch" : {
+    "metadata" : { "min_hits": 10 },
     "trigger" : { "schedule" : { "interval" : "24h" } },
     "input" : {
       "search" : {
@@ -24,26 +25,24 @@ POST _watcher/watch/_execute
         }
       }
     },
+    "condition" : {
+      "script" :
+      """
+        return ctx.payload.hits.total > ctx.metadata.min_hits
+      """
+    },
+    "transform" : {
+      "script" :
+      """
+        def theDate = ZonedDateTime.ofInstant(ctx.execution_time.toInstant(), ctx.execution_time.getZone());
+        return ['human_date': DateTimeFormatter.RFC_1123_DATE_TIME.format(theDate),
+                'aggregations': ctx.payload.aggregations]
+      """
+    },
     "actions" : {
-      "mod_log" : {
-        "transform": {                                                               
-          "script" :
-          """
-          def formatter = NumberFormat.getCurrencyInstance();
-          return [
-            'msg': ctx.payload.aggregations.theatres.buckets.stream()
-              .map(t-> formatter.format(t.money.value) + ' for the play ' + t.key)
-              .collect(Collectors.joining(", "))
-          ]
-          """
-        },
+      "my_log" : {
         "logging" : {
-          "text" : "The output of the payload was transformed to: {{ctx.payload.msg}}"
-        }
-      },
-      "unmod_log" : {                                                                
-        "logging" : {
-          "text" : "The output of the payload was not transformed and this value should not exist: {{ctx.payload.msg}}"
+          "text" : "The watch was successfully executed on {{ctx.payload.human_date}} and contained {{ctx.payload.aggregations.theatres.buckets.size}} buckets"
         }
       }
     }
