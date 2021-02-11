@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Migrate the cross-cluster search deployment template | Elasticsearch Service Documentation | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Service Documentation"/>
+<link rel="up" href="ec-enable-ccs.html" title="Enable cross-cluster search and cross-cluster replication"/>
+<link rel="prev" href="ec-enable-ccs.html" title="Enable cross-cluster search and cross-cluster replication"/>
+<link rel="next" href="ec-enable-enterprise-search.html" title="Enable Enterprise Search"/>
+<meta name="DC.type" content="Learn/Docs/Cloud/Reference"/>
+<meta name="DC.subject" content="Elastic Cloud"/>
+<meta name="DC.identifier" content="ms-52"/>
+</head>
+<body>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Service Documentation</a></span>
+»
+<span class="breadcrumb-link"><a href="ec-configure.html">Configuring your deployment</a></span>
+»
+<span class="breadcrumb-link"><a href="ec-enable-ccs.html">Enable cross-cluster search and cross-cluster replication</a></span>
+»
+<span class="breadcrumb-node">Migrate the cross-cluster search deployment template</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="ec-enable-ccs.html">« Enable cross-cluster search and cross-cluster replication</a>
+</span>
+<span class="next">
+<a href="ec-enable-enterprise-search.html">Enable Enterprise Search »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="ec-migrate-ccs"></a>Migrate the cross-cluster search deployment template<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/cloud/edit/ms-52/docs/saas/ec-migrate-ccs.asciidoc">edit</a></h2>
+</div></div></div>
+<p>The cross-cluster search deployment template is now deprecated and has been removed from the Elasticsearch Service user console. You no longer need to use the dedicated cross-cluster template to search across deployments. Instead, you can now use any template to <a class="xref" href="ec-enable-ccs.html" title="Enable cross-cluster search and cross-cluster replication">configure remote clusters</a> and search across them when using stack version 6.7 or above. Existing deployments created using this template are not affected, but they are required to migrate to another template before upgrading to the next 8.0 major version.</p>
+<p>There are two different approaches to do this migration:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="ec-migrate-ccs.html#ec-migrate-ccs-deployment-using-api" title="Use the API to migrate deployments that use the cross-cluster search template">Migrate using the API</a>
+</li>
+<li class="listitem">
+<a class="xref" href="ec-migrate-ccs.html#ec-migrate-ccs-deployment-using-snapshot" title="Use a snapshot to migrate deployments that use the cross-cluster search deployment template">Migrate using a snapshot</a>
+</li>
+</ul>
+</div>
+<h3><a id="ec-migrate-ccs-deployment-using-api"></a>Use the API to migrate deployments that use the cross-cluster search template<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/cloud/edit/ms-52/docs/saas/ec-migrate-ccs.asciidoc">edit</a></h3>
+<p>You can use a PUT request to update your deployment, changing both the deployment template ID and the instances required by the new template.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>First, choose the new template you want to use and obtain its ID. This template ID can be obtained from the <a href="https://cloud.elastic.co?baymax=docs-body&amp;elektra=docs" class="ulink" target="_top">Elasticsearch Service Console</a> <span class="strong strong"><strong>Create Deployment</strong></span> page by clicking <span class="strong strong"><strong>Equivalent API request</strong></span> and inspecting the result for the field <code class="literal">deployment_template</code>. For example, we are going to use the "IO Optimized" deployment template, and in our GCP region the id is <code class="literal">gcp-io-optimized</code>.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/ec-migrate-deployment-template.png" alt="Deployment Template ID">
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Make a request to update your deployment with two changes:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Under <code class="literal">deployment_template</code>, set <code class="literal">id</code> to the value obtained in the previous step.
+</li>
+<li class="listitem">
+Change the cluster topology to match the new template that your deployment will migrate to.
+</li>
+</ol>
+</div>
+</li>
+</ol>
+</div>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">curl -k -H 'Content-Type: application/json' -X PUT -H "Authorization: ApiKey $ECE_API_KEY" https://COORDINATOR_HOST:12443/api/v1/deployments/$DEPLOYMENT_ID -d "{
+    "prune_orphans": false,
+    "resources": {
+        "elasticsearch": [
+            {
+                "region": "$REGION",
+                "settings": {
+                    "dedicated_masters_threshold": 6
+                },
+                "plan": {
+                    "cluster_topology": [
+                        {
+                            "zone_count": 2,
+                            "node_roles" : [
+                              "master",
+                              "ingest",
+                              "remote_cluster_client",
+                              "data_hot",
+                              "transform",
+                              "data_content"
+                            ],
+                            "elasticsearch": {
+                                "enabled_built_in_plugins": [],
+                                "node_attributes": {
+                                    "data": "hot"
+                                }
+                            },
+                            "autoscaling_max": {
+                              "resource": "memory",
+                              "value": 131072
+                            },
+                            "instance_configuration_id": "gcp.data.highio.1",
+                            "id": "hot_content",
+                            "size": {
+                                "resource": "memory",
+                                "value": 8192
+                            }
+                        },
+                        {
+                            "zone_count": 1,
+                            "node_roles" : [
+                              "ml",
+                              "remote_cluster_client"
+                            ],
+                            "elasticsearch": {
+                                "enabled_built_in_plugins": []
+                            },
+                            "autoscaling_max": {
+                              "resource": "memory",
+                              "value": 65536
+                            },
+                            "instance_configuration_id": "gcp.ml.1",
+                            "id": "ml",
+                            "size": {
+                                "resource": "memory",
+                                "value": 0
+                            }
+                        },
+                        {
+                            "zone_count": 2,
+                            "elasticsearch": {
+                                "enabled_built_in_plugins": []
+                            },
+                            "instance_configuration_id": "gcp.coordinating.1",
+                            "node_roles": [
+                                "ingest",
+                                "remote_cluster_client"
+                            ],
+                            "id": "coordinating",
+                            "size": {
+                                "resource": "memory",
+                                "value": 0
+                            }
+                        },
+                        {
+                            "zone_count": 2,
+                            "elasticsearch": {
+                                "enabled_built_in_plugins": [],
+                                "node_attributes": {
+                                    "data": "warm"
+                                }
+                            },
+                            "autoscaling_max": {
+                                "resource": "memory",
+                                "value": 131072
+                            },
+                            "instance_configuration_id": "gcp.data.highstorage.1",
+                            "node_roles": [
+                                "data_warm",
+                                "remote_cluster_client"
+                            ],
+                            "id": "warm",
+                            "size": {
+                                "resource": "memory",
+                                "value": 0
+                            }
+                        },
+                        {
+                            "zone_count": 1,
+                            "elasticsearch": {
+                                "enabled_built_in_plugins": [],
+                                "node_attributes": {
+                                    "data": "cold"
+                                }
+                            },
+                            "autoscaling_max": {
+                                "resource": "memory",
+                                "value": 65536
+                            },
+                            "instance_configuration_id": "gcp.data.highstorage.1",
+                            "node_roles": [
+                                "data_cold",
+                                "remote_cluster_client"
+                            ],
+                            "id": "cold",
+                            "size": {
+                                "resource": "memory",
+                                "value": 0
+                            }
+                        },
+                        {
+                            "zone_count": 3,
+                            "elasticsearch": {
+                                "enabled_built_in_plugins": []
+                            },
+                            "instance_configuration_id": "gcp.master.1",
+                            "node_roles": [
+                                "master"
+                            ],
+                            "id": "master",
+                            "size": {
+                                "resource": "memory",
+                                "value": 0
+                            }
+                        }
+                    ],
+                    "elasticsearch": {
+                        "version": "7.11.0"
+                    },
+                    "deployment_template": {
+                        "id": "gcp-io-optimized"
+                    }
+                },
+                "ref_id": "main-elasticsearch"
+            }
+        ],
+        "enterprise_search": [
+            {
+                "elasticsearch_cluster_ref_id": "main-elasticsearch",
+                "region": "$REGION",
+                "plan": {
+                    "cluster_topology": [
+                        {
+                            "node_type": {
+                                "connector": true,
+                                "appserver": true,
+                                "worker": true
+                            },
+                            "instance_configuration_id": "gcp.enterprisesearch.1",
+                            "zone_count": 2,
+                            "size": {
+                                "resource": "memory",
+                                "value": 0
+                            }
+                        }
+                    ],
+                    "enterprise_search": {}
+                },
+                "ref_id": "enterprise_search-ref-id"
+            }
+        ],
+        "kibana": [
+            {
+                "elasticsearch_cluster_ref_id": "main-elasticsearch",
+                "region": "$REGION",
+                "plan": {
+                    "cluster_topology": [
+                        {
+                            "instance_configuration_id": "gcp.kibana.1",
+                            "zone_count": 1,
+                            "size": {
+                                "resource": "memory",
+                                "value": 1024
+                            }
+                        }
+                    ],
+                    "kibana": {
+                        "version": "7.11.0"
+                    }
+                },
+                "ref_id": "main-kibana"
+            }
+        ],
+        "apm": [
+            {
+                "elasticsearch_cluster_ref_id": "main-elasticsearch",
+                "region": "$REGION",
+                "plan": {
+                    "cluster_topology": [
+                        {
+                            "instance_configuration_id": "gcp.apm.1",
+                            "zone_count": 1,
+                            "size": {
+                                "resource": "memory",
+                                "value": 512
+                            }
+                        }
+                    ],
+                    "apm": {}
+                },
+                "ref_id": "apm-ref-id"
+            }
+        ]
+    }
+}"</pre>
+</div>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">DEPLOYMENT_ID</code>
+</span>
+</dt>
+<dd>
+The ID of your deployment, as shown in the Cloud UI or obtained through the API.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">REGION</code>
+</span>
+</dt>
+<dd>
+The region of your deployment, as shown in the Cloud UI or obtained through the API.
+</dd>
+</dl>
+</div>
+<p>Note that the <code class="literal">ref_id</code> and version numbers for your resources may not the be same as shown in this example. Make sure to use the ones your deployment has.</p>
+<h3><a id="ec-migrate-ccs-deployment-using-snapshot"></a>Use a snapshot to migrate deployments that use the cross-cluster search deployment template<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/cloud/edit/ms-52/docs/saas/ec-migrate-ccs.asciidoc">edit</a></h3>
+<p>You can make this change in the user <a href="https://cloud.elastic.co?baymax=docs-body&amp;elektra=docs" class="ulink" target="_top">Elasticsearch Service Console</a>. The only drawback of this method is that it changes the URL used to access the Elasticsearch cluster and Kibana.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+From the deployment menu, open the <span class="strong strong"><strong>Snapshots</strong></span> page and click <span class="strong strong"><strong>Take Snapshot now</strong></span>. Wait for the snapshot to finish.
+</li>
+<li class="listitem">
+<p>From the main <span class="strong strong"><strong>Deployments</strong></span> page, click <span class="strong strong"><strong>Create deployment</strong></span> and select any available template. Expand <span class="strong strong"><strong>Deployment settings</strong></span> to choose a <span class="strong strong"><strong>Snapshot source</strong></span>, and then select your deployment and the snapshot that you created.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/ec-create-from-snapshot.png" alt="Create a Deployment using a snapshot">
+</div>
+</div>
+</li>
+</ol>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="ec-enable-ccs.html">« Enable cross-cluster search and cross-cluster replication</a>
+</span>
+<span class="next">
+<a href="ec-enable-enterprise-search.html">Enable Enterprise Search »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
