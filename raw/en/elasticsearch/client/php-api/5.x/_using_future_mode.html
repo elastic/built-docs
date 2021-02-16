@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Using Future Mode | Elasticsearch-PHP [5.x] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch-PHP [5.x]"/>
+<link rel="up" href="_future_mode.html" title="Future Mode"/>
+<link rel="prev" href="_future_mode.html" title="Future Mode"/>
+<link rel="next" href="_changing_batch_size.html" title="Changing batch size"/>
+<meta name="DC.type" content="Learn/Docs/Clients/PHP/5.x"/>
+<meta name="DC.subject" content="Clients"/>
+<meta name="DC.identifier" content="5.x"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+<strong>IMPORTANT</strong>: No additional bug fixes or documentation updates
+will be released for this version. For the latest information, see the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch-PHP [5.x]</a></span>
+»
+<span class="breadcrumb-link"><a href="_future_mode.html">Future Mode</a></span>
+»
+<span class="breadcrumb-node">Using Future Mode</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="_future_mode.html">« Future Mode</a>
+</span>
+<span class="next">
+<a href="_changing_batch_size.html">Changing batch size »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="_using_future_mode"></a>Using Future Mode<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch-php/edit/5.x/docs/futures.asciidoc">edit</a></h2>
+</div></div></div>
+<p>Utilizing this feature is relatively straightforward, but it does introduce more responsibility into your code.  To enable
+future mode, set the <code class="literal">future</code> flag in the client options to <code class="literal">'lazy'</code>:</p>
+<div class="pre_wrapper lang-php">
+<pre class="programlisting prettyprint lang-php">$client = ClientBuilder::create()-&gt;build();
+
+$params = [
+    'index' =&gt; 'test',
+    'type' =&gt; 'test',
+    'id' =&gt; 1,
+    'client' =&gt; [
+        'future' =&gt; 'lazy'
+    ]
+];
+
+$future = $client-&gt;get($params);</pre>
+</div>
+<p>This will return a <em>future</em>, rather than the actual response.  A future represents a <em>future computation</em> and acts like
+a placeholder.  You can pass a future around your code like a regular object.  When you need the result values, you
+can <em>resolve</em> the future.  If the future has already resolved (due to some other activity), the values will be immediately
+available.  If the future has not resolved yet, the resolution will block until those values have become available (e.g.
+after the API call completes).</p>
+<p>In practice, this means you can queue up a batch of requests by using <code class="literal">future: lazy</code> and they will pend until you resolve
+the futures, at which time all requests will be sent in parallel to the cluster and return asynchronously to curl.</p>
+<p>This sounds tricky, but it is actually very simple thanks to RingPHP&#8217;s <code class="literal">FutureArray</code> interface, which makes the future
+act like a simple associative array.  For example:</p>
+<div class="pre_wrapper lang-php">
+<pre class="programlisting prettyprint lang-php">$client = ClientBuilder::create()-&gt;build();
+
+$params = [
+    'index' =&gt; 'test',
+    'type' =&gt; 'test',
+    'id' =&gt; 1,
+    'client' =&gt; [
+        'future' =&gt; 'lazy'
+    ]
+];
+
+$future = $client-&gt;get($params);
+
+$doc = $future['_source'];    // This call will block and force the future to resolve</pre>
+</div>
+<p>Interacting with the future as an associative array, just like a normal response, will cause the future to resolve
+that particular value (which in turn resolves all pending requests and values).  This allows patterns such as:</p>
+<div class="pre_wrapper lang-php">
+<pre class="programlisting prettyprint lang-php">$client = ClientBuilder::create()-&gt;build();
+$futures = [];
+
+for ($i = 0; $i &lt; 1000; $i++) {
+    $params = [
+        'index' =&gt; 'test',
+        'type' =&gt; 'test',
+        'id' =&gt; $i,
+        'client' =&gt; [
+            'future' =&gt; 'lazy'
+        ]
+    ];
+
+    $futures[] = $client-&gt;get($params);     //queue up the request
+}
+
+
+foreach ($futures as $future) {
+    // access future's values, causing resolution if necessary
+    echo $future['_source'];
+}</pre>
+</div>
+<p>The queued requests will execute in parallel and populate their futures after execution.  Batch size defaults to
+100 requests-per-batch.</p>
+<p>If you wish to force future resolution, but don&#8217;t actually need the values immediately, you can call <code class="literal">wait()</code> on the future
+to force resolution too:</p>
+<div class="pre_wrapper lang-php">
+<pre class="programlisting prettyprint lang-php">$client = ClientBuilder::create()-&gt;build();
+$futures = [];
+
+for ($i = 0; $i &lt; 1000; $i++) {
+    $params = [
+        'index' =&gt; 'test',
+        'type' =&gt; 'test',
+        'id' =&gt; $i,
+        'client' =&gt; [
+            'future' =&gt; 'lazy'
+        ]
+    ];
+
+    $futures[] = $client-&gt;get($params);     //queue up the request
+}
+
+//wait() forces future resolution and will execute the underlying curl batch
+$futures[999]-&gt;wait();</pre>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="_future_mode.html">« Future Mode</a>
+</span>
+<span class="next">
+<a href="_changing_batch_size.html">Changing batch size »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
