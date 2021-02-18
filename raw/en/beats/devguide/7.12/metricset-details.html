@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Metricset Details | Beats Developer Guide [7.12] | Elastic</title>
+<link rel="home" href="index.html" title="Beats Developer Guide [7.12]"/>
+<link rel="up" href="metricbeat-developer-guide.html" title="Extending Metricbeat"/>
+<link rel="prev" href="creating-metricsets.html" title="Creating a Metricset"/>
+<link rel="next" href="creating-metricbeat-module.html" title="Creating a Metricbeat Module"/>
+<meta name="DC.type" content="Learn/Docs/Devguide/Reference/7.12"/>
+<meta name="DC.subject" content="Beats"/>
+<meta name="DC.identifier" content="7.12"/>
+</head>
+<body><div class="page_header">
+A newer version is available. For the latest information, see the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Beats Developer Guide [7.12]</a></span>
+»
+<span class="breadcrumb-link"><a href="metricbeat-developer-guide.html">Extending Metricbeat</a></span>
+»
+<span class="breadcrumb-node">Metricset Details</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="creating-metricsets.html">« Creating a Metricset</a>
+</span>
+<span class="next">
+<a href="creating-metricbeat-module.html">Creating a Metricbeat Module »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="metricset-details"></a>Metricset Details<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.12/docs/devguide/metricset-details.asciidoc">edit</a></h2>
+</div></div></div>
+<p>This topic provides additional details about creating metricsets.</p>
+<h3><a id="_adding_special_configuration_options"></a>Adding Special Configuration Options<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.12/docs/devguide/metricset-details.asciidoc">edit</a></h3>
+<p>Each metricset can have its own configuration variables defined. To make use of
+these variables, you must extend the <code class="literal">New</code> method. For example, let&#8217;s assume that
+you want to add a <code class="literal">password</code> config option to the metricset. You would extend
+<code class="literal">beat.yml</code> in the following way:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">metricbeat.modules:
+- module: {module}
+  metricsets: ["{metricset}"]
+  password: "test1234"</pre>
+</div>
+<p>To read in the new <code class="literal">password</code> config option, you need to modify the <code class="literal">New</code> method. First you define a config
+struct that contains the value types to be read. You can set default values, as needed. Then you pass the config to
+the <code class="literal">UnpackConfig</code> method for loading the configuration.</p>
+<p>Your implementation should look something like this:</p>
+<div class="pre_wrapper lang-go">
+<pre class="programlisting prettyprint lang-go">type MetricSet struct {
+	mb.BaseMetricSet
+	password string
+}
+
+func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
+
+	// Unpack additional configuration options.
+	config := struct {
+		Password string `config:"password"`
+	}{
+		Password: "",
+	}
+	err := base.Module().UnpackConfig(&amp;config)
+	if err != nil {
+		return nil, err
+	}
+
+	return &amp;MetricSet{
+		BaseMetricSet: base,
+		password:      config.Password,
+	}, nil
+}</pre>
+</div>
+<h4><a id="_timeout_connections_to_services"></a>Timeout Connections to Services<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.12/docs/devguide/metricset-details.asciidoc">edit</a></h4>
+<p>Each time the <code class="literal">Fetch</code> method is called, it makes a request to the service, so it&#8217;s
+important to handle the connections correctly. We recommended that you set up the
+connections in the <code class="literal">New</code> method and persist them in the <code class="literal">MetricSet</code> object. This allows
+connections to be reused.</p>
+<p>One very important point is that connections must respect the timeout variable:
+<code class="literal">base.Module().Config().Timeout</code>. If the timeout elapses before the request completes,
+the request must be ended and an error must be returned to make sure the next request
+can be started on time. By default the Timeout is set to Period, so one request gets
+ended before a new request is made.</p>
+<p>If a request must be ended or has an error, make sure that you return a useful error
+message. This error message is also sent to Elasticsearch, making it possible to not
+only fetch metrics from the service, but also report potential problems or errors with
+the metricset.</p>
+<h4><a id="_data_transformation"></a>Data Transformation<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.12/docs/devguide/metricset-details.asciidoc">edit</a></h4>
+<p>If the data transformation that has to happen in the <code class="literal">Fetch</code> method is
+extensive, we recommend that you create a second file called <code class="literal">data.go</code> in the same package
+as the metricset. The <code class="literal">data.go</code> file should contain a function called <code class="literal">eventMapping(...)</code>.
+A separate file is not required, but is currently a best practice because it isolates the
+functionality of the metricset and <code class="literal">Fetch</code> method from the data mapping.</p>
+<h4><a id="_fields_yml"></a>fields.yml<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.12/docs/devguide/metricset-details.asciidoc">edit</a></h4>
+<p>The <code class="literal">fields.yml</code> file is used for different purposes:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Creates the Elasticsearch template
+</li>
+<li class="listitem">
+Creates the Kibana index pattern configuration
+</li>
+<li class="listitem">
+Creates the Exported Fields documentation for the metricset
+</li>
+</ul>
+</div>
+<p>To make sure the Elasticsearch template is correct, it&#8217;s important to keep this file up-to-date
+with all the changes. There is a <code class="literal">fields.yml</code> file under <code class="literal">module/{module}/_meta/fields.yml</code> that contains
+the general top level structure for all metricsets. Normally you only need to modify the description in this file.</p>
+<p>Here an example for the <code class="literal">fields.yml</code> file from the MySQL module.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">- key: mysql
+  title: "MySQL"
+  description: &gt;
+    MySQL server status metrics collected from MySQL.
+  short_config: false
+  release: ga
+  fields:
+    - name: mysql
+      type: group
+      description: &gt;
+        `mysql` contains the metrics that were obtained from MySQL
+        query.
+      fields:</pre>
+</div>
+<p>There is another <code class="literal">fields.yml</code> file under <code class="literal">module/{module}/{metricset}/_meta/fields.yml</code> that contains all fields retrieved
+by the metricset. As field types, each field must have a core data type
+<a href="/guide/en/elasticsearch/reference/master/mapping-types.html#_core_datatypes" class="ulink" target="_top">supported by elasticsearch</a>. Here&#8217;s a very basic example that shows one group from the MySQL <code class="literal">status</code> metricset:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">- name: status
+  type: group
+  description: &gt;
+    `status` contains the metrics that were obtained by the status SQL query.
+  fields:
+    - name: aborted
+      type: group
+      description: &gt;
+        Aborted status fields.
+      fields:
+        - name: clients
+          type: integer
+          description: &gt;
+            The number of connections that were aborted because the client died without closing the connection properly.
+
+        - name: connects
+          type: integer
+          description: &gt;
+            The number of failed attempts to connect to the MySQL server.</pre>
+</div>
+<p>As you can see, if there are nested fields, you must use the type <code class="literal">group</code>.</p>
+<h4><a id="_testing"></a>Testing<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.12/docs/devguide/metricset-details.asciidoc">edit</a></h4>
+<p>It&#8217;s important to also add tests for your metricset. There are three different types of tests that you need for testing a Beat:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+unit tests
+</li>
+<li class="listitem">
+integration tests
+</li>
+<li class="listitem">
+system tests
+</li>
+</ul>
+</div>
+<p>We recommend that you use all three when you create a metricset. Unit tests are
+written in Go and have no dependencies. Integration tests are also written
+in Go but require the service from which the module collects metrics to also be running.
+System tests for Metricbeat also require the service to be running in most cases and are
+written in Python based on our small Python test framework.
+We use <a href="https://docs.python.org/3/library/venv.html" class="ulink" target="_top">venv</a> to deal with Python dependencies.
+You can simply run the command <code class="literal">make python-env</code>  and then <code class="literal">. build/python-env/bin/activate</code> .</p>
+<p>You should use a combination of the three test types to test your metricsets because
+each method has advantages and disadvantages. To get started with your own tests, it&#8217;s best
+to look at the existing tests. You&#8217;ll find the unit and integration tests
+in the <code class="literal">_test.go</code> files under existing modules and metricsets.
+Integration tests usually take the form of <code class="literal">TestFetch</code> and <code class="literal">TestData</code>.
+The system tests are under <code class="literal">tests/systems</code>.</p>
+<h5><a id="_adding_a_test_environment"></a>Adding a Test Environment<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.12/docs/devguide/metricset-details.asciidoc">edit</a></h5>
+<p>Integration and system tests need an environment that&#8217;s running the service. You
+can create this environment by using Docker and a docker-compose file. If you add a
+module that requires a service, you must add the service to the virtual environment.
+To do this, you:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Update the <code class="literal">docker-compose.yml</code> file with your environment
+</li>
+<li class="listitem">
+Update the <code class="literal">docker-entrypoint.sh</code> script
+</li>
+</ul>
+</div>
+<p>The <code class="literal">docker-compose.yml</code> file is at the root of Metricbeat. Most services have
+existing Docker modules and can be added as simply as Redis:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">redis:
+  image: redis:3.2.3</pre>
+</div>
+<p>To allow the Beat to access your service, make sure that you define the environment
+variables in the docker-compose file and add the link to the container:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">beat:
+  links:
+    - redis
+  environment:
+    - REDIS_HOST=redis
+    - REDIS_PORT=6379</pre>
+</div>
+<p>To make sure the service is running before the tests are started, modify the
+<code class="literal">docker-entrypoint.sh</code> script to add a check that verifies your service is
+running. For example, the check for Redis looks like this:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">waitFor ${REDIS_HOST} ${REDIS_PORT} Redis</pre>
+</div>
+<p>The environment expects your service to be available as soon as it receives a response from
+the given address and port.</p>
+<h5><a id="_adding_the_standard_metricset_integration_tests"></a>Adding the standard metricset integration tests<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.12/docs/devguide/metricset-details.asciidoc">edit</a></h5>
+<p>There are normally two integration tests that are part of every metricset: <code class="literal">TestFetch</code> and <code class="literal">TestData</code>.
+Both tests will start up a new instance of your metricset and fetch an event. In order to start a metricset, you need to create a configuration object:</p>
+<div class="pre_wrapper lang-go">
+<pre class="programlisting prettyprint lang-go">func getConfig() map[string]interface{} {
+    return map[string]interface{}{
+    "module":           "{module}",
+    "metricsets":       []string{"{metricset}"},
+    "hosts":      []string{GetEnvHost() + ":" + GetEnvPort()}, <a id="CO8-1"></a><i class="conum" data-value="1"></i>
+  }
+}
+
+func GetEnvHost() string { <a id="CO8-2"></a><i class="conum" data-value="2"></i>
+    host := os.Getenv("{module}_HOST")
+    if len(host) == 0 {
+    host = "127.0.0.1"
+  }
+  return host
+}
+
+func GetEnvPort() string { <a id="CO8-3"></a><i class="conum" data-value="2"></i>
+    port := os.Getenv("{module}_PORT")
+
+    if len(port) == 0 {
+      port = "1234"
+    }
+  return port
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO8-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Add any additional config options your metricset needs here.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO8-2"><i class="conum" data-value="2"></i></a><a href="#CO8-3"></a></p>
+</td>
+<td align="left" valign="top">
+<p>The endpoint used by the metricset needs to be configurable for manual and automated testing.
+Environment variables should be defined in the module under <code class="literal">_meta/env</code> and included in the <code class="literal">docker-compose.yml</code> file.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The <code class="literal">TestFetch</code> integration test will return a single event from your metricset, which you can use to test the validity of the data.
+<code class="literal">TestData</code> will (re)generate the <code class="literal">_meta/data.json</code> file that documents the data reported by the metricset.</p>
+<div class="pre_wrapper lang-go">
+<pre class="programlisting prettyprint lang-go">import (
+	"os"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/elastic/beats/libbeat/tests/compose"
+	mbtest "github.com/elastic/beats/metricbeat/mb/testing"
+)
+
+func TestFetch(t *testing.T) {
+	compose.EnsureUp(t, "{module}") <a id="CO9-1"></a><i class="conum" data-value="1"></i>
+
+	f := mbtest.NewReportingMetricSetV2Error(t, getConfig())
+
+	events, errs := mbtest.ReportingFetchV2Error(f)
+	if len(errs) &gt; 0 {
+		t.Fatalf("Expected 0 errord, had %d. %v\n", len(errs), errs)
+	}
+
+	assert.NotEmpty(t, events) <a id="CO9-2"></a><i class="conum" data-value="2"></i>
+
+}
+
+func TestData(t *testing.T) {
+
+	f := mbtest.NewReportingMetricSetV2Error(t, getConfig())
+
+	err := mbtest.WriteEventsReporterV2Error(f, t, "") <a id="CO9-3"></a><i class="conum" data-value="3"></i>
+	if !assert.NoError(t, err) {
+		t.FailNow()
+	}
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO9-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Use this to start the docker service associated with your metricset.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO9-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Add any further validity checks to verify the metricset is working.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO9-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">WriteEventsReporterV2Error</code> will take the first valid event from the metricset and write it to <code class="literal">_meta/data.json</code></p>
+</td>
+</tr>
+</table>
+</div>
+<h5><a id="_running_the_tests"></a>Running the Tests<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.12/docs/devguide/metricset-details.asciidoc">edit</a></h5>
+<p>To run all the tests, run <code class="literal">make testsuite</code>. To only run unit tests, run
+<code class="literal">mage unitTest</code>, or for integration tests <code class="literal">mage integTest</code>.
+Be aware that a running Docker environment is needed for integration and system
+tests.</p>
+<p>To run <code class="literal">TestData</code> and generate the <code class="literal">data.json</code> file, run
+<code class="literal">go test -tags=integration -data -run TestData</code> in the directory where your test is located.</p>
+<p>To run the integration tests for a single module, set the <code class="literal">MODULE</code> environment
+variable to the name of the directory of the module. For example you can run the
+following command to run integration tests for <code class="literal">apache</code> module:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">MODULE=apache mage integTest</pre>
+</div>
+<h3><a id="_documentation"></a>Documentation<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.12/docs/devguide/metricset-details.asciidoc">edit</a></h3>
+<p>Each module must be documented. The documentation is based on asciidoc and is in
+the file <code class="literal">module/{module}/_meta/docs.asciidoc</code> for the module and in <code class="literal">module/{module}/{metricset}/_meta/docs.asciidoc</code>
+ for the metricset. Basic documentation with the config file and an example output is automatically
+ generated. Use these files to document specific configuration options or usage examples.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="creating-metricsets.html">« Creating a Metricset</a>
+</span>
+<span class="next">
+<a href="creating-metricbeat-module.html">Creating a Metricbeat Module »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

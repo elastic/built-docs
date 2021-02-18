@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>History retention | Elasticsearch Reference [7.12] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.12]"/>
+<link rel="up" href="index-modules.html" title="Index modules"/>
+<link rel="prev" href="index-modules-translog.html" title="Translog"/>
+<link rel="next" href="index-modules-index-sorting.html" title="Index Sorting"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.12"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.12"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.12]</a></span>
+»
+<span class="breadcrumb-link"><a href="index-modules.html">Index modules</a></span>
+»
+<span class="breadcrumb-node">History retention</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="index-modules-translog.html">« Translog</a>
+</span>
+<span class="next">
+<a href="index-modules-index-sorting.html">Index Sorting »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="index-modules-history-retention"></a>History retention<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/index-modules/history-retention.asciidoc">edit</a></h2>
+</div></div></div>
+<p>Elasticsearch sometimes needs to replay some of the operations that were performed on a
+shard. For instance, if a replica is briefly offline then it may be much more
+efficient to replay the few operations it missed while it was offline than to
+rebuild it from scratch. Similarly, cross-cluster replication works by performing operations on the
+leader cluster and then replaying those operations on the follower cluster.</p>
+<p>At the Lucene level there are really only two write operations that Elasticsearch
+performs on an index: a new document may be indexed, or an existing document may
+be deleted. Updates are implemented by atomically deleting the old document and
+then indexing the new document. A document indexed into Lucene already contains
+all the information needed to replay that indexing operation, but this is not
+true of document deletions. To solve this, Elasticsearch uses a feature called <em>soft
+deletes</em> to preserve recent deletions in the Lucene index so that they can be
+replayed.</p>
+<p>Elasticsearch only preserves certain recently-deleted documents in the index because a
+soft-deleted document still takes up some space. Eventually Elasticsearch will fully
+discard these soft-deleted documents to free up that space so that the index
+does not grow larger and larger over time. Fortunately Elasticsearch does not need to be
+able to replay every operation that has ever been performed on a shard, because
+it is always possible to make a full copy of a shard on a remote node. However,
+copying the whole shard may take much longer than replaying a few missing
+operations, so Elasticsearch tries to retain all of the operations it expects to need to
+replay in future.</p>
+<p>Elasticsearch keeps track of the operations it expects to need to replay in future using
+a mechanism called <em>shard history retention leases</em>. Each shard copy that might
+need operations to be replayed must first create a shard history retention lease
+for itself. For example, this shard copy might be a replica of a shard or it
+might be a shard of a follower index when using cross-cluster replication. Each retention lease
+keeps track of the sequence number of the first operation that the corresponding
+shard copy has not received. As the shard copy receives new operations, it
+increases the sequence number contained in its retention lease to indicate that
+it will not need to replay those operations in future. Elasticsearch discards
+soft-deleted operations once they are not being held by any retention lease.</p>
+<p>If a shard copy fails then it stops updating its shard history retention lease,
+which means that Elasticsearch will preserve all new operations so they can be replayed
+when the failed shard copy recovers. However, retention leases only last for a
+limited amount of time. If the shard copy does not recover quickly enough then
+its retention lease may expire. This protects Elasticsearch from retaining history
+forever if a shard copy fails permanently, because once a retention lease has
+expired Elasticsearch can start to discard history again. If a shard copy recovers after
+its retention lease has expired then Elasticsearch will fall back to copying the whole
+index since it can no longer simply replay the missing history. The expiry time
+of a retention lease defaults to <code class="literal">12h</code> which should be long enough for most
+reasonable recovery scenarios.</p>
+<p>Soft deletes are enabled by default on indices created in recent versions, but
+they can be explicitly enabled or disabled at index creation time. If soft
+deletes are disabled then peer recoveries can still sometimes take place by
+copying just the missing operations from the translog
+<a class="xref" href="index-modules-translog.html#index-modules-translog-retention" title="Translog retention">as long as those operations are retained
+there</a>. Cross-cluster replication will not function if soft deletes are disabled.</p>
+<h3><a id="_history_retention_settings"></a>History retention settings<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/index-modules/history-retention.asciidoc">edit</a></h3>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">index.soft_deletes.enabled</code>
+</span>
+</dt>
+<dd>
+<span class="Admonishment Admonishment--change">
+[<span class="Admonishment-version u-mono u-strikethrough">7.6.0</span>]
+<span class="Admonishment-detail">
+Deprecated in 7.6.0. Creating indices with soft-deletes disabled is deprecated and will be removed in future Elasticsearch versions.
+</span>
+</span>
+Indicates whether soft deletes are enabled on the index. Soft deletes can only
+be configured at index creation and only on indices created on or after
+Elasticsearch 6.5.0. Defaults to <code class="literal">true</code>.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">index.soft_deletes.retention_lease.period</code>
+</span>
+</dt>
+<dd>
+The maximum period to retain a shard history retention lease before it is
+considered expired. Shard history retention leases ensure that soft deletes are
+retained during merges on the Lucene index. If a soft delete is merged away
+before it can be replicated to a follower the following process will fail due
+to incomplete history on the leader. Defaults to <code class="literal">12h</code>.
+</dd>
+</dl>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="index-modules-translog.html">« Translog</a>
+</span>
+<span class="next">
+<a href="index-modules-index-sorting.html">Index Sorting »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

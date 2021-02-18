@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Date index name processor | Elasticsearch Reference [7.12] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.12]"/>
+<link rel="up" href="ingest-processors.html" title="Processors"/>
+<link rel="prev" href="date-processor.html" title="Date processor"/>
+<link rel="next" href="dissect-processor.html" title="Dissect processor"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.12"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.12"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.12]</a></span>
+»
+<span class="breadcrumb-link"><a href="ingest.html">Ingest node</a></span>
+»
+<span class="breadcrumb-link"><a href="ingest-processors.html">Processors</a></span>
+»
+<span class="breadcrumb-node">Date index name processor</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="date-processor.html">« Date processor</a>
+</span>
+<span class="next">
+<a href="dissect-processor.html">Dissect processor »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="date-index-name-processor"></a>Date index name processor<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ingest/processors/date-index-name.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>The purpose of this processor is to point documents to the right time based index based
+on a date or timestamp field in a document by using the <a class="xref" href="date-math-index-names.html" title="Date math support in index names">date math index name support</a>.</p>
+<p>The processor sets the <code class="literal">_index</code> metadata field with a date math index name expression based on the provided index name
+prefix, a date or timestamp field in the documents being processed and the provided date rounding.</p>
+<p>First, this processor fetches the date or timestamp from a field in the document being processed. Optionally,
+date formatting can be configured on how the field&#8217;s value should be parsed into a date. Then this date,
+the provided index name prefix and the provided date rounding get formatted into a date math index name expression.
+Also here optionally date formatting can be specified on how the date should be formatted into a date math index name
+expression.</p>
+<p>An example pipeline that points documents to a monthly index that starts with a <code class="literal">my-index-</code> prefix based on a
+date in the <code class="literal">date1</code> field:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/monthlyindex
+{
+  "description": "monthly date-time index naming",
+  "processors" : [
+    {
+      "date_index_name" : {
+        "field" : "date1",
+        "index_name_prefix" : "my-index-",
+        "date_rounding" : "M"
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/642.console"></div>
+<p>Using that pipeline for an index request:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT /my-index/_doc/1?pipeline=monthlyindex
+{
+  "date1" : "2016-04-25T12:02:01.789Z"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/643.console"></div>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "_index" : "my-index-2016-04-01",
+  "_type" : "_doc",
+  "_id" : "1",
+  "_version" : 1,
+  "result" : "created",
+  "_shards" : {
+    "total" : 2,
+    "successful" : 1,
+    "failed" : 0
+  },
+  "_seq_no" : 55,
+  "_primary_term" : 1
+}</pre>
+</div>
+<p>The above request will not index this document into the <code class="literal">my-index</code> index, but into the <code class="literal">my-index-2016-04-01</code> index because
+it was rounded by month. This is because the date-index-name-processor overrides the <code class="literal">_index</code> property of the document.</p>
+<p>To see the date-math value of the index supplied in the actual index request which resulted in the above document being
+indexed into <code class="literal">my-index-2016-04-01</code> we can inspect the effects of the processor using a simulate request.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ingest/pipeline/_simulate
+{
+  "pipeline" :
+  {
+    "description": "monthly date-time index naming",
+    "processors" : [
+      {
+        "date_index_name" : {
+          "field" : "date1",
+          "index_name_prefix" : "my-index-",
+          "date_rounding" : "M"
+        }
+      }
+    ]
+  },
+  "docs": [
+    {
+      "_source": {
+        "date1": "2016-04-25T12:02:01.789Z"
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/644.console"></div>
+<p>and the result:</p>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "docs" : [
+    {
+      "doc" : {
+        "_id" : "_id",
+        "_index" : "&lt;my-index-{2016-04-25||/M{yyyy-MM-dd|UTC}}&gt;",
+        "_type" : "_doc",
+        "_source" : {
+          "date1" : "2016-04-25T12:02:01.789Z"
+        },
+        "_ingest" : {
+          "timestamp" : "2016-11-08T19:43:03.850+0000"
+        }
+      }
+    }
+  ]
+}</pre>
+</div>
+<p>The above example shows that <code class="literal">_index</code> was set to <code class="literal">&lt;my-index-{2016-04-25||/M{yyyy-MM-dd|UTC}}&gt;</code>. Elasticsearch
+understands this to mean <code class="literal">2016-04-01</code> as is explained in the <a class="xref" href="date-math-index-names.html" title="Date math support in index names">date math index name documentation</a></p>
+<div class="table">
+<a id="date-index-name-options"></a>
+<p class="title"><strong>Table 11. Date index name options</strong></p>
+<div class="table-contents">
+<table border="1" cellpadding="4px" summary="Date index name options">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+<col class="col_4"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Name</th>
+<th align="left" valign="top">Required</th>
+<th align="left" valign="top">Default</th>
+<th align="left" valign="top">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">field</code></p></td>
+<td align="left" valign="top"><p>yes</p></td>
+<td align="left" valign="top"><p>-</p></td>
+<td align="left" valign="top"><p>The field to get the date or timestamp from.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">index_name_prefix</code></p></td>
+<td align="left" valign="top"><p>no</p></td>
+<td align="left" valign="top"><p>-</p></td>
+<td align="left" valign="top"><p>A prefix of the index name to be prepended before the printed date. Supports <a class="xref" href="accessing-data-in-pipelines.html#accessing-template-fields" title="Accessing Fields and Metafields in Templates">template snippets</a>.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">date_rounding</code></p></td>
+<td align="left" valign="top"><p>yes</p></td>
+<td align="left" valign="top"><p>-</p></td>
+<td align="left" valign="top"><p>How to round the date when formatting the date into the index name. Valid values are: <code class="literal">y</code> (year), <code class="literal">M</code> (month), <code class="literal">w</code> (week), <code class="literal">d</code> (day), <code class="literal">h</code> (hour), <code class="literal">m</code> (minute) and <code class="literal">s</code> (second). Supports <a class="xref" href="accessing-data-in-pipelines.html#accessing-template-fields" title="Accessing Fields and Metafields in Templates">template snippets</a>.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">date_formats</code></p></td>
+<td align="left" valign="top"><p>no</p></td>
+<td align="left" valign="top"><p>yyyy-MM-dd'T'HH:mm:ss.SSSXX</p></td>
+<td align="left" valign="top"><p>An array of the expected date formats for parsing dates / timestamps in the document being preprocessed. Can be a java time pattern or one of the following formats: ISO8601, UNIX, UNIX_MS, or TAI64N.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">timezone</code></p></td>
+<td align="left" valign="top"><p>no</p></td>
+<td align="left" valign="top"><p>UTC</p></td>
+<td align="left" valign="top"><p>The timezone to use when parsing the date and when date math index supports resolves expressions into concrete index names.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">locale</code></p></td>
+<td align="left" valign="top"><p>no</p></td>
+<td align="left" valign="top"><p>ENGLISH</p></td>
+<td align="left" valign="top"><p>The locale to use when parsing the date from the document being preprocessed, relevant when parsing month names or week days.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">index_name_format</code></p></td>
+<td align="left" valign="top"><p>no</p></td>
+<td align="left" valign="top"><p>yyyy-MM-dd</p></td>
+<td align="left" valign="top"><p>The format to be used when printing the parsed date into the index name. A valid java time pattern is expected here. Supports <a class="xref" href="accessing-data-in-pipelines.html#accessing-template-fields" title="Accessing Fields and Metafields in Templates">template snippets</a>.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">if</code></p></td>
+<td align="left" valign="top"><p>no</p></td>
+<td align="left" valign="top"><p>-</p></td>
+<td align="left" valign="top"><p>Conditionally execute this processor.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">on_failure</code></p></td>
+<td align="left" valign="top"><p>no</p></td>
+<td align="left" valign="top"><p>-</p></td>
+<td align="left" valign="top"><p>Handle failures for this processor. See <a class="xref" href="handling-failure-in-pipelines.html" title="Handling Failures in Pipelines"><em>Handling Failures in Pipelines</em></a>.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ignore_failure</code></p></td>
+<td align="left" valign="top"><p>no</p></td>
+<td align="left" valign="top"><p><code class="literal">false</code></p></td>
+<td align="left" valign="top"><p>Ignore failures for this processor. See <a class="xref" href="handling-failure-in-pipelines.html" title="Handling Failures in Pipelines"><em>Handling Failures in Pipelines</em></a>.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">tag</code></p></td>
+<td align="left" valign="top"><p>no</p></td>
+<td align="left" valign="top"><p>-</p></td>
+<td align="left" valign="top"><p>An identifier for this processor. Useful for debugging and metrics.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="date-processor.html">« Date processor</a>
+</span>
+<span class="next">
+<a href="dissect-processor.html">Dissect processor »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

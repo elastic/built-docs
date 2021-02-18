@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Using the annotated-text field | Elasticsearch Plugins and Integrations [7.12] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Plugins and Integrations [7.12]"/>
+<link rel="up" href="mapper-annotated-text.html" title="Mapper Annotated Text Plugin"/>
+<link rel="prev" href="mapper-annotated-text.html" title="Mapper Annotated Text Plugin"/>
+<link rel="next" href="mapper-annotated-text-tips.html" title="Data modelling tips"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Plugins/7.12"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.12"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Plugins and Integrations [7.12]</a></span>
+»
+<span class="breadcrumb-link"><a href="mapper.html">Mapper Plugins</a></span>
+»
+<span class="breadcrumb-link"><a href="mapper-annotated-text.html">Mapper Annotated Text Plugin</a></span>
+»
+<span class="breadcrumb-node">Using the <code class="literal">annotated-text</code> field</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="mapper-annotated-text.html">« Mapper Annotated Text Plugin</a>
+</span>
+<span class="next">
+<a href="mapper-annotated-text-tips.html">Data modelling tips »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="mapper-annotated-text-usage"></a>Using the <code class="literal">annotated-text</code> field<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/plugins/mapper-annotated-text.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The <code class="literal">annotated-text</code> tokenizes text content as per the more common <a href="/guide/en/elasticsearch/reference/7.12/text.html" class="ulink" target="_top"><code class="literal">text</code></a> field (see
+"limitations" below) but also injects any marked-up annotation tokens directly into
+the search index:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT my-index-000001
+{
+  "mappings": {
+    "properties": {
+      "my_field": {
+        "type": "annotated_text"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/40.console"></div>
+<p>Such a mapping would allow marked-up text eg wikipedia articles to be indexed as both text
+and structured tokens. The annotations use a markdown-like syntax using URL encoding of
+one or more values separated by the <code class="literal">&amp;</code> symbol.</p>
+<p>We can use the "_analyze" api to test how an example annotation would be stored as tokens
+in the search index:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">GET my-index-000001/_analyze
+{
+  "field": "my_field",
+  "text":"Investors in [Apple](Apple+Inc.) rejoiced."
+}</pre>
+</div>
+<p>Response:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+  "tokens": [
+    {
+      "token": "investors",
+      "start_offset": 0,
+      "end_offset": 9,
+      "type": "&lt;ALPHANUM&gt;",
+      "position": 0
+    },
+    {
+      "token": "in",
+      "start_offset": 10,
+      "end_offset": 12,
+      "type": "&lt;ALPHANUM&gt;",
+      "position": 1
+    },
+    {
+      "token": "Apple Inc.", <a id="CO19-1"></a><i class="conum" data-value="1"></i>
+      "start_offset": 13,
+      "end_offset": 18,
+      "type": "annotation",
+      "position": 2
+    },
+    {
+      "token": "apple",
+      "start_offset": 13,
+      "end_offset": 18,
+      "type": "&lt;ALPHANUM&gt;",
+      "position": 2
+    },
+    {
+      "token": "rejoiced",
+      "start_offset": 19,
+      "end_offset": 27,
+      "type": "&lt;ALPHANUM&gt;",
+      "position": 3
+    }
+  ]
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO19-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Note the whole annotation token <code class="literal">Apple Inc.</code> is placed, unchanged as a single token in
+the token stream and at the same position (position 2) as the text token (<code class="literal">apple</code>) it annotates.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>We can now perform searches for annotations using regular <code class="literal">term</code> queries that don&#8217;t tokenize
+the provided search values. Annotations are a more precise way of matching as can be seen
+in this example where a search for <code class="literal">Beck</code> will not match <code class="literal">Jeff Beck</code> :</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console"># Example documents
+PUT my-index-000001/_doc/1
+{
+  "my_field": "[Beck](Beck) announced a new tour"<a id="CO20-1"></a><i class="conum" data-value="1"></i>
+}
+
+PUT my-index-000001/_doc/2
+{
+  "my_field": "[Jeff Beck](Jeff+Beck&amp;Guitarist) plays a strat"<a id="CO20-2"></a><i class="conum" data-value="2"></i>
+}
+
+# Example search
+GET my-index-000001/_search
+{
+  "query": {
+    "term": {
+        "my_field": "Beck" <a id="CO20-3"></a><i class="conum" data-value="3"></i>
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/41.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO20-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>As well as tokenising the plain text into single words e.g. <code class="literal">beck</code>, here we
+inject the single token value <code class="literal">Beck</code> at the same position as <code class="literal">beck</code> in the token stream.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO20-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Note annotations can inject multiple tokens at the same position - here we inject both
+the very specific value <code class="literal">Jeff Beck</code> and the broader term <code class="literal">Guitarist</code>. This enables
+broader positional queries e.g. finding mentions of a <code class="literal">Guitarist</code> near to <code class="literal">start</code>.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO20-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>A benefit of searching with these carefully defined annotation tokens is that a query for
+<code class="literal">Beck</code> will not match document 2 that contains the tokens <code class="literal">jeff</code>, <code class="literal">beck</code> and <code class="literal">Jeff Beck</code></p>
+</td>
+</tr>
+</table>
+</div>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Any use of <code class="literal">=</code> signs in annotation values eg <code class="literal">[Prince](person=Prince)</code> will
+cause the document to be rejected with a parse failure. In future we hope to have a use for
+the equals signs so wil actively reject documents that contain this today.</p>
+</div>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="mapper-annotated-text.html">« Mapper Annotated Text Plugin</a>
+</span>
+<span class="next">
+<a href="mapper-annotated-text-tips.html">Data modelling tips »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

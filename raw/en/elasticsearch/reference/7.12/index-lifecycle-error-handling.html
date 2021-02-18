@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Resolve lifecycle policy execution errors | Elasticsearch Reference [7.12] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.12]"/>
+<link rel="up" href="index-lifecycle-management.html" title="ILM: Manage the index lifecycle"/>
+<link rel="prev" href="set-up-lifecycle-policy.html" title="Configure a lifecycle policy"/>
+<link rel="next" href="start-stop-ilm.html" title="Start and stop index lifecycle management"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.12"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.12"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.12]</a></span>
+»
+<span class="breadcrumb-link"><a href="index-lifecycle-management.html">ILM: Manage the index lifecycle</a></span>
+»
+<span class="breadcrumb-node">Resolve lifecycle policy execution errors</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="set-up-lifecycle-policy.html">« Configure a lifecycle policy <a id="ilm-policy-definition"></a></a>
+</span>
+<span class="next">
+<a href="start-stop-ilm.html">Start and stop index lifecycle management »</a>
+</span>
+</div>
+<div class="chapter xpack">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="index-lifecycle-error-handling"></a>Resolve lifecycle policy execution errors<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ilm/error-handling.asciidoc">edit</a><a class="xpack_tag" href="/subscriptions"></a></h2>
+</div></div></div>
+<p>When ILM executes a lifecycle policy, it&#8217;s possible for errors to occur
+while performing the necessary index operations for a step.
+When this happens, ILM moves the index to an <code class="literal">ERROR</code> step.
+If ILM cannot resolve the error automatically, execution is halted
+until you resolve the underlying issues with the policy, index, or cluster.</p>
+<p>For example, you might have a <code class="literal">shrink-index</code> policy that shrinks an index to four shards once it
+is at least five days old:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ilm/policy/shrink-index
+{
+  "policy": {
+    "phases": {
+      "warm": {
+        "min_age": "5d",
+        "actions": {
+          "shrink": {
+            "number_of_shards": 4
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1386.console"></div>
+<p>There is nothing that prevents you from applying the <code class="literal">shrink-index</code> policy to a new
+index that has only two shards:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT /my-index-000001
+{
+  "settings": {
+    "index.number_of_shards": 2,
+    "index.lifecycle.name": "shrink-index"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1387.console"></div>
+<p>After five days, ILM attempts to shrink <code class="literal">my-index-000001</code> from two shards to four shards.
+Because the shrink action cannot <em>increase</em> the number of shards, this operation fails
+and ILM moves <code class="literal">my-index-000001</code> to the <code class="literal">ERROR</code> step.</p>
+<p>You can use the <a class="xref" href="ilm-explain-lifecycle.html" title="Explain lifecycle API">ILM Explain API</a> to get information about
+what went wrong:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /my-index-000001/_ilm/explain</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1388.console"></div>
+<p>Which returns the following information:</p>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "indices" : {
+    "my-index-000001" : {
+      "index" : "my-index-000001",
+      "managed" : true,
+      "policy" : "shrink-index",                <a id="CO479-1"></a><i class="conum" data-value="1"></i>
+      "lifecycle_date_millis" : 1541717265865,
+      "age": "5.1d",                            <a id="CO479-2"></a><i class="conum" data-value="2"></i>
+      "phase" : "warm",                         <a id="CO479-3"></a><i class="conum" data-value="3"></i>
+      "phase_time_millis" : 1541717272601,
+      "action" : "shrink",                      <a id="CO479-4"></a><i class="conum" data-value="4"></i>
+      "action_time_millis" : 1541717272601,
+      "step" : "ERROR",                         <a id="CO479-5"></a><i class="conum" data-value="5"></i>
+      "step_time_millis" : 1541717272688,
+      "failed_step" : "shrink",                 <a id="CO479-6"></a><i class="conum" data-value="6"></i>
+      "step_info" : {
+        "type" : "illegal_argument_exception",  <a id="CO479-7"></a><i class="conum" data-value="7"></i>
+        "reason" : "the number of target shards [4] must be less that the number of source shards [2]"
+      },
+      "phase_execution" : {
+        "policy" : "shrink-index",
+        "phase_definition" : {                  <a id="CO479-8"></a><i class="conum" data-value="8"></i>
+          "min_age" : "5d",
+          "actions" : {
+            "shrink" : {
+              "number_of_shards" : 4
+            }
+          }
+        },
+        "version" : 1,
+        "modified_date_in_millis" : 1541717264230
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO479-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The policy being used to manage the index: <code class="literal">shrink-index</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO479-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The index age: 5.1 days</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO479-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The phase the index is currently in: <code class="literal">warm</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO479-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The current action: <code class="literal">shrink</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO479-5"><i class="conum" data-value="5"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The step the index is currently in: <code class="literal">ERROR</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO479-6"><i class="conum" data-value="6"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The step that failed to execute: <code class="literal">shrink</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO479-7"><i class="conum" data-value="7"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The type of error and a description of that error.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO479-8"><i class="conum" data-value="8"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The definition of the current phase from the <code class="literal">shrink-index</code> policy</p>
+</td>
+</tr>
+</table>
+</div>
+<p>To resolve this, you could update the policy to shrink the index to a single shard after 5 days:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ilm/policy/shrink-index
+{
+  "policy": {
+    "phases": {
+      "warm": {
+        "min_age": "5d",
+        "actions": {
+          "shrink": {
+            "number_of_shards": 1
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1389.console"></div>
+<h3><a id="_retrying_failed_lifecycle_policy_steps"></a>Retrying failed lifecycle policy steps<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ilm/error-handling.asciidoc">edit</a></h3>
+<p>Once you fix the problem that put an index in the <code class="literal">ERROR</code> step,
+you might need to explicitly tell ILM to retry the step:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /my-index-000001/_ilm/retry</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1390.console"></div>
+<p>ILM subsequently attempts to re-run the step that failed.
+You can use the <a class="xref" href="ilm-explain-lifecycle.html" title="Explain lifecycle API">ILM Explain API</a> to monitor the progress.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="set-up-lifecycle-policy.html">« Configure a lifecycle policy <a id="ilm-policy-definition"></a></a>
+</span>
+<span class="next">
+<a href="start-stop-ilm.html">Start and stop index lifecycle management »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

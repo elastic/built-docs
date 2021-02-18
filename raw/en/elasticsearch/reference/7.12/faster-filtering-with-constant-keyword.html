@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Use constant_keyword to speed up filtering | Elasticsearch Reference [7.12] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.12]"/>
+<link rel="up" href="tune-for-search-speed.html" title="Tune for search speed"/>
+<link rel="prev" href="faster-prefix-queries.html" title="Faster prefix queries with index_prefixes"/>
+<link rel="next" href="tune-for-disk-usage.html" title="Tune for disk usage"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.12"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.12"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.12]</a></span>
+»
+<span class="breadcrumb-link"><a href="how-to.html">How To</a></span>
+»
+<span class="breadcrumb-link"><a href="tune-for-search-speed.html">Tune for search speed</a></span>
+»
+<span class="breadcrumb-node">Use <code class="literal">constant_keyword</code> to speed up filtering</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="faster-prefix-queries.html">« Faster prefix queries with <code class="literal">index_prefixes</code></a>
+</span>
+<span class="next">
+<a href="tune-for-disk-usage.html">Tune for disk usage »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="faster-filtering-with-constant-keyword"></a>Use <code class="literal">constant_keyword</code> to speed up filtering<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h2>
+</div></div></div>
+<p>There is a general rule that the cost of a filter is mostly a function of the
+number of matched documents. Imagine that you have an index containing cycles.
+There are a large number of bicycles and many searches perform a filter on
+<code class="literal">cycle_type: bicycle</code>. This very common filter is unfortunately also very costly
+since it matches most documents. There is a simple way to avoid running this
+filter: move bicycles to their own index and filter bicycles by searching this
+index instead of adding a filter to the query.</p>
+<p>Unfortunately this can make client-side logic tricky, which is where
+<code class="literal">constant_keyword</code> helps. By mapping <code class="literal">cycle_type</code> as a <code class="literal">constant_keyword</code> with
+value <code class="literal">bicycle</code> on the index that contains bicycles, clients can keep running
+the exact same queries as they used to run on the monolithic index and
+Elasticsearch will do the right thing on the bicycles index by ignoring filters
+on <code class="literal">cycle_type</code> if the value is <code class="literal">bicycle</code> and returning no hits otherwise.</p>
+<p>Here is what mappings could look like:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT bicycles
+{
+  "mappings": {
+    "properties": {
+      "cycle_type": {
+        "type": "constant_keyword",
+        "value": "bicycle"
+      },
+      "name": {
+        "type": "text"
+      }
+    }
+  }
+}
+
+PUT other_cycles
+{
+  "mappings": {
+    "properties": {
+      "cycle_type": {
+        "type": "keyword"
+      },
+      "name": {
+        "type": "text"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1579.console"></div>
+<p>We are splitting our index in two: one that will contain only bicycles, and
+another one that contains other cycles: unicycles, tricycles, etc. Then at
+search time, we need to search both indices, but we don&#8217;t need to modify
+queries.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET bicycles,other_cycles/_search
+{
+  "query": {
+    "bool": {
+      "must": {
+        "match": {
+          "description": "dutch"
+        }
+      },
+      "filter": {
+        "term": {
+          "cycle_type": "bicycle"
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1580.console"></div>
+<p>On the <code class="literal">bicycles</code> index, Elasticsearch will simply ignore the <code class="literal">cycle_type</code>
+filter and rewrite the search request to the one below:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET bicycles,other_cycles/_search
+{
+  "query": {
+    "match": {
+      "description": "dutch"
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1581.console"></div>
+<p>On the <code class="literal">other_cycles</code> index, Elasticsearch will quickly figure out that
+<code class="literal">bicycle</code> doesn&#8217;t exist in the terms dictionary of the <code class="literal">cycle_type</code> field and
+return a search response with no hits.</p>
+<p>This is a powerful way of making queries cheaper by putting common values in a
+dedicated index. This idea can also be combined across multiple fields: for
+instance if you track the color of each cycle and your <code class="literal">bicycles</code> index ends up
+having a majority of black bikes, you could split it into a <code class="literal">bicycles-black</code>
+and a <code class="literal">bicycles-other-colors</code> indices.</p>
+<p>The <code class="literal">constant_keyword</code> is not strictly required for this optimization: it is
+also possible to update the client-side logic in order to route queries to the
+relevant indices based on filters. However <code class="literal">constant_keyword</code> makes it
+transparently and allows to decouple search requests from the index topology in
+exchange of very little overhead.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="faster-prefix-queries.html">« Faster prefix queries with <code class="literal">index_prefixes</code></a>
+</span>
+<span class="next">
+<a href="tune-for-disk-usage.html">Tune for disk usage »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

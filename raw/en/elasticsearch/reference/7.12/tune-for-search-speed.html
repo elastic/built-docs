@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Tune for search speed | Elasticsearch Reference [7.12] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.12]"/>
+<link rel="up" href="how-to.html" title="How To"/>
+<link rel="prev" href="tune-for-indexing-speed.html" title="Tune for indexing speed"/>
+<link rel="next" href="_tune_your_queries_with_the_profile_api.html" title="Tune your queries with the Profile API"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.12"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.12"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.12]</a></span>
+»
+<span class="breadcrumb-link"><a href="how-to.html">How To</a></span>
+»
+<span class="breadcrumb-node">Tune for search speed</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="tune-for-indexing-speed.html">« Tune for indexing speed</a>
+</span>
+<span class="next">
+<a href="_tune_your_queries_with_the_profile_api.html">Tune your queries with the Profile API »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="tune-for-search-speed"></a>Tune for search speed<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h2>
+</div></div></div>
+<h3><a id="_give_memory_to_the_filesystem_cache_2"></a>Give memory to the filesystem cache<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p>Elasticsearch heavily relies on the filesystem cache in order to make search
+fast. In general, you should make sure that at least half the available memory
+goes to the filesystem cache so that Elasticsearch can keep hot regions of the
+index in physical memory.</p>
+<h3><a id="_use_faster_hardware_2"></a>Use faster hardware<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p>If your search is I/O bound, you should investigate giving more memory to the
+filesystem cache (see above) or buying faster drives. In particular SSD drives
+are known to perform better than spinning disks. Always use local storage,
+remote filesystems such as <code class="literal">NFS</code> or <code class="literal">SMB</code> should be avoided. Also beware of
+virtualized storage such as Amazon&#8217;s <code class="literal">Elastic Block Storage</code>. Virtualized
+storage works very well with Elasticsearch, and it is appealing since it is so
+fast and simple to set up, but it is also unfortunately inherently slower on an
+ongoing basis when compared to dedicated local storage. If you put an index on
+<code class="literal">EBS</code>, be sure to use provisioned IOPS otherwise operations could be quickly
+throttled.</p>
+<p>If your search is CPU-bound, you should investigate buying faster CPUs.</p>
+<h3><a id="_document_modeling"></a>Document modeling<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p>Documents should be modeled so that search-time operations are as cheap as possible.</p>
+<p>In particular, joins should be avoided. <a class="xref" href="nested.html" title="Nested field type"><code class="literal">nested</code></a> can make queries
+several times slower and <a class="xref" href="parent-join.html" title="Join field type">parent-child</a> relations can make
+queries hundreds of times slower. So if the same questions can be answered without
+joins by denormalizing documents, significant speedups can be expected.</p>
+<h3><a id="search-as-few-fields-as-possible"></a>Search as few fields as possible<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p>The more fields a <a class="xref" href="query-dsl-query-string-query.html" title="Query string query"><code class="literal">query_string</code></a> or
+<a class="xref" href="query-dsl-multi-match-query.html" title="Multi-match query"><code class="literal">multi_match</code></a> query targets, the slower it is.
+A common technique to improve search speed over multiple fields is to copy
+their values into a single field at index time, and then use this field at
+search time. This can be automated with the <a class="xref" href="copy-to.html" title="copy_to"><code class="literal">copy-to</code></a> directive of
+mappings without having to change the source of documents. Here is an example
+of an index containing movies that optimizes queries that search over both the
+name and the plot of the movie by indexing both values into the <code class="literal">name_and_plot</code>
+field.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT movies
+{
+  "mappings": {
+    "properties": {
+      "name_and_plot": {
+        "type": "text"
+      },
+      "name": {
+        "type": "text",
+        "copy_to": "name_and_plot"
+      },
+      "plot": {
+        "type": "text",
+        "copy_to": "name_and_plot"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1570.console"></div>
+<h3><a id="_pre_index_data"></a>Pre-index data<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p>You should leverage patterns in your queries to optimize the way data is indexed.
+For instance, if all your documents have a <code class="literal">price</code> field and most queries run
+<a class="xref" href="search-aggregations-bucket-range-aggregation.html" title="Range aggregation"><code class="literal">range</code></a> aggregations on a fixed
+list of ranges, you could make this aggregation faster by pre-indexing the ranges
+into the index and using a <a class="xref" href="search-aggregations-bucket-terms-aggregation.html" title="Terms aggregation"><code class="literal">terms</code></a>
+aggregations.</p>
+<p>For instance, if documents look like:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT index/_doc/1
+{
+  "designation": "spoon",
+  "price": 13
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1571.console"></div>
+<p>and search requests look like:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET index/_search
+{
+  "aggs": {
+    "price_ranges": {
+      "range": {
+        "field": "price",
+        "ranges": [
+          { "to": 10 },
+          { "from": 10, "to": 100 },
+          { "from": 100 }
+        ]
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1572.console"></div>
+<p>Then documents could be enriched by a <code class="literal">price_range</code> field at index time, which
+should be mapped as a <a class="xref" href="keyword.html" title="Keyword type family"><code class="literal">keyword</code></a>:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT index
+{
+  "mappings": {
+    "properties": {
+      "price_range": {
+        "type": "keyword"
+      }
+    }
+  }
+}
+
+PUT index/_doc/1
+{
+  "designation": "spoon",
+  "price": 13,
+  "price_range": "10-100"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1573.console"></div>
+<p>And then search requests could aggregate this new field rather than running a
+<code class="literal">range</code> aggregation on the <code class="literal">price</code> field.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET index/_search
+{
+  "aggs": {
+    "price_ranges": {
+      "terms": {
+        "field": "price_range"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1574.console"></div>
+<h3><a id="map-ids-as-keyword"></a>Consider mapping identifiers as <code class="literal">keyword</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p>Not all numeric data should be mapped as a <a class="xref" href="number.html" title="Numeric field types">numeric</a> field data type.
+Elasticsearch optimizes numeric fields, such as <code class="literal">integer</code> or <code class="literal">long</code>, for
+<a class="xref" href="query-dsl-range-query.html" title="Range query"><code class="literal">range</code></a> queries. However, <a class="xref" href="keyword.html" title="Keyword type family"><code class="literal">keyword</code></a> fields
+are better for <a class="xref" href="query-dsl-term-query.html" title="Term query"><code class="literal">term</code></a> and other
+<a class="xref" href="term-level-queries.html" title="Term-level queries">term-level</a> queries.</p>
+<p>Identifiers, such as an ISBN or a product ID, are rarely used in <code class="literal">range</code>
+queries. However, they are often retrieved using term-level queries.</p>
+<p>Consider mapping a numeric identifier as a <code class="literal">keyword</code> if:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+You don&#8217;t plan to search for the identifier data using
+<a class="xref" href="query-dsl-range-query.html" title="Range query"><code class="literal">range</code></a> queries.
+</li>
+<li class="listitem">
+Fast retrieval is important. <code class="literal">term</code> query searches on <code class="literal">keyword</code> fields are
+often faster than <code class="literal">term</code> searches on numeric fields.
+</li>
+</ul>
+</div>
+<p>If you&#8217;re unsure which to use, you can use a <a class="xref" href="multi-fields.html" title="fields">multi-field</a> to map
+the data as both a <code class="literal">keyword</code> <em>and</em> a numeric data type.</p>
+<h3><a id="_avoid_scripts"></a>Avoid scripts<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p>If possible, avoid using <a class="xref" href="modules-scripting.html" title="Scripting">scripts</a> or
+<a class="xref" href="search-fields.html#script-fields" title="Script fields">scripted fields</a> in searches. See
+<a class="xref" href="scripts-and-search-speed.html" title="Scripts and search speed">Scripts and search speed</a>.</p>
+<h3><a id="_search_rounded_dates"></a>Search rounded dates<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p>Queries on date fields that use <code class="literal">now</code> are typically not cacheable since the
+range that is being matched changes all the time. However switching to a
+rounded date is often acceptable in terms of user experience, and has the
+benefit of making better use of the query cache.</p>
+<p>For instance the below query:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT index/_doc/1
+{
+  "my_date": "2016-05-11T16:30:55.328Z"
+}
+
+GET index/_search
+{
+  "query": {
+    "constant_score": {
+      "filter": {
+        "range": {
+          "my_date": {
+            "gte": "now-1h",
+            "lte": "now"
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1575.console"></div>
+<p>could be replaced with the following query:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET index/_search
+{
+  "query": {
+    "constant_score": {
+      "filter": {
+        "range": {
+          "my_date": {
+            "gte": "now-1h/m",
+            "lte": "now/m"
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1576.console"></div>
+<p>In that case we rounded to the minute, so if the current time is <code class="literal">16:31:29</code>,
+the range query will match everything whose value of the <code class="literal">my_date</code> field is
+between <code class="literal">15:31:00</code> and <code class="literal">16:31:59</code>. And if several users run a query that
+contains this range in the same minute, the query cache could help speed things
+up a bit. The longer the interval that is used for rounding, the more the query
+cache can help, but beware that too aggressive rounding might also hurt user
+experience.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>It might be tempting to split ranges into a large cacheable part and
+smaller not cacheable parts in order to be able to leverage the query cache,
+as shown below:</p>
+</div>
+</div>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET index/_search
+{
+  "query": {
+    "constant_score": {
+      "filter": {
+        "bool": {
+          "should": [
+            {
+              "range": {
+                "my_date": {
+                  "gte": "now-1h",
+                  "lte": "now-1h/m"
+                }
+              }
+            },
+            {
+              "range": {
+                "my_date": {
+                  "gt": "now-1h/m",
+                  "lt": "now/m"
+                }
+              }
+            },
+            {
+              "range": {
+                "my_date": {
+                  "gte": "now/m",
+                  "lte": "now"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1577.console"></div>
+<p>However such practice might make the query run slower in some cases since the
+overhead introduced by the <code class="literal">bool</code> query may defeat the savings from better
+leveraging the query cache.</p>
+<h3><a id="_force_merge_read_only_indices"></a>Force-merge read-only indices<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p>Indices that are read-only may benefit from being <a class="xref" href="indices-forcemerge.html" title="Force merge API">merged
+down to a single segment</a>. This is typically the case with time-based indices:
+only the index for the current time frame is getting new documents while older
+indices are read-only. Shards that have been force-merged into a single segment
+can use simpler and more efficient data structures to perform searches.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Do not force-merge indices to which you are still writing, or to
+which you will write again in the future. Instead, rely on the automatic
+background merge process to perform merges as needed to keep the index running
+smoothly. If you continue to write to a force-merged index then its performance
+may become much worse.</p>
+</div>
+</div>
+<h3><a id="_warm_up_global_ordinals"></a>Warm up global ordinals<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p><a class="xref" href="eager-global-ordinals.html" title="eager_global_ordinals">Global ordinals</a> are a data structure that is used to
+optimize the performance of aggregations. They are calculated lazily and stored in
+the JVM heap as part of the <a class="xref" href="modules-fielddata.html" title="Field data cache settings">field data cache</a>. For fields
+that are heavily used for bucketing aggregations, you can tell Elasticsearch to construct
+and cache the global ordinals before requests are received. This should be done
+carefully because it will increase heap usage and can make <a class="xref" href="indices-refresh.html" title="Refresh API">refreshes</a>
+take longer. The option can be updated dynamically on an existing mapping by
+setting the <a class="xref" href="eager-global-ordinals.html" title="eager_global_ordinals">eager global ordinals</a> mapping parameter:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT index
+{
+  "mappings": {
+    "properties": {
+      "foo": {
+        "type": "keyword",
+        "eager_global_ordinals": true
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1578.console"></div>
+<h3><a id="_warm_up_the_filesystem_cache"></a>Warm up the filesystem cache<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p>If the machine running Elasticsearch is restarted, the filesystem cache will be
+empty, so it will take some time before the operating system loads hot regions
+of the index into memory so that search operations are fast. You can explicitly
+tell the operating system which files should be loaded into memory eagerly
+depending on the file extension using the
+<a class="xref" href="preload-data-to-file-system-cache.html" title="Preloading data into the file system cache"><code class="literal">index.store.preload</code></a> setting.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Loading data into the filesystem cache eagerly on too many indices or
+too many files will make search <em>slower</em> if the filesystem cache is not large
+enough to hold all the data. Use with caution.</p>
+</div>
+</div>
+<h3><a id="_use_index_sorting_to_speed_up_conjunctions"></a>Use index sorting to speed up conjunctions<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p><a class="xref" href="index-modules-index-sorting.html" title="Index Sorting">Index sorting</a> can be useful in order to make
+conjunctions faster at the cost of slightly slower indexing. Read more about it
+in the <a class="xref" href="index-modules-index-sorting-conjunctions.html" title="Use index sorting to speed up conjunctions">index sorting documentation</a>.</p>
+<h3><a id="preference-cache-optimization"></a>Use <code class="literal">preference</code> to optimize cache utilization<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p>There are multiple caches that can help with search performance, such as the
+<a href="https://en.wikipedia.org/wiki/Page_cache" class="ulink" target="_top">filesystem cache</a>, the
+<a class="xref" href="shard-request-cache.html" title="Shard request cache settings">request cache</a> or the <a class="xref" href="query-cache.html" title="Node query cache settings">query cache</a>. Yet
+all these caches are maintained at the node level, meaning that if you run the
+same request twice in a row, have 1 <a class="xref" href="glossary.html#glossary-replica-shard">replica</a> or more
+and use <a href="https://en.wikipedia.org/wiki/Round-robin_DNS" class="ulink" target="_top">round-robin</a>, the default
+routing algorithm, then those two requests will go to different shard copies,
+preventing node-level caches from helping.</p>
+<p>Since it is common for users of a search application to run similar requests
+one after another, for instance in order to analyze a narrower subset of the
+index, using a preference value that identifies the current user or session
+could help optimize usage of the caches.</p>
+<h3><a id="_replicas_might_help_with_throughput_but_not_always"></a>Replicas might help with throughput, but not always<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p>In addition to improving resiliency, replicas can help improve throughput. For
+instance if you have a single-shard index and three nodes, you will need to
+set the number of replicas to 2 in order to have 3 copies of your shard in
+total so that all nodes are utilized.</p>
+<p>Now imagine that you have a 2-shards index and two nodes. In one case, the
+number of replicas is 0, meaning that each node holds a single shard. In the
+second case the number of replicas is 1, meaning that each node has two shards.
+Which setup is going to perform best in terms of search performance? Usually,
+the setup that has fewer shards per node in total will perform better. The
+reason for that is that it gives a greater share of the available filesystem
+cache to each shard, and the filesystem cache is probably Elasticsearch&#8217;s
+number 1 performance factor. At the same time, beware that a setup that does
+not have replicas is subject to failure in case of a single node failure, so
+there is a trade-off between throughput and availability.</p>
+<p>So what is the right number of replicas? If you have a cluster that has
+<code class="literal">num_nodes</code> nodes, <code class="literal">num_primaries</code> primary shards <em>in total</em> and if you want to
+be able to cope with <code class="literal">max_failures</code> node failures at once at most, then the
+right number of replicas for you is
+<code class="literal">max(max_failures, ceil(num_nodes / num_primaries) - 1)</code>.</p>
+
+
+
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="tune-for-indexing-speed.html">« Tune for indexing speed</a>
+</span>
+<span class="next">
+<a href="_tune_your_queries_with_the_profile_api.html">Tune your queries with the Profile API »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>OpenID Connect without Kibana | Elasticsearch Reference [7.12] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.12]"/>
+<link rel="up" href="oidc-guide.html" title="Configuring single sign-on to the Elastic Stack using OpenID Connect"/>
+<link rel="prev" href="oidc-kibana.html" title="Configuring Kibana"/>
+<link rel="next" href="authorization.html" title="User authorization"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.12"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.12"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.12]</a></span>
+»
+<span class="breadcrumb-link"><a href="secure-cluster.html">Secure a cluster</a></span>
+»
+<span class="breadcrumb-link"><a href="oidc-guide.html">Configuring single sign-on to the Elastic Stack using OpenID Connect</a></span>
+»
+<span class="breadcrumb-node">OpenID Connect without Kibana</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="oidc-kibana.html">« Configuring Kibana</a>
+</span>
+<span class="next">
+<a href="authorization.html">User authorization »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="oidc-without-kibana"></a>OpenID Connect without Kibana<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/x-pack/docs/en/security/authentication/oidc-guide.asciidoc">edit</a></h2>
+</div></div></div>
+<p>The OpenID Connect realm is designed to allow users to authenticate to Kibana and as
+such, most of the parts of the guide above make the assumption that Kibana is used.
+This section describes how a custom web application could use the relevant OpenID
+Connect REST APIs in order to authenticate the users to Elasticsearch, with OpenID Connect.</p>
+<p>Single sign-on realms such as OpenID Connect and SAML make use of the Token Service in
+Elasticsearch and in principle exchange a SAML or OpenID Connect Authentication response for
+an Elasticsearch access token and a refresh token. The access token is used as credentials for subsequent calls to Elasticsearch. The
+refresh token enables the user to get new Elasticsearch access tokens after the current one
+expires.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The Elasticsearch Token Service can be seen as a minimal oAuth2 authorization server
+and the access token and refresh token mentioned above are tokens that pertain
+<em>only</em> to this authorization server. They are generated and consumed <em>only</em> by Elasticsearch
+and are in no way related to the tokens ( access token and ID Token ) that the
+OpenID Connect Provider issues.</p>
+</div>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_register_the_rp_with_an_openid_connect_provider"></a>Register the RP with an OpenID Connect Provider<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/x-pack/docs/en/security/authentication/oidc-guide.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The Relying Party ( Elasticsearch and the custom web app ) will need to be registered as
+client with the OpenID Connect Provider. Note that when registering the
+<code class="literal">Redirect URI</code>, it needs to be a URL in the custom web app.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_openid_connect_realm"></a>OpenID Connect Realm<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/x-pack/docs/en/security/authentication/oidc-guide.asciidoc">edit</a></h3>
+</div></div></div>
+<p>An OpenID Connect realm needs to be created and configured accordingly
+in Elasticsearch. See <a class="xref" href="oidc-guide-authentication.html" title="Configure Elasticsearch for OpenID Connect authentication">Configure Elasticsearch for OpenID Connect authentication</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_service_account_user_for_accessing_the_apis"></a>Service Account user for accessing the APIs<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/x-pack/docs/en/security/authentication/oidc-guide.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The realm is designed with the assumption that there needs to be a privileged entity
+acting as an authentication proxy. In this case, the custom web application is the
+authentication proxy handling the authentication of end users ( more correctly,
+"delegating" the authentication to the OpenID Connect Provider ). The OpenID Connect
+APIs require authentication and the necessary authorization level for the authenticated
+user. For this reason, a Service Account user needs to be created and assigned a role
+that gives them the <code class="literal">manage_oidc</code> cluster privilege. The use of the <code class="literal">manage_token</code>
+cluster privilege will be necessary after the authentication takes place, so that the
+user can maintain access or be subsequently logged out.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/role/facilitator-role
+{
+  "cluster" : ["manage_oidc", "manage_token"]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1497.console"></div>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/user/facilitator
+{
+  "password" : "&lt;somePasswordHere&gt;",
+  "roles"    : [ "facilitator-role"]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1498.console"></div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_handling_the_authentication_flow"></a>Handling the authentication flow<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/x-pack/docs/en/security/authentication/oidc-guide.asciidoc">edit</a></h3>
+</div></div></div>
+<p>On a high level, the custom web application would need to perform the following steps in order to
+authenticate a user with OpenID Connect:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Make an HTTP POST request to <code class="literal">_security/oidc/prepare</code>, authenticating as the <code class="literal">facilitator</code> user, using the name of the
+OpenID Connect realm in the Elasticsearch configuration in the request body. See the
+<a class="xref" href="security-api-oidc-prepare-authentication.html" title="OpenID Connect prepare authentication API">OIDC prepare authentication API</a> for more details</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/oidc/prepare
+{
+  "realm" : "oidc1"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1499.console"></div>
+</li>
+<li class="listitem">
+Handle the response to <code class="literal">/_security/oidc/prepare</code>. The response from Elasticsearch will contain 3 parameters:
+<code class="literal">redirect</code>, <code class="literal">state</code>, <code class="literal">nonce</code>. The custom web application would need to store the values for <code class="literal">state</code>
+and <code class="literal">nonce</code> in the user&#8217;s session (client side in a cookie or server side if session information is
+ persisted this way) and redirect the user&#8217;s browser to the URL that will be contained in the
+<code class="literal">redirect</code> value.
+</li>
+<li class="listitem">
+<p>Handle a subsequent response from the OP. After the user is successfully authenticated with the
+OpenID Connect Provider, they will be redirected back to the callback/redirect URI. Upon receiving
+this HTTP GET request, the custom web app will need to make an HTTP POST request to
+<code class="literal">_security/oidc/authenticate</code>, again - authenticating as the <code class="literal">facilitator</code> user - passing the URL
+where the user&#8217;s browser was redirected to, as a parameter, along with the
+values for <code class="literal">nonce</code> and <code class="literal">state</code> it had saved in the user&#8217;s session previously. If more than one
+OpenID Connect realms are configured, the custom web app can specify the name of the realm to be
+used for handling this, but this parameter is optional.
+See <a class="xref" href="security-api-oidc-authenticate.html" title="OpenID Connect authenticate API">OIDC authenticate API</a> for more details</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/oidc/authenticate
+{
+  "redirect_uri" : "https://oidc-kibana.elastic.co:5603/api/security/oidc/callback?code=jtI3Ntt8v3_XvcLzCFGq&amp;state=4dbrihtIAt3wBTwo6DxK-vdk-sSyDBV8Yf0AjdkdT5I",
+  "state" : "4dbrihtIAt3wBTwo6DxK-vdk-sSyDBV8Yf0AjdkdT5I",
+  "nonce" : "WaBPH0KqPVdG5HHdSxPRjfoZbXMCicm5v1OiAj0DUFM",
+  "realm" : "oidc1"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1500.console"></div>
+<p>Elasticsearch will validate this and if all is correct will respond with an access token that can be used
+as a <code class="literal">Bearer</code> token for subsequent requests and a refresh token that can be later used to refresh the given
+access token as described in <a class="xref" href="security-api-get-token.html" title="Get token API">get token API</a>.</p>
+</li>
+<li class="listitem">
+<p>At some point, if necessary, the custom web application can log the user out by using the
+<a class="xref" href="security-api-oidc-logout.html" title="OpenID Connect logout API">OIDC logout API</a> passing the access token and refresh token as parameters. For example:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/oidc/logout
+{
+  "token" : "dGhpcyBpcyBub3QgYSByZWFsIHRva2VuIGJ1dCBpdCBpcyBvbmx5IHRlc3QgZGF0YS4gZG8gbm90IHRyeSB0byByZWFkIHRva2VuIQ==",
+  "refresh_token": "vLBPvmAB6KvwvJZr27cS"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1501.console"></div>
+<p>If the realm is configured accordingly, this may result in a response with a <code class="literal">redirect</code> parameter indicating where
+the user needs to be redirected in the OP in order to complete the logout process.</p>
+</li>
+</ol>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="oidc-kibana.html">« Configuring Kibana</a>
+</span>
+<span class="next">
+<a href="authorization.html">User authorization »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

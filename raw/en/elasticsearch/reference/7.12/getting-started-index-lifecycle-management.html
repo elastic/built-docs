@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Tutorial: Automate rollover with ILM | Elasticsearch Reference [7.12] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.12]"/>
+<link rel="up" href="index-lifecycle-management.html" title="ILM: Manage the index lifecycle"/>
+<link rel="prev" href="update-lifecycle-policy.html" title="Lifecycle policy updates"/>
+<link rel="next" href="example-using-index-lifecycle-policy.html" title="Tutorial: Customize built-in ILM policies"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.12"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.12"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.12]</a></span>
+»
+<span class="breadcrumb-link"><a href="index-lifecycle-management.html">ILM: Manage the index lifecycle</a></span>
+»
+<span class="breadcrumb-node">Tutorial: Automate rollover with ILM</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="update-lifecycle-policy.html">« Lifecycle policy updates</a>
+</span>
+<span class="next">
+<a href="example-using-index-lifecycle-policy.html">Tutorial: Customize built-in ILM policies »</a>
+</span>
+</div>
+<div class="chapter xpack">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="getting-started-index-lifecycle-management"></a>Tutorial: Automate rollover with ILM<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ilm/ilm-tutorial.asciidoc">edit</a><a class="xpack_tag" href="/subscriptions"></a></h2>
+</div></div></div>
+
+<p>When you continuously index timestamped documents into Elasticsearch,
+you typically use a <a class="xref" href="data-streams.html" title="Data streams">data stream</a> so you can periodically roll over to a
+new index.
+This enables you to implement a hot-warm-cold architecture to meet your performance
+requirements for your newest data, control costs over time, enforce retention policies,
+and still get the most out of your data.</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Data streams are best suited for
+<a class="xref" href="data-streams.html#data-streams-append-only" title="Append-only">append-only</a> use cases. If you need to frequently
+update or delete existing documents across multiple indices, we recommend
+using an index alias and index template instead. You can still use ILM to
+manage and rollover the alias&#8217;s indices. Skip to
+<a class="xref" href="getting-started-index-lifecycle-management.html#manage-time-series-data-without-data-streams" title="Manage time series data without data streams">Manage time series data without data streams</a>.</p>
+</div>
+</div>
+<p>To automate rollover and management of a data stream with ILM, you:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<a class="xref" href="getting-started-index-lifecycle-management.html#ilm-gs-create-policy" title="Create a lifecycle policy">Create a lifecycle policy</a> that defines the appropriate
+phases and actions.
+</li>
+<li class="listitem">
+<a class="xref" href="getting-started-index-lifecycle-management.html#ilm-gs-apply-policy" title="Create an index template to create the data stream and apply the lifecycle policy">Create an index template</a> to create the data stream and
+apply the ILM policy and the indices settings and mappings configurations for the backing
+indices.
+</li>
+<li class="listitem">
+<a class="xref" href="getting-started-index-lifecycle-management.html#ilm-gs-check-progress" title="Check lifecycle progress">Verify indices are moving through the lifecycle phases</a>
+as expected.
+</li>
+</ol>
+</div>
+<p>For an introduction to rolling indices, see <a class="xref" href="index-rollover.html" title="Rollover">Rollover</a>.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>When you enable index lifecycle management for Beats or the Logstash Elasticsearch output plugin,
+lifecycle policies are set up automatically.
+You do not need to take any other actions.
+You can modify the default policies through
+<a class="xref" href="example-using-index-lifecycle-policy.html" title="Tutorial: Customize built-in ILM policies">Kibana Management</a>
+or the ILM APIs.</p>
+</div>
+</div>
+<h3><a id="ilm-gs-create-policy"></a>Create a lifecycle policy<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ilm/ilm-tutorial.asciidoc">edit</a></h3>
+<p>A lifecycle policy specifies the phases in the index lifecycle
+and the actions to perform in each phase. A lifecycle can have up to five phases:
+<code class="literal">hot</code>, <code class="literal">warm</code>, <code class="literal">cold</code>, <code class="literal">frozen</code>, and <code class="literal">delete</code>.</p>
+<p>For example, you might define a <code class="literal">timeseries_policy</code> that has two phases:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+A <code class="literal">hot</code> phase that defines a rollover action to specify that an index rolls over when it
+reaches either a <code class="literal">max_size</code> of 50 gigabytes or a <code class="literal">max_age</code> of 30 days.
+</li>
+<li class="listitem">
+A <code class="literal">delete</code> phase that sets <code class="literal">min_age</code> to remove the index 90 days after rollover.
+Note that this value is relative to the rollover time, not the index creation time.
+</li>
+</ul>
+</div>
+<p>You can create the policy through Kibana or with the
+<a class="xref" href="ilm-put-lifecycle.html" title="Create lifecycle policy API">put policy</a> API.
+To create the policy from Kibana, open the menu and go to <span class="strong strong"><strong>Stack Management &gt;
+Index Lifecycle Policies</strong></span>. Click <span class="strong strong"><strong>Create policy</strong></span>.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/ilm/create-policy.png" alt="Create policy page">
+</div>
+</div>
+<details>
+<summary class="title">API example</summary>
+<div class="content">
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ilm/policy/timeseries_policy
+{
+  "policy": {
+    "phases": {
+      "hot": {                      <a id="CO470-1"></a><i class="conum" data-value="1"></i>
+        "actions": {
+          "rollover": {
+            "max_size": "50GB",     <a id="CO470-2"></a><i class="conum" data-value="2"></i>
+            "max_age": "30d"
+          }
+        }
+      },
+      "delete": {
+        "min_age": "90d",           <a id="CO470-3"></a><i class="conum" data-value="3"></i>
+        "actions": {
+          "delete": {}              <a id="CO470-4"></a><i class="conum" data-value="4"></i>
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1352.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO470-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">min_age</code> defaults to <code class="literal">0ms</code>, so new indices enter the <code class="literal">hot</code> phase immediately.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO470-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Trigger the <code class="literal">rollover</code> action when either of the conditions are met.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO470-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Move the index into the <code class="literal">delete</code> phase 90 days after rollover.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO470-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Trigger the <code class="literal">delete</code> action when the index enters the delete phase.</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+</details>
+<h3><a id="ilm-gs-apply-policy"></a>Create an index template to create the data stream and apply the lifecycle policy<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ilm/ilm-tutorial.asciidoc">edit</a></h3>
+<p>To set up a data stream, first create an index template to specify the lifecycle policy. Because
+the template is for a data stream, it must also include a <code class="literal">data_stream</code> definition.</p>
+<p>For example, you might create a <code class="literal">timeseries_template</code> to use for a future data stream
+named <code class="literal">timeseries</code>.</p>
+<p>To enable the ILM to manage the data stream, the template configures one ILM setting:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">index.lifecycle.name</code> specifies the name of the lifecycle policy to apply to the data stream.
+</li>
+</ul>
+</div>
+<p>You can use the Kibana Create template wizard to add the template. From Kibana,
+open the menu and go to <span class="strong strong"><strong>Stack Management &gt; Index Management</strong></span>. In the <span class="strong strong"><strong>Index
+Templates</strong></span> tab, click <span class="strong strong"><strong>Create template</strong></span>.</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/data-streams/create-index-template.png" alt="Create template page">
+</div>
+</div>
+<p>This wizard invokes the <a class="xref" href="indices-put-template.html" title="Put index template API">put index template API</a> to create
+the index template with the options you specify.</p>
+<details>
+<summary class="title">API example</summary>
+<div class="content">
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _index_template/timeseries_template
+{
+  "index_patterns": ["timeseries"],                   <a id="CO471-1"></a><i class="conum" data-value="1"></i>
+  "data_stream": { },
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 1,
+      "index.lifecycle.name": "timeseries_policy"     <a id="CO471-2"></a><i class="conum" data-value="2"></i>
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1353.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO471-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Apply the template when a document is indexed into the <code class="literal">timeseries</code> target.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO471-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The name of the ILM policy used to manage the data stream.</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+</details>
+<h3><a id="ilm-gs-create-the-data-stream"></a>Create the data stream<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ilm/ilm-tutorial.asciidoc">edit</a></h3>
+<p>To get things started, index a document into the name or wildcard pattern defined
+in the <code class="literal">index_patterns</code> of the <a class="xref" href="index-templates.html" title="Index templates">index template</a>. As long
+as an existing data stream, index, or index alias does not already use the name, the index
+request automatically creates a corresponding data stream with a single backing index.
+Elasticsearch automatically indexes the request&#8217;s documents into this backing index, which also
+acts as the stream&#8217;s <a class="xref" href="data-streams.html#data-stream-write-index" title="Write index">write index</a>.</p>
+<p>For example, the following request creates the <code class="literal">timeseries</code> data stream and the
+first generation backing index called <code class="literal">.ds-timeseries-2099.03.08-000001</code>.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST timeseries/_doc
+{
+  "message": "logged the request",
+  "@timestamp": "1591890611"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1354.console"></div>
+<p>When a rollover condition in the lifecycle policy is met, the <code class="literal">rollover</code> action:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Creates the second generation backing index, named
+<code class="literal">.ds-timeseries-2099.03.08-000002</code>. Because it is a backing index of the
+<code class="literal">timeseries</code> data stream, the configuration from the <code class="literal">timeseries_template</code> index
+template is applied to the new index.
+</li>
+<li class="listitem">
+As it is the latest generation index of the <code class="literal">timeseries</code> data stream, the
+newly created backing index <code class="literal">.ds-timeseries-2099.03.08-000002</code> becomes the data
+stream&#8217;s write index.
+</li>
+</ul>
+</div>
+<p>This process repeats each time a rollover condition is met.
+You can search across all of the data stream&#8217;s backing indices, managed by the <code class="literal">timeseries_policy</code>,
+with the <code class="literal">timeseries</code> data stream name.
+Write operations are routed to the current write index. Read operations will be handled by all
+backing indices.</p>
+<h3><a id="ilm-gs-check-progress"></a>Check lifecycle progress<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ilm/ilm-tutorial.asciidoc">edit</a></h3>
+<p>To get status information for managed indices, you use the ILM explain API.
+This lets you find out things like:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+What phase an index is in and when it entered that phase.
+</li>
+<li class="listitem">
+The current action and what step is being performed.
+</li>
+<li class="listitem">
+If any errors have occurred or progress is blocked.
+</li>
+</ul>
+</div>
+<p>For example, the following request gets information about the <code class="literal">timeseries</code> data stream&#8217;s
+backing indices:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET .ds-timeseries-*/_ilm/explain</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1355.console"></div>
+<p>The following response shows the data stream&#8217;s first generation backing index is waiting for the <code class="literal">hot</code>
+phase&#8217;s <code class="literal">rollover</code> action.
+It remains in this state and ILM continues to call <code class="literal">check-rollover-ready</code> until a rollover condition
+is met.</p>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "indices": {
+    ".ds-timeseries-2099.03.07-000001": {
+      "index": ".ds-timeseries-2099.03.07-000001",
+      "managed": true,
+      "policy": "timeseries_policy",             <a id="CO472-1"></a><i class="conum" data-value="1"></i>
+      "lifecycle_date_millis": 1538475653281,
+      "age": "30s",                              <a id="CO472-2"></a><i class="conum" data-value="2"></i>
+      "phase": "hot",
+      "phase_time_millis": 1538475653317,
+      "action": "rollover",
+      "action_time_millis": 1538475653317,
+      "step": "check-rollover-ready",            <a id="CO472-3"></a><i class="conum" data-value="3"></i>
+      "step_time_millis": 1538475653317,
+      "phase_execution": {
+        "policy": "timeseries_policy",
+        "phase_definition": {                    <a id="CO472-4"></a><i class="conum" data-value="4"></i>
+          "min_age": "0ms",
+          "actions": {
+            "rollover": {
+              "max_size": "50gb",
+              "max_age": "30d"
+            }
+          }
+        },
+        "version": 1,
+        "modified_date_in_millis": 1539609701576
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO472-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The policy used to manage the index</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO472-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The age of the index</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO472-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The step ILM is performing on the index</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO472-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The definition of the current phase (the <code class="literal">hot</code> phase)</p>
+</td>
+</tr>
+</table>
+</div>
+<h3><a id="manage-time-series-data-without-data-streams"></a>Manage time series data without data streams<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ilm/ilm-tutorial.asciidoc">edit</a></h3>
+<p>Even though <a class="xref" href="data-streams.html" title="Data streams">data streams</a> are a convenient way to scale
+and manage time series data, they are designed to be append-only. We recognise there
+might be use-cases where data needs to be updated or deleted in place and the
+data streams don&#8217;t support delete and update requests directly,
+so the index APIs would need to be used directly on the data stream&#8217;s backing indices.</p>
+<p>In these cases, you can use an index alias to manage indices containing the time series data
+and periodically roll over to a new index.</p>
+<p>To automate rollover and management of time series indices with ILM using an index
+alias, you:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Create a lifecycle policy that defines the appropriate phases and actions.
+See <a class="xref" href="getting-started-index-lifecycle-management.html#ilm-gs-create-policy" title="Create a lifecycle policy">Create a lifecycle policy</a> above.
+</li>
+<li class="listitem">
+<a class="xref" href="getting-started-index-lifecycle-management.html#ilm-gs-alias-apply-policy" title="Create an index template to apply the lifecycle policy">Create an index template</a> to apply the policy to each new index.
+</li>
+<li class="listitem">
+<a class="xref" href="getting-started-index-lifecycle-management.html#ilm-gs-alias-bootstrap" title="Bootstrap the initial time series index with a write index alias">Bootstrap an index</a> as the initial write index.
+</li>
+<li class="listitem">
+<a class="xref" href="getting-started-index-lifecycle-management.html#ilm-gs-alias-check-progress" title="Check lifecycle progress">Verify indices are moving through the lifecycle phases</a>
+as expected.
+</li>
+</ol>
+</div>
+<h3><a id="ilm-gs-alias-apply-policy"></a>Create an index template to apply the lifecycle policy<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ilm/ilm-tutorial.asciidoc">edit</a></h3>
+<p>To automatically apply a lifecycle policy to the new write index on rollover,
+specify the policy in the index template used to create new indices.</p>
+<p>For example, you might create a <code class="literal">timeseries_template</code> that is applied to new indices
+whose names match the <code class="literal">timeseries-*</code> index pattern.</p>
+<p>To enable automatic rollover, the template configures two ILM settings:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">index.lifecycle.name</code> specifies the name of the lifecycle policy to apply to new indices
+that match the index pattern.
+</li>
+<li class="listitem">
+<code class="literal">index.lifecycle.rollover_alias</code> specifies the index alias to be rolled over
+when the rollover action is triggered for an index.
+</li>
+</ul>
+</div>
+<p>You can use the Kibana Create template wizard to add the template. To access the
+wizard, open the menu and go to <span class="strong strong"><strong>Stack Management &gt; Index Management</strong></span>. In the
+<span class="strong strong"><strong>Index Templates</strong></span> tab, click <span class="strong strong"><strong>Create template</strong></span>.</p>
+<p class="screenshot"><span class="image"><img src="images/ilm/create-template-wizard.png" alt="Create template page"></span></p>
+<p>The create template request for the example template looks like this:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _index_template/timeseries_template
+{
+  "index_patterns": ["timeseries-*"],                 <a id="CO473-1"></a><i class="conum" data-value="1"></i>
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 1,
+      "index.lifecycle.name": "timeseries_policy",      <a id="CO473-2"></a><i class="conum" data-value="2"></i>
+      "index.lifecycle.rollover_alias": "timeseries"    <a id="CO473-3"></a><i class="conum" data-value="3"></i>
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1356.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO473-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Apply the template to a new index if its name starts with <code class="literal">timeseries-</code>.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO473-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The name of the lifecycle policy to apply to each new index.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO473-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The name of the alias used to reference these indices.
+Required for policies that use the rollover action.</p>
+</td>
+</tr>
+</table>
+</div>
+<h3><a id="ilm-gs-alias-bootstrap"></a>Bootstrap the initial time series index with a write index alias<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ilm/ilm-tutorial.asciidoc">edit</a></h3>
+<p>To get things started, you need to bootstrap an initial index and
+designate it as the write index for the rollover alias specified in your index template.
+The name of this index must match the template&#8217;s index pattern and end with a number.
+On rollover, this value is incremented to generate a name for the new index.</p>
+<p>For example, the following request creates an index called <code class="literal">timeseries-000001</code>
+and makes it the write index for the <code class="literal">timeseries</code> alias.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT timeseries-000001
+{
+  "aliases": {
+    "timeseries": {
+      "is_write_index": true
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1357.console"></div>
+<p>When the rollover conditions are met, the <code class="literal">rollover</code> action:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Creates a new index called <code class="literal">timeseries-000002</code>.
+This matches the <code class="literal">timeseries-*</code> pattern, so the settings from <code class="literal">timeseries_template</code> are applied to the new index.
+</li>
+<li class="listitem">
+Designates the new index as the write index and makes the bootstrap index read-only.
+</li>
+</ul>
+</div>
+<p>This process repeats each time rollover conditions are met.
+You can search across all of the indices managed by the <code class="literal">timeseries_policy</code> with the <code class="literal">timeseries</code> alias.
+Write operations are routed to the current write index.</p>
+<h3><a id="ilm-gs-alias-check-progress"></a>Check lifecycle progress<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ilm/ilm-tutorial.asciidoc">edit</a></h3>
+<p>Retrieving the status information for managed indices is very similar to the data stream case.
+See the data stream <a class="xref" href="getting-started-index-lifecycle-management.html#ilm-gs-check-progress" title="Check lifecycle progress">check progress section</a> for more information.
+The only difference is the indices namespace, so retrieving the progress will entail the following
+api call:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET timeseries-*/_ilm/explain</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1358.console"></div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="update-lifecycle-policy.html">« Lifecycle policy updates</a>
+</span>
+<span class="next">
+<a href="example-using-index-lifecycle-policy.html">Tutorial: Customize built-in ILM policies »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

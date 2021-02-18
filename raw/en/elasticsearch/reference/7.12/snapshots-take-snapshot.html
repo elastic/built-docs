@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Create a snapshot | Elasticsearch Reference [7.12] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.12]"/>
+<link rel="up" href="snapshot-restore.html" title="Snapshot and restore"/>
+<link rel="prev" href="snapshots-register-repository.html" title="Register a snapshot repository"/>
+<link rel="next" href="snapshots-restore-snapshot.html" title="Restore a snapshot"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.12"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.12"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.12]</a></span>
+»
+<span class="breadcrumb-link"><a href="snapshot-restore.html">Snapshot and restore</a></span>
+»
+<span class="breadcrumb-node">Create a snapshot</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="snapshots-register-repository.html">« Register a snapshot repository</a>
+</span>
+<span class="next">
+<a href="snapshots-restore-snapshot.html">Restore a snapshot »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="snapshots-take-snapshot"></a>Create a snapshot<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/snapshot-restore/take-snapshot.asciidoc">edit</a></h2>
+</div></div></div>
+<p>A repository can contain multiple snapshots of the same cluster. Snapshots are identified by unique names within the
+cluster.</p>
+<p>Use the <a class="xref" href="put-snapshot-repo-api.html" title="Put snapshot repository API">put snapshot repository API</a> to register or update a snapshot repository, and then use the <a class="xref" href="create-snapshot-api.html" title="Create snapshot API">create snapshot API</a> to create a snapshot in a repository.</p>
+<p>The following request creates a snapshot with the name <code class="literal">snapshot_1</code> in the repository <code class="literal">my_backup</code>:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT /_snapshot/my_backup/snapshot_1?wait_for_completion=true</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1453.console"></div>
+<p>The <code class="literal">wait_for_completion</code> parameter specifies whether or not the request should return immediately after snapshot
+initialization (default) or wait for snapshot completion. During snapshot initialization, information about all
+previous snapshots is loaded into memory, which means that in large repositories it may take several seconds (or
+even minutes) for this request to return even if the <code class="literal">wait_for_completion</code> parameter is set to <code class="literal">false</code>.</p>
+<p>By default, a snapshot backs up all data streams and open indices in the cluster. You can change this behavior by
+specifying the list of data streams and indices in the body of the snapshot request:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT /_snapshot/my_backup/snapshot_2?wait_for_completion=true
+{
+  "indices": "data_stream_1,index_1,index_2",
+  "ignore_unavailable": true,
+  "include_global_state": false,
+  "metadata": {
+    "taken_by": "kimchy",
+    "taken_because": "backup before upgrading"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1454.console"></div>
+<p>Use the <code class="literal">indices</code> parameter to list the data streams and indices that should be included in the snapshot. This parameter supports
+<a class="xref" href="multi-index.html" title="Multi-target syntax">multi-target syntax</a>, although the options that control the behavior of multi-index syntax
+must be supplied in the body of the request, rather than as request parameters.</p>
+<p>Data stream backups include the stream&#8217;s backing indices and metadata, such as
+the current <a class="xref" href="data-streams.html#data-streams-generation" title="Generation">generation</a> and timestamp field.</p>
+<p>You can also choose to include only specific backing indices in a snapshot.
+However, these backups do not include the associated data stream&#8217;s
+metadata or its other backing indices.</p>
+<h3><a id="create-snapshot-process-details"></a>Snapshot process details<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/snapshot-restore/take-snapshot.asciidoc">edit</a></h3>
+<p>The snapshot process is incremental. In the process of making the snapshot, Elasticsearch analyses
+the list of the data stream and index files that are already stored in the repository and copies only files that were created or
+changed since the last snapshot. This process allows multiple snapshots to be preserved in the repository in a compact form.</p>
+<p>The snapshot process is executed in non-blocking fashion. All indexing and searching operations can continue to run against the data stream or index
+that is being snapshotted. However, a snapshot represents a point-in-time view
+at the moment when snapshot was created, so no records that were added to the data stream or index after the snapshot process was started
+will be included in the snapshot.</p>
+<p>The snapshot process starts immediately for the primary shards that have been started and are not relocating at the moment. Elasticsearch waits for
+relocation or initialization of shards to complete before snapshotting them.</p>
+<p>Besides creating a copy of each data stream and index, the snapshot process can also store global cluster metadata, which includes persistent
+cluster settings, templates, and data stored in system indices, such as Watches and task records, regardless of whether those system
+indices are named in the <code class="literal">indices</code> section of the request. The <a class="xref" href="create-snapshot-api.html#create-snapshot-api-feature-states"><code class="literal">feature_states</code> field</a> can be used to
+select a subset of system indices to be included in the snapshot. The transient settings and registered snapshot repositories are not stored
+as part of the snapshot.</p>
+<p>While a snapshot of a particular shard is being
+created, this shard cannot be moved to another node, which can interfere with rebalancing and allocation
+filtering. Elasticsearch can only move a shard to another node (according to the current allocation
+filtering settings and rebalancing algorithm) after the snapshot process
+is finished.</p>
+<p>After a snapshot is created, use the <a class="xref" href="get-snapshot-api.html" title="Get snapshot API">Get snapshot API</a> to retrieve information about a snapshot. See <a class="xref" href="snapshots-monitor-snapshot-restore.html" title="Monitor snapshot and restore progress">Monitor snapshot and restore progress</a> to learn more about retrieving snapshot status.</p>
+<h3><a id="create-snapshot-options"></a>Options for creating a snapshot<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/snapshot-restore/take-snapshot.asciidoc">edit</a></h3>
+<p>The create snapshot request supports the
+<code class="literal">ignore_unavailable</code> option. Setting it to <code class="literal">true</code> will cause data streams and indices that do not exist to be ignored during snapshot
+creation. By default, when the <code class="literal">ignore_unavailable</code> option is not set and a data stream or index is missing, the snapshot request will fail.</p>
+<p>By setting <code class="literal">include_global_state</code> to <code class="literal">false</code> it&#8217;s possible to prevent the cluster global state to be stored as part of
+the snapshot.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The global cluster state includes the cluster&#8217;s index
+templates, such as those <a class="xref" href="set-up-a-data-stream.html#create-a-data-stream-template" title="Create an index template">matching a data
+stream</a>. If your snapshot includes data streams, we recommend storing the
+global state as part of the snapshot. This lets you later restored any
+templates required for a data stream.</p>
+</div>
+</div>
+<p>By default, the entire snapshot will fail if one or more indices participating in the snapshot do not have
+all primary shards available. You can change this behaviour by setting <code class="literal">partial</code> to <code class="literal">true</code>. The <code class="literal">expand_wildcards</code>
+option can be used to control whether hidden and closed indices will be included in the snapshot, and defaults to <code class="literal">all</code>.</p>
+<p>Use the <code class="literal">metadata</code> field to attach arbitrary metadata to the snapshot,
+such as who took the snapshot,
+why it was taken, or any other data that might be useful.</p>
+<p>Snapshot names can be automatically derived using <a class="xref" href="date-math-index-names.html" title="Date math support in index names">date math expressions</a>, similarly as when creating
+new indices. Special characters must be URI encoded.</p>
+<p>For example, use the <a class="xref" href="create-snapshot-api.html" title="Create snapshot API">create snapshot API</a> to create
+a snapshot with the current day in the name, such as <code class="literal">snapshot-2020.07.11</code>:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT /_snapshot/my_backup/&lt;snapshot-{now/d}&gt;
+PUT /_snapshot/my_backup/%3Csnapshot-%7Bnow%2Fd%7D%3E</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1455.console"></div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>You can also create snapshots that are copies of part of an existing snapshot using the <a class="xref" href="clone-snapshot-api.html" title="Clone snapshot API">clone snapshot API</a>.</p>
+</div>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="snapshots-register-repository.html">« Register a snapshot repository</a>
+</span>
+<span class="next">
+<a href="snapshots-restore-snapshot.html">Restore a snapshot »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

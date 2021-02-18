@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Tutorial: Set up cross-cluster replication | Elasticsearch Reference [7.12] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Reference [7.12]"/>
+<link rel="up" href="xpack-ccr.html" title="Cross-cluster replication"/>
+<link rel="prev" href="xpack-ccr.html" title="Cross-cluster replication"/>
+<link rel="next" href="ccr-managing.html" title="Manage cross-cluster replication"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.12"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="7.12"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.12]</a></span>
+»
+<span class="breadcrumb-link"><a href="high-availability.html">Set up a cluster for high availability</a></span>
+»
+<span class="breadcrumb-link"><a href="xpack-ccr.html">Cross-cluster replication</a></span>
+»
+<span class="breadcrumb-node">Tutorial: Set up cross-cluster replication</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="xpack-ccr.html">« Cross-cluster replication</a>
+</span>
+<span class="next">
+<a href="ccr-managing.html">Manage cross-cluster replication »</a>
+</span>
+</div>
+<div class="section xpack">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="ccr-getting-started"></a>Tutorial: Set up cross-cluster replication<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ccr/getting-started.asciidoc">edit</a><a class="xpack_tag" href="/subscriptions"></a></h2>
+</div></div></div>
+
+<p>Use this guide to set up cross-cluster replication (CCR) between clusters in two
+datacenters. Replicating your data across datacenters provides several benefits:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Brings data closer to your users or application server to reduce latency and
+response time
+</li>
+<li class="listitem">
+Provides your mission-critical applications with the tolerance to withstand datacenter or region outages
+</li>
+</ul>
+</div>
+<p>In this guide, you&#8217;ll learn how to:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Configure a <a class="xref" href="modules-remote-clusters.html" title="Remote clusters">remote cluster</a> with a leader index
+</li>
+<li class="listitem">
+Create a follower index on a local cluster
+</li>
+<li class="listitem">
+Create an auto-follow pattern to automatically follow time series indices
+that are periodically created in a remote cluster
+</li>
+</ul>
+</div>
+<p>You can manually create follower indices to replicate specific indices on a
+remote cluster, or configure auto-follow patterns to replicate rolling time series indices.</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If you want to replicate data across clusters in the cloud, you can
+<a href="/guide/en/cloud/current/ec-enable-ccs.html" class="ulink" target="_top">configure remote clusters on Elasticsearch Service</a>. Then, you
+can <a class="xref" href="modules-cross-cluster-search.html" title="Search across clusters">search across clusters</a> and set up cross-cluster replication.</p>
+</div>
+</div>
+<div class="videoblock">
+<div class="content">
+<video src="https://static-www.elastic.co/v3/assets/bltefdd0b53724fa2ce/blt994089f5e841ad69/5f6265de6f40ab4648b5cf9b/ccr-setup-video-edited.mp4" width="700" height="500" autoplay controls loop>
+Your browser does not support the video tag.
+</video>
+</div>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="ccr-getting-started-prerequisites"></a>Prerequisites<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ccr/getting-started.asciidoc">edit</a></h3>
+</div></div></div>
+<p>To complete this tutorial, you need:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+A license on both clusters that includes cross-cluster replication. <a href="/guide/en/kibana/7.12/managing-licenses.html" class="ulink" target="_top">Activate a free 30-day trial</a>.
+</li>
+<li class="listitem">
+The <code class="literal">read_ccr</code> cluster privilege and <code class="literal">monitor</code> and <code class="literal">read</code> privileges
+for the leader index on the remote cluster. <a class="xref" href="stack-management.html#stack-management-ccr-remote">Configure remote cluster privileges</a>.
+</li>
+<li class="listitem">
+The <code class="literal">manage_ccr</code> cluster privilege and <code class="literal">monitor</code>, <code class="literal">read</code>, <code class="literal">write</code> and
+<code class="literal">manage_follow_index</code> privileges to configure remote clusters and follower
+indices on the local cluster. <a class="xref" href="stack-management.html#stack-management-ccr-local">Configure local cluster privileges</a>.
+</li>
+<li class="listitem">
+An index on the remote cluster that contains the data you want to replicate.
+This tutorial uses the sample eCommerce orders data set.
+<a href="/guide/en/kibana/7.12/get-started.html#gs-get-data-into-kibana" class="ulink" target="_top">Load sample data</a>.
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="ccr-getting-started-remote-cluster"></a>Connect to a remote cluster<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ccr/getting-started.asciidoc">edit</a></h3>
+</div></div></div>
+<p>To replicate an index on a remote cluster (Cluster A) to a local cluster (Cluster B), you configure Cluster A as a remote on Cluster B.</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/ccr-tutorial-clusters.png" alt="ClusterA contains the leader index and ClusterB contains the follower index">
+</div>
+</div>
+<p>To configure a remote cluster from Stack Management in Kibana:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Select <span class="strong strong"><strong>Remote Clusters</strong></span> from the side navigation.
+</li>
+<li class="listitem">
+Specify the IP address or host name of the remote cluster (ClusterB),
+followed by the transport port of the remote cluster (defaults to <code class="literal">9300</code>). For
+example, <code class="literal">192.168.1.1:9300</code>.
+</li>
+</ol>
+</div>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/ccr-add-remote-cluster.png" alt="The Add remote clusters page in Kibana">
+</div>
+</div>
+<details>
+<summary class="title">API example</summary>
+<div class="content">
+<p>Use the <a class="xref" href="cluster-update-settings.html" title="Cluster update settings API">cluster update settings API</a> to add a remote cluster:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT /_cluster/settings
+{
+  "persistent" : {
+    "cluster" : {
+      "remote" : {
+        "leader" : {
+          "seeds" : [
+            "127.0.0.1:9300" <a id="CO502-1"></a><i class="conum" data-value="1"></i>
+          ]
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1433.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO502-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Specifies the hostname and transport port of a seed node in the remote
+cluster.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>You can verify that the local cluster is successfully connected to the remote
+cluster.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /_remote/info</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1434.console"></div>
+<p>The API will respond by showing that the local cluster is connected to the
+remote cluster.</p>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "leader" : {
+    "seeds" : [
+      "127.0.0.1:9300"
+    ],
+    "connected" : true, <a id="CO503-1"></a><i class="conum" data-value="1"></i>
+    "num_nodes_connected" : 1, <a id="CO503-2"></a><i class="conum" data-value="2"></i>
+    "max_connections_per_cluster" : 3,
+    "initial_connect_timeout" : "30s",
+    "skip_unavailable" : false,
+    "mode" : "sniff"
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO503-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This shows the local cluster is connected to the remote cluster with cluster
+alias <code class="literal">leader</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO503-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This shows the number of nodes in the remote cluster the local cluster is
+connected to.</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+</details>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="ccr-enable-soft-deletes"></a>Enable soft deletes on leader indices<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ccr/getting-started.asciidoc">edit</a></h3>
+</div></div></div>
+<p>To follow an index, it must have been created with
+<a class="xref" href="xpack-ccr.html#ccr-leader-requirements" title="Replicating a leader requires soft deletes">soft deletes</a> enabled. If the index doesn’t have
+soft deletes enabled, you must reindex it and use the new index as the leader
+index. Soft deletes are enabled by default on new indices
+created with Elasticsearch 7.0.0 and later.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="ccr-getting-started-follower-index"></a>Create a follower index to replicate a specific index<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ccr/getting-started.asciidoc">edit</a></h3>
+</div></div></div>
+<p>When you create a follower index, you reference the remote cluster and the
+leader index in your remote cluster.</p>
+<p>To create a follower index from Stack Management in Kibana:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Select <span class="strong strong"><strong>Cross-Cluster Replication</strong></span> in the side navigation and choose the
+<span class="strong strong"><strong>Follower Indices</strong></span> tab.
+</li>
+<li class="listitem">
+Choose the cluster (ClusterA) containing the leader index you want to
+replicate.
+</li>
+<li class="listitem">
+Enter the name of the leader index, which is
+<code class="literal">kibana_sample_data_ecommerce</code> if you are following the tutorial.
+</li>
+<li class="listitem">
+Enter a name for your follower index, such as <code class="literal">follower-kibana-sample-data</code>.
+</li>
+</ol>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/ccr-add-follower-index.png" alt="Adding a follower index named server-metrics in Kibana">
+</div>
+</div>
+<p>Elasticsearch initializes the follower using the
+<a class="xref" href="xpack-ccr.html#ccr-remote-recovery" title="Initializing followers using remote recovery">remote recovery</a>
+process, which transfers the existing Lucene segment files from the leader
+index to the follower index. The index status changes to <span class="strong strong"><strong>Paused</strong></span>. When the
+remote recovery process is complete, the index following begins and the status
+changes to <span class="strong strong"><strong>Active</strong></span>.</p>
+<p>When you index documents into your leader index, Elasticsearch replicates the documents
+in the follower index.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/ccr-follower-index.png" alt="The Cross-Cluster Replication page in Kibana">
+</div>
+</div>
+<details>
+<summary class="title">API example</summary>
+<div class="content">
+<p>Use the <a class="xref" href="ccr-put-follow.html" title="Create follower API">create follower API</a> to create follower indices.
+When you create a follower index, you must reference the remote cluster and the
+leader index that you created in the
+remote cluster.</p>
+<p>When initiating the follower request, the response returns before the
+<a class="xref" href="xpack-ccr.html#ccr-remote-recovery" title="Initializing followers using remote recovery">remote recovery</a> process completes. To wait for the process
+to complete, add the <code class="literal">wait_for_active_shards</code> parameter to your request.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT /server-metrics-follower/_ccr/follow?wait_for_active_shards=1
+{
+  "remote_cluster" : "leader",
+  "leader_index" : "server-metrics"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1435.console"></div>
+<p>Use the
+<a class="xref" href="ccr-get-follow-stats.html" title="Get follower stats API">get follower stats API</a> to inspect the status of
+replication</p>
+</div>
+</details>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="ccr-getting-started-auto-follow"></a>Create an auto-follow pattern to replicate time series indices<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/ccr/getting-started.asciidoc">edit</a></h3>
+</div></div></div>
+<p>You use <a class="xref" href="ccr-auto-follow.html" title="Manage auto-follow patterns">auto-follow patterns</a> to automatically create new
+followers for rolling time series indices. Whenever the name of a new index on
+the remote cluster matches the auto-follow pattern, a corresponding follower
+index is added to the local cluster.</p>
+<p>An auto-follow pattern specifies the remote cluster you want to replicate from,
+and one or more index patterns that specify the rolling time series indices you
+want to replicate.</p>
+<p>To create an auto-follow pattern from Stack Management in Kibana:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Select <span class="strong strong"><strong>Cross Cluster Replication</strong></span> in the side navigation and choose the
+<span class="strong strong"><strong>Auto-follow patterns</strong></span> tab.
+</li>
+<li class="listitem">
+Enter a name for the auto-follow pattern, such as <code class="literal">beats</code>.
+</li>
+<li class="listitem">
+Choose the remote cluster that contains the index you want to replicate,
+which in the example scenario is Cluster A.
+</li>
+<li class="listitem">
+Enter one or more index patterns that identify the indices you want to
+replicate from the remote cluster. For example, enter
+<code class="literal">metricbeat-* packetbeat-*</code> to automatically create followers for Metricbeat and Packetbeat indices.
+</li>
+<li class="listitem">
+Enter <span class="strong strong"><strong>follower-</strong></span> as the prefix to apply to the names of the follower indices so
+you can more easily identify replicated indices.
+</li>
+</ol>
+</div>
+<p>As new indices matching these patterns are
+created on the remote, Elasticsearch automatically replicates them to local follower indices.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/auto-follow-patterns.png" alt="The Auto-follow patterns page in Kibana">
+</div>
+</div>
+<details>
+<summary class="title">API example</summary>
+<div class="content">
+<p>Use the <a class="xref" href="ccr-put-auto-follow-pattern.html" title="Create auto-follow pattern API">create auto-follow pattern API</a> to
+configure auto-follow patterns.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT /_ccr/auto_follow/beats
+{
+  "remote_cluster" : "leader",
+  "leader_index_patterns" :
+  [
+    "metricbeat-*", <a id="CO504-1"></a><i class="conum" data-value="1"></i>
+    "packetbeat-*" <a id="CO504-2"></a><i class="conum" data-value="2"></i>
+  ],
+  "follow_index_pattern" : "{{leader_index}}-copy" <a id="CO504-3"></a><i class="conum" data-value="3"></i>
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1436.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO504-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Automatically follow new Metricbeat indices.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO504-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Automatically follow new Packetbeat indices.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO504-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The name of the follower index is derived from the name of the leader index
+by adding the suffix <code class="literal">-copy</code> to the name of the leader index.</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+</details>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="xpack-ccr.html">« Cross-cluster replication</a>
+</span>
+<span class="next">
+<a href="ccr-managing.html">Manage cross-cluster replication »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
