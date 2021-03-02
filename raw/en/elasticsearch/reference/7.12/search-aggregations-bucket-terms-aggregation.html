@@ -431,65 +431,71 @@ tie-breaker in ascending alphabetical order to prevent non-deterministic orderin
 <div class="titlepage"><div><div>
 <h3 class="title"><a id="search-aggregations-bucket-terms-aggregation-script"></a>Script<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/aggregations/bucket/terms-aggregation.asciidoc">edit</a></h3>
 </div></div></div>
-<p>Generating the terms using a script:</p>
+<p>Use a <a class="xref" href="runtime.html" title="Runtime fields">runtime field</a> if the data in your documents doesn&#8217;t
+exactly match what you&#8217;d like to aggregate. If, for example, "anthologies"
+need to be in a special category then you could run this:</p>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">GET /_search
 {
+  "size": 0,
+  "runtime_mappings": {
+    "normalized_genre": {
+      "type": "keyword",
+      "script": """
+        String genre = doc['genre'].value;
+        if (doc['product'].value.startsWith('Anthology')) {
+          emit(genre + ' anthology');
+        } else {
+          emit(genre);
+        }
+      """
+    }
+  },
   "aggs": {
     "genres": {
       "terms": {
-        "script": {
-          "source": "doc['genre'].value",
-          "lang": "painless"
-        }
+        "field": "normalized_genre"
       }
     }
   }
 }</pre>
 </div>
 <div class="console_widget" data-snippet="snippets/1127.console"></div>
-<p>This will interpret the <code class="literal">script</code> parameter as an <code class="literal">inline</code> script with the default script language and no script parameters. To use a stored script use the following syntax:</p>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET /_search
-{
-  "aggs": {
+<p>Which will look like:</p>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "aggregations": {
     "genres": {
-      "terms": {
-        "script": {
-          "id": "my_script",
-          "params": {
-            "field": "genre"
-          }
+      "doc_count_error_upper_bound": 0,
+      "sum_other_doc_count": 0,
+      "buckets": [
+        {
+          "key": "electronic",
+          "doc_count": 4
+        },
+        {
+          "key": "rock",
+          "doc_count": 3
+        },
+        {
+          "key": "electronic anthology",
+          "doc_count": 2
+        },
+        {
+          "key": "jazz",
+          "doc_count": 2
         }
-      }
+      ]
     }
-  }
+  },
+  ...
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1128.console"></div>
-</div>
-
-<div class="section">
-<div class="titlepage"><div><div>
-<h3 class="title"><a id="_value_script_2"></a>Value Script<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.12/docs/reference/aggregations/bucket/terms-aggregation.asciidoc">edit</a></h3>
-</div></div></div>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET /_search
-{
-  "aggs": {
-    "genres": {
-      "terms": {
-        "field": "genre",
-        "script": {
-          "source": "'Genre: ' +_value",
-          "lang": "painless"
-        }
-      }
-    }
-  }
-}</pre>
-</div>
-<div class="console_widget" data-snippet="snippets/1129.console"></div>
+<p>This is a little slower because the runtime field has to access two fields
+instead of one and because there are some optimizations that work on
+non-runtime <code class="literal">keyword</code> fields that we have to give up for for runtime
+<code class="literal">keyword</code> fields. If you need the speed, you can index the
+<code class="literal">normalized_genre</code> field.</p>
 </div>
 
 <div class="section">
@@ -517,7 +523,7 @@ tie-breaker in ascending alphabetical order to prevent non-deterministic orderin
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1130.console"></div>
+<div class="console_widget" data-snippet="snippets/1128.console"></div>
 <p>In the above example, buckets will be created for all the tags that has the word <code class="literal">sport</code> in them, except those starting
 with <code class="literal">water_</code> (so the tag <code class="literal">water_sports</code> will not be aggregated). The <code class="literal">include</code> regular expression will determine what
 values are "allowed" to be aggregated, while the <code class="literal">exclude</code> determines the values that should not be aggregated. When
@@ -550,7 +556,7 @@ strings that represent the terms as they are found in the index:</p>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1131.console"></div>
+<div class="console_widget" data-snippet="snippets/1129.console"></div>
 </div>
 
 <div class="section">
@@ -590,7 +596,7 @@ Consider this request which is looking for accounts that have not logged any acc
    }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1132.console"></div>
+<div class="console_widget" data-snippet="snippets/1130.console"></div>
 <p>This request is finding the last logged access date for a subset of customer accounts because we
 might want to expire some customer accounts who haven&#8217;t been seen for a long while.
 The <code class="literal">num_partitions</code> setting has requested that the unique account_ids are organized evenly into twenty
@@ -721,7 +727,7 @@ An example problem scenario is querying a movie database for the 10 most popular
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1133.console"></div>
+<div class="console_widget" data-snippet="snippets/1131.console"></div>
 <p>Even though the number of actors may be comparatively small and we want only 50 result buckets there is a combinatorial explosion of buckets
 during calculation - a single actor can produce n² buckets where n is the number of actors. The sane option would be to first determine
 the 10 most popular actors and only then examine the top co-stars for these 10 actors. This alternative strategy is what we call the <code class="literal">breadth_first</code> collection
@@ -755,7 +761,7 @@ It is possible to override the default heuristic and to provide a collect mode d
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1134.console"></div>
+<div class="console_widget" data-snippet="snippets/1132.console"></div>
 <div class="calloutlist">
 <table border="0" summary="Callout list">
 <tr>
@@ -815,7 +821,7 @@ ordinals.</p>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1135.console"></div>
+<div class="console_widget" data-snippet="snippets/1133.console"></div>
 <div class="calloutlist">
 <table border="0" summary="Callout list">
 <tr>
@@ -851,7 +857,7 @@ had a value.</p>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1136.console"></div>
+<div class="console_widget" data-snippet="snippets/1134.console"></div>
 <div class="calloutlist">
 <table border="0" summary="Callout list">
 <tr>
