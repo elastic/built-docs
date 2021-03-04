@@ -41,13 +41,46 @@ Not what you want? See the
 <h4><a id="k8s-140-agent-support"></a>Support for Elastic Agent<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/release-notes/highlights-1.4.0.asciidoc">edit</a></h4>
 <p><a href="/guide/en/fleet/current/elastic-agent-installation-configuration.html" class="ulink" target="_top">Elastic Agent</a> provides a unified way to monitor logs, metrics, and other types of data from your Kubernetes infrastructure quickly and easily. You can use a single Elastic Agent deployment to replace multiple Beats deployments that were previously required to collect the different types of data you want to monitor. ECK 1.4.0 introduces experimental support for Elastic Agent in <a href="/guide/en/fleet/current/run-elastic-agent-standalone.html" class="ulink" target="_top">standalone mode</a> as a technology preview.</p>
 <h3><a id="k8s-140-known-issues"></a>Known issues<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/release-notes/highlights-1.4.0.asciidoc">edit</a></h3>
-<p>On Kubernetes versions 1.16 or higher, if the operator is installed using Helm and if the validating webhook is enabled, you may be prevented from <a class="xref" href="k8s-volume-claim-templates.html" title="Volume claim templates">increasing the storage size</a> of Elasticsearch <code class="literal">volumeClaimTemplates</code> even if the underlying storage class allows expansion. This is due to a change in how <code class="literal">admissionregistration.k8s.io/v1</code> resources match update requests to validating webhook endpoints. You can work around this problem by patching the validating webhook as follows:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+On Kubernetes version 1.16 or higher, if the operator is installed using Helm and if the validating webhook is enabled, you might be prevented from <a class="xref" href="k8s-volume-claim-templates.html" title="Volume claim templates">increasing the storage size</a> of Elasticsearch <code class="literal">volumeClaimTemplates</code> even if the underlying storage class allows expansion. This is due to a change in how <code class="literal">admissionregistration.k8s.io/v1</code> resources match update requests to validating webhook endpoints. As a workaround, you can patch the validating webhook as follows:
+</li>
+</ul>
+</div>
 <div class="pre_wrapper lang-sh">
 <pre class="programlisting prettyprint lang-sh"># If you installed using the Helm defaults, the name of the webhook would be elastic-operator.elastic-system.k8s.elastic.co
 # If the operator name or namespace was changed during the installation, the name would reflect those changes.
 WEBHOOK=$(kubectl get validatingwebhookconfiguration --no-headers -o custom-columns=NAME:.metadata.name | grep 'k8s.elastic.co')
 kubectl patch validatingwebhookconfiguration "$WEBHOOK" \
     --patch='{"webhooks": [{"name": "elastic-es-validation-v1.k8s.elastic.co", "matchPolicy": "Exact"}, {"name": "elastic-es-validation-v1beta1.k8s.elastic.co", "matchPolicy": "Exact"}]}'</pre>
+</div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Elastic Agent currently writes its runtime state into the filesystem of its container. As a consequence, the identity of the Elastic Agent changes on container restarts and any internal state of applications run by that Elastic Agent is lost. As a workaround, you can mount the agent-data <code class="literal">hostPath</code> volume into the Elastic Agent container in the location where the process writes its runtime state. You also have to run the Elastic Agent as the root user to be able to access the <code class="literal">hostPath</code> volume, as shown in the following example:
+</li>
+</ul>
+</div>
+<pre class="screen">apiVersion: agent.k8s.elastic.co/v1alpha1
+kind: Agent
+metadata:
+  name: elastic-agent
+spec:
+  version: 7.11.1
+  daemonSet:
+    podTemplate:
+      spec:
+        containers:
+        - name: agent
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+          - name: agent-data
+            mountPath: /usr/share/elastic-agent/data/elastic-agent-9b2fec/run</pre>
+<p>The <code class="literal">mountPath</code> differs from version to version as it contains the hash of the version control system reference which was used to build Elastic Agent. You can find out which path to use by either inspecting the Docker image or by running a command against the container, as shown below:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">docker run -ti --entrypoint bash docker.elastic.co/beats/elastic-agent:7.11.1 -c "ls /usr/share/elastic-agent/data"</pre>
 </div>
 </div>
 <div class="navfooter">
