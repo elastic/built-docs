@@ -680,6 +680,17 @@ For Linux, macOS or Unix, the file is located at <code class="literal">~/.aws/cr
 the home path depends on the user that manages the service, so the <code class="literal">shared_credential_file</code> parameter can be used to avoid ambiguity. Please see
 <a href="https://docs.aws.amazon.com/ses/latest/DeveloperGuide/create-shared-credentials-file.html" class="ulink" target="_top">Create Shared Credentials File</a>
 for more details.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Use <code class="literal">role_arn</code>
+</li>
+</ul>
+</div>
+<p>If <code class="literal">access_key_id</code> and <code class="literal">secret_access_key</code>, <code class="literal">credential_profile_name</code> and/or
+<code class="literal">shared_credential_file</code> are not given, then metricbeat will check for
+<code class="literal">role_arn</code>. <code class="literal">role_arn</code> is used to specify which AWS IAM role to assume
+for generating temporary credentials.</p>
 <p>If running on Docker, the credential file needs to be provided via a volume
 mount. For example, with Metricbeat:</p>
 <pre class="screen">docker run -d --name=metricbeat --user=root --volume="$(pwd)/metricbeat.aws.yml:/usr/share/metricbeat/metricbeat.yml:ro" --volume="/Users/foo/.aws/credentials:/usr/share/metricbeat/credentials:ro" docker.elastic.co/beats/metricbeat:7.11.1 metricbeat -e -E cloud.auth=elastic:1234 -E cloud.id=test-aws:1234</pre>
@@ -741,6 +752,19 @@ mount. For example, with Metricbeat:</p>
   credential_profile_name: test-mb</pre>
 </div>
 </li>
+<li class="listitem">
+<p>Use IAM role ARN with shared AWS credentials file</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">metricbeat.modules:
+- module: aws
+  period: 5m
+  role_arn: arn:aws:iam::123456789012:role/test-mb
+  shared_credential_file: /Users/mb/.aws/credentials_backup
+  credential_profile_name: test
+  metricsets:
+    - ec2</pre>
+</div>
+</li>
 </ul>
 </div>
 <h4><a id="_aws_credentials_types"></a>AWS Credentials Types<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/master/x-pack/libbeat/docs/aws-credentials-config.asciidoc">edit</a></h4>
@@ -772,6 +796,71 @@ A role does not have standard long-term credentials such as a password or access
 Instead, when you assume a role, it provides you with temporary security credentials for your role session.
 IAM role Amazon Resource Name (ARN) can be used to specify which AWS IAM role to assume to generate temporary credentials.
 Please see <a href="https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html" class="ulink" target="_top">AssumeRole API documentation</a> for more details.</p>
+<p>Here are the steps to set up IAM role using AWS CLI for Metricbeat. Please replace
+<code class="literal">123456789012</code> with your own account ID.</p>
+<p>Step 1. Create <code class="literal">example-policy.json</code> file to include all permissions:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "VisualEditor0",
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "sqs:ReceiveMessage"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "VisualEditor1",
+            "Effect": "Allow",
+            "Action": "sqs:ChangeMessageVisibility",
+            "Resource": "arn:aws:sqs:us-east-1:123456789012:test-fb-ks"
+        },
+        {
+            "Sid": "VisualEditor2",
+            "Effect": "Allow",
+            "Action": "sqs:DeleteMessage",
+            "Resource": "arn:aws:sqs:us-east-1:123456789012:test-fb-ks"
+        },
+        {
+            "Sid": "VisualEditor3",
+            "Effect": "Allow",
+            "Action": [
+                "sts:AssumeRole",
+                "sqs:ListQueues",
+                "tag:GetResources",
+                "ec2:DescribeInstances",
+                "cloudwatch:GetMetricData",
+                "ec2:DescribeRegions",
+                "iam:ListAccountAliases",
+                "sts:GetCallerIdentity",
+                "cloudwatch:ListMetrics"
+            ],
+            "Resource": "*"
+        }
+    ]
+}</pre>
+</div>
+<p>Step 2. Create IAM policy using the <code class="literal">aws iam create-policy</code> command:</p>
+<pre class="screen">$ aws iam create-policy --policy-name example-policy --policy-document file://example-policy.json</pre>
+<p>Step 3. Create the JSON file <code class="literal">example-role-trust-policy.json</code> that defines the trust relationship of the IAM role</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">{
+    "Version": "2012-10-17",
+    "Statement": {
+        "Effect": "Allow",
+        "Principal": { "AWS": "arn:aws:iam::123456789012:root" },
+        "Action": "sts:AssumeRole"
+    }
+}</pre>
+</div>
+<p>Step 4. Create the IAM role and attach the policy:</p>
+<pre class="screen">$ aws iam create-role --role-name example-role --assume-role-policy-document file://example-role-trust-policy.json
+$ aws iam attach-role-policy --role-name example-role --policy-arn "arn:aws:iam::123456789012:policy/example-policy"</pre>
+<p>After these steps are done, IAM role ARN can be used for authentication in Metricbeat
+<code class="literal">aws</code> module.</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
