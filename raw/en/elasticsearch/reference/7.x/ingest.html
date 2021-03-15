@@ -2,11 +2,11 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Ingest node | Elasticsearch Reference [7.x] | Elastic</title>
+<title>Ingest pipelines | Elasticsearch Reference [7.x] | Elastic</title>
 <link rel="home" href="index.html" title="Elasticsearch Reference [7.x]"/>
 <link rel="up" href="index.html" title="Elasticsearch Reference [7.x]"/>
 <link rel="prev" href="data-streams-change-mappings-and-settings.html" title="Change mappings and settings for a data stream"/>
-<link rel="next" href="pipeline.html" title="Pipeline Definition"/>
+<link rel="next" href="common-log-format-example.html" title="Example: Parse logs in the Common Log Format"/>
 <meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/7.x"/>
 <meta name="DC.subject" content="Elasticsearch"/>
 <meta name="DC.identifier" content="7.x"/>
@@ -20,92 +20,647 @@ Not what you want? See the
 <div class="breadcrumbs">
 <span class="breadcrumb-link"><a href="index.html">Elasticsearch Reference [7.x]</a></span>
 »
-<span class="breadcrumb-node">Ingest node</span>
+<span class="breadcrumb-node">Ingest pipelines</span>
 </div>
 <div class="navheader">
 <span class="prev">
 <a href="data-streams-change-mappings-and-settings.html">« Change mappings and settings for a data stream</a>
 </span>
 <span class="next">
-<a href="pipeline.html">Pipeline Definition »</a>
+<a href="common-log-format-example.html">Example: Parse logs in the Common Log Format »</a>
 </span>
 </div>
 <div class="part">
 <div class="titlepage"><div><div>
-<h1 class="title"><a id="ingest"></a>Ingest node<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/ingest.asciidoc">edit</a></h1>
+<h1 class="title"><a id="ingest"></a>Ingest pipelines<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/ingest.asciidoc">edit</a></h1>
 </div></div></div>
 <div class="openblock partintro">
 <div class="content">
-<p>Use an ingest node to pre-process documents before the actual document indexing happens.
-The ingest node intercepts bulk and index requests, it applies transformations, and it then
-passes the documents back to the index or bulk APIs.</p>
-<p>All nodes enable ingest by default, so any node can handle ingest tasks. To
-create a dedicated ingest node, configure the <a class="xref" href="modules-node.html" title="Node"><code class="literal">node.roles</code></a>
-setting in <code class="literal">elasticsearch.yml</code> as follows:</p>
-<div class="pre_wrapper lang-yaml">
-<pre class="programlisting prettyprint lang-yaml">node.roles: [ ingest ]</pre>
+<p>Ingest pipelines let you perform common transformations on your data before
+indexing. For example, you can use pipelines to remove fields, extract values
+from text, and enrich your data.</p>
+<p>A pipeline consists of a series of configurable tasks called
+<a class="xref" href="processors.html" title="Ingest processor reference">processors</a>. Each processor runs sequentially, making specific
+changes to incoming documents. After the processors have run, Elasticsearch adds the
+transformed documents to your data stream or index.</p>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/ingest/ingest-process.svg" alt="Ingest pipeline diagram">
 </div>
-<p>To disable ingest for a node, specify the <code class="literal">node.roles</code> setting and exclude
-<code class="literal">ingest</code> from the listed roles.</p>
-<p>To pre-process documents before indexing, <a class="xref" href="pipeline.html" title="Pipeline Definition">define a pipeline</a> that specifies a series of
-<a class="xref" href="ingest-processors.html" title="Processors">processors</a>. Each processor transforms the document in some specific way. For example, a
-pipeline might have one processor that removes a field from the document, followed by
-another processor that renames a field. The <a class="xref" href="cluster-state.html" title="Cluster state API">cluster state</a> then stores
-the configured pipelines.</p>
-<p>To use a pipeline, simply specify the <code class="literal">pipeline</code> parameter on an index or bulk request. This
-way, the ingest node knows which pipeline to use.</p>
-<p>For example:
-Create a pipeline</p>
+</div>
+<p>You can create and manage ingest pipelines using Kibana&#8217;s <span class="strong strong"><strong>Ingest Node
+Pipelines</strong></span> feature or the <a class="xref" href="ingest-apis.html" title="Ingest APIs">ingest APIs</a>. Elasticsearch stores pipelines in
+the <a class="xref" href="cluster-state.html" title="Cluster state API">cluster state</a>.</p>
+<h3><a id="ingest-prerequisites"></a>Prerequisites<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/ingest.asciidoc">edit</a></h3>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Nodes with the <a class="xref" href="modules-node.html#node-ingest-node" title="Ingest node"><code class="literal">ingest</code></a> node role handle pipeline
+processing. To use ingest pipelines, your cluster must have at least one node
+with the <code class="literal">ingest</code> role. For heavy ingest loads, we recommend creating
+<a class="xref" href="modules-node.html#node-ingest-node" title="Ingest node">dedicated ingest nodes</a>.
+</li>
+<li class="listitem">
+If the Elasticsearch security features are enabled, you must have the <code class="literal">manage_pipeline</code>
+<a class="xref" href="security-privileges.html#privileges-list-cluster" title="Cluster privileges">cluster privilege</a> to manage ingest pipelines. To use
+Kibana&#8217;s <span class="strong strong"><strong>Ingest Node Pipelines</strong></span> feature, you also need the
+<code class="literal">cluster:monitor/nodes/info</code> cluster privileges.
+</li>
+<li class="listitem">
+Pipelines including the <code class="literal">enrich</code> processor require additional setup. See
+<a class="xref" href="ingest-enriching-data.html" title="Enrich your data"><em>Enrich your data</em></a>.
+</li>
+</ul>
+</div>
+<h2><a id="create-manage-ingest-pipelines"></a>Create and manage pipelines<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/ingest.asciidoc">edit</a></h2>
+<p>In Kibana, open the main menu and click <span class="strong strong"><strong>Stack Management</strong></span> &gt; <span class="strong strong"><strong>Ingest Node
+Pipelines</strong></span>. From the list view, you can:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+View a list of your pipelines and drill down into details
+</li>
+<li class="listitem">
+Edit or clone existing pipelines
+</li>
+<li class="listitem">
+Delete pipelines
+</li>
+</ul>
+</div>
+<p>To create a new pipeline, click <span class="strong strong"><strong>Create a pipeline</strong></span>. For an example tutorial,
+see <a class="xref" href="common-log-format-example.html" title="Example: Parse logs in the Common Log Format"><em>Example: Parse logs</em></a>.</p>
+<div class="imageblock text-center screenshot">
+<div class="content">
+<img src="images/ingest/ingest-pipeline-list.png" alt="Kibana&#8217;s Ingest Node Pipelines list view">
+</div>
+</div>
+<p>You can also use the <a class="xref" href="ingest-apis.html" title="Ingest APIs">ingest APIs</a> to create and manage pipelines.
+The following <a class="xref" href="put-pipeline-api.html" title="Put pipeline API">create pipeline API</a> request creates
+a pipeline containing two <a class="xref" href="set-processor.html" title="Set processor"><code class="literal">set</code></a> processors followed by a
+<a class="xref" href="lowercase-processor.html" title="Lowercase processor"><code class="literal">lowercase</code></a> processor. The processors run sequentially
+in the order specified.</p>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my_pipeline_id
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-pipeline
 {
-  "description" : "describe pipeline",
-  "processors" : [
+  "description": "My pipeline description",
+  "processors": [
     {
-      "set" : {
-        "field": "foo",
-        "value": "new"
+      "set": {
+        "field": "my-long-field",
+        "value": 10
+      }
+    },
+    {
+      "set": {
+        "field": "my-boolean-field",
+        "value": true
+      }
+    },
+    {
+      "lowercase": {
+        "field": "my-keyword-field"
       }
     }
   ]
 }</pre>
 </div>
 <div class="console_widget" data-snippet="snippets/614.console"></div>
-<p>Index with defined pipeline</p>
+<h3><a id="test-pipeline"></a>Test a pipeline<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/ingest.asciidoc">edit</a></h3>
+<p>Before using a pipeline in production, we recommend you test it using sample
+documents. When creating or editing a pipeline in Kibana, click <span class="strong strong"><strong>Add
+documents</strong></span>. In the <span class="strong strong"><strong>Documents</strong></span> tab, provide sample documents and click <span class="strong strong"><strong>Run
+the pipeline</strong></span>.</p>
+<div class="imageblock text-center screenshot">
+<div class="content">
+<img src="images/ingest/test-a-pipeline.png" alt="Test a pipeline in Kibana">
+</div>
+</div>
+<p>You can also test pipelines using the <a class="xref" href="simulate-pipeline-api.html" title="Simulate pipeline API">simulate pipeline
+API</a>.</p>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">PUT my-index-00001/_doc/my-id?pipeline=my_pipeline_id
+<pre class="programlisting prettyprint lang-console">POST _ingest/pipeline/my-pipeline/_simulate
 {
-  "foo": "bar"
+  "docs": [
+    {
+      "_source": {
+        "my-keyword-field": "FOO"
+      }
+    },
+    {
+      "_source": {
+        "my-keyword-field": "BAR"
+      }
+    }
+  ]
 }</pre>
 </div>
 <div class="console_widget" data-snippet="snippets/615.console"></div>
-<p>Response：</p>
+<p>The API returns transformed documents:</p>
 <div class="pre_wrapper lang-console-result">
 <pre class="programlisting prettyprint lang-console-result">{
-  "_index" : "my-index-00001",
-  "_type" : "_doc",
-  "_id" : "my-id",
-  "_version" : 1,
-  "result" : "created",
-  "_shards" : {
-    "total" : 2,
-    "successful" : 2,
-    "failed" : 0
-  },
-  "_seq_no" : 0,
-  "_primary_term" : 1
+  "docs": [
+    {
+      "doc": {
+        "_index": "_index",
+        "_type": "_doc",
+        "_id": "_id",
+        "_source": {
+          "my-long-field": 10,
+          "my-boolean-field": true,
+          "my-keyword-field": "foo"
+        },
+        "_ingest": {
+          "timestamp": "2099-02-30T22:30:03.187Z"
+        }
+      }
+    },
+    {
+      "doc": {
+        "_index": "_index",
+        "_type": "_doc",
+        "_id": "_id",
+        "_source": {
+          "my-long-field": 10,
+          "my-boolean-field": true,
+          "my-keyword-field": "bar"
+        },
+        "_ingest": {
+          "timestamp": "2099-02-30T22:30:03.188Z"
+        }
+      }
+    }
+  ]
 }</pre>
 </div>
-<p>An index may also declare a <a class="xref" href="index-modules.html#dynamic-index-settings" title="Dynamic index settings">default pipeline</a> that will be used in the
-absence of the <code class="literal">pipeline</code> parameter.</p>
-<p>Finally, an index may also declare a <a class="xref" href="index-modules.html#dynamic-index-settings" title="Dynamic index settings">final pipeline</a>
-that will be executed after any request or default pipeline (if any).</p>
-<p>See <a class="xref" href="ingest-apis.html" title="Ingest APIs">Ingest APIs</a> for more information about creating, adding, and deleting pipelines.</p>
+<h3><a id="add-pipeline-to-indexing-request"></a>Add a pipeline to an indexing request<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/ingest.asciidoc">edit</a></h3>
+<p>Use the <code class="literal">pipeline</code> query parameter to apply a pipeline to documents in
+<a class="xref" href="docs-index_.html" title="Index API">individual</a> or <a class="xref" href="docs-bulk.html" title="Bulk API">bulk</a> indexing requests.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST my-data-stream/_doc?pipeline=my-pipeline
+{
+  "@timestamp": "2099-03-07T11:04:05.000Z",
+  "my-keyword-field": "foo"
+}
+
+PUT my-data-stream/_bulk?pipeline=my-pipeline
+{ "create":{ } }
+{ "@timestamp": "2099-03-08T11:04:05.000Z", "my-keyword-field" : "foo" }
+{ "create":{ } }
+{ "@timestamp": "2099-03-08T11:06:07.000Z", "my-keyword-field" : "bar" }</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/616.console"></div>
+<p>You can also use the <code class="literal">pipeline</code> parameter with the <a class="xref" href="docs-update-by-query.html" title="Update By Query API">update
+by query</a> or <a class="xref" href="docs-reindex.html" title="Reindex API">reindex</a> APIs.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST my-data-stream/_update_by_query?pipeline=my-pipeline
+
+POST _reindex
+{
+  "source": {
+    "index": "my-data-stream"
+  },
+  "dest": {
+    "index": "my-new-data-stream",
+    "op_type": "create",
+    "pipeline": "my-pipeline"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/617.console"></div>
+<h3><a id="set-default-pipeline"></a>Set a default pipeline<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/ingest.asciidoc">edit</a></h3>
+<p>Use the <a class="xref" href="index-modules.html#index-default-pipeline"><code class="literal">index.default_pipeline</code></a> index setting to set
+a default pipeline. Elasticsearch applies this pipeline if no <code class="literal">pipeline</code> parameter
+is specified.</p>
+<h3><a id="set-final-pipeline"></a>Set a final pipeline<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/ingest.asciidoc">edit</a></h3>
+<p>Use the <a class="xref" href="index-modules.html#index-final-pipeline"><code class="literal">index.final_pipeline</code></a> index setting to set a
+final pipeline. Elasticsearch applies this pipeline after the request or default
+pipeline, even if neither is specified.</p>
+<h3><a id="access-source-fields"></a>Access source fields in a processor<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/ingest.asciidoc">edit</a></h3>
+<p>Processors have read and write access to an incoming document&#8217;s source fields.
+To access a field key in a processor, use its field name. The following <code class="literal">set</code>
+processor accesses <code class="literal">my-long-field</code>.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-pipeline
+{
+  "processors": [
+    {
+      "set": {
+        "field": "my-long-field",
+        "value": 10
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/618.console"></div>
+<p>You can also prepend the <code class="literal">_source</code> prefix.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-pipeline
+{
+  "processors": [
+    {
+      "set": {
+        "field": "_source.my-long-field",
+        "value": 10
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/619.console"></div>
+<p>Use dot notation to access object fields.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If your document contains flattened objects, use the
+<a class="xref" href="dot-expand-processor.html" title="Dot expander processor"><code class="literal">dot_expander</code></a> processor to expand them first. Other
+ingest processors cannot access flattened objects.</p>
 </div>
 </div>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-pipeline
+{
+  "processors": [
+    {
+      "dot_expander": {
+        "field": "my-object-field.my-property"
+      }
+    },
+    {
+      "set": {
+        "field": "my-object-field.my-property",
+        "value": 10
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/620.console"></div>
+<p><a id="template-snippets"></a>To access field values, enclose the field name in double curly brackets <code class="literal">{{ }}</code>
+to create a <a href="https://mustache.github.io" class="ulink" target="_top">Mustache</a> template snippet. You can use
+template snippets to dynamically set field names. The following processor sets a
+field name as the <code class="literal">service</code> field value.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-pipeline
+{
+  "processors": [
+    {
+      "set": {
+        "field": "{{service}}",
+        "value": "{{code}}"
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/621.console"></div>
+<h3><a id="access-metadata-fields"></a>Access metadata fields in a processor<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/ingest.asciidoc">edit</a></h3>
+<p>Processors can access the following metadata fields by name:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">_index</code>
+</li>
+<li class="listitem">
+<code class="literal">_id</code>
+</li>
+<li class="listitem">
+<code class="literal">_routing</code>
+</li>
+</ul>
+</div>
+<p>For example, the following <code class="literal">set</code> processor sets the document&#8217;s routing value as
+the <code class="literal">geoip.country_iso_code</code> field value.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-pipeline
+{
+  "processors" : [
+    {
+      "set" : {
+        "field": "_routing",
+        "value": "{{geoip.country_iso_code}}"
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/622.console"></div>
+<p>Use a Mustache template snippet to access metadata field values. For example,
+<code class="literal">{{_routing}}</code> retrieves a document&#8217;s routing value.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If you <a class="xref" href="docs-index_.html#create-document-ids-automatically" title="Create document IDs automatically">automatically generate</a>
+document IDs, you cannot use <code class="literal">{{_id}}</code> in a processor. Elasticsearch assigns
+auto-generated <code class="literal">_id</code> values after ingest.</p>
+</div>
+</div>
+<h3><a id="access-ingest-metadata"></a>Access ingest metadata in a processor<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/ingest.asciidoc">edit</a></h3>
+<p>Ingest processors can add and access ingest metadata using the <code class="literal">_ingest</code> key.</p>
+<p>Unlike source and metadata fields, Elasticsearch does not index ingest metadata fields by
+default. Elasticsearch also allows source fields that start with an <code class="literal">_ingest</code> key. If
+your data includes such source fields, use <code class="literal">_source._ingest</code> to access them.</p>
+<p>Pipelines only create the <code class="literal">_ingest.timestamp</code> ingest metadata field by default.
+This field contains a timestamp of when Elasticsearch received the document&#8217;s indexing
+request. To index <code class="literal">_ingest.timestamp</code> or other ingest metadata fields, use the
+<code class="literal">set</code> processor.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-pipeline
+{
+  "processors": [
+    {
+      "set": {
+        "field": "received",
+        "value": "{{_ingest.timestamp}}"
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/623.console"></div>
+<h3><a id="handling-pipeline-failures"></a>Handing pipeline failures<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/ingest.asciidoc">edit</a></h3>
+<p>A pipeline&#8217;s processors run sequentially. By default, pipeline processing stops
+when one of these processors fails or encounters an error.</p>
+<p>To ignore a processor failure and run the pipeline&#8217;s remaining processors, set
+<code class="literal">ignore_failure</code> to <code class="literal">true</code>.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-pipeline
+{
+  "processors": [
+    {
+      "rename": {
+        "field": "foo",
+        "target_field": "bar",
+        "ignore_failure": true
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/624.console"></div>
+<p>Use the <code class="literal">on_failure</code> parameter to specify a list of processors to run
+immediately after a processor failure. If <code class="literal">on_failure</code> is specified, Elasticsearch
+afterward runs the pipeline&#8217;s remaining processors , even if the <code class="literal">on_failure</code>
+configuration is empty.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-pipeline
+{
+  "processors": [
+    {
+      "rename": {
+        "field": "foo",
+        "target_field": "bar",
+        "on_failure": [
+          {
+            "set": {
+              "field": "error.message",
+              "value": "field \"foo\" does not exist, cannot rename to \"bar\"",
+              "override": false
+            }
+          }
+        ]
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/625.console"></div>
+<p>Nest a list of <code class="literal">on_failure</code> processors for nested error handling.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-pipeline
+{
+  "processors": [
+    {
+      "rename": {
+        "field": "foo",
+        "target_field": "bar",
+        "on_failure": [
+          {
+            "set": {
+              "field": "error.message",
+              "value": "field \"foo\" does not exist, cannot rename to \"bar\"",
+              "override": false,
+              "on_failure": [
+                {
+                  "set": {
+                    "field": "error.message.multi",
+                    "value": "Document encountered multiple ingest errors",
+                    "override": true
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/626.console"></div>
+<p>You can also specify <code class="literal">on_failure</code> for a pipeline.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-pipeline
+{
+  "processors": [ ... ],
+  "on_failure": [
+    {
+      "set": {
+        "field": "_index",
+        "value": "failed-{{ _index }}"
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/627.console"></div>
+<h3><a id="conditionally-run-processor"></a>Conditionally run a processor<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/ingest.asciidoc">edit</a></h3>
+<p>Each processor supports an optional <code class="literal">if</code> condition, written as a
+<a href="/guide/en/elasticsearch/painless/7.x/painless-guide.html" class="ulink" target="_top">Painless script</a>. If provided, the processor only
+runs when the <code class="literal">if</code> condition is <code class="literal">true</code>.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><code class="literal">if</code> condition scripts run in Painless&#8217;s
+<a href="/guide/en/elasticsearch/painless/7.x/painless-ingest-processor-context.html" class="ulink" target="_top">ingest processor context</a>. In
+<code class="literal">if</code> conditions, <code class="literal">ctx</code> values are read-only.</p>
+</div>
+</div>
+<p>The following <a class="xref" href="drop-processor.html" title="Drop processor"><code class="literal">drop</code></a> processor uses an <code class="literal">if</code> condition to drop
+documents with a <code class="literal">network_name</code> of <code class="literal">Guest</code>.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-pipeline
+{
+  "processors": [
+    {
+      "drop": {
+        "if": "ctx?.network_name == 'Guest'"
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/628.console"></div>
+<p>If the static <code class="literal">script.painless.regex.enabled</code> cluster setting is enabled, you
+can use regular expressions in your <code class="literal">if</code> condition scripts. For supported
+syntax, see the <a href="/guide/en/elasticsearch/painless/7.x/painless-regexes.html" class="ulink" target="_top">Painless regexes</a>
+documentation.</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If possible, avoid using regular expressions. Expensive regular expressions
+can slow indexing speeds.</p>
+</div>
+</div>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-pipeline
+{
+  "processors": [
+    {
+      "set": {
+        "if": "ctx.href?.url =~ /^http[^s]/",
+        "field": "href.insecure",
+        "value": true
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/629.console"></div>
+<p>You must specify <code class="literal">if</code> conditions as valid JSON on a single line. However, you
+can use the <a href="/guide/en/kibana/7.x/console-kibana.html#configuring-console" class="ulink" target="_top">Kibana
+console</a>'s triple quote syntax to write and debug larger scripts.</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If possible, avoid using complex or expensive <code class="literal">if</code> condition scripts.
+Expensive condition scripts can slow indexing speeds.</p>
+</div>
+</div>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-pipeline
+{
+  "processors": [
+    {
+      "drop": {
+        "if": """
+            Collection tags = ctx.tags;
+            if(tags != null){
+              for (String tag : tags) {
+                if (tag.toLowerCase().contains('prod')) {
+                  return false;
+                }
+              }
+            }
+            return true;
+        """
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/630.console"></div>
+<p>You can also specify a <a class="xref" href="modules-scripting-using.html#modules-scripting-stored-scripts" title="Stored scripts">stored script</a> as the
+<code class="literal">if</code> condition.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _scripts/my-stored-script
+{
+  "script": {
+    "lang": "painless",
+    "source": """
+      Collection tags = ctx.tags;
+      if(tags != null){
+        for (String tag : tags) {
+          if (tag.toLowerCase().contains('prod')) {
+            return false;
+          }
+        }
+      }
+      return true;
+    """
+  }
+}
 
-
-
+PUT _ingest/pipeline/my-pipeline
+{
+  "processors": [
+    {
+      "drop": {
+        "if": { "id": "my-stored-script" }
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/631.console"></div>
+<p>Incoming documents often contain object fields. If a processor script attempts
+to access a field whose parent object does not exist, Elasticsearch returns a
+<code class="literal">NullPointerException</code>. To avoid these exceptions, use
+<a href="/guide/en/elasticsearch/painless/7.x/painless-operators-reference.html#null-safe-operator" class="ulink" target="_top">null safe
+operators</a>, such as <code class="literal">?.</code>, and write your scripts to be null safe.</p>
+<p>For example, <code class="literal">ctx.network?.name.equalsIgnoreCase('Guest')</code> is not null safe.
+<code class="literal">ctx.network?.name</code> can return null. Rewrite the script as
+<code class="literal">'Guest'.equalsIgnoreCase(ctx.network?.name)</code>, which is null safe because
+<code class="literal">Guest</code> is always non-null.</p>
+<p>If you can&#8217;t rewrite a script to be null safe, include an explicit null check.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-pipeline
+{
+  "processors": [
+    {
+      "drop": {
+        "if": "ctx.network?.name != null &amp;&amp; ctx.network.name.contains('Guest')"
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/632.console"></div>
+<h3><a id="conditionally-apply-pipelines"></a>Conditionally apply pipelines<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/ingest.asciidoc">edit</a></h3>
+<p>Combine an <code class="literal">if</code> condition with the <a class="xref" href="pipeline-processor.html" title="Pipeline processor"><code class="literal">pipeline</code></a> processor
+to apply other pipelines to documents based on your criteria. You can use this
+pipeline as the <a class="xref" href="ingest.html#set-default-pipeline" title="Set a default pipeline">default pipeline</a> in an
+<a class="xref" href="index-templates.html" title="Index templates">index template</a> used to configure multiple data streams or
+indices.</p>
+<p>The following pipeline applies different pipelines to incoming documents based
+on the <code class="literal">service.name</code> field value.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/one-pipeline-to-rule-them-all
+{
+  "processors": [
+    {
+      "pipeline": {
+        "if": "ctx.service?.name == 'apache_httpd'",
+        "name": "httpd_pipeline"
+      }
+    },
+    {
+      "pipeline": {
+        "if": "ctx.service?.name == 'syslog'",
+        "name": "syslog_pipeline"
+      }
+    },
+    {
+      "fail": {
+        "if": "ctx.service?.name != 'apache_httpd' &amp;&amp; ctx.service?.name != 'syslog'",
+        "message": "This pipeline requires service.name to be either `syslog` or `apache_httpd`"
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/633.console"></div>
+<h3><a id="get-pipeline-usage-stats"></a>Get pipeline usage statistics<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/ingest.asciidoc">edit</a></h3>
+<p>Use the <a class="xref" href="cluster-nodes-stats.html" title="Nodes stats API">node stats</a> API to get global and per-pipeline
+ingest statistics. Use these stats to determine which pipelines run most
+frequently or spend the most time processing.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _nodes/stats/ingest?filter_path=nodes.*.ingest</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/634.console"></div>
+</div>
+</div>
 
 
 
@@ -115,7 +670,7 @@ that will be executed after any request or default pipeline (if any).</p>
 <a href="data-streams-change-mappings-and-settings.html">« Change mappings and settings for a data stream</a>
 </span>
 <span class="next">
-<a href="pipeline.html">Pipeline Definition »</a>
+<a href="common-log-format-example.html">Example: Parse logs in the Common Log Format »</a>
 </span>
 </div>
 </div>
