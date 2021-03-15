@@ -138,17 +138,41 @@ For information about how index templates worked previously,
 see the <a class="xref" href="indices-templates-v1.html" title="Put index template API">legacy template documentation</a>.</p>
 </div>
 </div>
-<p><a id="getting"></a>An index template is a way to tell Elasticsearch how to configure an index when it is created.
-For data streams, the index template configures the stream&#8217;s backing indices as they
-are created. Templates are configured prior to index creation and then when an
-index is created either manually or through indexing a document, the template
-settings are used as a basis for creating the index.</p>
-<p>There are two types of templates, index templates and <a class="xref" href="indices-component-template.html" title="Put component template API">component
-templates</a>. Component templates are reusable building blocks that configure mappings, settings, and
-aliases. You use component templates to construct index templates, they aren&#8217;t directly applied to a
-set of indices. Index templates can contain a collection of component templates, as well as directly
-specify settings, mappings, and aliases.</p>
-<p>If a new data stream or index matches more than one index template, the index template with the highest priority is used.</p>
+<p><a id="getting"></a>An index template is a way to tell Elasticsearch how to configure an index when it is
+created. For data streams, the index template configures the stream&#8217;s backing
+indices as they are created. Templates are configured
+<span class="strong strong"><strong>prior to index creation</strong></span>. When an index is created - either manually or
+through indexing a document - the template settings are used as a basis for
+creating the index.</p>
+<p>There are two types of templates: index templates and <a class="xref" href="indices-component-template.html" title="Put component template API">component templates</a>. Component templates are reusable building
+blocks that configure mappings, settings, and aliases. While you can use
+component templates to construct index templates, they aren&#8217;t directly applied
+to a set of indices. Index templates can contain a collection of component
+templates, as well as directly specify settings, mappings, and aliases.</p>
+<p>The following conditions apply to index templates:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Composable templates take precedence over legacy templates. If no composable
+template matches a given index, a legacy template may still match and be
+applied.
+</li>
+<li class="listitem">
+If an index is created with explicit settings and also matches an index
+template, the settings from the <a class="xref" href="indices-create-index.html" title="Create index API">create index</a> request
+take precedence over settings specified in the index template and its component
+templates.
+</li>
+<li class="listitem">
+If a new data stream or index matches more than one index template, the index
+template with the highest priority is used.
+</li>
+</ul>
+</div>
+<div class="sidebar">
+<div class="titlepage"><div><div>
+<p class="title"><strong>Using index templates with Fleet or Elastic Agent</strong></p>
+</div></div></div>
 <div class="important admon">
 <div class="icon"></div>
 <div class="admon_content">
@@ -194,12 +218,13 @@ for <code class="literal">logs-*-*</code>.
 </div>
 </div>
 </div>
-<p>When a composable template matches a given index
-it always takes precedence over a legacy template. If no composable template matches, a legacy
-template may still match and be applied.</p>
-<p>If an index is created with explicit settings and also matches an index template,
-the settings from the create index request take precedence over settings specified in the index template and its component templates.</p>
-<a id="350a405d5bd802163f3648c67a2e71ce"></a>
+</div>
+<h2><a id="create-index-templates"></a>Create index template<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/indices/index-templates.asciidoc">edit</a></h2>
+<p>Use the <a class="xref" href="indices-put-template.html" title="Put index template API">index template</a> and <a class="xref" href="indices-component-template.html" title="Put component template API">put component template</a> APIs to create and update index templates.
+You can also <a class="xref" href="index-mgmt.html" title="Index management">manage index templates</a> from Stack
+Management in Kibana.</p>
+<p>The following requests create two component templates.</p>
+<a id="e944653610f311fa06148d5b0afdf697"></a>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">PUT _component_template/component_template1
 {
@@ -214,20 +239,41 @@ the settings from the create index request take precedence over settings specifi
   }
 }
 
-PUT _component_template/other_component_template
+PUT _component_template/runtime_component_template
 {
   "template": {
     "mappings": {
-      "properties": {
-        "ip_address": {
-          "type": "ip"
+      "runtime": { <a id="CO157-1"></a><i class="conum" data-value="1"></i>
+        "day_of_week": {
+          "type": "keyword",
+          "script": {
+            "source": "emit(doc['@timestamp'].value.dayOfWeekEnum.getDisplayName(TextStyle.FULL, Locale.ROOT))"
+          }
         }
       }
     }
   }
-}
-
-PUT _index_template/template_1
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/555.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO157-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This component template adds a <a class="xref" href="runtime-mapping-fields.html" title="Map a runtime field">runtime field</a>
+named <code class="literal">day_of_week</code> to the mappings when a new index matches the template.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The following request creates an index template that is <em>composed of</em> these
+component templates.</p>
+<a id="2fa7ded8515b32f26c54394ea598f573"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _index_template/template_1
 {
   "index_patterns": ["te*", "bar*"],
   "template": {
@@ -236,7 +282,7 @@ PUT _index_template/template_1
     },
     "mappings": {
       "_source": {
-        "enabled": false
+        "enabled": true
       },
       "properties": {
         "host_name": {
@@ -253,14 +299,14 @@ PUT _index_template/template_1
     }
   },
   "priority": 500,
-  "composed_of": ["component_template1", "other_component_template"],
+  "composed_of": ["component_template1", "runtime_component_template"], <a id="CO158-1"></a><i class="conum" data-value="1"></i>
   "version": 3,
   "_meta": {
     "description": "my custom"
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/555.console"></div>
+<div class="console_widget" data-snippet="snippets/556.console"></div>
 </div>
 </div>
 
