@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Elasticsearch autoscaling | Elastic Cloud on Kubernetes [master] | Elastic</title>
+<link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [master]"/>
+<link rel="up" href="k8s-elasticsearch-specification.html" title="Run Elasticsearch on ECK"/>
+<link rel="prev" href="k8s-prestop.html" title="Pod PreStop hook"/>
+<link rel="next" href="k8s-kibana.html" title="Run Kibana on ECK"/>
+<meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/master"/>
+<meta name="DC.subject" content="ECK"/>
+<meta name="DC.identifier" content="master"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes [master]</a></span>
+»
+<span class="breadcrumb-link"><a href="k8s-orchestrating-elastic-stack-applications.html">Orchestrating Elastic Stack applications</a></span>
+»
+<span class="breadcrumb-link"><a href="k8s-elasticsearch-specification.html">Run Elasticsearch on ECK</a></span>
+»
+<span class="breadcrumb-node">Elasticsearch autoscaling</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="k8s-prestop.html">« Pod PreStop hook</a>
+</span>
+<span class="next">
+<a href="k8s-kibana.html">Run Kibana on ECK »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="k8s-autoscaling"></a>Elasticsearch autoscaling<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/orchestrating-elastic-stack-applications/elasticsearch/autoscaling.asciidoc">edit</a></h2>
+</div></div></div>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This functionality is experimental and may be changed or removed completely in a future release. Elastic will take a best effort approach to fix any issues, but experimental features are not subject to the support SLA of official GA features.</p>
+</div>
+</div>
+<p>ECK can leverage the <a href="/guide/en/elasticsearch/reference/master/autoscaling-apis.html" class="ulink" target="_top">autoscaling API</a> introduced in Elasticsearch 7.11 to adjust automatically the number of Pods and the allocated resources in a tier. Currently, autoscaling is supported for Elasticsearch <a href="/guide/en/elasticsearch/reference/current/data-tiers.html" class="ulink" target="_top">data tiers</a> and machine learning nodes.</p>
+<h4><a id="k8s-enable"></a>Enable autoscaling<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/orchestrating-elastic-stack-applications/elasticsearch/autoscaling.asciidoc">edit</a></h4>
+<p>To enable autoscaling on an Elasticsearch cluster, you need to define one or more autoscaling policies. Each autoscaling policy applies to one or more NodeSets which share the same set of roles specified in the <code class="literal">node.roles</code> setting in the Elasticsearch configuration.</p>
+<h5><a id="k8s-autoscaling-policies"></a>Define autoscaling policies<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/orchestrating-elastic-stack-applications/elasticsearch/autoscaling.asciidoc">edit</a></h5>
+<p>Autoscaling policies can be defined in the <code class="literal">elasticsearch.alpha.elastic.co/autoscaling-spec</code> annotation of the Elasticsearch resource. Each autoscaling policy must have the following fields:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">name</code> is a unique name used to identify the autoscaling policy.
+</li>
+<li class="listitem">
+<code class="literal">roles</code> contains a set of node roles, unique across all the autoscaling policies, used to identify the NodeSets to which this policy applies. At least one NodeSet with the exact same set of roles must exist in the Elasticsearch resource specification.
+</li>
+<li class="listitem">
+<p><code class="literal">resources</code> helps define the minimum and maximum compute resources usage:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">nodeCount</code> defines the minimum and maximum nodes allowed in the tier.
+</li>
+<li class="listitem">
+<code class="literal">cpu</code> and <code class="literal">memory</code> enforce minimum and maximum compute resources usage for the Elasticsearch container.
+</li>
+<li class="listitem">
+<code class="literal">storage</code> enforces minimum and maximum storage request per PersistentVolumeClaim.
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+    "policies": [{
+      "name": "data-ingest",
+      "roles": ["data", "ingest" , "transform"],
+      "resources": {
+          "nodeCount": { "min": 3, "max": 8 },
+          "cpu": { "min": 2, "max": 8 },
+          "memory": { "min": "2Gi", "max": "16Gi" },
+          "storage": { "min": "64Gi", "max": "512Gi" }
+      }
+    },
+    {
+      "name": "ml",
+      "roles": ["ml"],
+      "resources": {
+          "nodeCount": { "min": 1, "max": 9 },
+          "cpu": { "min": 1, "max": 4 },
+          "memory": { "min": "2Gi", "max": "8Gi" }
+      }
+    }]
+}</pre>
+</div>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>A node role should not be referenced in more than one autoscaling policy.</p>
+</div>
+</div>
+<p>In the case of storage the following restrictions apply:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Scaling the storage size automatically requires the <code class="literal">ExpandInUsePersistentVolumes</code> feature to be enabled. It also requires a storage class that supports <a href="https://kubernetes.io/blog/2018/07/12/resizing-persistent-volumes-using-kubernetes/" class="ulink" target="_top">volume expansion</a>.
+</li>
+<li class="listitem">
+Only one persistent volume claim per Elasticsearch node is supported when autoscaling is enabled.
+</li>
+<li class="listitem">
+Volume size cannot be scaled down.
+</li>
+</ul>
+</div>
+<h5><a id="k8s-autoscaling-resources"></a>Set the limits<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/orchestrating-elastic-stack-applications/elasticsearch/autoscaling.asciidoc">edit</a></h5>
+<p>The value set for memory and CPU limits are computed by applying a ratio to the calculated resource request. For memory, the default ratio between the request and the limit is 1. This means that request and limit have the same value. For CPU the default ratio is 0, which means that no limit is set. You can change the default ratio between the request and the limit for both the CPU and memory ranges by using the <code class="literal">requestsToLimitsRatio</code> field.</p>
+<p>For example, you can remove the memory limit and set a CPU limit to twice the value of the request, as follows:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+    "policies": [{
+        "name": "data-ingest-hot",
+        "roles": ["data_hot", "ingest", "transform"],
+        "resources": {
+            "nodeCount": {
+                "min": 2,
+                "max": 5
+            },
+            "cpu": {
+                "min": 1,
+                "max": 2,
+                "requestsToLimitsRatio": 2
+            },
+            "memory": {
+                "min": "2Gi",
+                "max": "6Gi",
+                "requestsToLimitsRatio": 0
+            }
+        }
+    }]
+}</pre>
+</div>
+<p>You can find <a href="https://github.com/elastic/cloud-on-k8s/blob/1.4/config/recipes/autoscaling/elasticsearch.yaml" class="ulink" target="_top">a complete example in the ECK GitHub repository</a> which will also show you how to fine-tune the <a href="/guide/en/elasticsearch/reference/current/autoscaling-deciders.html" class="ulink" target="_top">autoscaling deciders</a>.</p>
+<h5><a id="k8s-autoscaling-polling-interval"></a>Change the polling interval<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/orchestrating-elastic-stack-applications/elasticsearch/autoscaling.asciidoc">edit</a></h5>
+<p>The Elasticsearch autoscaling capacity endpoint is polled every minute by the operator. This interval duration can be controlled using the <code class="literal">pollingPeriod</code> field in the autoscaling specification:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+    "pollingPeriod": "42s",
+    "policies": [{
+        "name": "data-ingest-hot",
+        "roles": ["data_hot", "ingest", "transform"],
+        "resources": {
+            "nodeCount": {
+                "min": 2,
+                "max": 5
+            },
+            "cpu": {
+                "min": 1,
+                "max": 2
+            },
+            "memory": {
+                "min": "2Gi",
+                "max": "6Gi"
+            }
+        }
+    }]
+}</pre>
+</div>
+<h4><a id="k8s-monitoring"></a>Monitoring<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/orchestrating-elastic-stack-applications/elasticsearch/autoscaling.asciidoc">edit</a></h4>
+<p>In addition to the logs generated by the operator, an autoscaling status is stored in the <code class="literal">elasticsearch.alpha.elastic.co/autoscaling-status</code> annotation. The autoscaling status is a JSON document which describes the expected resources for each NodeSet managed by an autoscaling policy. It may also contain important messages about the state of the tier.</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+	"policies": [
+		{
+			"name": "data-ingest-hot",
+			"nodeSets": [{
+				"name": "data-ingest-hot",
+				"nodeCount": 5
+			}],
+			"resources": {
+				"limits": {
+					"cpu": "2",
+					"memory": "6Gi"
+				},
+				"requests": {
+					"cpu": "2",
+					"memory": "6Gi",
+					"storage": "6Gi"
+				}
+			},
+			"state": [{
+				"type": "HorizontalScalingLimitReached",
+				"messages": [
+					"Can't provide total required storage 32588740338, max number of nodes is 5, requires 6 nodes"
+				]
+			}],
+			"lastModificationTime": "2021-03-09T17:01:25Z"
+		}
+	]
+}</pre>
+</div>
+<p>Important events are also reported through Kubernetes events, for example when the maximum autoscaling size limit is reached:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">&gt; kubectl get events
+
+40m  Warning  HorizontalScalingLimitReached  elasticsearch/sample   Can't provide total required storage 32588740338, max number of nodes is 5, requires 6 nodes</pre>
+</div>
+<h4><a id="k8s-disable"></a>Disable autoscaling<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/master/docs/orchestrating-elastic-stack-applications/elasticsearch/autoscaling.asciidoc">edit</a></h4>
+<p>You can disable autoscaling at any time by removing the <code class="literal">elasticsearch.alpha.elastic.co/autoscaling-spec</code> annotation from the Elasticsearch resource metadata.</p>
+<p>For machine learning the following settings are not automatically reset:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">xpack.ml.max_ml_node_size</code>
+</li>
+<li class="listitem">
+<code class="literal">xpack.ml.max_lazy_ml_nodes</code>
+</li>
+<li class="listitem">
+<code class="literal">xpack.ml.use_auto_machine_memory_percent</code>
+</li>
+</ul>
+</div>
+<p>You should adjust those settings manually to match the size of your deployment when you disable autoscaling.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="k8s-prestop.html">« Pod PreStop hook</a>
+</span>
+<span class="next">
+<a href="k8s-kibana.html">Run Kibana on ECK »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
