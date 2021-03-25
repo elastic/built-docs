@@ -1,25 +1,60 @@
-PUT _watcher/watch/log_error_watch
+PUT _watcher/watch/log_errors
 {
-  "trigger" : { "schedule" : { "interval" : "10s" }},
+  "metadata" : {
+    "color" : "red"
+  },
+  "trigger" : {
+    "schedule" : {
+      "interval" : "5m"
+    }
+  },
   "input" : {
     "search" : {
       "request" : {
-        "indices" : [ "logs" ],
+        "indices" : "log-events",
         "body" : {
-          "query" : {
-            "match" : { "message": "error" }
-          }
+          "size" : 0,
+          "query" : { "match" : { "status" : "error" } }
         }
       }
     }
   },
   "condition" : {
-    "compare" : { "ctx.payload.hits.total" : { "gt" : 0 }}
+    "compare" : { "ctx.payload.hits.total" : { "gt" : 5 }}
+  },
+  "transform" : {
+    "search" : {
+        "request" : {
+          "indices" : "log-events",
+          "body" : {
+            "query" : { "match" : { "status" : "error" } }
+          }
+        }
+    }
   },
   "actions" : {
-    "log_error" : {
-      "logging" : {
-        "text" : "Found {{ctx.payload.hits.total}} errors in the logs"
+    "my_webhook" : {
+      "webhook" : {
+        "method" : "POST",
+        "host" : "mylisteninghost",
+        "port" : 9200,
+        "path" : "/{{watch_id}}",
+        "body" : "Encountered {{ctx.payload.hits.total}} errors"
+      }
+    },
+    "email_administrator" : {
+      "email" : {
+        "to" : "sys.admino@host.domain",
+        "subject" : "Encountered {{ctx.payload.hits.total}} errors",
+        "body" : "Too many error in the system, see attached data",
+        "attachments" : {
+          "attached_data" : {
+            "data" : {
+              "format" : "json"
+            }
+          }
+        },
+        "priority" : "high"
       }
     }
   }
