@@ -134,10 +134,10 @@ Not what you want? See the
 </div></div></div>
 
 <p>A <code class="literal">single-value</code> metrics aggregation that computes the weighted average of numeric values that are extracted from the aggregated documents.
-These values can be extracted either from specific numeric fields in the documents, or provided by a script.</p>
+These values can be extracted either from specific numeric fields in the documents.</p>
 <p>When calculating a regular average, each datapoint has an equal "weight" &#8230;&#8203; it contributes equally to the final value. Weighted averages,
 on the other hand, weight each datapoint differently. The amount that each datapoint contributes to the final value is extracted from the
-document, or provided by a script.</p>
+document.</p>
 <p>As a formula, a weighted average is the <code class="literal">∑(value * weight) / ∑(weight)</code></p>
 <p>A regular average can be thought of as a weighted average where every value has an implicit weight of <code class="literal">1</code>.</p>
 <div class="table">
@@ -175,12 +175,6 @@ document, or provided by a script.</p>
 <tr>
 <td align="left" valign="top"><p><code class="literal">format</code></p></td>
 <td align="left" valign="top"><p>The numeric response formatter</p></td>
-<td align="left" valign="top"><p>Optional</p></td>
-<td align="left" valign="top"><p></p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">value_type</code></p></td>
-<td align="left" valign="top"><p>A hint about the values for pure scripts or unmapped fields</p></td>
 <td align="left" valign="top"><p>Optional</p></td>
 <td align="left" valign="top"><p></p></td>
 </tr>
@@ -286,7 +280,7 @@ we can calculate the weighted average using:</p>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1230.console"></div>
+<div class="console_widget" data-snippet="snippets/1211.console"></div>
 <p>Which yields a response like:</p>
 <a id="cf7da4a0b43c334bd535db6995d7cefa"></a>
 <div class="pre_wrapper lang-console-result">
@@ -300,9 +294,9 @@ we can calculate the weighted average using:</p>
 }</pre>
 </div>
 <p>While multiple values-per-field are allowed, only one weight is allowed. If the aggregation encounters
-a document that has more than one weight (e.g. the weight field is a multi-valued field) it will throw an exception.
-If you have this situation, you will need to specify a <code class="literal">script</code> for the weight field, and use the script
-to combine the multiple values into a single value to be used.</p>
+a document that has more than one weight (e.g. the weight field is a multi-valued field) it will abort the search.
+If you have this situation, you should build a <a class="xref" href="search-aggregations-metrics-weight-avg-aggregation.html#search-aggregations-metrics-weight-avg-aggregation-runtime-field" title="Runtime field">Runtime field</a>
+to combine those values into a single weight.</p>
 <p>This single weight will be applied independently to each value extracted from the <code class="literal">value</code> field.</p>
 <p>This example show how a single document with multiple values will be averaged with a single weight:</p>
 <a id="abc280775734daa6cf2c28868e155d10"></a>
@@ -330,7 +324,7 @@ POST /exams/_search
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1231.console"></div>
+<div class="console_widget" data-snippet="snippets/1212.console"></div>
 <p>The three values (<code class="literal">1</code>, <code class="literal">2</code>, and <code class="literal">3</code>) will be included as independent values, all with the weight of <code class="literal">2</code>:</p>
 <a id="84a4a31a48fa19f5f0202052efae7de1"></a>
 <div class="pre_wrapper lang-console-result">
@@ -349,15 +343,38 @@ POST /exams/_search
 
 <div class="section">
 <div class="titlepage"><div><div>
-<h3 class="title"><a id="_script_18"></a>Script<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/aggregations/metrics/weighted-avg-aggregation.asciidoc">edit</a></h3>
+<h3 class="title"><a id="search-aggregations-metrics-weight-avg-aggregation-runtime-field"></a>Runtime field<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/aggregations/metrics/weighted-avg-aggregation.asciidoc">edit</a></h3>
 </div></div></div>
-<p>Both the value and the weight can be derived from a script, instead of a field. As a simple example, the following
-will add one to the grade and weight in the document using a script:</p>
-<a id="53461e3a652f110bcddf513eccd03f5a"></a>
+<p>If you have to sum or weigh values that don&#8217;t quite line up with the indexed
+values, run the aggregation on a <a class="xref" href="runtime.html" title="Runtime fields">runtime field</a>.</p>
+<a id="73250f845738c428246a3ade66a8f54c"></a>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">POST /exams/_search
+<pre class="programlisting prettyprint lang-console">POST /exams/_doc?refresh
+{
+  "grade": 100,
+  "weight": [2, 3]
+}
+POST /exams/_doc?refresh
+{
+  "grade": 80,
+  "weight": 3
+}
+
+POST /exams/_search?filter_path=aggregations
 {
   "size": 0,
+  "runtime_mappings": {
+    "weight.combined": {
+      "type": "double",
+      "script": """
+        double s = 0;
+        for (double w : doc['weight']) {
+          s += w;
+        }
+        emit(s);
+      """
+    }
+  },
   "aggs": {
     "weighted_grade": {
       "weighted_avg": {
@@ -365,14 +382,25 @@ will add one to the grade and weight in the document using a script:</p>
           "script": "doc.grade.value + 1"
         },
         "weight": {
-          "script": "doc.weight.value + 1"
+          "field": "weight.combined"
         }
       }
     }
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1232.console"></div>
+<div class="console_widget" data-snippet="snippets/1213.console"></div>
+<p>Which should look like:</p>
+<a id="fe65500260f57458aad47b911320ebc5"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "aggregations": {
+    "weighted_grade": {
+      "value": 93.5
+    }
+  }
+}</pre>
+</div>
 </div>
 
 <div class="section">
@@ -405,7 +433,7 @@ If the <code class="literal">weight</code> field is missing, it is assumed to ha
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1233.console"></div>
+<div class="console_widget" data-snippet="snippets/1214.console"></div>
 </div>
 
 </div>
