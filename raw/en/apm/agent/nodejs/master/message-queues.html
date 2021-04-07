@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Message queues | APM Node.js Agent Reference [master] | Elastic</title>
+<link rel="home" href="index.html" title="APM Node.js Agent Reference [master]"/>
+<link rel="up" href="index.html" title="APM Node.js Agent Reference [master]"/>
+<link rel="prev" href="distributed-tracing.html" title="Distributed tracing"/>
+<link rel="next" href="performance-tuning.html" title="Performance Tuning"/>
+<meta name="DC.type" content="Learn/Docs/APM Node.js Agent/Reference/master"/>
+<meta name="DC.subject" content="APM"/>
+<meta name="DC.identifier" content="master"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">APM Node.js Agent Reference [master]</a></span>
+»
+<span class="breadcrumb-node">Message queues</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="distributed-tracing.html">« Distributed tracing</a>
+</span>
+<span class="next">
+<a href="performance-tuning.html">Performance Tuning »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h1 class="title"><a id="message-queues"></a>Message queues<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-nodejs/edit/master/docs/message-queues.asciidoc">edit</a></h1>
+</div></div></div>
+<p>The Node.js Agent will automatically create spans for activity to/from your Amazon SQS message queues.  To record these spans, your message queue activity must occur during a transaction. If you&#8217;re performing queue operations during an HTTP request from a <a class="xref" href="supported-technologies.html#compatibility-frameworks" title="Frameworks">supported framework</a>, the agent will start a transaction automatically.  However, if you&#8217;re performing queue operations in a stand-alone program (such as a message processor), you&#8217;ll need to use the Node.js Agent&#8217;s <a class="xref" href="agent-api.html#apm-start-transaction" title="apm.startTransaction([name][, type][, subtype][, action][, options])"><code class="literal">startTransaction()</code></a> method to manually create transactions for your messages.</p>
+<p>You can see an example of this in the following code sample.</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">const apm = require('elastic-apm-node').start({/*...*/})
+const AWS = require('aws-sdk');
+// Set the region
+AWS.config.update({region: 'us-west'});
+
+// Create an SQS service object
+const sqs = new AWS.SQS({apiVersion: '2012-11-05'});
+
+/* ... */
+
+const transaction = apm.startTransaction("Process Messages", 'cli') <a id="CO1-1"></a><i class="conum" data-value="1"></i>
+sqs.receiveMessage(params, function(err, data) {
+  if(err) {
+    console.log("Receive Error", err);
+  } else {
+    console.log(`Length: ${data.Messages.length}`)
+    /* process messages */
+  }
+  // end the transaction
+  transaction.end() <a id="CO1-2"></a><i class="conum" data-value="2"></i>
+})</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO1-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Prior to calling the <code class="literal">sqs.receiveMessage</code> method, start a new transaction.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO1-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Only end the transaction <em>after</em> the queue&#8217;s processing callback finishes executing. The will ensure a transaction is active while processing your queue messages.</p>
+</td>
+</tr>
+</table>
+</div>
+<h3><a id="message-queues-distributed-tracing"></a>Distributed tracing and messaging queues<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-nodejs/edit/master/docs/message-queues.asciidoc">edit</a></h3>
+<p>To enable queue scheduling and queue processing with distributed tracing, use the Node.js Agent&#8217;s API to <em>store</em> a <code class="literal">traceparent</code> header with your queue message; then, provide that <code class="literal">traceparent</code> header when starting a new transaction.</p>
+<p>Here&#8217;s a <em>new</em> example that uses the Node.js Agent API to store the <code class="literal">traceparent</code> as a message attribute and then uses that attribute to link your new transaction with the original.</p>
+<p><span class="strong strong"><strong>Storing the Traceparent</strong></span></p>
+<p>When sending the message, you&#8217;ll want to add the trace as one of the <code class="literal">MessageAttributes</code>.</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">// stores the traceparent when sending the queue message
+const traceParent = apm.currentTransaction ? apm.currentTransaction.traceparent : ''
+
+// Use the Amazon SQS `MessageAttributes` to pass
+// on the  traceparent header
+const params = {
+  /* ... other params ... */
+  MessageAttributes: {
+    /* ... other attributes ... */
+    "MyTraceparent":{
+        DataType: "String",
+        StringValue: traceParent
+    }
+  }
+
+}
+sqs.sendMessage(params, function(err, data) {
+  /* ... */
+});</pre>
+</div>
+<p>This will save the traceparent value so we can use it later on when receiving the messages.</p>
+<p><span class="strong strong"><strong>Applying the Traceparent</strong></span></p>
+<p>When we receive our queue messages, we&#8217;ll check the message for our Traceparent header, and use it to start a new transaction.  By starting a transaction with this traceparent header we&#8217;ll be linking the sending and receiving via distributed tracing.</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">// uses the traceparent to start a transaction
+
+sqs.receiveMessage(params, function(err, data) {
+  if(!data.Messages) {
+    return
+  }
+
+  // loop over your returned messages
+  for(const message of data.Messages) { <a id="CO2-1"></a><i class="conum" data-value="1"></i>
+    // start a transaction to process each message, using our previously
+    // saved distributed tracing traceparent header
+    let traceparent
+    if(message.MessageAttributes.MyTraceparent) {
+        traceparent = message.MessageAttributes.MyTraceparent.StringValue
+    }
+    const transactionMessage = apm.startTransaction('RECEIVE_TRANSACTION', 'cli', {
+      childOf:traceparent <a id="CO2-2"></a><i class="conum" data-value="2"></i>
+    })
+    /* ... process message ... */
+    transactionMessage.end() <a id="CO2-3"></a><i class="conum" data-value="3"></i>
+  }
+})</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO2-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Even though we only scheduled one queue message, Amazon&#8217;s SQS API returns an array of  <em>multiple</em> messages.  Therefore we&#8217;ll need to loop over each one.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO2-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>We extract the traceparent header we&#8217;d previously save, and use it to start a transaction.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO2-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Once we&#8217;re done processing a single message, we end the transaction and move on to the next.</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="distributed-tracing.html">« Distributed tracing</a>
+</span>
+<span class="next">
+<a href="performance-tuning.html">Performance Tuning »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
