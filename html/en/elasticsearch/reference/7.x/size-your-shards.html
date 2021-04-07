@@ -192,10 +192,9 @@ time-based backing indices. You can use <a class="xref" href="index-lifecycle-ma
 <p class="screenshot"><span class="image"><img src="images/ilm/index-lifecycle-policies.png" alt="index lifecycle policies"></span></p>
 <p>One advantage of this setup is
 <a class="xref" href="getting-started-index-lifecycle-management.html" title="Tutorial: Automate rollover with ILM">automatic rollover</a>, which creates
-a new write index when the current one meets a defined <code class="literal">max_age</code>, <code class="literal">max_docs</code>, or
-<code class="literal">max_size</code> threshold. You can use these thresholds to create indices based on
-your retention intervals. When an index is no longer needed, you can use
-ILM to automatically delete it and free up resources.</p>
+a new write index when the current one meets a defined <code class="literal">max_primary_shard_size</code>,
+<code class="literal">max_age</code>, <code class="literal">max_docs</code>, or <code class="literal">max_size</code> threshold. When an index is no longer
+needed, you can use ILM to automatically delete it and free up resources.</p>
 <p>ILM also makes it easy to change your sharding strategy over time:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -218,11 +217,25 @@ this by lowering the <code class="literal">min_age</code> threshold for your pol
 </ul>
 </div>
 <p>Every new backing index is an opportunity to further tune your strategy.</p>
-<h4><a id="shard-size-recommendation"></a>Aim for shard sizes between 10GB and 50GB<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
-<p>Shards larger than 50GB may make a cluster less likely to recover from failure.
+<h4><a id="shard-size-recommendation"></a>Aim for shard sizes between 10GB and 65GB<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>Shards larger than 65GB may make a cluster less likely to recover from failure.
 When a node fails, Elasticsearch rebalances the node&#8217;s shards across the data tier&#8217;s
-remaining nodes. Shards larger than 50GB can be harder to move across a network
-and may tax node resources.</p>
+remaining nodes. Larger shards can be harder to move across a network and may
+tax node resources.</p>
+<p>If you use ILM, set the <a class="xref" href="ilm-rollover.html" title="Rollover">rollover action</a>'s
+<code class="literal">max_primary_shard_size</code> threshold to <code class="literal">65gb</code> to avoid larger shards.</p>
+<p>To see the current size of your shards, use the <a class="xref" href="cat-shards.html" title="cat shards API">cat shards API</a>.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _cat/shards?v=true&amp;h=index,prirep,shard,store&amp;s=prirep,store&amp;bytes=gb</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1602.console"></div>
+<p>The <code class="literal">pri.store.size</code> value shows the combined size of all primary shards for
+the index.</p>
+<div class="pre_wrapper lang-txt">
+<pre class="programlisting prettyprint lang-txt">index                                 prirep shard store
+.ds-my-data-stream-2099.05.06-000001  p      0      65gb
+...</pre>
+</div>
 <h4><a id="shard-count-recommendation"></a>Aim for 20 shards or fewer per GB of heap memory<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
 <p>The number of shards a node can hold is proportional to the node&#8217;s
 heap memory. For example, a node with 30GB of heap memory should
@@ -234,13 +247,13 @@ API</a>.</p>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">GET _cat/nodes?v=true&amp;h=heap.current</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1602.console"></div>
+<div class="console_widget" data-snippet="snippets/1603.console"></div>
 <p>You can use the <a class="xref" href="cat-shards.html" title="cat shards API">cat shards API</a> to check the number of shards per
 node.</p>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">GET _cat/shards</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1603.console"></div>
+<div class="console_widget" data-snippet="snippets/1604.console"></div>
 <h4><a id="avoid-node-hotspots"></a>Avoid node hotspots<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
 <p>If too many shards are allocated to a specific node, the node can become a
 hotspot. For example, if a single node contains too many shards for an index
@@ -258,19 +271,17 @@ configure <code class="literal">index.routing.allocation.total_shards_per_node</
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1604.console"></div>
+<div class="console_widget" data-snippet="snippets/1605.console"></div>
 <h3><a id="fix-an-oversharded-cluster"></a>Fix an oversharded cluster<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h3>
 <p>If your cluster is experiencing stability issues due to oversharded indices,
 you can use one or more of the following methods to fix them.</p>
-<h4><a id="reindex-indices-from-shorter-periods-into-longer-periods"></a>Create time-based indices that cover longer periods<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
-<p>For time series data, you can create indices that cover longer time intervals.
-For example, instead of daily indices, you can create indices on a monthly or
-yearly basis.</p>
-<p>If you&#8217;re using ILM, you can do this by increasing the <code class="literal">max_age</code>
-threshold for the <a class="xref" href="ilm-rollover.html" title="Rollover">rollover action</a>.</p>
-<p>If your retention policy allows it, you can also create larger indices by
-omitting a <code class="literal">max_age</code> threshold and using <code class="literal">max_docs</code> and/or <code class="literal">max_size</code>
-thresholds instead.</p>
+<h4><a id="create-indices-that-cover-longer-time-periods"></a>Create indices that cover longer time periods<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>If you use ILM and your retention policy allows it, avoid using a
+<code class="literal">max_age</code> threshold for the rollover action. Instead, use
+<code class="literal">max_primary_shard_size</code> to avoid creating empty indices or many small shards.</p>
+<p>If your retention policy requires a <code class="literal">max_age</code> threshold, increase it to create
+indices that cover longer time intervals. For example, instead of creating daily
+indices, you can create indices on a weekly or monthly basis.</p>
 <h4><a id="delete-empty-indices"></a>Delete empty or unneeded indices<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
 <p>If you&#8217;re using ILM and roll over indices based on a <code class="literal">max_age</code> threshold,
 you can inadvertently create indices with no documents. These empty indices
@@ -279,14 +290,14 @@ provide no benefit but still consume resources.</p>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">GET /_cat/count/my-index-000001?v=true</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1605.console"></div>
+<div class="console_widget" data-snippet="snippets/1606.console"></div>
 <p>Once you have a list of empty indices, you can delete them using the
 <a class="xref" href="indices-delete-index.html" title="Delete index API">delete index API</a>. You can also delete any other
 unneeded indices.</p>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">DELETE /my-index-*</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1606.console"></div>
+<div class="console_widget" data-snippet="snippets/1607.console"></div>
 <h4><a id="force-merge-during-off-peak-hours"></a>Force merge during off-peak hours<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
 <p>If you no longer write to an index, you can use the <a class="xref" href="indices-forcemerge.html" title="Force merge API">force
 merge API</a> to <a class="xref" href="index-modules-merge.html" title="Merge">merge</a> smaller segments into larger ones.
@@ -295,14 +306,14 @@ are resource-intensive. If possible, run the force merge during off-peak hours.<
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">POST /my-index-000001/_forcemerge</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1607.console"></div>
+<div class="console_widget" data-snippet="snippets/1608.console"></div>
 <h4><a id="shrink-existing-index-to-fewer-shards"></a>Shrink an existing index to fewer shards<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
 <p>If you no longer write to an index, you can use the
 <a class="xref" href="indices-shrink-index.html" title="Shrink index API">shrink index API</a> to reduce its shard count.</p>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">POST /my-index-000001/_shrink/my-shrunken-index-000001</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1608.console"></div>
+<div class="console_widget" data-snippet="snippets/1609.console"></div>
 <p>ILM also has a <a class="xref" href="ilm-shrink.html" title="Shrink">shrink action</a> for indices in the
 warm phase.</p>
 <h4><a id="combine-smaller-indices"></a>Combine smaller indices<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
@@ -323,7 +334,7 @@ shared index pattern, such as <code class="literal">my-index-2099.10.11</code>, 
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1609.console"></div>
+<div class="console_widget" data-snippet="snippets/1610.console"></div>
 </div>
 <div class="navfooter">
 <span class="prev">
