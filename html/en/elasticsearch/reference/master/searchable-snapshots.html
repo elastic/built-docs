@@ -236,23 +236,22 @@ copying data from the primary.</p>
 <p>To search a snapshot, you must first mount it locally as an index. Usually
 ILM will do this automatically, but you can also call the
 <a class="xref" href="searchable-snapshots-api-mount-snapshot.html" title="Mount snapshot API">mount snapshot</a> API yourself. There
-are two options for mounting a snapshot, each with different performance
-characteristics and local storage footprints:</p>
+are two options for mounting an index from a snapshot, each with different
+performance characteristics and local storage footprints:</p>
 <div class="variablelist">
-<a id="full-copy"></a>
+<a id="fully-mounted"></a>
 <dl class="variablelist">
 <dt>
 <span class="term">
-Full copy
+Fully mounted index
 </span>
 </dt>
 <dd>
 <p>
 Loads a full copy of the snapshotted index&#8217;s shards onto node-local storage
-within the cluster. This is the default mount option. ILM uses this
-option by default in the <code class="literal">hot</code> and <code class="literal">cold</code> phases.
+within the cluster. ILM uses this option in the <code class="literal">hot</code> and <code class="literal">cold</code> phases.
 </p>
-<p>Search performance for a full-copy searchable snapshot index is normally
+<p>Search performance for a fully mounted index is normally
 comparable to a regular index, since there is minimal need to access the
 snapshot repository. While recovery is ongoing, search performance may be
 slower than with a regular index because a search may need some data that has
@@ -263,41 +262,41 @@ recovery.</p>
 </dl>
 </div>
 <div class="variablelist">
-<a id="shared-cache"></a>
+<a id="partially-mounted"></a>
 <dl class="variablelist">
 <dt>
 <span class="term">
-Shared cache
+Partially mounted index
 </span>
 </dt>
 <dd>
 <p>
 Uses a local cache containing only recently searched parts of the snapshotted
-index&#8217;s data. ILM uses this option by default in the <code class="literal">frozen</code> phase and
-corresponding frozen tier.
+index&#8217;s data. This cache has a fixed size and is shared across nodes in the
+frozen tier. ILM uses this option in the <code class="literal">frozen</code> phase.
 </p>
 <p>If a search requires data that is not in the cache, Elasticsearch fetches the missing
 data from the snapshot repository. Searches that require these fetches are
 slower, but the fetched data is stored in the cache so that similar searches
 can be served more quickly in future. Elasticsearch will evict infrequently used data
 from the cache to free up space.</p>
-<p>Although slower than a full local copy or a regular index, a shared-cache
-searchable snapshot index still returns search results quickly, even for large
-data sets, because the layout of data in the repository is heavily optimized
-for search. Many searches will need to retrieve only a small subset of the
-total shard data before returning results.</p>
+<p>Although slower than a fully mounted index or a regular index, a
+partially mounted index still returns search results quickly, even for
+large data sets, because the layout of data in the repository is heavily
+optimized for search. Many searches will need to retrieve only a small subset of
+the total shard data before returning results.</p>
 </dd>
 </dl>
 </div>
-<p>To mount a searchable snapshot index with the shared cache mount option, you
-must have one or more nodes with a shared cache available. By default,
-dedicated frozen data tier nodes (nodes with the <code class="literal">data_frozen</code> role and no other
-data roles) have a shared cache configured using the greater of 90% of total
-disk space and total disk space subtracted a headroom of 100GB.</p>
+<p>To partially mount an index, you must have one or more nodes with a shared cache
+available. By default, dedicated frozen data tier nodes (nodes with the
+<code class="literal">data_frozen</code> role and no other data roles) have a shared cache configured using
+the greater of 90% of total disk space and total disk space subtracted a
+headroom of 100GB.</p>
 <p>Using a dedicated frozen tier is highly recommended for production use. If you
 do not have a dedicated frozen tier, you must configure the
 <code class="literal">xpack.searchable.snapshot.shared_cache.size</code> setting to reserve space for the
-cache on one or more nodes. Indices mounted with the shared cache mount option
+cache on one or more nodes. Partially mounted indices
 are only allocated to nodes that have a shared cache.</p>
 <div class="variablelist">
 <a id="searchable-snapshots-shared-cache"></a>
@@ -309,10 +308,10 @@ are only allocated to nodes that have a shared cache.</p>
 </dt>
 <dd>
 (<a class="xref" href="settings.html#static-cluster-setting">Static</a>)
-The size of the space reserved for the shared cache, either specified as a
-percentage of total disk space or an absolute <a class="xref" href="common-options.html#byte-units" title="Byte size units">byte value</a>.
-Defaults to 90% of total disk space on dedicated frozen data tier nodes,
-otherwise <code class="literal">0b</code>.
+Disk space reserved for the shared cache of partially mounted indices.
+Accepts a percentage of total disk space or an absolute <a class="xref" href="common-options.html#byte-units" title="Byte size units">byte
+value</a>. Defaults to <code class="literal">90%</code> of total disk space for dedicated frozen data tier
+nodes. Otherwise defaults to <code class="literal">0b</code>.
 </dd>
 <dt>
 <span class="term">
@@ -321,11 +320,11 @@ otherwise <code class="literal">0b</code>.
 </dt>
 <dd>
 (<a class="xref" href="settings.html#static-cluster-setting">Static</a>, <a class="xref" href="common-options.html#byte-units" title="Byte size units">byte value</a>)
-For dedicated frozen tier nodes, the max headroom to maintain. Defaults to 100GB
-on dedicated frozen tier nodes when
-<code class="literal">xpack.searchable.snapshot.shared_cache.size</code> is not explicitly set, otherwise
--1 (not set). Can only be set when <code class="literal">xpack.searchable.snapshot.shared_cache.size</code>
-is set as a percentage.
+For dedicated frozen tier nodes, the max headroom to maintain. If
+<code class="literal">xpack.searchable.snapshot.shared_cache.size</code> is not explicitly set, this
+setting defaults to <code class="literal">100GB</code>. Otherwise it defaults to <code class="literal">-1</code> (not set). You can
+only configure this setting if <code class="literal">xpack.searchable.snapshot.shared_cache.size</code> is
+set as a percentage.
 </dd>
 </dl>
 </div>
@@ -339,7 +338,7 @@ is 3600 GB, leaving 400 GB headroom. The default <code class="literal">max_headr
 takes effect, and the result is therefore 3900 GB.
 </li>
 <li class="listitem">
-A 400 GB disk will result in a shard cache sized at 360 GB.
+A 400 GB disk will result in a shared cache sized at 360 GB.
 </li>
 </ul>
 </div>
@@ -355,10 +354,6 @@ A 400 GB disk will result in a shard cache sized at 360 GB.
 cache can only have a single <a class="xref" href="important-settings.html#path-settings" title="Path settings">data path</a>.</p>
 </div>
 </div>
-<p>You can set <code class="literal">xpack.searchable.snapshot.shared_cache.size</code> to any size between a
-couple of gigabytes up to 90% of available disk space. We only recommend larger
-sizes if you use the node exclusively on a frozen tier or for searchable
-snapshots.</p>
 <h3><a id="back-up-restore-searchable-snapshots"></a>Back up and restore searchable snapshots<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/searchable-snapshots/index.asciidoc">edit</a></h3>
 <p>You can use <a class="xref" href="snapshot-lifecycle-management.html" title="SLM: Manage the snapshot lifecycle">regular snapshots</a> to back up a
 cluster containing searchable snapshot indices. When you restore a snapshot
