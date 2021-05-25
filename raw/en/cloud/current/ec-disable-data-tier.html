@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Disable a data tier | Elasticsearch Service Documentation | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Service Documentation"/>
+<link rel="up" href="ec-configure.html" title="Configuring your deployment"/>
+<link rel="prev" href="ec-migrate-index-management.html" title="Migrate to index lifecycle management"/>
+<link rel="next" href="ec-cloud-id.html" title="Configure Beats and Logstash with Cloud ID"/>
+<meta name="DC.type" content="Learn/Docs/Cloud/Reference"/>
+<meta name="DC.subject" content="Elastic Cloud"/>
+<meta name="DC.identifier" content="latest"/>
+</head>
+<body>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Service Documentation</a></span>
+»
+<span class="breadcrumb-link"><a href="ec-configure.html">Configuring your deployment</a></span>
+»
+<span class="breadcrumb-node">Disable a data tier</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="ec-migrate-index-management.html">« Migrate to index lifecycle management</a>
+</span>
+<span class="next">
+<a href="ec-cloud-id.html">Configure Beats and Logstash with Cloud ID »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="ec-disable-data-tier"></a>Disable a data tier<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/cloud/edit/ms-57/docs/shared/ec-ce-disable-data-tier.asciidoc">edit</a></h2>
+</div></div></div>
+<p>Elasticsearch Service tries to move all data from the nodes that are removed during plan changes. To disable a data tier, make sure that all data on that tier can be re-allocated by reconfiguring the relevant shard allocation filters. You&#8217;ll also need to temporarily stop your index lifecycle management (ILM) policies to prevent new indices from being moved to the data tier you want to disable.</p>
+<p>To learn more about ILM for Elasticsearch Service, or shard allocation filtering, check the following documentation:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="ec-configure-index-management.html" title="Configure index management">Configure index management</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/kibana/7.13/creating-index-lifecycle-policies.html" class="ulink" target="_top">Create your index lifecyle policy in Kibana</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/elasticsearch/reference/7.13/index-lifecycle-management.html" class="ulink" target="_top">Managing the index lifecycle</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/elasticsearch/reference/7.13/shard-allocation-filtering.html" class="ulink" target="_top">Shard allocation filters</a>
+</li>
+</ul>
+</div>
+<p>To make sure that all data can be migrated from the data tier you want to disable, follow these steps:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Determine which nodes will be removed from the cluster.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Log in to the <a href="https://cloud.elastic.co?baymax=docs-body&amp;elektra=docs" class="ulink" target="_top">Elasticsearch Service Console</a>.
+</li>
+<li class="listitem">
+<p>From the <span class="strong strong"><strong>Deployments</strong></span> page, select your deployment.</p>
+<p>Narrow your deployments by name, ID, or choose from several other filters. To customize your view, use a combination of filters, or change the format from a grid to a list.</p>
+</li>
+<li class="listitem">
+<p>Filter the list of instances by the Data tier you want to disable.</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/ec-ce-remove-tier-filter-instances.png" alt="A screenshot showing a filtered instance list">
+</div>
+</div>
+<p>Note the listed instance IDs. In this example, it would be Instance 2 and Instance 3.</p>
+</li>
+</ol>
+</div>
+</li>
+<li class="listitem">
+<p>Stop ILM.</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">POST /_ilm/stop</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Determine which shards need to be moved.</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">GET /_cat/shards</pre>
+</div>
+<p>Parse the output, looking for shards allocated to the nodes to be removed from the cluster. Note that <code class="literal">Instance #2</code> is shown as <code class="literal">instance-0000000002</code> in the output.</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/ec-ce-remove-tier-filtered-cat-shards.png" alt="A screenshot showing a filtered shard list">
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Move shards off the nodes to be removed from the cluster.</p>
+<p>You must remove any <a href="/guide/en/elasticsearch/reference/7.13/shard-allocation-filtering.html" class="ulink" target="_top">index-level shard allocation filters</a> from the indices on the nodes to be removed. ILM uses different rules depending on the policy and version of Elasticsearch. Check the index settings to determine which rule to use:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">GET /my-index/_settings</pre>
+</div>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Updating data tier based allocation inclusion rules.</p>
+<p>Data tier based ILM policies uses <code class="literal">index.routing.allocation.include</code> to allocate shards to the appropriate tier. The indices that use this method have index routing settings similar to the following example:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">{
+...
+    "routing": {
+        "allocation": {
+            "include": {
+                "_tier_preference": "data_warm,data_hot"
+            }
+        }
+    }
+...
+}</pre>
+</div>
+<p>You must remove the relevant tier from the inclusion rules. For example, to disable the warm tier, the <code class="literal">data_warm</code> tier preference should be removed:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">PUT /my-index/_settings
+
+{
+    "routing":
+      "allocation": {
+        "include": {
+            "_tier_preference": "data_hot"
+        }
+      }
+}</pre>
+</div>
+<p>Updating allocation inclusion rules will trigger a shard re-allocation, moving the shards from the nodes to be removed.</p>
+</li>
+<li class="listitem">
+<p>Updating node attribute allocation requirement rules.</p>
+<p>Node attribute based ILM policies uses <code class="literal">index.routing.allocation.require</code> to allocate shards to the appropriate nodes. The indices that use this method have index routing settings that are similar to the following example:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">{
+...
+    "routing": {
+        "allocation": {
+            "require": {
+                "data": "warm"
+            }
+        }
+    }
+...
+}</pre>
+</div>
+<p>You must either remove or redefine the routing requirements. To remove the attribute requirements, use the following code:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">PUT /my-index/_settings
+
+{
+    "routing":
+      "allocation": {
+        "require": {
+            "data": null
+        }
+      }
+}</pre>
+</div>
+<p>Removing required attributes does not trigger a shard reallocation. These shards are moved when applying the plan to disable the data tier. Alternatively, you can use the <a href="/guide/en/elasticsearch/reference/7.13/cluster-reroute.html" class="ulink" target="_top">cluster re-route API</a> to manually re-allocate the shards before removing the nodes, or explicitly re-allocate shards to hot nodes by using the following code:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">PUT /my-index/_settings
+
+{
+    "routing":
+      "allocation": {
+        "require": {
+            "data": "hot"
+        }
+      }
+}</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Removing custom allocation rules.</p>
+<p>If indices on nodes to be removed have shard allocation rules of other forms, they must be removed as shown in the following example:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">PUT /my-index/_settings
+
+{
+    "routing":
+      "allocation": {
+        "require": null,
+        "include": null,
+        "exclude": null
+      }
+}</pre>
+</div>
+</li>
+</ol>
+</div>
+</li>
+<li class="listitem">
+<p>Edit the deployment, disabling the data tier.</p>
+<p>If autoscaling is enabled, set the maximum size to 0 for the data tier to ensure autoscaling does not re-enable the data tier.</p>
+<p>Any remaining shards on the tier being disabled are re-allocated across the remaining cluster nodes while applying the plan to disable the data tier. Monitor shard allocation during the data migration phase to ensure all allocation rules have been correctly updated. If the plan fails to migrate data away from the data tier, then re-examine the allocation rules for the indices remaining on that data tier.</p>
+</li>
+</ol>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="ec-migrate-index-management.html">« Migrate to index lifecycle management</a>
+</span>
+<span class="next">
+<a href="ec-cloud-id.html">Configure Beats and Logstash with Cloud ID »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
