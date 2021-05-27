@@ -146,11 +146,11 @@ time for these fields.</p>
 <h3 class="title"><a id="runtime-examples-define-fields"></a>Define indexed fields as a starting point<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/mapping/runtime.asciidoc">edit</a></h3>
 </div></div></div>
 <p>You can start with a simple example by adding the <code class="literal">@timestamp</code> and <code class="literal">message</code>
-fields to the <code class="literal">my-index</code> mapping as indexed fields. To remain flexible, use
+fields to the <code class="literal">my-index-000001</code> mapping as indexed fields. To remain flexible, use
 <code class="literal">wildcard</code> as the field type for <code class="literal">message</code>:</p>
-<a id="bd7fa2f122ab861cd00e0b9154d120b3"></a>
+<a id="dcee24dba43050e4b01b6e3a3211ce09"></a>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">PUT /my-index/
+<pre class="programlisting prettyprint lang-console">PUT /my-index-000001/
 {
   "mappings": {
     "properties": {
@@ -174,13 +174,13 @@ fields to the <code class="literal">my-index</code> mapping as indexed fields. T
 </div></div></div>
 <p>After mapping the fields you want to retrieve, index a few records from
 your log data into Elasticsearch. The following request uses the <a class="xref" href="docs-bulk.html" title="Bulk API">bulk API</a>
-to index raw log data into <code class="literal">my-index</code>. Instead of indexing all of your log
+to index raw log data into <code class="literal">my-index-000001</code>. Instead of indexing all of your log
 data, you can use a small sample to experiment with runtime fields.</p>
 <p>The final document is not a valid Apache log format, but we can account for
 that scenario in our script.</p>
-<a id="d06a649bc38aa9a6433b64efa78d8cb5"></a>
+<a id="77d0780c5faea4c9ec51a322a6811b3b"></a>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">POST /my-index/_bulk?refresh
+<pre class="programlisting prettyprint lang-console">POST /my-index-000001/_bulk?refresh
 {"index":{}}
 {"timestamp":"2020-04-30T14:30:17-05:00","message":"40.135.0.0 - - [30/Apr/2020:14:30:17 -0500] \"GET /images/hm_bg.jpg HTTP/1.0\" 200 24736"}
 {"index":{}}
@@ -198,16 +198,16 @@ that scenario in our script.</p>
 </div>
 <div class="console_widget" data-snippet="snippets/148.console"></div>
 <p>At this point, you can view how Elasticsearch stores your raw data.</p>
-<a id="75fc7c8d2ea1b8c75828a0d4d95a8e69"></a>
+<a id="a6bb306ca250cf651f19cae808b97012"></a>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET /my-index</pre>
+<pre class="programlisting prettyprint lang-console">GET /my-index-000001</pre>
 </div>
 <div class="console_widget" data-snippet="snippets/149.console"></div>
 <p>The mapping contains two fields: <code class="literal">@timestamp</code> and <code class="literal">message</code>.</p>
-<a id="3bf94f0c541bfd8906fc92ecb4319ec4"></a>
+<a id="e87781bb31444bed8096492e0f7f71cd"></a>
 <div class="pre_wrapper lang-console-result">
 <pre class="programlisting prettyprint lang-console-result">{
-  "my-index" : {
+  "my-index-000001" : {
     "aliases" : { },
     "mappings" : {
       "properties" : {
@@ -235,16 +235,16 @@ that scenario in our script.</p>
 </div></div></div>
 <p>If you want to retrieve results that include <code class="literal">clientip</code>, you can add that
 field as a runtime field in the mapping. The following runtime script defines a
-grok pattern that extracts structured fields out of a single text
+<a class="xref" href="grok.html" title="Grokking grok">grok pattern</a> that extracts structured fields out of a single text
 field within a document. A grok pattern is like a regular expression that
-supports aliased expressions that you can reuse. See <a class="xref" href="grok-processor.html#grok-basics" title="Grok Basics">Grok basics</a> to learn more about grok syntax.</p>
+supports aliased expressions that you can reuse.</p>
 <p>The script matches on the <code class="literal">%{COMMONAPACHELOG}</code> log pattern, which understands
 the structure of Apache logs. If the pattern matches, the script emits the
-value matching IP address. If the pattern doesn&#8217;t match
+value of the matching IP address. If the pattern doesn&#8217;t match
 (<code class="literal">clientip != null</code>), the script just returns the field value without crashing.</p>
-<a id="0adbce828234ca221e3d03b184296407"></a>
+<a id="f66dbd3be056ab5c152f941fab8e1408"></a>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">PUT my-index/_mappings
+<pre class="programlisting prettyprint lang-console">PUT my-index-000001/_mappings
 {
   "runtime": {
     "http.clientip": {
@@ -271,15 +271,44 @@ the message doesn&#8217;t match.</p>
 </tr>
 </table>
 </div>
+<p>Alternatively, you can define the same runtime field but in the context of a
+search request. The runtime definition and the script are exactly the same as
+the one defined previously in the index mapping. Just copy that definition into
+the search request under the <code class="literal">runtime_mappings</code> section and include a query
+that matches on the runtime field. This query returns the same results as if
+you defined a search query for the <code class="literal">http.clientip</code> runtime field in your index
+mappings, but only in the context of this specific search:</p>
+<a id="2c44657adf550b8ade5cf5334106d38b"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET my-index-000001/_search
+{
+  "runtime_mappings": {
+    "http.clientip": {
+      "type": "ip",
+      "script": """
+        String clientip=grok('%{COMMONAPACHELOG}').extract(doc["message"].value)?.clientip;
+        if (clientip != null) emit(clientip);
+      """
+    }
+  },
+  "query": {
+    "match": {
+      "http.clientip": "40.135.0.0"
+    }
+  },
+  "fields" : ["http.clientip"]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/151.console"></div>
 <div class="section">
 <div class="titlepage"><div><div>
 <h4 class="title"><a id="runtime-examples-grok-ip"></a>Search for a specific IP address<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/mapping/runtime.asciidoc">edit</a></h4>
 </div></div></div>
 <p>Using the <code class="literal">http.clientip</code> runtime field, you can define a simple query to run a
 search for a specific IP address and return all related fields.</p>
-<a id="bcc84c0f2195b847575a11d78e5252dc"></a>
+<a id="636ee2066450605247ec1f68d04b8ee4"></a>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET my-index/_search
+<pre class="programlisting prettyprint lang-console">GET my-index-000001/_search
 {
   "query": {
     "match": {
@@ -289,7 +318,7 @@ search for a specific IP address and return all related fields.</p>
   "fields" : ["*"]
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/151.console"></div>
+<div class="console_widget" data-snippet="snippets/152.console"></div>
 <p>The API returns the following result. Without building your data structure in
 advance, you can search and explore your data in meaningful ways to experiment
 and determine which fields to index.</p>
@@ -300,7 +329,7 @@ and determine which fields to index.</p>
 <p>If the script didn&#8217;t include this condition, the query would fail on any shard
 that doesn&#8217;t match the pattern. By including this condition, the query skips
 data that doesn&#8217;t match the grok pattern.</p>
-<a id="0f2b99a593c3880da9c9f8770f28b196"></a>
+<a id="45a8cb2ba5d1a0dee7d73e72ede9b966"></a>
 <div class="pre_wrapper lang-console-result">
 <pre class="programlisting prettyprint lang-console-result">{
   ...
@@ -312,7 +341,7 @@ data that doesn&#8217;t match the grok pattern.</p>
     "max_score" : 1.0,
     "hits" : [
       {
-        "_index" : "my-index",
+        "_index" : "my-index-000001",
         "_id" : "FdLqu3cBhqheMnFKd0gK",
         "_score" : 1.0,
         "_source" : {
@@ -344,9 +373,9 @@ data that doesn&#8217;t match the grok pattern.</p>
 <p>You can also run a <a class="xref" href="query-dsl-range-query.html" title="Range query">range query</a> that operates on the
 <code class="literal">timestamp</code> field. The following query returns any documents where the
 <code class="literal">timestamp</code> is greater than or equal to <code class="literal">2020-04-30T14:31:27-05:00</code>:</p>
-<a id="a1b110b91d3f7b20ee01f772170a3acf"></a>
+<a id="92fa6608673cec5a2ed568a07e80d36b"></a>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET my-index/_search
+<pre class="programlisting prettyprint lang-console">GET my-index-000001/_search
 {
   "query": {
     "range": {
@@ -357,10 +386,10 @@ data that doesn&#8217;t match the grok pattern.</p>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/152.console"></div>
+<div class="console_widget" data-snippet="snippets/153.console"></div>
 <p>The response includes the document where the log format doesn&#8217;t match, but the
 timestamp falls within the defined range.</p>
-<a id="348c1b38f3d28af585f230c29a47edd0"></a>
+<a id="039ea67fc8ab51de13b77b0d73b45e68"></a>
 <div class="pre_wrapper lang-console-result">
 <pre class="programlisting prettyprint lang-console-result">{
   ...
@@ -372,7 +401,7 @@ timestamp falls within the defined range.</p>
     "max_score" : 1.0,
     "hits" : [
       {
-        "_index" : "my-index",
+        "_index" : "my-index-000001",
         "_id" : "hdEhyncBRSB6iD-PoBqe",
         "_score" : 1.0,
         "_source" : {
@@ -381,7 +410,7 @@ timestamp falls within the defined range.</p>
         }
       },
       {
-        "_index" : "my-index",
+        "_index" : "my-index-000001",
         "_id" : "htEhyncBRSB6iD-PoBqe",
         "_score" : 1.0,
         "_source" : {
@@ -409,9 +438,9 @@ a <a class="xref" href="runtime-examples.html#runtime-examples-grok" title="Defi
 pattern, you include the parts of the string that you want to discard. Paying
 special attention to the parts of the string you want to discard will help build
 successful dissect patterns.</p>
-<a id="f774edb1819a23d1c3d1a4425fbb7e81"></a>
+<a id="413fdcc7c437775a16bb55b81c2bbe2b"></a>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">PUT my-index/_mappings
+<pre class="programlisting prettyprint lang-console">PUT my-index-000001/_mappings
 {
   "runtime": {
     "http.client.ip": {
@@ -424,11 +453,11 @@ successful dissect patterns.</p>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/153.console"></div>
+<div class="console_widget" data-snippet="snippets/154.console"></div>
 <p>Similarly, you can define a dissect pattern to extract the <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Status" class="ulink" target="_top">HTTP response code</a>:</p>
-<a id="efa146bf81a9351ba42b92a6decbcfee"></a>
+<a id="3d2b696d3b5f067b6bcc58b69edc4d43"></a>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">PUT my-index/_mappings
+<pre class="programlisting prettyprint lang-console">PUT my-index-000001/_mappings
 {
   "runtime": {
     "http.response": {
@@ -441,12 +470,12 @@ successful dissect patterns.</p>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/154.console"></div>
+<div class="console_widget" data-snippet="snippets/155.console"></div>
 <p>You can then run a query to retrieve a specific HTTP response using the
 <code class="literal">http.response</code> runtime field:</p>
-<a id="6c27c00e7a1def409b8938897f4a9ae8"></a>
+<a id="e4d64fe8a6d7752da481d987ec410b36"></a>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET my-index/_search
+<pre class="programlisting prettyprint lang-console">GET my-index-000001/_search
 {
   "query": {
     "match": {
@@ -456,9 +485,9 @@ successful dissect patterns.</p>
   "fields" : ["*"]
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/155.console"></div>
+<div class="console_widget" data-snippet="snippets/156.console"></div>
 <p>The response includes a single document where the HTTP response is <code class="literal">304</code>:</p>
-<a id="ae8bb100dc0bcd9bc5fe97f7f79a7626"></a>
+<a id="2ea5ba43a1f2bfa35d3fc8224c4089cd"></a>
 <div class="pre_wrapper lang-console-result">
 <pre class="programlisting prettyprint lang-console-result">{
   ...
@@ -470,7 +499,7 @@ successful dissect patterns.</p>
     "max_score" : 1.0,
     "hits" : [
       {
-        "_index" : "my-index",
+        "_index" : "my-index-000001",
         "_id" : "A2qDy3cBWRMvVAuI7F8M",
         "_score" : 1.0,
         "_source" : {
