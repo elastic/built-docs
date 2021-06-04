@@ -42,6 +42,12 @@ that framework&#8217;s API. The request context can be used for reporting <a cla
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
+<a class="xref" href="builtin-modules.html#builtin-modules-apmhttp" title="module/apmhttp">module/apmhttp</a>
+</li>
+<li class="listitem">
+<a class="xref" href="builtin-modules.html#builtin-modules-apmfasthttp" title="module/apmfasthttp">module/apmfasthttp</a>
+</li>
+<li class="listitem">
 <a class="xref" href="builtin-modules.html#builtin-modules-apmecho" title="module/apmecho">module/apmecho</a>
 </li>
 <li class="listitem">
@@ -55,9 +61,6 @@ that framework&#8217;s API. The request context can be used for reporting <a cla
 </li>
 <li class="listitem">
 <a class="xref" href="builtin-modules.html#builtin-modules-apmgrpc" title="module/apmgrpc">module/apmgrpc</a>
-</li>
-<li class="listitem">
-<a class="xref" href="builtin-modules.html#builtin-modules-apmhttp" title="module/apmhttp">module/apmhttp</a>
 </li>
 <li class="listitem">
 <a class="xref" href="builtin-modules.html#builtin-modules-apmhttprouter" title="module/apmhttprouter">module/apmhttprouter</a>
@@ -115,6 +118,85 @@ that framework&#8217;s API. The request context can be used for reporting <a cla
 </li>
 </ul>
 </div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="builtin-modules-apmhttp"></a>module/apmhttp<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-go/edit/master/docs/instrumenting.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Package apmhttp provides a low-level <code class="literal">net/http</code> middleware handler. Other web middleware should
+typically be based off this.</p>
+<p>For each request, a transaction is stored in the request context, which can be obtained via
+<a href="https://golang.org/pkg/net/http/#Request.Context" class="ulink" target="_top">http.Request.Context</a> in your handler.</p>
+<div class="pre_wrapper lang-go">
+<pre class="programlisting prettyprint lang-go">import (
+	"go.elastic.co/apm/module/apmhttp"
+)
+
+func main() {
+	var myHandler http.Handler = ...
+	tracedHandler := apmhttp.Wrap(myHandler)
+}</pre>
+</div>
+<p>The apmhttp handler will recover panics and send them to Elastic APM.</p>
+<p>Package apmhttp also provides functions for instrumenting an <code class="literal">http.Client</code> or <code class="literal">http.RoundTripper</code>
+such that outgoing requests are traced as spans, if the request context includes a transaction.
+When performing the request, the enclosing context should be propagated by using
+<a href="https://golang.org/pkg/net/http/#Request.WithContext" class="ulink" target="_top">http.Request.WithContext</a>, or a helper, such as those provided by <a href="https://golang.org/x/net/context/ctxhttp" class="ulink" target="_top">https://golang.org/x/net/context/ctxhttp</a>.</p>
+<p>Client spans are not ended until the response body is fully consumed or closed.
+If you fail to do either, the span will not be sent.
+Always close the response body to ensure HTTP connections can be reused; see <a href="https://golang.org/pkg/net/http/#Client.Do" class="ulink" target="_top"><code class="literal">func (*Client) Do</code></a>.</p>
+<div class="pre_wrapper lang-go">
+<pre class="programlisting prettyprint lang-go">import (
+	"net/http"
+
+	"golang.org/x/net/context/ctxhttp"
+
+	"go.elastic.co/apm"
+	"go.elastic.co/apm/module/apmhttp"
+)
+
+var tracingClient = apmhttp.WrapClient(http.DefaultClient)
+
+func serverHandler(w http.ResponseWriter, req *http.Request) {
+	// Propagate the transaction context contained in req.Context().
+	resp, err := ctxhttp.Get(req.Context(), tracingClient, "http://backend.local/foo")
+	if err != nil {
+		apm.CaptureError(req.Context(), err).Send()
+		http.Error(w, "failed to query backend", 500)
+		return
+	}
+	body, err := ioutil.ReadAll(resp.Body)
+	...
+}
+
+func main() {
+	http.ListenAndServe(":8080", apmhttp.Wrap(http.HandlerFunc(serverHandler)))
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="builtin-modules-apmfasthttp"></a>module/apmfasthttp<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-go/edit/master/docs/instrumenting.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Package apmfasthttp provides a low-level <a href="https://github.com/valyala/fasthttp" class="ulink" target="_top">valyala/fasthttp</a> middleware request handler. Other fasthttp-based web middleware should typically be based off this.</p>
+<p>For each request, a transaction is stored in the request context, which can be obtained via
+<a href="https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx" class="ulink" target="_top">fasthttp.RequestCtx</a> in your handler using <code class="literal">apm.TransactionFromContext</code>.</p>
+<div class="pre_wrapper lang-go">
+<pre class="programlisting prettyprint lang-go">import (
+	"go.elastic.co/apm/module/apmfasthttp"
+)
+
+func main() {
+	var myHandler fasthttp.RequestHandler = func(ctx *fasthttp.RequestCtx) {
+		apmCtx := apm.TransactionFromContext(ctx)
+		// ...
+	}
+	tracedHandler := apmfasthttp.Wrap(myHandler)
+}</pre>
+</div>
+<p>The apmfasthttp handler will recover panics and send them to Elastic APM.</p>
+</div>
+
 <div class="section">
 <div class="titlepage"><div><div>
 <h3 class="title"><a id="builtin-modules-apmecho"></a>module/apmecho<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-go/edit/master/docs/instrumenting.asciidoc">edit</a></h3>
@@ -261,62 +343,6 @@ and not individual messages. For client streams, spans will be ended when the re
 fails; when any of <code class="literal">grpc.ClientStream.RecvMsg</code>, <code class="literal">grpc.ClientStream.SendMsg</code>, or
 <code class="literal">grpc.ClientStream.Header</code> return with an error; or when <code class="literal">grpc.ClientStream.RecvMsg</code>
 returns for a non-streaming server method.</p>
-</div>
-
-<div class="section">
-<div class="titlepage"><div><div>
-<h3 class="title"><a id="builtin-modules-apmhttp"></a>module/apmhttp<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-go/edit/master/docs/instrumenting.asciidoc">edit</a></h3>
-</div></div></div>
-<p>Package apmhttp provides a low-level <code class="literal">net/http</code> middleware handler. Other web middleware should
-typically be based off this.</p>
-<p>For each request, a transaction is stored in the request context, which can be obtained via
-<a href="https://golang.org/pkg/net/http/#Request.Context" class="ulink" target="_top">http.Request.Context</a> in your handler.</p>
-<div class="pre_wrapper lang-go">
-<pre class="programlisting prettyprint lang-go">import (
-	"go.elastic.co/apm/module/apmhttp"
-)
-
-func main() {
-	var myHandler http.Handler = ...
-	tracedHandler := apmhttp.Wrap(myHandler)
-}</pre>
-</div>
-<p>The apmhttp handler will recover panics and send them to Elastic APM.</p>
-<p>Package apmhttp also provides functions for instrumenting an <code class="literal">http.Client</code> or <code class="literal">http.RoundTripper</code>
-such that outgoing requests are traced as spans, if the request context includes a transaction.
-When performing the request, the enclosing context should be propagated by using
-<a href="https://golang.org/pkg/net/http/#Request.WithContext" class="ulink" target="_top">http.Request.WithContext</a>, or a helper, such as those provided by <a href="https://golang.org/x/net/context/ctxhttp" class="ulink" target="_top">https://golang.org/x/net/context/ctxhttp</a>.</p>
-<p>Client spans are not ended until the response body is fully consumed or closed.
-If you fail to do either, the span will not be sent.
-Always close the response body to ensure HTTP connections can be reused; see <a href="https://golang.org/pkg/net/http/#Client.Do" class="ulink" target="_top"><code class="literal">func (*Client) Do</code></a>.</p>
-<div class="pre_wrapper lang-go">
-<pre class="programlisting prettyprint lang-go">import (
-	"net/http"
-
-	"golang.org/x/net/context/ctxhttp"
-
-	"go.elastic.co/apm"
-	"go.elastic.co/apm/module/apmhttp"
-)
-
-var tracingClient = apmhttp.WrapClient(http.DefaultClient)
-
-func serverHandler(w http.ResponseWriter, req *http.Request) {
-	// Propagate the transaction context contained in req.Context().
-	resp, err := ctxhttp.Get(req.Context(), tracingClient, "http://backend.local/foo")
-	if err != nil {
-		apm.CaptureError(req.Context(), err).Send()
-		http.Error(w, "failed to query backend", 500)
-		return
-	}
-	body, err := ioutil.ReadAll(resp.Body)
-	...
-}
-
-func main() {
-	http.ListenAndServe(":8080", apmhttp.Wrap(http.HandlerFunc(serverHandler)))
-}</pre>
-</div>
 </div>
 
 <div class="section">
