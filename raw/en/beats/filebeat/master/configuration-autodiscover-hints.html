@@ -205,41 +205,116 @@ Access logs will be retrieved from stdout stream, and error logs from stderr.</p
   co.elastic.logs/json.message_key: log</pre>
 </div>
 <h4><a id="_nomad_2"></a>Nomad<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/master/filebeat/docs/autodiscover-hints.asciidoc">edit</a></h4>
-<p>Nomad autodiscover provider supports hints using the <a href="https://www.nomadproject.io/docs/job-specification/meta.html" class="ulink" target="_top"><code class="literal">meta</code> stanza</a>. To enable it just set <code class="literal">hints.enabled</code>:</p>
+<p>Nomad autodiscover provider supports hints using the
+<a href="https://www.nomadproject.io/docs/job-specification/meta.html" class="ulink" target="_top"><code class="literal">meta</code> stanza</a>. To
+enable it just set <code class="literal">hints.enabled</code>:</p>
 <div class="pre_wrapper lang-yaml">
 <pre class="programlisting prettyprint lang-yaml">filebeat.autodiscover:
   providers:
     - type: nomad
       hints.enabled: true</pre>
 </div>
-<p>You can configure the default config that will be launched when a new job is seen, like this:</p>
+<p>You can configure the default config that will be launched when a new job is
+seen, like this:</p>
 <div class="pre_wrapper lang-yaml">
 <pre class="programlisting prettyprint lang-yaml">filebeat.autodiscover:
   providers:
     - type: nomad
       hints.enabled: true
       hints.default_config:
-        type: nomad
+        type: log
         paths:
-          - /var/lib/nomad/alloc/${data.nomad.allocation.id}/alloc/logs/${data.nomad.task.name}.*</pre>
+          - /opt/nomad/alloc/${data.nomad.allocation.id}/alloc/logs/${data.nomad.task.name}.*</pre>
 </div>
-<p>You can also disable default settings entirely, so only Jobs annotated like <code class="literal">co.elastic.logs/enabled: true</code>
-will be retrieved:</p>
+<p>You can also disable the default config such that only logs from jobs explicitly
+annotated with <code class="literal">"co.elastic.logs/enabled" = "true"</code> will be collected:</p>
 <div class="pre_wrapper lang-yaml">
 <pre class="programlisting prettyprint lang-yaml">filebeat.autodiscover:
   providers:
     - type: nomad
       hints.enabled: true
-      hints.default_config.enabled: false</pre>
+      hints.default_config:
+        enabled: false
+        type: log
+        paths:
+          - /opt/nomad/alloc/${data.nomad.allocation.id}/alloc/logs/${data.nomad.task.name}.*</pre>
 </div>
-<p>You can annotate Nomad Jobs using the <code class="literal">meta</code> stanza with useful info to spin up Filebeat inputs
-or modules:</p>
+<p>You can annotate Nomad Jobs using the <code class="literal">meta</code> stanza with useful info to spin up
+Filebeat inputs or modules:</p>
 <div class="pre_wrapper lang-hcl">
 <pre class="programlisting prettyprint lang-hcl">meta {
-  "co.elastic.logs/multiline.pattern" = "^\["
-  "co.elastic.logs/multiline.negate"  = true
-  "co.elastic.logs/multiline.match"   = after
+  "co.elastic.logs/enabled"           = "true"
+  "co.elastic.logs/multiline.pattern" = "^\\["
+  "co.elastic.logs/multiline.negate"  = "true"
+  "co.elastic.logs/multiline.match"   = "after"
 }</pre>
+</div>
+<p>If you are using autodiscover then in most cases you will want to use the
+<a class="xref" href="add-nomad-metadata.html" title="Add Nomad metadata"><code class="literal">add_nomad_metadata</code></a> processor to enrich events with
+Nomad metadata. This example configures {Filebeat} to connect to the local
+Nomad agent over HTTPS and adds the Nomad allocation ID to all events from the
+input. Later in the pipeline the <code class="literal">add_nomad_metadata</code> processor will use that ID
+to enrich the event.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">filebeat.autodiscover:
+  providers:
+    - type: nomad
+      address: https://localhost:4646
+      hints.enabled: true
+      hints.default_config:
+        enabled: false <a id="CO24-1"></a><i class="conum" data-value="1"></i>
+        type: log
+        paths:
+          - /opt/nomad/alloc/${data.nomad.allocation.id}/alloc/logs/${data.nomad.task.name}.*
+        processors:
+          - add_fields: <a id="CO24-2"></a><i class="conum" data-value="2"></i>
+              target: nomad
+              fields:
+                allocation.id: ${data.nomad.allocation.id}
+
+processors:
+  - add_nomad_metadata: <a id="CO24-3"></a><i class="conum" data-value="3"></i>
+      when.has_fields.fields: [nomad.allocation.id]
+      address: https://localhost:4646
+      default_indexers.enabled: false
+      default_matchers.enabled: false
+      indexers:
+        - allocation_uuid:
+      matchers:
+        - fields:
+            lookup_fields:
+              - 'nomad.allocation.id'</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO24-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The default config is disabled meaning any task without the
+<code class="literal">"co.elastic.logs/enabled" = "true"</code> metadata will be ignored.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO24-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">add_fields</code> processor populates the <code class="literal">nomad.allocation.id</code> field with
+the Nomad allocation UUID.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO24-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">add_nomad_metadata</code> processor is configured at the global level so
+that it is only instantiated one time which saves resources.</p>
+</td>
+</tr>
+</table>
 </div>
 </div>
 <div class="navfooter">
