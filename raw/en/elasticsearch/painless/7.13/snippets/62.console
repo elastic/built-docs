@@ -7,9 +7,7 @@ POST _watcher/watch/_execute
         "request" : {
           "indices" : [ "seats" ],
           "body" : {
-            "query" : {
-              "term": { "sold": "true"}
-            },
+            "query" : { "term": { "sold": "true"} },
             "aggs" : {
               "theatres" : {
                 "terms" : { "field" : "play" },
@@ -24,26 +22,31 @@ POST _watcher/watch/_execute
         }
       }
     },
-    "actions" : {
-      "mod_log" : {
-        "transform": {                                                               
-          "script" :
-          """
-          def formatter = NumberFormat.getCurrencyInstance();
-          return [
-            'msg': ctx.payload.aggregations.theatres.buckets.stream()
-              .map(t-> formatter.format(t.money.value) + ' for the play ' + t.key)
-              .collect(Collectors.joining(", "))
+    "transform" : {
+      "script":
+      """
+        return [
+          'money_makers': ctx.payload.aggregations.theatres.buckets.stream() 
+            .filter(t -> {                                                   
+                return t.money.value > 50000
+            })
+            .map(t -> {                                                      
+                return ['play': t.key, 'total_value': t.money.value ]
+            }).collect(Collectors.toList()),                                 
+          'duds' : ctx.payload.aggregations.theatres.buckets.stream()        
+            .filter(t -> {
+                return t.money.value < 15000
+            })
+            .map(t -> {
+                return ['play': t.key, 'total_value': t.money.value ]
+            }).collect(Collectors.toList())
           ]
-          """
-        },
+      """
+    },
+    "actions" : {
+      "my_log" : {
         "logging" : {
-          "text" : "The output of the payload was transformed to: {{ctx.payload.msg}}"
-        }
-      },
-      "unmod_log" : {                                                                
-        "logging" : {
-          "text" : "The output of the payload was not transformed and this value should not exist: {{ctx.payload.msg}}"
+          "text" : "The output of the payload was transformed to {{ctx.payload}}"
         }
       }
     }
