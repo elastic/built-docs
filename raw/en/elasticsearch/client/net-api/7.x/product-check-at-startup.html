@@ -34,12 +34,13 @@
 </div></div></div>
 <p>Since v7.14.0, the client performs a required product check before the first call.
 This pre-flight product check allows the client to establish the version of Elasticsearch that it is communicating with.</p>
-<p>The product check requires one additional HTTP request to be sent to the server as part of the request pipeline before
-the main API call is sent. In most cases, this will succeed during the very first API call that the client sends.
+<p>The product check generally requires a single additional HTTP request to be sent to the server as part of the request pipeline before
+the first API call is sent. In most cases, this will succeed during the first API call that the client sends.
 Once the product check succeeds, no further product check HTTP requests are sent for subsequent API calls.</p>
 <div class="pre_wrapper lang-csharp">
 <pre class="programlisting prettyprint lang-csharp">var audit = new Auditor(() =&gt; VirtualClusterWith
     .Nodes(1)
+    .ProductCheck(r =&gt; r.SucceedAlways())
     .ClientCalls(r =&gt; r.SucceedAlways())
     .StaticConnectionPool()
     .Settings(s =&gt; s.DisablePing())
@@ -88,7 +89,7 @@ audit = await audit.TraceCalls(skipProductCheck: false,
 <div class="pre_wrapper lang-csharp">
 <pre class="programlisting prettyprint lang-csharp">var audit = new Auditor(() =&gt; VirtualClusterWith
     .Nodes(1, productCheckAlwaysSucceeds: false)
-    .ProductCheck(r =&gt; r.Fails(TimesHelper.Once))
+    .ProductCheck(r =&gt; r.Fails(TimesHelper.Once, 429))
     .ProductCheck(r =&gt; r.SucceedAlways())
     .ClientCalls(r =&gt; r.SucceedAlways())
     .StaticConnectionPool()
@@ -98,13 +99,12 @@ audit = await audit.TraceCalls(skipProductCheck: false,
 audit = await audit.TraceCalls(skipProductCheck: false,
     new ClientCall() {
         { ProductCheckOnStartup },
-        { ProductCheckFailure, 9200 }, <a id="CO12-1"></a><i class="conum" data-value="1"></i>
-        { HealthyResponse, 9200 } <a id="CO12-2"></a><i class="conum" data-value="2"></i>
+        { ProductCheckFailure, 9200 } <a id="CO12-1"></a><i class="conum" data-value="1"></i>
     },
     new ClientCall() {
         { ProductCheckOnStartup },
-        { ProductCheckSuccess, 9200 }, <a id="CO12-3"></a><i class="conum" data-value="3"></i>
-        { HealthyResponse, 9200 }
+        { ProductCheckSuccess, 9200 }, <a id="CO12-2"></a><i class="conum" data-value="2"></i>
+        { HealthyResponse, 9200 } <a id="CO12-3"></a><i class="conum" data-value="3"></i>
     },
     new ClientCall() {
         { HealthyResponse, 9200 } <a id="CO12-4"></a><i class="conum" data-value="4"></i>
@@ -118,7 +118,7 @@ audit = await audit.TraceCalls(skipProductCheck: false,
 <p><a href="#CO12-1"><i class="conum" data-value="1"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>as this is the first call, the product check is executed, but fails</p>
+<p>as this is the first call, the product check is executed, but times out</p>
 </td>
 </tr>
 <tr>
@@ -126,7 +126,7 @@ audit = await audit.TraceCalls(skipProductCheck: false,
 <p><a href="#CO12-2"><i class="conum" data-value="2"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>the actual request is still sent and succeeds</p>
+<p>as the previous product check failed, it runs again on the second call and this time it succeeds</p>
 </td>
 </tr>
 <tr>
@@ -134,7 +134,7 @@ audit = await audit.TraceCalls(skipProductCheck: false,
 <p><a href="#CO12-3"><i class="conum" data-value="3"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>as the previous product check failed, it runs again on the second call</p>
+<p>this time the main API call is sent and also succeeds</p>
 </td>
 </tr>
 <tr>
@@ -147,11 +147,11 @@ audit = await audit.TraceCalls(skipProductCheck: false,
 </tr>
 </table>
 </div>
-<p>Here&#8217;s an example with a three node cluster which fails for some reason during the first and second product check attempts.</p>
+<p>Here&#8217;s an example with a three node cluster which fails (due to too many requests) during the first and second product check attempts.</p>
 <div class="pre_wrapper lang-csharp">
 <pre class="programlisting prettyprint lang-csharp">var audit = new Auditor(() =&gt; VirtualClusterWith
     .Nodes(3, productCheckAlwaysSucceeds: false)
-    .ProductCheck(r =&gt; r.FailAlways())
+    .ProductCheck(r =&gt; r.FailAlways(429))
     .ProductCheck(r =&gt; r.OnPort(9202).SucceedAlways())
     .ClientCalls(r =&gt; r.SucceedAlways())
     .StaticConnectionPool()
