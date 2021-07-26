@@ -132,7 +132,8 @@ Not what you want? See the
 <div class="titlepage"><div><div>
 <h2 class="title"><a id="configure-ssl-tls"></a>Configure SSL/TLS<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/7.14/enterprise-search-docs/configuration/configure-ssl-tls.asciidoc">edit</a></h2>
 </div></div></div>
-<p>By default, Enterprise Search does not enable TLS (Transport Layer Security).</p>
+<p>By default, Enterprise Search does not enable TLS (Transport Layer Security) for
+incoming HTTP connections.</p>
 <p>To enable SSL/TLS, set the following <a class="xref" href="configuration.html#configuration-file" title="Enterprise Search configuration settings">configuration settings</a>:</p>
 <div class="pre_wrapper lang-yml">
 <pre class="programlisting prettyprint lang-yml">ent_search.ssl.enabled: true
@@ -141,22 +142,84 @@ ent_search.ssl.keystore.password: "changeme"
 ent_search.ssl.keystore.key_password: "changeme"
 ent_search.external_url: https://localhost:3002</pre>
 </div>
+<p>See below for more details on specific settings.</p>
 <div class="section">
 <div class="titlepage"><div><div>
 <h3 class="title"><a id="configure-ssl-tls-create-java-keystore"></a>Create the Java KeyStore<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/7.14/enterprise-search-docs/configuration/configure-ssl-tls.asciidoc">edit</a></h3>
 </div></div></div>
-<p>In the above example, <code class="literal">keystore.jks</code> is a Java KeyStore file.</p>
-<p>Create a Java KeyStore file using the <code class="literal">keytool</code> utility, which is included with the JVM.
-If you are using the Elastic provided Docker image, the <code class="literal">keytool</code> utility is available at <code class="literal">/etc/alternatives/keytool</code> within the container.
-See <a href="https://docs.oracle.com/javase/8/docs/technotes/tools/unix/keytool.html" class="ulink" target="_blank" rel="noopener">keytool - Key and Certificate Management Tool</a> in the Java documentation.</p>
-<p>For example, to create a self-signed certificate and add it to a keystore for use with a server running on <code class="literal">localhost</code>, run:</p>
+<p>In the above example, <code class="literal">keystore.jks</code> is a
+<a href="https://en.wikipedia.org/wiki/Java_KeyStore" class="ulink" target="_top">Java KeyStore file</a>.</p>
+<p>You can create a Java KeyStore file using the <code class="literal">keytool</code> utility, which is included with the JVM.
+If you are using the Elastic provided Docker image, the <code class="literal">keytool</code> utility is available at <code class="literal">/usr/bin/keytool</code> within the container. See <a href="https://docs.oracle.com/javase/8/docs/technotes/tools/unix/keytool.html" class="ulink" target="_blank" rel="noopener">keytool - Key and Certificate Management Tool</a> in the Java documentation for more details on the usage of this tool.</p>
+<p>In a production scenario, you would merge your private key (<code class="literal">private.key</code>) and your SSL certificate (<code class="literal">certificate.crt</code>) into the <a href="https://en.wikipedia.org/wiki/PKCS_12" class="ulink" target="_top">PKCS12</a> format and then convert it to a Java keystore by using the following commands:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash"># Convert the existing certificate and the private key to a PKCS12 file
+openssl pkcs12 -export \
+  -in certificate.crt \
+  -inkey private.key \
+  -out keystore.p12 \
+  -name ent-search
+
+# Create the Java keystore from the PKCS12 file
+keytool -importkeystore \
+  -destkeystore keystore.jks \
+  -srckeystore keystore.p12 \
+  -srcstoretype PKCS12 \
+  -storepass changeme
+  -alias ent-search</pre>
+</div>
+<p>In a development environment (do not use this in production), you can use they they <code class="literal">keytool</code> command to  create a self-signed certificate and add it to a keystore for use with a server running on <code class="literal">localhost</code>:</p>
 <div class="pre_wrapper lang-bash">
 <pre class="programlisting prettyprint lang-bash">keytool -genkey -alias server-alias -keyalg RSA \
   -storepass changeme -keypass changeme -keystore keystore.jks \
   -dname 'CN=localhost, OU=Unknown, O=Unknown, L=Unknown, ST=Unknown, C=Unknown'</pre>
 </div>
 <p>Note that the values used in <code class="literal">-keypass changeme</code> and <code class="literal">-storepass changeme</code> correspond directly to the values that must be set for <code class="literal">ent_search.ssl.keystore.key_password</code> and <code class="literal">ent_search.ssl.keystore.password</code>, respectively.</p>
-<p>Please note: In a production scenario, you will need a public certificate signed by a trusted Certificate Authority.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="configure-ssl-tls-in-kibana"></a>Configure Kibana to Trust Your SSL Certificate Authority<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/7.14/enterprise-search-docs/configuration/configure-ssl-tls.asciidoc">edit</a></h3>
+</div></div></div>
+<p>If you are using a custom SSL certificate for your Enterprise Search deployment, you will have to configure Kibana accordingly to make sure it trusts your custom SSL certificate by adding your custom Certificate Authority (CA) to Kibana configuration.</p>
+<p>The Enterprise Search SSL configuration in Kibana is controlled by the following options:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">enterpriseSearch.ssl.certificateAuthorities</code> – used to configure a list of custom Certificate Authority (CA) certificates to be used for validating certificates presented by Enterprise Search. You need to set this to the CA certificate (in a PEM format) you used to generate your custom Enterprise Search SSL certificate.
+</li>
+<li class="listitem">
+<p><code class="literal">enterpriseSearch.ssl.verificationMode</code> – used to control the level of SSL certificate validation for connections from Kibana to Enterprise Search. Possible values are:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">full</code> (default, both SSL certificate and host name are verified)
+</li>
+<li class="listitem">
+<code class="literal">certificate</code> (only SSL certificate validation is performed, hostname is not checked)
+</li>
+<li class="listitem">
+<code class="literal">none</code> (SSL validation is disabled entirely, useful for development only).
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+<p>Here is an example snippet from a <code class="literal">kibana.yml</code> file used on a deployment with Enterprise Search:</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">enterpriseSearch.host: https://some-host.tld:3002
+enterpriseSearch.ssl.verificationMode: certificate
+enterpriseSearch.ssl.certificateAuthorities:
+  - /path/to/your/ca.pem</pre>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If you are using a self-signed SSL certificate (without a custom Certificate Authority), the only way to make Kibana work with it is by disabling SSL verification entirely (by setting <code class="literal">enterpriseSearch.ssl.verificationMode: none</code>).</p>
+<p>Do not use this method in production!</p>
+</div>
+</div>
 </div>
 
 <div class="section">
