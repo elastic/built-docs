@@ -134,6 +134,12 @@ that framework&#8217;s API. The request context can be used for reporting <a cla
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
+<a class="xref" href="builtin-modules.html#builtin-modules-apmhttp" title="module/apmhttp">module/apmhttp</a>
+</li>
+<li class="listitem">
+<a class="xref" href="builtin-modules.html#builtin-modules-apmfasthttp" title="module/apmfasthttp">module/apmfasthttp</a>
+</li>
+<li class="listitem">
 <a class="xref" href="builtin-modules.html#builtin-modules-apmecho" title="module/apmecho">module/apmecho</a>
 </li>
 <li class="listitem">
@@ -147,9 +153,6 @@ that framework&#8217;s API. The request context can be used for reporting <a cla
 </li>
 <li class="listitem">
 <a class="xref" href="builtin-modules.html#builtin-modules-apmgrpc" title="module/apmgrpc">module/apmgrpc</a>
-</li>
-<li class="listitem">
-<a class="xref" href="builtin-modules.html#builtin-modules-apmhttp" title="module/apmhttp">module/apmhttp</a>
 </li>
 <li class="listitem">
 <a class="xref" href="builtin-modules.html#builtin-modules-apmhttprouter" title="module/apmhttprouter">module/apmhttprouter</a>
@@ -202,16 +205,100 @@ that framework&#8217;s API. The request context can be used for reporting <a cla
 <li class="listitem">
 <a class="xref" href="builtin-modules.html#builtin-modules-apmmongo" title="module/apmmongo">module/apmmongo</a>
 </li>
+<li class="listitem">
+<a class="xref" href="builtin-modules.html#builtin-modules-apmawssdkgo" title="module/apmawssdkgo">module/apmawssdkgo</a>
+</li>
 </ul>
 </div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="builtin-modules-apmhttp"></a>module/apmhttp<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-go/edit/1.x/docs/instrumenting.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Package apmhttp provides a low-level <code class="literal">net/http</code> middleware handler. Other web middleware should
+typically be based off this.</p>
+<p>For each request, a transaction is stored in the request context, which can be obtained via
+<a href="https://golang.org/pkg/net/http/#Request.Context" class="ulink" target="_top">http.Request.Context</a> in your handler.</p>
+<div class="pre_wrapper lang-go">
+<pre class="programlisting prettyprint lang-go">import (
+	"go.elastic.co/apm/module/apmhttp"
+)
+
+func main() {
+	var myHandler http.Handler = ...
+	tracedHandler := apmhttp.Wrap(myHandler)
+}</pre>
+</div>
+<p>The apmhttp handler will recover panics and send them to Elastic APM.</p>
+<p>Package apmhttp also provides functions for instrumenting an <code class="literal">http.Client</code> or <code class="literal">http.RoundTripper</code>
+such that outgoing requests are traced as spans, if the request context includes a transaction.
+When performing the request, the enclosing context should be propagated by using
+<a href="https://golang.org/pkg/net/http/#Request.WithContext" class="ulink" target="_top">http.Request.WithContext</a>, or a helper, such as those provided by <a href="https://golang.org/x/net/context/ctxhttp" class="ulink" target="_top">https://golang.org/x/net/context/ctxhttp</a>.</p>
+<p>Client spans are not ended until the response body is fully consumed or closed.
+If you fail to do either, the span will not be sent.
+Always close the response body to ensure HTTP connections can be reused; see <a href="https://golang.org/pkg/net/http/#Client.Do" class="ulink" target="_top"><code class="literal">func (*Client) Do</code></a>.</p>
+<div class="pre_wrapper lang-go">
+<pre class="programlisting prettyprint lang-go">import (
+	"net/http"
+
+	"golang.org/x/net/context/ctxhttp"
+
+	"go.elastic.co/apm"
+	"go.elastic.co/apm/module/apmhttp"
+)
+
+var tracingClient = apmhttp.WrapClient(http.DefaultClient)
+
+func serverHandler(w http.ResponseWriter, req *http.Request) {
+	// Propagate the transaction context contained in req.Context().
+	resp, err := ctxhttp.Get(req.Context(), tracingClient, "http://backend.local/foo")
+	if err != nil {
+		apm.CaptureError(req.Context(), err).Send()
+		http.Error(w, "failed to query backend", 500)
+		return
+	}
+	body, err := ioutil.ReadAll(resp.Body)
+	...
+}
+
+func main() {
+	http.ListenAndServe(":8080", apmhttp.Wrap(http.HandlerFunc(serverHandler)))
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="builtin-modules-apmfasthttp"></a>module/apmfasthttp<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-go/edit/1.x/docs/instrumenting.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Package apmfasthttp provides a low-level <a href="https://github.com/valyala/fasthttp" class="ulink" target="_top">valyala/fasthttp</a> middleware request handler. Other fasthttp-based web middleware should typically be based off this.</p>
+<p>For each request, a transaction is stored in the request context, which can be obtained via
+<a href="https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx" class="ulink" target="_top">fasthttp.RequestCtx</a> in your handler using <code class="literal">apm.TransactionFromContext</code>.</p>
+<div class="pre_wrapper lang-go">
+<pre class="programlisting prettyprint lang-go">import (
+	"github.com/valyala/fasthttp"
+
+	"go.elastic.co/apm/module/apmfasthttp"
+)
+
+func main() {
+	var myHandler fasthttp.RequestHandler = func(ctx *fasthttp.RequestCtx) {
+		apmCtx := apm.TransactionFromContext(ctx)
+		// ...
+	}
+	tracedHandler := apmfasthttp.Wrap(myHandler)
+}</pre>
+</div>
+<p>The apmfasthttp handler will recover panics and send them to Elastic APM.</p>
+</div>
+
 <div class="section">
 <div class="titlepage"><div><div>
 <h3 class="title"><a id="builtin-modules-apmecho"></a>module/apmecho<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-go/edit/1.x/docs/instrumenting.asciidoc">edit</a></h3>
 </div></div></div>
 <p>Packages apmecho and apmechov4 provide middleware for the <a href="https://github.com/labstack/echo" class="ulink" target="_top">Echo</a>
 web framework, versions 3.x and 4.x respectively.</p>
-<p>If you are using Echo 4.x (<code class="literal">github.com/labstack/echo/v4</code>), then you should use <code class="literal">module/apmechov4</code>.
-For the older Echo 3.x versions (<code class="literal">github.com/labstack/echo</code>), you should use <code class="literal">module/apmecho</code>.</p>
+<p>If you are using Echo 4.x (<code class="literal">github.com/labstack/echo/v4</code>), use <code class="literal">module/apmechov4</code>.
+For the older Echo 3.x versions (<code class="literal">github.com/labstack/echo</code>), use <code class="literal">module/apmecho</code>.</p>
 <p>For each request, a transaction is stored in the request context, which can be obtained via
 <a href="https://godoc.org/github.com/labstack/echo#Context" class="ulink" target="_top">echo.Context</a><code class="literal">.Request().Context()</code> in your handler.</p>
 <div class="pre_wrapper lang-go">
@@ -321,9 +408,15 @@ context passed into the method.</p>
 )
 
 func main() {
-	server := grpc.NewServer(grpc.UnaryInterceptor(apmgrpc.NewUnaryServerInterceptor()))
+	server := grpc.NewServer(
+		grpc.UnaryInterceptor(apmgrpc.NewUnaryServerInterceptor()),
+		grpc.StreamInterceptor(apmgrpc.NewStreamServerInterceptor()),
+	)
 	...
-	conn, err := grpc.Dial(addr, grpc.WithUnaryInterceptor(apmgrpc.NewUnaryClientInterceptor()))
+	conn, err := grpc.Dial(addr,
+		grpc.WithUnaryInterceptor(apmgrpc.NewUnaryClientInterceptor()),
+		gprc.WithStreamInterceptor(apmgrpc.NewStreamClientInterceptor()),
+	)
 	...
 }</pre>
 </div>
@@ -339,65 +432,11 @@ by apmgrpc.</p>
 ))
 ...</pre>
 </div>
-<p>There is currently no support for intercepting at the stream level. Please file an issue and/or
-send a pull request if this is something you need.</p>
-</div>
-
-<div class="section">
-<div class="titlepage"><div><div>
-<h3 class="title"><a id="builtin-modules-apmhttp"></a>module/apmhttp<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-go/edit/1.x/docs/instrumenting.asciidoc">edit</a></h3>
-</div></div></div>
-<p>Package apmhttp provides a low-level <code class="literal">net/http</code> middleware handler. Other web middleware should
-typically be based off this.</p>
-<p>For each request, a transaction is stored in the request context, which can be obtained via
-<a href="https://golang.org/pkg/net/http/#Request.Context" class="ulink" target="_top">http.Request.Context</a> in your handler.</p>
-<div class="pre_wrapper lang-go">
-<pre class="programlisting prettyprint lang-go">import (
-	"go.elastic.co/apm/module/apmhttp"
-)
-
-func main() {
-	var myHandler http.Handler = ...
-	tracedHandler := apmhttp.Wrap(myHandler)
-}</pre>
-</div>
-<p>The apmhttp handler will recover panics and send them to Elastic APM.</p>
-<p>Package apmhttp also provides functions for instrumenting an <code class="literal">http.Client</code> or <code class="literal">http.RoundTripper</code>
-such that outgoing requests are traced as spans, if the request context includes a transaction.
-When performing the request, the enclosing context should be propagated by using
-<a href="https://golang.org/pkg/net/http/#Request.WithContext" class="ulink" target="_top">http.Request.WithContext</a>, or a helper
-such as those provided by <a href="https://golang.org/x/net/context/ctxhttp" class="ulink" target="_top">https://golang.org/x/net/context/ctxhttp</a>.</p>
-<p>Client spans are not ended until the response body is fully consumed or closed. If you fail to
-do either of these, then the span will not be sent. You should always close the response body
-anyway, to ensure HTTP connections can be reused; see <a href="https://golang.org/pkg/net/http/#Client.Do" class="ulink" target="_top">https://golang.org/pkg/net/http/#Client.Do</a>.</p>
-<div class="pre_wrapper lang-go">
-<pre class="programlisting prettyprint lang-go">import (
-	"net/http"
-
-	"golang.org/x/net/context/ctxhttp"
-
-	"go.elastic.co/apm"
-	"go.elastic.co/apm/module/apmhttp"
-)
-
-var tracingClient = apmhttp.WrapClient(http.DefaultClient)
-
-func serverHandler(w http.ResponseWriter, req *http.Request) {
-	// Propagate the transaction context contained in req.Context().
-	resp, err := ctxhttp.Get(req.Context(), tracingClient, "http://backend.local/foo")
-	if err != nil {
-		apm.CaptureError(req.Context(), err).Send()
-		http.Error(w, "failed to query backend", 500)
-		return
-	}
-	body, err := ioutil.ReadAll(resp.Body)
-	...
-}
-
-func main() {
-	http.ListenAndServe(":8080", apmhttp.Wrap(http.HandlerFunc(serverHandler)))
-}</pre>
-</div>
+<p>Stream interceptors emit transactions and spans that represent the entire stream,
+and not individual messages. For client streams, spans will be ended when the request
+fails; when any of <code class="literal">grpc.ClientStream.RecvMsg</code>, <code class="literal">grpc.ClientStream.SendMsg</code>, or
+<code class="literal">grpc.ClientStream.Header</code> return with an error; or when <code class="literal">grpc.ClientStream.RecvMsg</code>
+returns for a non-streaming server method.</p>
 </div>
 
 <div class="section">
@@ -423,9 +462,8 @@ func main() {
 }</pre>
 </div>
 <p><a href="https://github.com/julienschmidt/httprouter/pull/139" class="ulink" target="_top">httprouter does not provide a means of obtaining the matched route</a>, hence the route must be passed into the wrapper.</p>
-<p>Alternatively you can use the apmhttprouter.Router type, which wraps httprouter.Router,
-providing the same API and instrumenting added routes. To use this wrapper type, you
-should rewrite your use of <code class="literal">httprouter.New</code> to <code class="literal">apmhttprouter.New</code>; the returned type
+<p>Alternatively, use the <code class="literal">apmhttprouter.Router</code> type, which wraps <code class="literal">httprouter.Router</code>,
+providing the same API and instrumenting added routes. To use this wrapper type, rewrite your use of <code class="literal">httprouter.New</code> to <code class="literal">apmhttprouter.New</code>; the returned type
 is <code class="literal">*apmhttprouter.Router</code>, and not <code class="literal">*httprouter.Router</code>.</p>
 <div class="pre_wrapper lang-go">
 <pre class="programlisting prettyprint lang-go">import "go.elastic.co/apm/module/apmhttprouter"
@@ -495,7 +533,7 @@ lambda.Start.</p>
 </div></div></div>
 <p>Package apmsql provides a means of wrapping <code class="literal">database/sql</code> drivers so that queries and other
 executions are reported as spans within the current transaction.</p>
-<p>To trace SQL queries, you should register drivers using apmsql.Register and obtain connections
+<p>To trace SQL queries, register drivers using apmsql.Register and obtain connections
 with apmsql.Open. The parameters are exactly the same as if you were to call sql.Register
 and sql.Open respectively.</p>
 <p>As a convenience, we also provide packages which will automatically register popular drivers
@@ -635,7 +673,7 @@ func main() {
 </div></div></div>
 <p>Package apmgocql provides a means of instrumenting <a href="https://github.com/gocql/gocql" class="ulink" target="_top">gocql</a> so
 that queries are reported as spans within the current transaction.</p>
-<p>To report <code class="literal">gocql</code> queries, you can construct an <code class="literal">apmgocql.Observer</code> and assign it to
+<p>To report <code class="literal">gocql</code> queries, construct an <code class="literal">apmgocql.Observer</code> and assign it to
 the <code class="literal">QueryObserver</code> and <code class="literal">BatchObserver</code> fields of <code class="literal">gocql.ClusterConfig</code>, or install it
 into a specific <code class="literal">gocql.Query</code> or <code class="literal">gocql.Batch</code> via their <code class="literal">Observer</code> methods.</p>
 <p>Spans will be created for queries as long as they have context associated, and the
@@ -667,7 +705,7 @@ func main() {
 </div></div></div>
 <p>Package apmredigo provides a means of instrumenting <a href="https://github.com/gomodule/redigo" class="ulink" target="_top">Redigo</a>
 so that Redis commands are reported as spans within the current transaction.</p>
-<p>To report Redis commands, you can use the top-level <code class="literal">Do</code> or <code class="literal">DoWithTimeout</code> functions.
+<p>To report Redis commands, use the top-level <code class="literal">Do</code> or <code class="literal">DoWithTimeout</code> functions.
 These functions have the same signature as the <code class="literal">redis.Conn</code> equivalents apart from an
 initial <code class="literal">context.Context</code> parameter. If the context passed in contains a sampled
 transaction, a span will be reported for the Redis command.</p>
@@ -706,7 +744,7 @@ func handleRequest(w http.ResponseWriter, req *http.Request) {
 </div></div></div>
 <p>Package apmgoredis provides a means of instrumenting <a href="https://github.com/go-redis/redis" class="ulink" target="_top">go-redis/redis</a>
 so that Redis commands are reported as spans within the current transaction.</p>
-<p>To report Redis commands, you can use the top-level <code class="literal">Wrap</code> function to wrap a
+<p>To report Redis commands, use the top-level <code class="literal">Wrap</code> function to wrap a
 <code class="literal">redis.Client</code>, <code class="literal">redis.ClusterClient</code>, or <code class="literal">redis.Ring</code>. Initially, the wrapped
 client will be associated with the background context; its <code class="literal">WithContext</code> method
 may be used to obtain a shallow copy with another context. For example, in an
@@ -928,7 +966,7 @@ func traceLoggingMiddleware(h http.Handler) http.Handler {
 of Elasticsearch clients, such as <a href="https://github.com/elastic/go-elasticsearch" class="ulink" target="_top">go-elasticsearch</a>
 and <a href="https://github.com/olivere/elastic" class="ulink" target="_top">olivere/elastic</a>, so that Elasticsearch
 requests are reported as spans within the current transaction.</p>
-<p>To create spans for an Elasticsearch request, you should wrap the client&#8217;s HTTP
+<p>To create spans for an Elasticsearch request, wrap the client&#8217;s HTTP
 transport using the <code class="literal">WrapRoundTripper</code> function, and then associate the request
 with a context containing a transaction.</p>
 <div class="pre_wrapper lang-go">
@@ -958,7 +996,7 @@ func handleRequest(w http.ResponseWriter, req *http.Request) {
 <p>Package apmmongo provides a means of instrumenting the
 <a href="https://github.com/mongodb/mongo-go-driver" class="ulink" target="_top">MongoDB Go Driver</a>, so that MongoDB
 commands are reported as spans within the current transaction.</p>
-<p>To create spans for MongoDB commands, you should pass in a <code class="literal">CommandMonitor</code> created
+<p>To create spans for MongoDB commands, pass in a <code class="literal">CommandMonitor</code> created
 with <code class="literal">apmmongo.CommandMonitor</code> as an option when constructing a client, and then when
 executing commands, pass in a context containing a transaction.</p>
 <div class="pre_wrapper lang-go">
@@ -982,6 +1020,68 @@ func handleRequest(w http.ResponseWriter, req *http.Request) {
 	collection := client.Database("db").Collection("coll")
 	cur, err := collection.Find(req.Context(), bson.D{})
 	...
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="builtin-modules-apmawssdkgo"></a>module/apmawssdkgo<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-go/edit/1.x/docs/instrumenting.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Package apmawssdkgo provides a means of instrumenting the
+<a href="https://github.com/aws/aws-sdk-go" class="ulink" target="_top">AWS SDK Go</a> session object, so that
+AWS requests are reported as spans within the current transaction.</p>
+<p>To create spans for AWS requests, you should wrap the <code class="literal">session.Session</code> created
+with <code class="literal">session.NewSession</code> when constructing a client. When executing commands,
+pass in a context containing a transaction.</p>
+<p>The following services are supported:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+S3
+</li>
+<li class="listitem">
+DynamoDB
+</li>
+<li class="listitem">
+SQS
+</li>
+<li class="listitem">
+SNS
+</li>
+</ul>
+</div>
+<p>Passing a <code class="literal">session.Session</code> wrapped with <code class="literal">apmawssdkgo.WrapSession</code> to these
+services from the AWS SDK will report spans within the current transaction.</p>
+<div class="pre_wrapper lang-go">
+<pre class="programlisting prettyprint lang-go">import (
+	"context"
+	"net/http"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+
+	"go.elastic.co/apm/module/apmawssdkgo"
+)
+
+func main() {
+  session := session.Must(session.NewSession())
+  session = apmawssdkgo.WrapSession(session)
+
+  uploader := s3manager.NewUploader(session)
+  s := &amp;server{uploader}
+  ...
+}
+
+func (s *server) handleRequest(w http.ResponseWriter, req *http.Request) {
+  ctx := req.Context()
+  out, err := s.uploader.UploadWithContext(ctx, &amp;s3manager.UploadInput{
+    Bucket: aws.String("your-bucket"),
+    Key:    aws.String("your-key"),
+    Body:   bytes.NewBuffer([]byte("your-body")),
+  })
+  ...
 }</pre>
 </div>
 </div>
