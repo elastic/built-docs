@@ -1,30 +1,42 @@
-GET /seats/_search
+POST _watcher/watch/_execute
 {
-  "size": 0,
-  "aggs": {
-    "theatres": {
-      "terms": {
-        "field": "theatre",
-        "size": 10
-      },
-      "aggs": {
-        "max_cost": {
-          "max": {
-            "field": "cost"
-          }
-        },
-        "filtering_agg": {
-          "bucket_selector": {
-            "buckets_path": {
-              "max": "max_cost"
+  "watch" : {
+    "trigger" : { "schedule" : { "interval" : "24h" } },
+    "input" : {
+      "search" : {
+        "request" : {
+          "indices" : [ "seats" ],
+          "body" : {
+            "query" : {
+              "term": { "sold": "true"}
             },
-            "script": {
-              "params": {
-                "base_cost": 5
-              },
-              "source": "params.max + params.base_cost > 10"
+            "aggs" : {
+              "theatres" : {
+                "terms" : { "field" : "play" },
+                "aggs" : {
+                  "money" : {
+                    "sum": { "field" : "cost" }
+                  }
+                }
+              }
             }
           }
+        }
+      }
+    },
+    "condition" : {
+      "script" :
+      """
+        return ctx.payload.aggregations.theatres.buckets.stream()      
+          .filter(theatre -> theatre.money.value < 15000 ||
+                             theatre.money.value > 50000)              
+          .count() > 0                                                 
+      """
+    },
+    "actions" : {
+      "my_log" : {
+        "logging" : {
+          "text" : "The output of the search was : {{ctx.payload.aggregations.theatres.buckets}}"
         }
       }
     }

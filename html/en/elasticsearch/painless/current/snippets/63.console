@@ -1,6 +1,7 @@
 POST _watcher/watch/_execute
 {
   "watch" : {
+    "metadata" : { "high_threshold": 4000, "low_threshold": 1000 },
     "trigger" : { "schedule" : { "interval" : "24h" } },
     "input" : {
       "search" : {
@@ -15,7 +16,12 @@ POST _watcher/watch/_execute
                 "terms" : { "field" : "play" },
                 "aggs" : {
                   "money" : {
-                    "sum": { "field" : "cost" }
+                    "sum": {
+                      "field" : "cost",
+                      "script": {
+                       "source": "doc.cost.value * doc.number.value"
+                      }
+                    }
                   }
                 }
               }
@@ -24,26 +30,72 @@ POST _watcher/watch/_execute
         }
       }
     },
+    "condition" : {
+      "script" :
+      """
+        return ctx.payload.aggregations.theatres.buckets.stream()
+          .anyMatch(theatre -> theatre.money.value < ctx.metadata.low_threshold ||
+                               theatre.money.value > ctx.metadata.high_threshold)
+      """
+    },
+    "transform" : {
+      "script":
+      """
+        return [
+          'money_makers': ctx.payload.aggregations.theatres.buckets.stream()
+            .filter(t -> {
+                return t.money.value > ctx.metadata.high_threshold
+            })
+            .map(t -> {
+                return ['play': t.key, 'total_value': t.money.value ]
+            }).collect(Collectors.toList()),
+          'duds' : ctx.payload.aggregations.theatres.buckets.stream()
+            .filter(t -> {
+                return t.money.value < ctx.metadata.low_threshold
+            })
+            .map(t -> {
+                return ['play': t.key, 'total_value': t.money.value ]
+            }).collect(Collectors.toList())
+          ]
+      """
+    },
     "actions" : {
-      "mod_log" : {
-        "transform": {                                                               
+      "log_money_makers" : {
+        "condition": {
+          "script" : "return ctx.payload.money_makers.size() > 0"
+        },
+        "transform": {
           "script" :
           """
           def formatter = NumberFormat.getCurrencyInstance();
           return [
-            'msg': ctx.payload.aggregations.theatres.buckets.stream()
-              .map(t-> formatter.format(t.money.value) + ' for the play ' + t.key)
+            'plays_value': ctx.payload.money_makers.stream()
+              .map(t-> formatter.format(t.total_value) + ' for the play ' + t.play)
               .collect(Collectors.joining(", "))
           ]
           """
         },
         "logging" : {
-          "text" : "The output of the payload was transformed to: {{ctx.payload.msg}}"
+          "text" : "The following plays contain the highest grossing total income: {{ctx.payload.plays_value}}"
         }
       },
-      "unmod_log" : {                                                                
+      "log_duds" : {
+        "condition": {
+          "script" : "return ctx.payload.duds.size() > 0"
+        },
+        "transform": {
+          "script" :
+          """
+          def formatter = NumberFormat.getCurrencyInstance();
+          return [
+            'plays_value': ctx.payload.duds.stream()
+              .map(t-> formatter.format(t.total_value) + ' for the play ' + t.play)
+              .collect(Collectors.joining(", "))
+          ]
+          """
+        },
         "logging" : {
-          "text" : "The output of the payload was not transformed and this value should not exist: {{ctx.payload.msg}}"
+          "text" : "The following plays need more advertising due to their low total income: {{ctx.payload.plays_value}}"
         }
       }
     }
