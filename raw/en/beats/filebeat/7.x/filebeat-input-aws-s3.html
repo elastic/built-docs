@@ -39,10 +39,13 @@ Not what you want? See the
 <h2 class="title"><a id="filebeat-input-aws-s3"></a>AWS S3 input<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.x/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a><a class="xpack_tag" href="/subscriptions"></a></h2>
 </div></div></div>
 
-<p>Use the <code class="literal">aws-s3</code> input to retrieve logs from S3 objects that are pointed by
-messages from specific SQS queues. This input can, for example, be used to
-receive S3 server access logs to monitor detailed records for the requests that
+<p>Use the <code class="literal">aws-s3</code> input to retrieve logs from S3 objects that are pointed to by
+S3 notification events read from an SQS queue. This input can, for example, be
+used to receive S3 access logs to monitor detailed records for the requests that
 are made to a bucket.</p>
+<p>This input depends on S3 notifications delivered to an SQS queue for
+<code class="literal">s3:ObjectCreated:*</code> events. You must create an SQS queue and configure S3
+to publish events to the queue.</p>
 <p>When processing a S3 object which pointed by a SQS message, if half of the set
 visibility timeout passed and the processing is still ongoing, then the
 visibility timeout of that SQS message will be reset to make sure the message
@@ -60,8 +63,8 @@ be stopped and the SQS message will be returned back to the queue.</p>
 <a class="xref" href="filebeat-input-aws-s3.html#filebeat-input-aws-s3-common-options" title="Common options">Common options</a> described later.</p>
 <h4><a id="_api_timeout_2"></a><code class="literal">api_timeout</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.x/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
 <p>The maximum duration of the AWS API call. If it exceeds the timeout, the AWS API
-call will be interrupted. The default AWS API call timeout for a message is 120
-seconds. The maximum is half of the visibility timeout value.</p>
+call will be interrupted. The default AWS API timeout is <code class="literal">120s</code>.</p>
+<p>The API timeout must be longer than the <code class="literal">sqs.wait_time</code> value.</p>
 <h4><a id="input-aws-s3-buffer_size"></a><code class="literal">buffer_size</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.x/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
 <p>The size in bytes of the buffer that each harvester uses when fetching a file.
 This only applies to non-JSON logs. The default is <code class="literal">16 KiB</code>.</p>
@@ -142,9 +145,8 @@ to all lowercase.</p>
 multiline log messages, which can get large. This only applies to non-JSON logs.
 The default is <code class="literal">10 MiB</code>.</p>
 <h4><a id="_max_number_of_messages"></a><code class="literal">max_number_of_messages</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.x/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
-<p>The maximum number of messages to return. Amazon SQS never returns more messages
-than this value (however, fewer messages might be returned). Valid values: 1 to
-10. Default: 5.</p>
+<p>The maximum number of SQS messages that can be inflight at any time. Defaults
+to 5.</p>
 <h4><a id="input-aws-s3-parsers"></a><code class="literal">parsers</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.x/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
 <div class="warning admon">
 <div class="icon"></div>
@@ -187,11 +189,24 @@ configuring multiline options.</p>
 <h4><a id="_queue_url"></a><code class="literal">queue_url</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.x/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
 <p>URL of the AWS SQS queue that messages will be received from. Required.</p>
 <h4><a id="_visibility_timeout"></a><code class="literal">visibility_timeout</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.x/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
-<p>The duration that the received messages are hidden from subsequent retrieve
-requests after being retrieved by a ReceiveMessage request. This value needs to
-be a lot bigger than Filebeat collection frequency so if it took too long
-to read the S3 log, this SQS message will not be reprocessed. The default
-visibility timeout for a message is 300 seconds. The maximum is 12 hours.</p>
+<p>The duration that the received SQS messages are hidden from subsequent retrieve
+requests after being retrieved by a <code class="literal">ReceiveMessage</code> request. The default
+visibility timeout is <code class="literal">300s</code>. The maximum is <code class="literal">12h</code>. Filebeat will
+automatically reset the visibility timeout of a message after 1/2 of the
+duration passes to prevent a message that is still being processed from
+returning to the queue.</p>
+<h4><a id="_sqs_max_receive_count"></a><code class="literal">sqs.max_receive_count</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.x/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
+<p>The maximum number of times a SQS message should be received (retried) before
+deleting it. This feature prevents poison-pill messages (messages that can be
+received but can&#8217;t be processed) from consuming resources. The number of times
+a message has been received is tracked using the <code class="literal">ApproximateReceiveCount</code> SQS
+attribute. The default value is 5.</p>
+<p>If you have configured a dead letter queue then you can set this value to
+<code class="literal">-1</code> to disable deletion on failure.</p>
+<h4><a id="_sqs_wait_time"></a><code class="literal">sqs.wait_time</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.x/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
+<p>The maximum duration that an SQS <code class="literal">ReceiveMessage</code> call should wait for a message
+to arrive in the queue before returning. The default value is <code class="literal">20s</code>. The maximum
+value is <code class="literal">20s</code>.</p>
 <h4><a id="_aws_credentials_2"></a><code class="literal">aws credentials</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/7.x/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
 <p>In order to make AWS API calls, <code class="literal">aws-s3</code> input requires AWS credentials. Please
 see <a class="xref" href="filebeat-input-aws-s3.html#aws-credentials-config" title="AWS Credentials Configuration">AWS credentials options</a> for more details.</p>
