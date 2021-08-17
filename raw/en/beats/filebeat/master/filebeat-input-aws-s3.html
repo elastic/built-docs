@@ -40,11 +40,17 @@ Not what you want? See the
 </div></div></div>
 
 <p>Use the <code class="literal">aws-s3</code> input to retrieve logs from S3 objects that are pointed to by
-S3 notification events read from an SQS queue. This input can, for example, be
+S3 notification events read from an SQS queue or directly polling list of S3 objects in an S3 bucket.
+The use of SQS notification is preferred: polling list of S3 objects is expensive
+in terms of performance and costs and should be preferably used only when no SQS
+notification can be attached to the S3 buckets. This input can, for example, be
 used to receive S3 access logs to monitor detailed records for the requests that
 are made to a bucket.</p>
-<p>This input depends on S3 notifications delivered to an SQS queue for
-<code class="literal">s3:ObjectCreated:*</code> events. You must create an SQS queue and configure S3
+<p>SQS notification method is enabled setting <code class="literal">queue_url</code> configuration value.
+S3 bucket list polling method is enabled setting <code class="literal">s3_bucket</code> configuration value.
+Both value cannot be set at the same time, at least one of the two value must be set.</p>
+<p>When using the SQS notification method this input depends on S3 notifications delivered
+to an SQS queue for <code class="literal">s3:ObjectCreated:*</code> events. You must create an SQS queue and configure S3
 to publish events to the queue.</p>
 <p>When processing a S3 object which pointed by a SQS message, if half of the set
 visibility timeout passed and the processing is still ongoing, then the
@@ -56,6 +62,20 @@ be stopped and the SQS message will be returned back to the queue.</p>
 <pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
 - type: aws-s3
   queue_url: https://sqs.ap-southeast-1.amazonaws.com/1234/test-s3-queue
+  credential_profile_name: elastic-beats
+  expand_event_list_from_field: Records</pre>
+</div>
+<p>When using the direct polling list of S3 objects in an S3 buckets,
+a number of workers that will process the S3 objects listed must be set
+through the <code class="literal">number_of_workers</code> config.
+Listing of the S3 bucket will be polled according the time interval defined by
+<code class="literal">bucket_list_interval</code> config. Default value is 120secs.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: aws-s3
+  s3_bucket: arn:aws:s3:::test-s3-bucket
+  number_of_workers: 5
+  bucket_list_interval: 300s
   credential_profile_name: elastic-beats
   expand_event_list_from_field: Records</pre>
 </div>
@@ -187,7 +207,7 @@ consist of XML that start with the <code class="literal">&lt;Event&gt;</code> ta
 multiple lines. See <a class="xref" href="multiline-examples.html" title="Manage multiline messages">Multiline messages</a> for more information about
 configuring multiline options.</p>
 <h4><a id="_queue_url"></a><code class="literal">queue_url</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/master/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
-<p>URL of the AWS SQS queue that messages will be received from. Required.</p>
+<p>URL of the AWS SQS queue that messages will be received from. (Required when <code class="literal">s3_bucket</code> is not set).</p>
 <h4><a id="_visibility_timeout"></a><code class="literal">visibility_timeout</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/master/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
 <p>The duration that the received SQS messages are hidden from subsequent retrieve
 requests after being retrieved by a <code class="literal">ReceiveMessage</code> request. The default
@@ -207,22 +227,33 @@ attribute. The default value is 5.</p>
 <p>The maximum duration that an SQS <code class="literal">ReceiveMessage</code> call should wait for a message
 to arrive in the queue before returning. The default value is <code class="literal">20s</code>. The maximum
 value is <code class="literal">20s</code>.</p>
+<h4><a id="_s3_bucket"></a><code class="literal">s3_bucket</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/master/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
+<p>ARN of the AWS S3 bucket that will be polled for list operation. (Required when <code class="literal">queue_url</code> is not set).</p>
+<h4><a id="_bucket_list_interval"></a><code class="literal">bucket_list_interval</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/master/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
+<p>Time interval for polling listing of the S3 bucket: default to <code class="literal">120s</code>.</p>
+<h4><a id="_number_of_workers"></a><code class="literal">number_of_workers</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/master/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
+<p>Number of workers that will process the S3 objects listed. (Required when <code class="literal">s3_bucket</code> is set).</p>
 <h4><a id="_aws_credentials_2"></a><code class="literal">aws credentials</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/master/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
 <p>In order to make AWS API calls, <code class="literal">aws-s3</code> input requires AWS credentials. Please
 see <a class="xref" href="filebeat-input-aws-s3.html#aws-credentials-config" title="AWS Credentials Configuration">AWS credentials options</a> for more details.</p>
 <h3><a id="_aws_permissions_2"></a>AWS Permissions<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/master/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h3>
-<p>Specific AWS permissions are required for IAM user to access SQS and S3:</p>
+<p>Specific AWS permissions are required for IAM user to access SQS and S3
+when using the SQS notifications method:</p>
 <pre class="screen">s3:GetObject
 sqs:ReceiveMessage
 sqs:ChangeMessageVisibility
 sqs:DeleteMessage</pre>
+<p>Reduced specific AWS permissions are required for IAM user to access S3
+when using the polling list of S3 bucket objects:</p>
+<pre class="screen">s3:GetObject
+s3:ListBucket</pre>
 <h3><a id="_s3_and_sqs_setup"></a>S3 and SQS setup<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/master/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h3>
 <p>Enable bucket notification: any new object creation in S3 bucket will also
 create a notification through SQS. Please see
 <a href="https://docs.aws.amazon.com/AmazonS3/latest/dev/ways-to-add-notification-config-to-bucket.html#step1-create-sqs-queue-for-notification" class="ulink" target="_top">create-sqs-queue-for-notification</a>
 for more details.</p>
 <h3><a id="_parallel_processing"></a>Parallel Processing<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/master/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h3>
-<p>Multiple Filebeat instances can read from the same SQS queues at the same time.
+<p>When using the SQS notifications method, multiple Filebeat instances can read from the same SQS queues at the same time.
 To horizontally scale processing when there are large amounts of log data
 flowing into an S3 bucket, you can run multiple Filebeat instances that
 read from the same SQS queues at the same time. No additional configuration is
@@ -239,6 +270,14 @@ becomes visible to other Filebeat instances, and the message is received
 again. By default, the visibility timeout is set to 5 minutes for aws-s3 input
 in Filebeat. 5 minutes is sufficient time for Filebeat to read SQS
 messages and process related s3 log files.</p>
+<p>When using the polling list of S3 bucket objects method be aware that if running multiple Filebeat instances,
+they can list the same S3 bucket at the same time. Since the state of the ingested S3 objects is persisted
+(upon processing every page of the listing operation) in the <code class="literal">path.data</code> configuration
+and multiple Filebeat cannot share the same <code class="literal">path.data</code> this will produce repeated
+ingestion of the S3 object.
+Therefore, when using the polling list of S3 bucket objects method, scaling should be
+vertical, with a single bigger Filebeat instance and higher <code class="literal">number_of_workers</code>
+config value.</p>
 <h3><a id="_metrics"></a>Metrics<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/master/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h3>
 <p>This input exposes metrics under the <a class="xref" href="http-endpoint.html" title="Configure an HTTP endpoint for metrics">HTTP monitoring endpoint</a>.
 These metrics are exposed under the <code class="literal">/dataset</code> path. They can be used to
@@ -283,6 +322,18 @@ observe the activity of the input.</p>
 <tr>
 <td align="left" valign="top"><p><code class="literal">s3_objects_requested_total</code></p></td>
 <td align="left" valign="top"><p>Number of S3 objects downloaded.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">s3_objects_listed_total</code></p></td>
+<td align="left" valign="top"><p>Number of S3 objects returned by list operations.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">s3_objects_processed_total</code></p></td>
+<td align="left" valign="top"><p>Number of S3 objects that matched file_selectors rules.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">s3_objects_acked_total</code></p></td>
+<td align="left" valign="top"><p>Number of S3 objects processed that were fully ACKed.</p></td>
 </tr>
 <tr>
 <td align="left" valign="top"><p><code class="literal">s3_bytes_processed_total</code></p></td>
