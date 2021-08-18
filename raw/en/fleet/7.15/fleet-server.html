@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Fleet Server | Fleet User Guide [7.15] | Elastic</title>
+<link rel="home" href="index.html" title="Fleet User Guide [7.15]"/>
+<link rel="up" href="index.html" title="Fleet User Guide [7.15]"/>
+<link rel="prev" href="fleet-settings.html" title="Fleet UI settings"/>
+<link rel="next" href="agent-policy.html" title="Elastic Agent policies"/>
+<meta name="DC.type" content="Learn/Docs/Fleet/Guide/7.15"/>
+<meta name="DC.subject" content="Fleet"/>
+<meta name="DC.identifier" content="7.15"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Fleet User Guide [7.15]</a></span>
+»
+<span class="breadcrumb-node">Fleet Server</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="fleet-settings.html">« Fleet UI settings</a>
+</span>
+<span class="next">
+<a href="agent-policy.html">Elastic Agent policies »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h1 class="title"><a id="fleet-server"></a>Fleet Server<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/7.15/docs/en/ingest-management/fleet/fleet-server.asciidoc">edit</a></h1>
+</div></div></div>
+<p>Fleet Server is a component of the Elastic Stack used to centrally manage Elastic Agents.
+It&#8217;s launched as part of an Elastic Agent on a host intended to act as a server.
+One Fleet Server process can support many Elastic Agent connections,
+and serves as a control plane for updating agent policies, collecting
+status information, and coordinating actions across Elastic Agents.</p>
+<p>Fleet Server is the mechanism Elastic Agents use to communicate with Elasticsearch:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+When a new agent policy is created, it&#8217;s saved to Elasticsearch.
+</li>
+<li class="listitem">
+To enroll in the policy, Elastic Agents send a request to Fleet Server,
+using the enrollment key generated for authentication.
+</li>
+<li class="listitem">
+Fleet Server receives the request and gets the agent policy from Elasticsearch,
+then ships the policy to all Elastic Agents enrolled in that policy.
+</li>
+<li class="listitem">
+Elastic Agent uses configuration information in the policy to collect and send data
+to Elasticsearch.
+</li>
+<li class="listitem">
+Fleet Server periodically checks Elastic Agents for status information.
+</li>
+<li class="listitem">
+When a policy is updated, Fleet Server retrieves the updated policy from
+Elasticsearch and sends it to the connected Elastic Agents.
+</li>
+</ol>
+</div>
+<p><span class="image"><img src="images/fleet-server-communication.png" alt="Fleet Server handles communication between Elastic Agent" width="Fleet" height="Elasticsearch"></span></p>
+<p>Fleet Server runs as a subprocess inside an Elastic Agent. The agent uses a special
+policy that describes the Fleet Server configuration. In large scale
+self-managed deployments or on <a href="/cloud/elasticsearch-service?baymax=docs-body&amp;elektra=docs" class="ulink" target="_top">hosted Elasticsearch Service</a> on Elastic Cloud,
+Fleet Server is typically run as a dedicated Elastic Agent communication host, but
+you can optionally use it for data collection on self-managed clusters. For more
+details, refer to <a class="xref" href="fleet-server.html#fleet-server-deployment" title="Scale your Fleet Server deployment">Scale your Fleet Server deployment</a>.</p>
+<h3><a id="fleet-server-compatibility"></a>Compatibility and prerequisites<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/7.15/docs/en/ingest-management/fleet/fleet-server.asciidoc">edit</a></h3>
+<p>Fleet Server is compatible with the following Elastic products:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>Elastic Stack 7.13 or later (<a href="/cloud/elasticsearch-service?baymax=docs-body&amp;elektra=docs" class="ulink" target="_top">hosted Elasticsearch Service</a> on Elastic Cloud, or
+a self-managed cluster).</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+For version compatibility: Elasticsearch &gt;= Fleet Server &gt;= Elastic Agent (except for
+bugfix releases)
+</li>
+<li class="listitem">
+Kibana should be on the same minor version as Elasticsearch.
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+Elastic Cloud Enterprise 2.9&#8212;&#8203;requires you to self-manage the Fleet Server.
+</li>
+<li class="listitem">
+<p>Elastic Cloud Enterprise 2.10 or later&#8212;&#8203;allows you to use a hosted Fleet Server on Elastic Cloud.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Requires additional wildcard domains and certificates (which normally only
+cover <code class="literal">*.cname</code>, not <code class="literal">*.*.cname</code>). This enables us to provide the URL for
+Fleet Server of <code class="literal">https://.fleet.</code>
+</li>
+<li class="listitem">
+The deployment template must contain an APM &amp; Fleet node.
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+<h3><a id="add-fleet-server"></a>Add a Fleet Server<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/7.15/docs/en/ingest-management/fleet/fleet-server.asciidoc">edit</a></h3>
+<p>Before using Fleet for central management, Fleet Server must be running. The
+steps for running Fleet Server on our <a href="/cloud/elasticsearch-service?baymax=docs-body&amp;elektra=docs" class="ulink" target="_top">hosted Elasticsearch Service</a> on Elastic Cloud
+are different from the steps for running it on a self-managed cluster.</p>
+<div class="tabs" data-tab-group="spin-up-stack">
+  <div role="tablist" aria-label="Spin up">
+    <button role="tab"
+            aria-selected="true"
+            aria-controls="cloud-tab-spinup"
+            id="cloud-spinup">
+      Elasticsearch Service
+    </button>
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="self-managed-tab-spinup"
+            id="self-managed-spinup"
+            tabindex="-1">
+      Self-managed
+    </button>
+  </div>
+  <div tabindex="0"
+       role="tabpanel"
+       id="cloud-tab-spinup"
+       aria-labelledby="cloud-spinup">
+<p>No extra setup is required. Elastic Cloud runs a hosted version of Fleet Server.</p>
+<p>To confirm that Fleet Server is available in your deployment:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Log in to Kibana and go to <span class="strong strong"><strong>Management &gt; Fleet</strong></span>.
+</li>
+<li class="listitem">
+Click the <span class="strong strong"><strong>Agents</strong></span> tab.
+</li>
+<li class="listitem">
+Under <span class="strong strong"><strong>Agent policy</strong></span>, look for <span class="strong strong"><strong>Elastic Cloud agent policy</strong></span>&#8201;&#8212;&#8201;Fleet Server is the agent enrolled in the Elastic Cloud agent policy.
+This policy is managed by Elastic Cloud. You cannot modify it.
+Confirm that the agent status is <span class="strong strong"><strong>Healthy</strong></span>.
+</li>
+</ol>
+</div>
+<p>Don&#8217;t see the Fleet Server agent? Make sure your deployment includes an
+APM &amp; Fleet node. This node is required to use Fleet Server.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/add-fleet-node-on-cloud.png" alt="Edit page showing settings for APM &amp; Fleet node">
+</div>
+</div>
+  </div>
+  <div tabindex="0"
+       role="tabpanel"
+       id="self-managed-tab-spinup"
+       aria-labelledby="self-managed-spinup"
+       hidden="">
+<p>To deploy Fleet Server on a self-managed cluster, install an Elastic Agent and
+enroll it in the default Fleet Server policy. The policy is created
+automatically when you run Fleet for the first time.</p>
+<p>To add Fleet Server:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Log in to Kibana and go to <span class="strong strong"><strong>Management &gt; Fleet</strong></span>. The first time you visit
+this page, it might take a minute to load.
+</li>
+<li class="listitem">
+Click <span class="strong strong"><strong>Fleet settings</strong></span>, and in the <span class="strong strong"><strong>Fleet Server hosts</strong></span> field, specify the
+URLs Elastic Agents will use to connect to Fleet Server. For example,
+<code class="literal">https://192.0.2.1:8220</code>, where <code class="literal">192.0.2.1</code> is the host IP where you will
+install Fleet Server.
+</li>
+<li class="listitem">
+<p>In the <span class="strong strong"><strong>Elasticsearch hosts</strong></span> field, specify the Elasticsearch URLs where Elastic Agents will send data.
+For example, <code class="literal">https://192.0.2.0:9200</code>.</p>
+<p>For more information about these settings, see <a class="xref" href="fleet-settings.html" title="Fleet UI settings"><em>Fleet UI settings</em></a>.</p>
+</li>
+<li class="listitem">
+Save and apply the settings.
+</li>
+<li class="listitem">
+<p>Click the <span class="strong strong"><strong>Agents</strong></span> tab and follow the in-product instructions to add a
+Fleet server:</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/add-fleet-server.png" alt="In-product instructions for adding a Fleet Server">
+</div>
+</div>
+</li>
+</ol>
+</div>
+<p><span class="strong strong"><strong>Notes:</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Make sure you download an x64 architecture installation package.
+</li>
+<li class="listitem">
+After generating the service token, save it to a secure location. You might
+want to use this token later to scale your deployment by adding Fleet Servers.
+For other ways to generate service tokens, see
+<a href="/guide/en/elasticsearch/reference/7.15/service-tokens-command.html" class="ulink" target="_top"><code class="literal">elasticsearch-service-tokens</code></a>.
+</li>
+<li class="listitem">
+<p>The <code class="literal">install</code> command installs the Elastic Agent as a managed service and enrolls it
+in a Fleet Server policy:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">sudo ./elastic-agent install -f --fleet-server-es=http://localhost:9200 \
+--fleet-server-service-token=AAEAAWVsYXN0aWMvZmxlZXQtc2VydmVyL3Rva2VuLTE2MTkxMzg3MzIzMTg6dzEta0JDTmZUZGlDTjlwRmNVTjNVQQ</pre>
+</div>
+<p>For more Fleet Server commands, see <a class="xref" href="elastic-agent-cmd-options.html" title="Command reference"><em>Command reference</em></a>.</p>
+<p>If installation is successful, you&#8217;ll see the Fleet Server Elastic Agent on the
+<span class="strong strong"><strong>Agents</strong></span> tab in <span class="strong strong"><strong>Fleet</strong></span>. Notice that the Default Fleet Server Policy is
+assigned to the Elastic Agent. This policy is created when you run Fleet for the
+first time.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/agents-tab-fleet-server.png" alt="Agent tab showing a healthy agent enrolled in the Default Fleet Server policy">
+</div>
+</div>
+</li>
+</ul>
+</div>
+  </div>
+</div>
+<p>Now you&#8217;re ready to add Elastic Agents to your host systems. To learn how, see
+<a class="xref" href="fleet-quick-start.html#add-agent-to-fleet" title="Step 2: Add an Elastic Agent to Fleet">Step 2: Add an Elastic Agent to Fleet</a>.</p>
+<h3><a id="fleet-server-deployment"></a>Scale your Fleet Server deployment<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/7.15/docs/en/ingest-management/fleet/fleet-server.asciidoc">edit</a></h3>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Coming in a future update.</p>
+</div>
+</div>
+<style>
+.tabs {
+  width: 100%;
+}
+[role="tablist"] {
+  margin: 0 0 -0.1em;
+  overflow: visible;
+}
+[role="tab"] {
+  position: relative;
+  padding: 0.3em 0.5em 0.4em;
+  border: 1px solid hsl(219, 1%, 72%);
+  border-radius: 0.2em 0.2em 0 0;
+  overflow: visible;
+  font-family: inherit;
+  font-size: inherit;
+  background: hsl(220, 20%, 94%);
+}
+[role="tab"]:hover::before,
+[role="tab"]:focus::before,
+[role="tab"][aria-selected="true"]::before {
+  position: absolute;
+  bottom: 100%;
+  right: -1px;
+  left: -1px;
+  border-radius: 0.2em 0.2em 0 0;
+  border-top: 3px solid hsl(219, 1%, 72%);
+  content: '';
+}
+[role="tab"][aria-selected="true"] {
+  border-radius: 0;
+  background: hsl(220, 43%, 99%);
+  outline: 0;
+}
+[role="tab"][aria-selected="true"]:not(:focus):not(:hover)::before {
+  border-top: 5px solid hsl(218, 96%, 48%);
+}
+[role="tab"][aria-selected="true"]::after {
+  position: absolute;
+  z-index: 3;
+  bottom: -1px;
+  right: 0;
+  left: 0;
+  height: 0.3em;
+  background: hsl(220, 43%, 99%);
+  box-shadow: none;
+  content: '';
+}
+[role="tab"]:hover,
+[role="tab"]:focus,
+[role="tab"]:active {
+  outline: 0;
+  border-radius: 0;
+  color: inherit;
+}
+[role="tab"]:hover::before,
+[role="tab"]:focus::before {
+  border-color: hsl(218, 96%, 48%);
+}
+[role="tabpanel"] {
+  position: relative;
+  z-index: 2;
+  padding: 1em;
+  border: 1px solid hsl(219, 1%, 72%);
+  border-radius: 0 0.2em 0.2em 0.2em;
+  box-shadow: 0 0 0.2em hsl(219, 1%, 72%);
+  background: hsl(220, 43%, 99%);
+  margin-bottom: 1em;
+}
+[role="tabpanel"] p {
+  margin: 0;
+}
+[role="tabpanel"] * + p {
+  margin-top: 1em;
+}
+</style>
+
+<script>
+window.addEventListener("DOMContentLoaded", () => {
+  const tabs = document.querySelectorAll('[role="tab"]');
+  const tabList = document.querySelector('[role="tablist"]');
+  // Add a click event handler to each tab
+  tabs.forEach(tab => {
+    tab.addEventListener("click", changeTabs);
+  });
+  // Enable arrow navigation between tabs in the tab list
+  let tabFocus = 0;
+  tabList.addEventListener("keydown", e => {
+    // Move right
+    if (e.keyCode === 39 || e.keyCode === 37) {
+      tabs[tabFocus].setAttribute("tabindex", -1);
+      if (e.keyCode === 39) {
+        tabFocus++;
+        // If we're at the end, go to the start
+        if (tabFocus >= tabs.length) {
+          tabFocus = 0;
+        }
+        // Move left
+      } else if (e.keyCode === 37) {
+        tabFocus--;
+        // If we're at the start, move to the end
+        if (tabFocus < 0) {
+          tabFocus = tabs.length - 1;
+        }
+      }
+      tabs[tabFocus].setAttribute("tabindex", 0);
+      tabs[tabFocus].focus();
+    }
+  });
+});
+
+function setActiveTab(target) {
+  const parent = target.parentNode;
+  const grandparent = parent.parentNode;
+  // console.log(grandparent);
+  // Remove all current selected tabs
+  parent
+    .querySelectorAll('[aria-selected="true"]')
+    .forEach(t => t.setAttribute("aria-selected", false));
+  // Set this tab as selected
+  target.setAttribute("aria-selected", true);
+  // Hide all tab panels
+  grandparent
+    .querySelectorAll('[role="tabpanel"]')
+    .forEach(p => p.setAttribute("hidden", true));
+  // Show the selected panel
+  grandparent.parentNode
+    .querySelector(`#${target.getAttribute("aria-controls")}`)
+    .removeAttribute("hidden");
+}
+
+function changeTabs(e) {
+  // get the containing list of the tab that was just clicked
+  const tabList = e.target.parentNode;
+
+  // get all of the sibling tabs
+  const buttons = Array.apply(null, tabList.querySelectorAll('button'));
+
+  // loop over the siblings to discover which index thje clicked one was
+  const { index } = buttons.reduce(({ found, index }, button) => {
+    if (!found && buttons[index] === e.target) {
+      return { found: true, index };
+    } else if (!found) {
+      return { found, index: index + 1 };
+    } else {
+      return { found, index };
+    }
+  }, { found: false, index: 0 });
+
+  // get the tab container
+  const container = tabList.parentNode;
+  // read the data-tab-group value from the container, e.g. "os"
+  const { tabGroup } = container.dataset;
+  // get a list of all the tab groups that match this value on the page
+  const groups = document.querySelectorAll('[data-tab-group=' + tabGroup + ']');
+
+  // for each of the found tab groups, find the tab button at the previously discovered index and select it for each group
+  groups.forEach((group) => {
+    const target = group.querySelectorAll('button')[index];
+    setActiveTab(target);
+  });
+}
+</script>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="fleet-settings.html">« Fleet UI settings</a>
+</span>
+<span class="next">
+<a href="agent-policy.html">Elastic Agent policies »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
