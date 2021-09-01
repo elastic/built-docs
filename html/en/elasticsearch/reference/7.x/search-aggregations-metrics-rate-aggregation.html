@@ -135,9 +135,15 @@ Not what you want? See the
 <h2 class="title"><a id="search-aggregations-metrics-rate-aggregation"></a>Rate aggregation<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/aggregations/metrics/rate-aggregation.asciidoc">edit</a><a class="xpack_tag" href="/subscriptions"></a></h2>
 </div></div></div>
 
-<p>A <code class="literal">rate</code> metrics aggregation can be used only inside a <code class="literal">date_histogram</code> and calculates a rate of documents or a field in each
-<code class="literal">date_histogram</code> bucket. The field values can be generated extracted from specific numeric or
+<p>A <code class="literal">rate</code> metrics aggregation can be used only inside a <code class="literal">date_histogram</code> or <code class="literal">composite</code> aggregation. It calculates a rate of documents
+or a field in each bucket. The field values can be generated extracted from specific numeric or
 <a class="xref" href="histogram.html" title="Histogram field type">histogram fields</a> in the documents.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>For <code class="literal">composite</code> aggregations, there must be exactly one <code class="literal">date_histogram</code> source for the <code class="literal">rate</code> aggregation to be supported.</p>
+</div>
+</div>
 <div class="section">
 <div class="titlepage"><div><div>
 <h3 class="title"><a id="_syntax_3"></a>Syntax<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/aggregations/metrics/rate-aggregation.asciidoc">edit</a></h3>
@@ -322,23 +328,37 @@ the total monthly sales and convert them into average daily sales.</p>
   }
 }</pre>
 </div>
-<p>By adding the <code class="literal">mode</code> parameter with the value <code class="literal">value_count</code>, we can change the calculation from <code class="literal">sum</code> to the number of values of the field:</p>
+<p>You can also take advantage of <code class="literal">composite</code> aggregations to calculate the average daily sale price for each item in
+your inventory</p>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET sales/_search
+<pre class="programlisting prettyprint lang-console">GET sales/_search?filter_path=aggregations&amp;size=0
 {
-  "size": 0,
   "aggs": {
-    "by_date": {
-      "date_histogram": {
-        "field": "date",
-        "calendar_interval": "month"  <a id="CO288-1"></a><i class="conum" data-value="1"></i>
+    "buckets": {
+      "composite": { <a id="CO288-1"></a><i class="conum" data-value="1"></i>
+        "sources": [
+          {
+            "month": {
+              "date_histogram": { <a id="CO288-2"></a><i class="conum" data-value="2"></i>
+                "field": "date",
+                "calendar_interval": "month"
+              }
+            }
+          },
+          {
+            "type": { <a id="CO288-3"></a><i class="conum" data-value="3"></i>
+              "terms": {
+                "field": "type"
+              }
+            }
+          }
+        ]
       },
       "aggs": {
-        "avg_number_of_sales_per_year": {
+        "avg_price": {
           "rate": {
-            "field": "price", <a id="CO288-2"></a><i class="conum" data-value="2"></i>
-            "unit": "year",  <a id="CO288-3"></a><i class="conum" data-value="3"></i>
-            "mode": "value_count" <a id="CO288-4"></a><i class="conum" data-value="4"></i>
+            "field": "price", <a id="CO288-4"></a><i class="conum" data-value="4"></i>
+            "unit": "day" <a id="CO288-5"></a><i class="conum" data-value="5"></i>
           }
         }
       }
@@ -354,7 +374,8 @@ the total monthly sales and convert them into average daily sales.</p>
 <p><a href="#CO288-1"><i class="conum" data-value="1"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>Histogram is grouped by month.</p>
+<p>Composite aggregation with a date histogram source
+and a source for the item type.</p>
 </td>
 </tr>
 <tr>
@@ -362,7 +383,7 @@ the total monthly sales and convert them into average daily sales.</p>
 <p><a href="#CO288-2"><i class="conum" data-value="2"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>Calculate number of all sale prices</p>
+<p>The date histogram source grouping monthly</p>
 </td>
 </tr>
 <tr>
@@ -370,12 +391,166 @@ the total monthly sales and convert them into average daily sales.</p>
 <p><a href="#CO288-3"><i class="conum" data-value="3"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>Convert to annual counts</p>
+<p>The terms source grouping for each sale item type</p>
 </td>
 </tr>
 <tr>
 <td align="left" valign="top" width="5%">
 <p><a href="#CO288-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Calculate sum of all sale prices, per month and item</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO288-5"><i class="conum" data-value="5"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Convert to average daily sales per item</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The response will contain the average daily sale prices for each month per item.</p>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "aggregations" : {
+    "buckets" : {
+      "after_key" : {
+        "month" : 1425168000000,
+        "type" : "t-shirt"
+      },
+      "buckets" : [
+        {
+          "key" : {
+            "month" : 1420070400000,
+            "type" : "bag"
+          },
+          "doc_count" : 1,
+          "avg_price" : {
+            "value" : 4.838709677419355
+          }
+        },
+        {
+          "key" : {
+            "month" : 1420070400000,
+            "type" : "hat"
+          },
+          "doc_count" : 1,
+          "avg_price" : {
+            "value" : 6.451612903225806
+          }
+        },
+        {
+          "key" : {
+            "month" : 1420070400000,
+            "type" : "t-shirt"
+          },
+          "doc_count" : 1,
+          "avg_price" : {
+            "value" : 6.451612903225806
+          }
+        },
+        {
+          "key" : {
+            "month" : 1422748800000,
+            "type" : "hat"
+          },
+          "doc_count" : 1,
+          "avg_price" : {
+            "value" : 1.7857142857142858
+          }
+        },
+        {
+          "key" : {
+            "month" : 1422748800000,
+            "type" : "t-shirt"
+          },
+          "doc_count" : 1,
+          "avg_price" : {
+            "value" : 0.35714285714285715
+          }
+        },
+        {
+          "key" : {
+            "month" : 1425168000000,
+            "type" : "hat"
+          },
+          "doc_count" : 1,
+          "avg_price" : {
+            "value" : 6.451612903225806
+          }
+        },
+        {
+          "key" : {
+            "month" : 1425168000000,
+            "type" : "t-shirt"
+          },
+          "doc_count" : 1,
+          "avg_price" : {
+            "value" : 5.645161290322581
+          }
+        }
+      ]
+    }
+  }
+}</pre>
+</div>
+<p>By adding the <code class="literal">mode</code> parameter with the value <code class="literal">value_count</code>, we can change the calculation from <code class="literal">sum</code> to the number of values of the field:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET sales/_search
+{
+  "size": 0,
+  "aggs": {
+    "by_date": {
+      "date_histogram": {
+        "field": "date",
+        "calendar_interval": "month"  <a id="CO289-1"></a><i class="conum" data-value="1"></i>
+      },
+      "aggs": {
+        "avg_number_of_sales_per_year": {
+          "rate": {
+            "field": "price", <a id="CO289-2"></a><i class="conum" data-value="2"></i>
+            "unit": "year",  <a id="CO289-3"></a><i class="conum" data-value="3"></i>
+            "mode": "value_count" <a id="CO289-4"></a><i class="conum" data-value="4"></i>
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1269.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO289-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Histogram is grouped by month.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO289-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Calculate number of all sale prices</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO289-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Convert to annual counts</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO289-4"><i class="conum" data-value="4"></i></a></p>
 </td>
 <td align="left" valign="top">
 <p>Changing the mode to value count</p>
@@ -562,7 +737,7 @@ our prices before calculating rates:</p>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1269.console"></div>
+<div class="console_widget" data-snippet="snippets/1270.console"></div>
 <div class="pre_wrapper lang-console-result">
 <pre class="programlisting prettyprint lang-console-result">{
   ...
