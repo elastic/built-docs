@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Air-gapped environments | Integrations Developer Guide | Elastic</title>
+<link rel="home" href="index.html" title="Integrations Developer Guide"/>
+<link rel="up" href="index.html" title="Integrations Developer Guide"/>
+<link rel="prev" href="manifest-spec.html" title="manifest.yml"/>
+<meta name="DC.type" content="Learn/Docs/Integrations/Developer"/>
+<meta name="DC.subject" content="Integrations"/>
+<meta name="DC.identifier" content="master"/>
+</head>
+<body>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Integrations Developer Guide</a></span>
+»
+<span class="breadcrumb-node">Air-gapped environments</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="manifest-spec.html">« <code class="literal">manifest.yml</code></a>
+</span>
+<span class="next">
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h1 class="title"><a id="air-gapped"></a>Air-gapped environments<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/integrations/air-gapped.asciidoc">edit</a></h1>
+</div></div></div>
+<p>There are certain environments in which network traffic restrictions are mandatory. In these environments, the Kibana instance
+isn&#8217;t able to reach the public Elastic Package Registry (EPR) endpoints, like <a href="https://epr.elastic.co/" class="ulink" target="_top">epr.elastic.co</a>, to download
+package metadata and content.</p>
+<p>There are two workarounds in this situation&#8201;&#8212;&#8201;use a proxy server as network gateway to reach the public endpoints,
+or deploy your own instance of the Elastic Package Registry.</p>
+<h3><a id="air-gapped-proxy-server"></a>Use a proxy server<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/integrations/air-gapped.asciidoc">edit</a></h3>
+<p>If you can route traffic to the public endpoint of EPR through a network gateway, there is a property in Kibana that
+can orchestrate to use a proxy server:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">xpack.ingestManager.registryProxyUrl: your-nat-gateway.corp.net</pre>
+</div>
+<p>For more information, see the <a href="/guide/en/fleet/master/fleet-overview.html#package-registry-intro" class="ulink" target="_top">Fleet User Guide</a>.</p>
+<h3><a id="air-gapped-diy-epr"></a>Host your own Elastic Package Registry<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/integrations/air-gapped.asciidoc">edit</a></h3>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This procedure is not officially supported.</p>
+</div>
+</div>
+<p>If routing traffic through a proxy server is not an option, you can host your own Elastic Package Registry.
+The Package Storage instance must be deployed and hosted on-site as a Docker container.
+Package Storage is a special distribution of the Package Registry which already includes packages.
+There are different distributions available:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+production (recommended): <code class="literal">docker.elastic.co/package-registry/distribution:production</code> - stable, tested package revisions
+</li>
+<li class="listitem">
+staging: <code class="literal">docker.elastic.co/package-registry/distribution:staging</code> - package revisions ready for testing before release
+</li>
+<li class="listitem">
+snapshot: <code class="literal">docker.elastic.co/package-registry/distribution:snapshot</code> - package revisions updated on daily basis
+</li>
+</ul>
+</div>
+<p>If you want to update the Package Storage image, you need to re-pull the image and restart docker container.</p>
+<p>Every distribution contains packages that can be used by different versions of the Elastic Stack. As we adopted a continuous delivery pipeline for packages,
+we haven&#8217;t introduced the box release approach so far (7.13.0, 7.14.0, etc.). The Package Registry API exposes a Kibana version constraint
+that allows for filtering packages that are compatible with particular stack version.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>These steps use the standard Docker CLI, but it shouldn&#8217;t be hard to transform them into Kubernetes descriptor file.
+Here is the k8s descriptor used by the e2e-testing project: <a href="https://github.com/elastic/e2e-testing/blob/k8s-deployment/cli/config/kubernetes/base/package-registry/" class="ulink" target="_top">yaml files</a>.</p>
+</div>
+</div>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Pull the Docker image from the public Docker registry:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">docker pull docker.elastic.co/package-registry/distribution:production</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Save the Docker image locally:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">docker save -o epr.tar docker.elastic.co/package-registry/distribution:production</pre>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>please mind the image size, so you won&#8217;t hit any capacity limit.</p>
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Transfer the image to the air-gapped environment and load:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">docker load -i epr.tar</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Run the Package Registry:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">docker run -it docker.elastic.co/package-registry/distribution:production</pre>
+</div>
+</li>
+<li class="listitem">
+<p>(Optional) Define the internal healthcheck for the service as:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">curl -f http://127.0.0.1:8080</pre>
+</div>
+</li>
+</ol>
+</div>
+<h4><a id="air-gapped-diy-epr-kibana"></a>Connect Kibana to the hosted Package Registry<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/master/docs/en/integrations/air-gapped.asciidoc">edit</a></h4>
+<p>There is a dedicated property in the Kibana config to change the URL of the Package Registry&#8217;s endpoint to a custom one.
+The example below connects to an internally hosted instance:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">xpack.fleet.registryUrl: "http://package-registry.corp.net:8080"</pre>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="manifest-spec.html">« <code class="literal">manifest.yml</code></a>
+</span>
+<span class="next">
+</span>
+</div>
+</div>
+</body>
+</html>
