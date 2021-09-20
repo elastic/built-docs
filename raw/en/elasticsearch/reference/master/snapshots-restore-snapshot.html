@@ -5,8 +5,8 @@
 <title>Restore a snapshot | Elasticsearch Guide [master] | Elastic</title>
 <link rel="home" href="index.html" title="Elasticsearch Guide [master]"/>
 <link rel="up" href="snapshot-restore.html" title="Snapshot and restore"/>
-<link rel="prev" href="snapshots-take-snapshot.html" title="Create a snapshot"/>
-<link rel="next" href="snapshots-monitor-snapshot-restore.html" title="Monitor snapshot and restore progress"/>
+<link rel="prev" href="delete-snapshots.html" title="Delete a snapshot"/>
+<link rel="next" href="snapshot-lifecycle-management.html" title="SLM: Manage the snapshot lifecycle"/>
 <meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/master"/>
 <meta name="DC.subject" content="Elasticsearch"/>
 <meta name="DC.identifier" content="master"/>
@@ -26,175 +26,518 @@ Not what you want? See the
 </div>
 <div class="navheader">
 <span class="prev">
-<a href="snapshots-take-snapshot.html">« Create a snapshot</a>
+<a href="delete-snapshots.html">« Delete a snapshot</a>
 </span>
 <span class="next">
-<a href="snapshots-monitor-snapshot-restore.html">Monitor snapshot and restore progress »</a>
+<a href="snapshot-lifecycle-management.html">SLM: Manage the snapshot lifecycle »</a>
 </span>
 </div>
 <div class="chapter">
 <div class="titlepage"><div><div>
 <h2 class="title"><a id="snapshots-restore-snapshot"></a>Restore a snapshot<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h2>
 </div></div></div>
-<p>Use the <a class="xref" href="restore-snapshot-api.html" title="Restore snapshot API">restore snapshot API</a> to restore
-a snapshot of a cluster or specified data streams and indices:</p>
-<a id="853ca73db9b596cc4ddda66b3ec8faa2"></a>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">POST /_snapshot/my_backup/snapshot_1/_restore</pre>
-</div>
-<div class="console_widget" data-snippet="snippets/1531.console"></div>
-<p>By default, all data streams and indices in the snapshot are restored, but the cluster state is
-<span class="strong strong"><strong>not</strong></span> restored. Use the <code class="literal">indices</code> parameter to restore only specific data streams or indices. This parameter
-supports <a class="xref" href="api-conventions.html#api-multi-index" title="Multi-target syntax">multi-target syntax</a>. To include the global cluster state, set
-<code class="literal">include_global_state</code> to <code class="literal">true</code> in the restore request body.</p>
-<p>Because all indices in the snapshot are restored by default, all system indices will be restored
-by default as well.</p>
-<div class="warning admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p>Each data stream requires a matching
-<a class="xref" href="set-up-a-data-stream.html#create-index-template" title="Create an index template">index template</a>. The stream uses this
-template to create new backing indices.</p>
-<p>When restoring a data stream, ensure a matching template exists for the stream.
-You can do this using one of the following methods:</p>
+<p><a id="change-index-settings-during-restore"></a>This guide shows you how to restore a snapshot. Snapshots are a convenient way
+to store a copy of your data outside of a cluster. You can restore a snapshot
+to recover indices and data streams after deletion or a hardware failure. You
+can also use snapshots to transfer data between clusters.</p>
+<p>In this guide, you&#8217;ll learn how to:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Check for existing templates that match the stream. If no matching template
-exists, <a class="xref" href="set-up-a-data-stream.html#create-index-template" title="Create an index template">create one</a>.
+Get a list of available snapshots
 </li>
 <li class="listitem">
-Restore a global cluster state that includes a matching template for the
+Restore an index or data stream from a snapshot
+</li>
+<li class="listitem">
+Restore an entire cluster
+</li>
+<li class="listitem">
+Monitor the restore operation
+</li>
+<li class="listitem">
+Cancel an ongoing restore
+</li>
+</ul>
+</div>
+<p>This guide also provides tips for <a class="xref" href="snapshots-restore-snapshot.html#restore-different-cluster" title="Restore to a different cluster">restoring to
+another cluster</a> and <a class="xref" href="snapshots-restore-snapshot.html#troubleshoot-restore" title="Troubleshoot restore errors">troubleshooting common restore
+errors</a>.</p>
+<h3><a id="restore-snapshot-prereqs"></a>Prerequisites<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h3>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+If you use the Elasticsearch security features, you must have the <code class="literal">manage</code> or
+<code class="literal">cluster:admin/snapshot/*</code> cluster privilege to restore a snapshot.
+</li>
+<li class="listitem">
+You can only restore a snapshot to a running cluster with an elected
+<a class="xref" href="modules-node.html#master-node" title="Master-eligible node">master node</a>. The snapshot&#8217;s repository must be
+<a class="xref" href="snapshots-register-repository.html" title="Register a snapshot repository">registered</a> and available to the cluster.
+</li>
+<li class="listitem">
+The snapshot and cluster versions must be compatible. See
+<a class="xref" href="snapshot-restore.html#snapshot-restore-version-compatibility" title="Version compatibility">Version compatibility</a>.
+</li>
+<li class="listitem">
+If you restore a data stream, ensure the cluster contains a
+<a class="xref" href="set-up-a-data-stream.html#create-index-template" title="Create an index template">matching index template</a> with data stream enabled.
+Without a matching index template, a data stream can&#8217;t roll over or create
+backing indices.
+</li>
+<li class="listitem">
+If your snapshot contains data from App Search or Workplace Search, ensure
+you&#8217;ve restored the <a href="/guide/en/enterprise-search/master/encryption-keys.html" class="ulink" target="_top">Enterprise
+Search encryption key</a> before restoring the snapshot.
+</li>
+</ul>
+</div>
+<h3><a id="restore-snapshot-considerations"></a>Considerations<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h3>
+<p>When restoring data from a snapshot, keep the following in mind:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+If you restore a data stream, you also restore its backing indices.
+</li>
+<li class="listitem">
+You can only restore an existing index if it&#8217;s <a class="xref" href="indices-close.html" title="Close index API">closed</a> and
+the index in the snapshot has the same number of primary shards.
+</li>
+<li class="listitem">
+You can&#8217;t restore an existing open index. This includes
+backing indices for a data stream.
+</li>
+<li class="listitem">
+The restore operation automatically opens restored indices, including backing
+indices.
+</li>
+<li class="listitem">
+You can restore only a specific backing index from a data stream. However, the
+restore operation doesn&#8217;t add the restored backing index to any existing data
 stream.
 </li>
 </ul>
 </div>
-<p>If no index template matches a data stream, the stream cannot
-<a class="xref" href="use-a-data-stream.html#manually-roll-over-a-data-stream" title="Manually roll over a data stream">roll over</a> or create new backing indices.</p>
-</div>
-</div>
-<p>The <code class="literal">rename_pattern</code>
-and <code class="literal">rename_replacement</code> options can be also used to rename data streams and indices on restore
-using regular expression that supports referencing the original text, according to the <a href="https://docs.oracle.com/javase/8/docs/api/java/util/regex/Matcher.html#appendReplacement-java.lang.StringBuffer-java.lang.String-" class="ulink" target="_top"><code class="literal">appendReplacement</code></a> logic.</p>
-<p><a id="rename-restored-data-stream"></a>If you rename a restored data stream, its backing indices are also
-renamed. For example, if you rename the <code class="literal">logs</code> data stream to <code class="literal">restored-logs</code>,
-the backing index <code class="literal">.ds-logs-2099.03.09-000005</code> is renamed to
-<code class="literal">.ds-restored-logs-2099.03.09-000005</code>.</p>
-<div class="warning admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p>If you rename a restored stream, ensure an index template matches the new stream
-name. If no index template matches the stream, it cannot
-<a class="xref" href="use-a-data-stream.html#manually-roll-over-a-data-stream" title="Manually roll over a data stream">roll over</a> or create new backing indices.</p>
-</div>
-</div>
-<p>To prevent aliases from being restored with their associated data streams and
-indices, set <code class="literal">include_aliases</code> to <code class="literal">false</code>.</p>
-<a id="d43ecb0a1c938eeafb1a5dd8ecd4fdda"></a>
+<h3><a id="get-snapshot-list"></a>Get a list of available snapshots<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h3>
+<p>To view a list of available snapshots in Kibana, go to the main menu and click
+<span class="strong strong"><strong>Stack Management &gt; Snapshot and Restore</strong></span>.</p>
+<p>You can also use the <a class="xref" href="get-snapshot-repo-api.html" title="Get snapshot repository API">get repository API</a> and the
+<a class="xref" href="get-snapshot-api.html" title="Get snapshot API">get snapshot API</a> to find snapshots that are available to
+restore. First, use the get repository API to fetch a list of registered
+snapshot repositories.</p>
+<a id="ac8328bc51fd396b3ce5f7ef3e1e73df"></a>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">POST /_snapshot/my_backup/snapshot_1/_restore
-{
-  "indices": "data_stream_1,index_1,index_2",
-  "ignore_unavailable": true,
-  "include_global_state": false,              <a id="CO510-1"></a><i class="conum" data-value="1"></i>
-  "rename_pattern": "index_(.+)",
-  "rename_replacement": "restored_index_$1",
-  "include_aliases": false
-}</pre>
+<pre class="programlisting prettyprint lang-console">GET _snapshot</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1532.console"></div>
-<div class="calloutlist">
-<table border="0" summary="Callout list">
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO510-1"><i class="conum" data-value="1"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>By default, <code class="literal">include_global_state</code> is <code class="literal">false</code>, meaning the snapshot&#8217;s
-cluster state and feature states are not restored.</p>
-<p>If <code class="literal">true</code> then the restore operation merges the legacy index templates in your
-cluster with the templates contained in the snapshot, replacing any existing
-ones whose name matches one in the snapshot. It completely removes all
-persistent settings, non-legacy index templates, ingest pipelines and
-ILM lifecycle policies that exist in your cluster and replaces them with
-the corresponding items from the snapshot.</p>
-</td>
-</tr>
-</table>
-</div>
-<p>The restore operation must be performed on a functioning cluster. However, an
-existing index can only be restored if it&#8217;s <a class="xref" href="indices-close.html" title="Close index API">closed</a> and
-has the same number of shards as the index in the snapshot. The restore
-operation automatically opens restored indices if they were closed and creates
-new indices if they didn&#8217;t exist in the cluster.</p>
-<p>If a data stream is restored, its backing indices are also restored. The restore
-operation automatically opens restored backing indices if they were closed.</p>
-<p>In addition to entire data streams, you can restore only specific backing
-indices from a snapshot. However, restored backing indices are not automatically
-added to any existing data streams. For example, if only the
-<code class="literal">.ds-logs-2099.03.08-000003</code> backing index is restored from a snapshot, it is
-not automatically added to the existing <code class="literal">logs</code> data stream.</p>
-<h3><a id="_partial_restore"></a>Partial restore<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h3>
-<p>By default, the entire restore operation will fail if one or more indices or backing indices participating in the operation don&#8217;t have
-snapshots of all shards available. It can occur if some shards failed to snapshot for example. It is still possible to
-restore such indices by setting <code class="literal">partial</code> to <code class="literal">true</code>. Please note, that only successfully snapshotted shards will be
-restored in this case and all missing shards will be recreated empty.</p>
-<h3><a id="change-index-settings-during-restore"></a>Changing index settings during restore<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h3>
-<p>Use the <a class="xref" href="restore-snapshot-api.html#restore-snapshot-api-index-settings"><code class="literal">index_settings</code></a> parameter
-to override index settings during the restore process. For example, the
-following request will restore the index <code class="literal">index_1</code> without creating any
-replicas while switching back to the default refresh interval:</p>
-<a id="922df55507c66533fcadc850eecabcff"></a>
+<div class="console_widget" data-snippet="snippets/1540.console"></div>
+<p>Then use the get snapshot API to get a list of snapshots in a specific
+repository.</p>
+<a id="4e926063a9494b563387617b08c4f232"></a>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">POST /_snapshot/my_backup/snapshot_1/_restore
-{
-  "indices": "index_1",
-  "ignore_unavailable": true,
-  "index_settings": {
-    "index.number_of_replicas": 0
-  },
-  "ignore_index_settings": [
-    "index.refresh_interval"
-  ]
-}</pre>
+<pre class="programlisting prettyprint lang-console">GET _snapshot/my_repository/*?verbose=false</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1533.console"></div>
-<div class="note admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p>Some settings such as <code class="literal">index.number_of_shards</code> cannot be changed during the restore operation.</p>
-</div>
-</div>
-<p>For data streams, these index settings are applied to the restored backing
-indices.</p>
-<div class="important admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p>The <code class="literal">index_settings</code> and <code class="literal">ignore_index_settings</code> parameters affect
-restored backing indices only. New backing indices created for a stream use the index
-settings specified in the stream&#8217;s matching
-<a class="xref" href="set-up-a-data-stream.html#create-index-template" title="Create an index template">index template</a>.</p>
-<p>If you change index settings during a restore, we recommend you make similar
-changes in the stream&#8217;s matching index template. This ensures new backing
-indices created for the stream use the same index settings.</p>
-</div>
-</div>
-<h3><a id="_restoring_to_a_different_cluster"></a>Restoring to a different cluster<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h3>
-<p>The information stored in a snapshot is not tied to a particular cluster or a cluster name. Therefore, it&#8217;s possible to
-restore a snapshot created from one cluster into another cluster by registering the repository that contains the snapshot in the new cluster and starting the restore process.</p>
-<p>The topology of the new cluster does not have to match the cluster where the snapshot was created. However, the version of the new cluster must be the same or only one major version newer than the cluster that was used to create the snapshot. For example, you can restore a 5.x snapshot to a 6.x cluster, but not a 5.x snapshot to a 7.x cluster.</p>
-<p>If the new cluster has a smaller capacity, consider the following changes:</p>
+<div class="console_widget" data-snippet="snippets/1541.console"></div>
+<h3><a id="restore-index-data-stream"></a>Restore an index or data stream<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h3>
+<p>You can restore a snapshot using Kibana&#8217;s <span class="strong strong"><strong>Snapshot and Restore</strong></span> feature or the
+<a class="xref" href="restore-snapshot-api.html" title="Restore snapshot API">restore snapshot API</a>.</p>
+<p>In most cases, you only need to restore a specific index or data stream from a
+snapshot. However, you can&#8217;t restore an existing open index.</p>
+<p>To avoid conflicts with existing indices and data streams, use one of the
+following methods:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Ensure that the new cluster has enough capacity to store all data streams and indices in the snapshot.
+<a class="xref" href="snapshots-restore-snapshot.html#delete-restore" title="Delete and restore">Delete and restore</a>
 </li>
 <li class="listitem">
-Change the index settings during the restore operation to reduce the
-<a class="xref" href="index-modules.html#dynamic-index-number-of-replicas">number of replicas</a>.
+<a class="xref" href="snapshots-restore-snapshot.html#rename-on-restore" title="Rename on restore">Rename on restore</a>
+</li>
+</ul>
+</div>
+<h4><a id="delete-restore"></a>Delete and restore<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h4>
+<p>The simplest way to avoid conflicts is to delete an existing index or data
+stream before restoring it. To prevent the accidental re-creation of the index
+or data stream, we recommend you temporarily stop all indexing until the restore
+operation is complete.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If the
+<a class="xref" href="index-management-settings.html#action-destructive-requires-name"><code class="literal">action.destructive_requires_name</code></a> cluster
+setting is <code class="literal">false</code>, don&#8217;t use the <a class="xref" href="indices-delete-index.html" title="Delete index API">delete index API</a> to
+target the <code class="literal">*</code> or <code class="literal">.*</code> wildcard expression. If you use Elasticsearch&#8217;s security features,
+this will delete system indices required for authentication. To delete all
+regular indices, use <code class="literal">*,-.*</code> instead.</p>
+</div>
+</div>
+<a id="e0734215054e1ff5df712ce3a826cdba"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console"># Delete an index
+DELETE my-index
+
+# Delete a data stream
+DELETE _data_stream/logs-my_app-default</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1542.console"></div>
+<p>By default, a restore request attempts to restore all indices and data
+streams in the snapshot, including system indices. If your cluster already
+contains one or more of these system indices, the request will return an error.</p>
+<p>To avoid this error, specify the indices and data streams to restore. To
+exclude system indices, append the <code class="literal">-.*</code> wildcard pattern. To restore all
+indices and data streams except system indices, use <code class="literal">*,-.*</code>.</p>
+<a id="4bb4a64cf04e3feb133b0221d29beaa9"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _snapshot/my_repository/my_snapshot_2099.05.06/_restore
+{
+  "indices": "my-index,logs-my_app-default"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1543.console"></div>
+<h4><a id="rename-on-restore"></a>Rename on restore<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h4>
+<p>If you want to avoid deleting existing data, you can instead
+rename the indices and data streams you restore. You typically use this method
+to compare existing data to historical data from a snapshot. For example, you
+can use this method to review documents after an accidental update or deletion.</p>
+<p>Before you start, ensure the cluster has enough capacity for both the existing
+and restored data.</p>
+<p>The following restore snapshot API request prepends <code class="literal">restored-</code> to the name of
+any restored index or data stream.</p>
+<a id="03b1d76fa0b773d5b7d74ecb7e1e1a80"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _snapshot/my_repository/my_snapshot_2099.05.06/_restore
+{
+  "indices": "my-index,logs-my_app-default",
+  "rename_pattern": "(.+)",
+  "rename_replacement": "restored-$1"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1544.console"></div>
+<p>If the rename options produce two or more indices or data streams with the same
+name, the restore operation fails.</p>
+<p>If you rename a data stream, its backing indices are also renamed. For example,
+if you rename the <code class="literal">logs-my_app-default</code> data stream to
+<code class="literal">restored-logs-my_app-default</code>, the backing index
+<code class="literal">.ds-logs-my_app-default-2099.03.09-000005</code> is renamed to
+<code class="literal">.ds-restored-logs-my_app-default-2099.03.09-000005</code>.</p>
+<p>When the restore operation is complete, you can compare the original and
+restored data. If you no longer need an original index or data stream, you can
+delete it and use a <a class="xref" href="docs-reindex.html" title="Reindex API">reindex</a> to rename the restored one.</p>
+<a id="da24c13eee8c9aeae9a23faf80489e31"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console"># Delete the original index
+DELETE my-index
+
+# Reindex the restored index to rename it
+POST _reindex
+{
+  "source": {
+    "index": "restored-my-index"
+  },
+  "dest": {
+    "index": "my-index"
+  }
+}
+
+# Delete the original data stream
+DELETE _data_stream/logs-my_app-default
+
+# Reindex the restored data stream to rename it
+POST _reindex
+{
+  "source": {
+    "index": "restored-logs-my_app-default"
+  },
+  "dest": {
+    "index": "logs-my_app-default",
+    "op_type": "create"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1545.console"></div>
+<h3><a id="restore-entire-cluster"></a>Restore an entire cluster<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h3>
+<p>In some cases, you need to restore an entire cluster from a snapshot, including
+the cluster state and all system indices. These cases should be rare, such as in
+the event of a catastrophic failure.</p>
+<p>Restoring an entire cluster involves deleting important system indices, including
+those used for authentication. Consider whether you can restore specific indices
+or data streams instead.</p>
+<p>If you&#8217;re restoring to a different cluster, see <a class="xref" href="snapshots-restore-snapshot.html#restore-different-cluster" title="Restore to a different cluster">Restore to a different cluster</a>
+before you start.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>If you <a class="xref" href="backup-cluster-configuration.html" title="Back up a cluster&#8217;s configuration">backed up the cluster&#8217;s configuration
+files</a>, you can restore them to each node. This step is optional and requires a
+<a class="xref" href="restart-upgrade.html" title="Full cluster restart upgrade">full cluster restart</a>.</p>
+<p>After you shut down a node, copy the backed-up configuration files over to the
+node&#8217;s <code class="literal">$ES_PATH_CONF</code> directory. Before restarting the node, ensure
+<code class="literal">elasticsearch.yml</code> contains the appropriate node roles, node name, and
+other node-specific settings.</p>
+<p>If you choose to perform this step, you must repeat this process on each node in
+the cluster.</p>
 </li>
 <li class="listitem">
-Use the <code class="literal">indices</code> parameter to choose only specific data streams or indices to restore.
+<p>Temporarily stop indexing and turn off the following features:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>ILM</p>
+<a id="585a34ad79aee16678b37da785933ac8"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ilm/stop</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1546.console"></div>
+</li>
+</ul>
+</div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>Machine Learning</p>
+<a id="a21a7bf052b41f5b996dc58f7b69770f"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ml/set_upgrade_mode?enabled=true</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1547.console"></div>
+</li>
+</ul>
+</div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>Watcher</p>
+<a id="6b1336ff477f91d4a0db0b06db546ff0"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _watcher/_stop</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1548.console"></div>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>If you use Elasticsearch security features, log in to a node host, navigate to the Elasticsearch
+installation directory, and add a user with the <code class="literal">superuser</code> role to the file
+realm using the <a class="xref" href="users-command.html" title="elasticsearch-users"><code class="literal">elasticsearch-users</code></a> tool.</p>
+<p>For example, the following command creates a user named <code class="literal">restore_user</code>.</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">./bin/elasticsearch-users useradd restore_user -p my_password -r superuser</pre>
+</div>
+<p>Use this file realm user to authenticate requests until the restore operation is
+complete.</p>
+</li>
+<li class="listitem">
+<p>Use the <a class="xref" href="cluster-update-settings.html" title="Cluster update settings API">update cluster settings API</a> to set
+<a class="xref" href="index-management-settings.html#action-destructive-requires-name"><code class="literal">action.destructive_requires_name</code></a> to
+<code class="literal">false</code>. This lets you delete indices and data streams using wildcards.</p>
+<a id="867f7d43a78066731ead2e223960fc07"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _cluster/settings
+{
+  "persistent": {
+    "action.destructive_requires_name": false
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1549.console"></div>
+</li>
+<li class="listitem">
+<p>Delete all existing indices and data streams on the cluster, including all
+system indices.</p>
+<a id="7dc5613762de1ee914ad8967a569232d"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console"># Delete all indices
+DELETE *
+
+# Delete all data streams
+DELETE _data_stream/*</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1550.console"></div>
+</li>
+<li class="listitem">
+<p>Restore the entire snapshot, including the cluster state. This also restores
+any system indices in the snapshot.</p>
+<a id="26bd8c027c82cd72c007c10fa66dc97f"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _snapshot/my_repository/my_snapshot_2099.05.06/_restore
+{
+  "indices": "*",
+  "include_global_state": true
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1551.console"></div>
+</li>
+<li class="listitem">
+<p>When the restore operation is complete, resume indexing and restart any
+features you stopped:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>ILM</p>
+<a id="72ae3851160fcf02b8e2cdfd4e57d238"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ilm/start</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1552.console"></div>
+</li>
+<li class="listitem">
+<p>Machine Learning</p>
+<a id="3c5d5a5c34a62724942329658c688f5e"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ml/set_upgrade_mode?enabled=false</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1553.console"></div>
+</li>
+<li class="listitem">
+<p>Watcher</p>
+<a id="97ea5ab17213cb1faaf6f3ea13607098"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _watcher/_start</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1554.console"></div>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>If wanted, reset the <code class="literal">action.destructive_requires_name</code> cluster setting.</p>
+<a id="e317a8380dfbc76c4e7f23d0997b3518"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _cluster/settings
+{
+  "persistent": {
+    "action.destructive_requires_name": null
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1555.console"></div>
+</li>
+</ol>
+</div>
+<h3><a id="monitor-restore"></a>Monitor a restore<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h3>
+<p>The restore operation uses the <a class="xref" href="indices-recovery.html" title="Index recovery API">shard recovery process</a> to
+restore an index&#8217;s primary shards from a snapshot. While the restore operation
+recovers primary shards, the cluster will have a <code class="literal">yellow</code>
+<a class="xref" href="cluster-health.html" title="Cluster health API">health status</a>.</p>
+<p>After all primary shards are recovered, the replication process creates and
+distributes replicas across eligible data nodes. When replication is complete,
+the cluster health status typically becomes <code class="literal">green</code>.</p>
+<p>You can monitor the cluster health status using the <a class="xref" href="cluster-health.html" title="Cluster health API">cluster
+health API</a>.</p>
+<div class="pre_wrapper lang-php alternative">
+<pre class="programlisting prettyprint lang-php alternative">$response = $client-&gt;cluster()-&gt;health();</pre>
+</div>
+<div class="pre_wrapper lang-csharp alternative">
+<pre class="programlisting prettyprint lang-csharp alternative">var healthResponse = client.Cluster.Health();</pre>
+</div>
+<div class="pre_wrapper lang-python alternative">
+<pre class="programlisting prettyprint lang-python alternative">resp = client.cluster.health()
+print(resp)</pre>
+</div>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.cluster.health
+puts response</pre>
+</div>
+<div class="pre_wrapper lang-go alternative">
+<pre class="programlisting prettyprint lang-go alternative">res, err := es.Cluster.Health()
+fmt.Println(res, err)</pre>
+</div>
+<div class="pre_wrapper lang-js alternative">
+<pre class="programlisting prettyprint lang-js alternative">const response = await client.cluster.health()
+console.log(response)</pre>
+</div>
+<a id="b02e4907c9936c1adc16ccce9d49900d"></a>
+<div class="pre_wrapper lang-console default has-php has-csharp has-python has-ruby has-go has-js">
+<pre class="programlisting prettyprint lang-console default has-php has-csharp has-python has-ruby has-go has-js">GET _cluster/health</pre>
+</div>
+<div class="console_widget has-php has-csharp has-python has-ruby has-go has-js" data-snippet="snippets/1556.console"></div>
+<p>To get detailed information about ongoing shard recoveries, use the
+<a class="xref" href="indices-recovery.html" title="Index recovery API">index recovery API</a>.</p>
+<a id="32ce26b8af95f7ccc2a7bd5e77a39d6c"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET my-index/_recovery</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1557.console"></div>
+<p>To view any unassigned shards, use the <a class="xref" href="cat-shards.html" title="cat shards API">cat shards API</a>.</p>
+<a id="6705eca2095ade294548cfb25bf2dd86"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _cat/shards?v=true&amp;h=index,shard,prirep,state,node,unassigned.reason&amp;s=state</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1558.console"></div>
+<p>Unassigned shards have a <code class="literal">state</code> of <code class="literal">UNASSIGNED</code>. The <code class="literal">prirep</code> value is <code class="literal">p</code> for
+primary shards and <code class="literal">r</code> for replicas. The <code class="literal">unassigned.reason</code> describes why the
+shard remains unassigned.</p>
+<p>To get a more in-depth explanation of an unassigned shard&#8217;s allocation status,
+use the <a class="xref" href="cluster-allocation-explain.html" title="Cluster allocation explain API">cluster allocation explanation API</a>.</p>
+<a id="f01d9bbab5b4535b9e067cde3f64ddbf"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _cluster/allocation/explain?filter_path=index,node_allocation_decisions.node_name,node_allocation_decisions.deciders.*
+{
+  "index": "my-index",
+  "shard": 0,
+  "primary": false,
+  "current_node": "my-node"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1559.console"></div>
+<h3><a id="cancel-restore"></a>Cancel a restore<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h3>
+<p>You can delete an index or data stream to cancel its ongoing restore. This also
+deletes any existing data in the cluster for the index or data stream. Deleting
+an index or data stream doesn&#8217;t affect the snapshot or its data.</p>
+<a id="e0734215054e1ff5df712ce3a826cdba"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console"># Delete an index
+DELETE my-index
+
+# Delete a data stream
+DELETE _data_stream/logs-my_app-default</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1560.console"></div>
+<h3><a id="restore-different-cluster"></a>Restore to a different cluster<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h3>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Elasticsearch Service can help you restore snapshots from other deployments. See
+<a href="/guide/en/cloud/current/ec-restoring-snapshots.html#ec-restore-across-clusters" class="ulink" target="_top">Restore across
+clusters</a>.</p>
+</div>
+</div>
+<p>Snapshots aren&#8217;t tied to a particular cluster or a cluster name. You can create
+a snapshot in one cluster and restore it in another
+<a class="xref" href="snapshot-restore.html#snapshot-restore-version-compatibility" title="Version compatibility">compatible cluster</a>. The topology of
+the clusters doesn&#8217;t need to match.</p>
+<p>To restore a snapshot, its repository must be
+<a class="xref" href="snapshots-register-repository.html" title="Register a snapshot repository">registered</a> and available to the new cluster.
+If the original cluster still has write access to the repository, register the
+repository in <code class="literal">readonly</code> mode. This prevents multiple clusters from writing to
+the repository at the same time and corrupting the repository&#8217;s contents.</p>
+<p>Before you start a restore operation, ensure the new cluster has enough capacity
+for any data streams or indices you want to restore. If the new cluster has a
+smaller capacity, you can:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Add nodes or upgrade your hardware to increase capacity.
+</li>
+<li class="listitem">
+Restore fewer indices and data streams.
+</li>
+<li class="listitem">
+<p>Reduce the <a class="xref" href="index-modules.html#dynamic-index-number-of-replicas">number of replicas</a> for
+restored indices.</p>
+<p>For example, the following restore snapshot API request uses the
+<code class="literal">index_settings</code> option to set <code class="literal">index.number_of_replicas</code> to <code class="literal">1</code>.</p>
+<a id="ed27843eff311f3011b679e97e6fda50"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _snapshot/my_repository/my_snapshot_2099.05.06/_restore
+{
+  "indices": "my-index,logs-my_app-default",
+  "index_settings": {
+    "index.number_of_replicas": 1
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1561.console"></div>
 </li>
 </ul>
 </div>
@@ -204,13 +547,23 @@ index will not be successfully restored unless these index allocation settings a
 <p>The restore operation also checks that restored persistent settings are compatible with the current cluster to avoid accidentally
 restoring incompatible settings. If you need to restore a snapshot with incompatible persistent settings, try restoring it without
 the <a class="xref" href="restore-snapshot-api.html#restore-snapshot-api-include-global-state">global cluster state</a>.</p>
+<h3><a id="troubleshoot-restore"></a>Troubleshoot restore errors<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h3>
+<p>Here&#8217;s how to resolve common errors returned by restore requests.</p>
+<h4><a id="_cannot_restore_index_index_because_an_open_index_with_same_name_already_exists_in_the_cluster"></a>Cannot restore index [&lt;index&gt;] because an open index with same name already exists in the cluster<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h4>
+<p>You can&#8217;t restore an open index that already exists. To resolve this error, try
+one of the methods in <a class="xref" href="snapshots-restore-snapshot.html#restore-index-data-stream" title="Restore an index or data stream">Restore an index or data stream</a>.</p>
+<h4><a id="_cannot_restore_index_index_with_x_shards_from_a_snapshot_of_index_snapshot_index_with_y_shards"></a>Cannot restore index [&lt;index&gt;] with [x] shards from a snapshot of index [&lt;snapshot-index&gt;] with [y] shards<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/snapshot-restore/restore-snapshot.asciidoc">edit</a></h4>
+<p>You can only restore an existing index if it&#8217;s closed and the index in the
+snapshot has the same number of primary shards. This error indicates the index
+in the snapshot has a different number of primary shards.</p>
+<p>To resolve this error, try one of the methods in <a class="xref" href="snapshots-restore-snapshot.html#restore-index-data-stream" title="Restore an index or data stream">Restore an index or data stream</a>.</p>
 </div>
 <div class="navfooter">
 <span class="prev">
-<a href="snapshots-take-snapshot.html">« Create a snapshot</a>
+<a href="delete-snapshots.html">« Delete a snapshot</a>
 </span>
 <span class="next">
-<a href="snapshots-monitor-snapshot-restore.html">Monitor snapshot and restore progress »</a>
+<a href="snapshot-lifecycle-management.html">SLM: Manage the snapshot lifecycle »</a>
 </span>
 </div>
 </div>
