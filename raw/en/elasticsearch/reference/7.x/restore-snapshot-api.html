@@ -43,7 +43,7 @@ Not what you want? See the
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">POST /_snapshot/my_repository/my_snapshot/_restore</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/2569.console"></div>
+<div class="console_widget" data-snippet="snippets/2585.console"></div>
 <div class="section">
 <div class="titlepage"><div><div>
 <h3 class="title"><a id="restore-snapshot-api-request"></a>Request<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/snapshot-restore/apis/restore-snapshot-api.asciidoc">edit</a></h3>
@@ -58,41 +58,30 @@ Not what you want? See the
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-If the Elasticsearch security features are enabled, you must have the <code class="literal">manage</code>
-<a class="xref" href="security-privileges.html#privileges-list-cluster" title="Cluster privileges">cluster privilege</a> to use this API.
+If you use the Elasticsearch security features, you must have the <code class="literal">manage</code> or
+<code class="literal">cluster:admin/snapshot/*</code> cluster privilege to restore a snapshot.
+</li>
+<li class="listitem">
+You can only restore a snapshot to a running cluster with an elected
+<a class="xref" href="modules-node.html#master-node" title="Master-eligible node">master node</a>. The snapshot&#8217;s repository must be
+<a class="xref" href="snapshots-register-repository.html" title="Register a snapshot repository">registered</a> and available to the cluster.
+</li>
+<li class="listitem">
+The snapshot and cluster versions must be compatible. See
+<a class="xref" href="snapshot-restore.html#snapshot-restore-version-compatibility" title="Version compatibility">Version compatibility</a>.
+</li>
+<li class="listitem">
+If you restore a data stream, ensure the cluster contains a
+<a class="xref" href="set-up-a-data-stream.html#create-index-template" title="Step 3. Create an index template">matching index template</a> with data stream enabled.
+Without a matching index template, a data stream can&#8217;t roll over or create
+backing indices.
+</li>
+<li class="listitem">
+If your snapshot contains data from App Search or Workplace Search, ensure
+you&#8217;ve restored the <a href="/guide/en/enterprise-search/7.x/encryption-keys.html" class="ulink" target="_top">Enterprise
+Search encryption key</a> before restoring the snapshot.
 </li>
 </ul>
-</div>
-</div>
-
-<div class="section">
-<div class="titlepage"><div><div>
-<h3 class="title"><a id="restore-snapshot-api-desc"></a>Description<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/7.x/docs/reference/snapshot-restore/apis/restore-snapshot-api.asciidoc">edit</a></h3>
-</div></div></div>
-<p>Use the restore snapshot API to restore a snapshot of a cluster, including all data streams and indices in the snapshot. If you do not want to restore the entire snapshot, you can select specific data streams or indices to restore.</p>
-<p>You can run the restore operation on a cluster that contains an elected
-<a class="xref" href="modules-node.html#master-node" title="Master-eligible node">master node</a> and has data nodes with enough capacity to accommodate the snapshot
-you are restoring. Existing indices can only be restored if they are
-<a class="xref" href="indices-close.html" title="Close index API">closed</a> and have the same number of shards as the indices in
-the snapshot. The restore operation automatically opens restored indices if
-they were closed and creates new indices if they do not exist in the cluster.</p>
-<p>If a data stream is restored, its aliases and backing indices are also restored.
-Alternatively, you can restore individual backing indices without restoring an
-entire data stream. If you restore individual backing indices, they are not
-automatically added to any existing data stream. For example, if only the
-<code class="literal">.ds-logs-2099.03.08-00003</code> backing index is restored from a snapshot, it is not
-automatically added to the existing <code class="literal">logs</code> data stream.</p>
-<div class="important admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p>The <code class="literal">index_settings</code> and <code class="literal">ignore_index_settings</code> parameters affect
-restored backing indices only. New backing indices created for a stream use the index
-settings specified in the stream&#8217;s matching
-<a class="xref" href="set-up-a-data-stream.html#create-index-template" title="Step 3. Create an index template">index template</a>.</p>
-<p>If you change index settings during a restore, we recommend you make similar
-changes in the stream&#8217;s matching index template. This ensures new backing
-indices created for the stream use the same index settings.</p>
-</div>
 </div>
 </div>
 
@@ -150,7 +139,7 @@ before the timeout expires, the request fails and returns an error. Defaults to
 <p>
 (Optional, Boolean) If <code class="literal">true</code>, the request returns a response when the restore
 operation completes. The operation is complete when it finishes all attempts to
-<a class="xref" href="snapshots-monitor-snapshot-restore.html#_monitoring_restore_operations" title="Monitoring restore operations">recover primary shards</a> for restored indices.
+<a class="xref" href="snapshots-restore-snapshot.html#monitor-restore" title="Monitor a restore">recover primary shards</a> for restored indices.
 This applies even if one or more of the recovery attempts fail.
 </p>
 <p>If <code class="literal">false</code>, the request returns a response when the restore
@@ -172,11 +161,9 @@ operation initializes. Defaults to <code class="literal">false</code>.</p>
 </span>
 </dt>
 <dd>
-<p>
-(Optional, Boolean)
-If <code class="literal">false</code>, the request returns an error for any data stream or index that is missing or closed. Defaults to <code class="literal">false</code>.
-</p>
-<p>If <code class="literal">true</code>, the request ignores data streams and indices in <code class="literal">indices</code> that are missing or closed.</p>
+(Optional, Boolean) If <code class="literal">true</code>, the request ignores any index or data stream in
+<code class="literal">indices</code> that&#8217;s missing from the snapshot. If <code class="literal">false</code>, the request returns an
+error for any missing index or data stream. Defaults to <code class="literal">false</code>.
 </dd>
 <dt>
 <span class="term">
@@ -184,8 +171,11 @@ If <code class="literal">false</code>, the request returns an error for any data
 </span>
 </dt>
 <dd>
-(Optional, string)
-A comma-separated list of index settings that should not be restored from a snapshot.
+<p>
+(Optional, string or array of strings) Index settings to not restore from the snapshot. You can&#8217;t use this option to ignore <a class="xref" href="index-modules.html#index-number-of-shards"><code class="literal">index.number_of_shards</code></a>.
+</p>
+<p>For data streams, this option only applies to restored backing indices. New
+backing indices are configured using the data stream&#8217;s matching index template.</p>
 </dd>
 <dt>
 <span class="term">
@@ -274,14 +264,12 @@ Providing an empty array will restore no feature states, regardless of the value
 </dt>
 <dd>
 <p>
-(Optional, string)
-A comma-separated list of settings to add or change in all restored indices. Use this parameter to override index settings when restoring snapshots.
+(Optional, object) Index settings to add or change in restored indices,
+including backing indices. You can&#8217;t use this option to change
+<a class="xref" href="index-modules.html#index-number-of-shards"><code class="literal">index.number_of_shards</code></a>.
 </p>
-<p>For data streams, these index settings are applied to the restored backing
-indices.</p>
-<p>For more information regarding all the different index-level settings
-that you can specify, see
-<a class="xref" href="index-modules.html" title="Index modules">index modules</a>.</p>
+<p>For data streams, this option only applies to restored backing indices. New
+backing indices are configured using the data stream&#8217;s matching index template.</p>
 </dd>
 <dt>
 <span class="term">
@@ -289,13 +277,7 @@ that you can specify, see
 </span>
 </dt>
 <dd>
-<p>
-(Optional, string)
-A comma-separated list of data streams and indices to restore from the snapshot.
-<a class="xref" href="multi-index.html" title="Multi-target syntax">Multi-index syntax</a> is supported.
-</p>
-<p>By default, a restore operation includes all data streams and indices in the snapshot. If this
-argument is provided, the restore operation only includes the specified data streams and indices.</p>
+(Optional, string or array of strings) Comma-separated list of indices and data streams to restore. Supports <a class="xref" href="multi-index.html" title="Multi-target syntax">multi-target syntax</a>. Defaults to all indices and data streams in the snapshot, including system indices.
 </dd>
 </dl>
 </div>
@@ -333,21 +315,8 @@ Defines a rename pattern to apply to restored data streams and indices. Data str
 </p>
 <p>The rename pattern is applied as defined by the regular expression that
 supports referencing the original text, according to the <a href="https://docs.oracle.com/javase/8/docs/api/java/util/regex/Matcher.html#appendReplacement-java.lang.StringBuffer-java.lang.String-" class="ulink" target="_top"><code class="literal">appendReplacement</code></a> logic.</p>
-<p>The request will fail if two or more data streams or indices will be renamed into the same name.</p>
-<p>If you rename a restored data stream, its backing indices are also
-renamed. For example, if you rename the <code class="literal">logs</code> data stream to <code class="literal">restored-logs</code>,
-the backing index <code class="literal">.ds-logs-2099.03.09-000005</code> is renamed to
-<code class="literal">.ds-restored-logs-2099.03.09-000005</code>.</p>
 </dd>
 </dl>
-</div>
-<div class="warning admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p>If you rename a restored stream, ensure an index template matches the new stream
-name. If no index template matches the stream, it cannot
-<a class="xref" href="use-a-data-stream.html#manually-roll-over-a-data-stream" title="Manually roll over a data stream">roll over</a> or create new backing indices.</p>
-</div>
 </div>
 <div class="variablelist">
 <a id="restore-snapshot-api-rename-replacement"></a>
@@ -382,7 +351,7 @@ Defines the rename replacement string. See <a class="xref" href="restore-snapsho
   "include_aliases": false
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/2570.console"></div>
+<div class="console_widget" data-snippet="snippets/2586.console"></div>
 <p>The API returns an acknowledgement if the request succeeds. If the request encounters errors, the response indicates any issues found, such as
 open indices that are blocking the restore operation from completing.</p>
 </div>
