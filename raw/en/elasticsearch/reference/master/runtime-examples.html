@@ -146,12 +146,12 @@ supports aliased expressions that you can reuse.</p>
 the structure of Apache logs. If the pattern matches, the script emits the
 value of the matching IP address. If the pattern doesn&#8217;t match
 (<code class="literal">clientip != null</code>), the script just returns the field value without crashing.</p>
-<a id="f66dbd3be056ab5c152f941fab8e1408"></a>
+<a id="0c2ca704a39dda8b3a7c5806ec6c6cf8"></a>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">PUT my-index-000001/_mappings
 {
   "runtime": {
-    "http.clientip": {
+    "http.client_ip": {
       "type": "ip",
       "script": """
         String clientip=grok('%{COMMONAPACHELOG}').extract(doc["message"].value)?.clientip;
@@ -204,6 +204,41 @@ mappings, but only in the context of this specific search:</p>
 }</pre>
 </div>
 <div class="console_widget" data-snippet="snippets/151.console"></div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="runtime-examples-grok-composite"></a>Define a composite runtime field<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/mapping/runtime.asciidoc">edit</a></h3>
+</div></div></div>
+<p>You can also define a <em>composite</em> runtime field to emit multiple fields from a
+single script. You can define a set of typed subfields and emit a map of
+values. At search time, each subfield retrieves the value associated with
+their name in the map. This means that you only need to specify your grok
+pattern one time and can return multiple values:</p>
+<a id="be9836fe55c5fada404a2adc1663d832"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT my-index-000001/_mappings
+{
+  "runtime": {
+    "http": {
+      "type": "composite",
+      "script": "emit(grok(\"%{COMMONAPACHELOG}\").extract(doc[\"message\"].value))",
+      "fields": {
+        "clientip": {
+          "type": "ip"
+        },
+        "verb": {
+          "type": "keyword"
+        },
+        "response": {
+          "type": "long"
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/152.console"></div>
 <div class="section">
 <div class="titlepage"><div><div>
 <h4 class="title"><a id="runtime-examples-grok-ip"></a>Search for a specific IP address<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/master/docs/reference/mapping/runtime.asciidoc">edit</a></h4>
@@ -222,18 +257,13 @@ search for a specific IP address and return all related fields.</p>
   "fields" : ["*"]
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/152.console"></div>
-<p>The API returns the following result. Without building your data structure in
-advance, you can search and explore your data in meaningful ways to experiment
-and determine which fields to index.</p>
-<p>Also, remember that <code class="literal">if</code> statement in the script?</p>
-<div class="pre_wrapper lang-painless">
-<pre class="programlisting prettyprint lang-painless">if (clientip != null) emit(clientip);</pre>
-</div>
-<p>If the script didn&#8217;t include this condition, the query would fail on any shard
-that doesn&#8217;t match the pattern. By including this condition, the query skips
-data that doesn&#8217;t match the grok pattern.</p>
-<a id="45a8cb2ba5d1a0dee7d73e72ede9b966"></a>
+<div class="console_widget" data-snippet="snippets/153.console"></div>
+<p>The API returns the following result. Because <code class="literal">http</code> is a <code class="literal">composite</code> runtime
+field, the response includes each of the sub-fields under <code class="literal">fields</code>, including
+any associated values that match the query. Without building your data structure
+in advance, you can search and explore your data in meaningful ways to
+experiment and determine which fields to index.</p>
+<a id="2a1cbd321855f88f9e1993ac62001821"></a>
 <div class="pre_wrapper lang-console-result">
 <pre class="programlisting prettyprint lang-console-result">{
   ...
@@ -246,18 +276,27 @@ data that doesn&#8217;t match the grok pattern.</p>
     "hits" : [
       {
         "_index" : "my-index-000001",
-        "_id" : "FdLqu3cBhqheMnFKd0gK",
+        "_id" : "sRVHBnwBB-qjgFni7h_O",
         "_score" : 1.0,
         "_source" : {
           "timestamp" : "2020-04-30T14:30:17-05:00",
           "message" : "40.135.0.0 - - [30/Apr/2020:14:30:17 -0500] \"GET /images/hm_bg.jpg HTTP/1.0\" 200 24736"
         },
         "fields" : {
+          "http.verb" : [
+            "GET"
+          ],
           "http.clientip" : [
             "40.135.0.0"
           ],
+          "http.response" : [
+            200
+          ],
           "message" : [
             "40.135.0.0 - - [30/Apr/2020:14:30:17 -0500] \"GET /images/hm_bg.jpg HTTP/1.0\" 200 24736"
+          ],
+          "http.client_ip" : [
+            "40.135.0.0"
           ],
           "timestamp" : [
             "2020-04-30T19:30:17.000Z"
@@ -268,6 +307,13 @@ data that doesn&#8217;t match the grok pattern.</p>
   }
 }</pre>
 </div>
+<p>Also, remember that <code class="literal">if</code> statement in the script?</p>
+<div class="pre_wrapper lang-painless">
+<pre class="programlisting prettyprint lang-painless">if (clientip != null) emit(clientip);</pre>
+</div>
+<p>If the script didn&#8217;t include this condition, the query would fail on any shard
+that doesn&#8217;t match the pattern. By including this condition, the query skips
+data that doesn&#8217;t match the grok pattern.</p>
 </div>
 
 <div class="section">
@@ -290,7 +336,7 @@ data that doesn&#8217;t match the grok pattern.</p>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/153.console"></div>
+<div class="console_widget" data-snippet="snippets/154.console"></div>
 <p>The response includes the document where the log format doesn&#8217;t match, but the
 timestamp falls within the defined range.</p>
 <a id="039ea67fc8ab51de13b77b0d73b45e68"></a>
@@ -357,14 +403,14 @@ successful dissect patterns.</p>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/154.console"></div>
+<div class="console_widget" data-snippet="snippets/155.console"></div>
 <p>Similarly, you can define a dissect pattern to extract the <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Status" class="ulink" target="_top">HTTP response code</a>:</p>
-<a id="3d2b696d3b5f067b6bcc58b69edc4d43"></a>
+<a id="d3a5b70d493e0bd77b3f2b586341c83c"></a>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">PUT my-index-000001/_mappings
 {
   "runtime": {
-    "http.response": {
+    "http.responses": {
       "type": "long",
       "script": """
         String response=dissect('%{clientip} %{ident} %{auth} [%{@timestamp}] "%{verb} %{request} HTTP/%{httpversion}" %{response} %{size}').extract(doc["message"].value)?.response;
@@ -374,24 +420,25 @@ successful dissect patterns.</p>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/155.console"></div>
+<div class="console_widget" data-snippet="snippets/156.console"></div>
 <p>You can then run a query to retrieve a specific HTTP response using the
-<code class="literal">http.response</code> runtime field:</p>
-<a id="e4d64fe8a6d7752da481d987ec410b36"></a>
+<code class="literal">http.responses</code> runtime field. Use the <code class="literal">fields</code> parameter of the <code class="literal">_search</code>
+request to indicate which fields you want to retrieve:</p>
+<a id="445f8a6ef75fb43da52990b3a9063c78"></a>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">GET my-index-000001/_search
 {
   "query": {
     "match": {
-      "http.response": "304"
+      "http.responses": "304"
     }
   },
-  "fields" : ["*"]
+  "fields" : ["http.client_ip","timestamp","http.verb"]
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/156.console"></div>
+<div class="console_widget" data-snippet="snippets/157.console"></div>
 <p>The response includes a single document where the HTTP response is <code class="literal">304</code>:</p>
-<a id="2ea5ba43a1f2bfa35d3fc8224c4089cd"></a>
+<a id="e61490b6751c2e52a1087c06b037afed"></a>
 <div class="pre_wrapper lang-console-result">
 <pre class="programlisting prettyprint lang-console-result">{
   ...
@@ -411,16 +458,10 @@ successful dissect patterns.</p>
           "message" : "247.37.0.0 - - [30/Apr/2020:14:31:22 -0500] \"GET /images/hm_nbg.jpg HTTP/1.0\" 304 0"
         },
         "fields" : {
-          "http.clientip" : [
-            "247.37.0.0"
+          "http.verb" : [
+            "GET"
           ],
-          "http.response" : [
-            304
-          ],
-          "message" : [
-            "247.37.0.0 - - [30/Apr/2020:14:31:22 -0500] \"GET /images/hm_nbg.jpg HTTP/1.0\" 304 0"
-          ],
-          "http.client.ip" : [
+          "http.client_ip" : [
             "247.37.0.0"
           ],
           "timestamp" : [
