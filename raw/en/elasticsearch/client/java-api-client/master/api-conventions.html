@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>API conventions | Elasticsearch Java API Client [master] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Java API Client [master]"/>
+<link rel="up" href="index.html" title="Elasticsearch Java API Client [master]"/>
+<link rel="prev" href="migrate-hlrc.html" title="Migrating from the High Level Rest Client"/>
+<link rel="next" href="java-rest-low.html" title="Java Low Level REST Client"/>
+<meta name="DC.type" content="Learn/Docs/Clients/Java/master"/>
+<meta name="DC.subject" content="Clients"/>
+<meta name="DC.identifier" content="master"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Java API Client [master]</a></span>
+»
+<span class="breadcrumb-node">API conventions</span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="migrate-hlrc.html">« Migrating from the High Level Rest Client</a>
+</span>
+<span class="next">
+<a href="java-rest-low.html">Java Low Level REST Client »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h1 class="title"><a id="api-conventions"></a>API conventions<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-java/edit/main/docs/api-conventions.asciidoc">edit</a></h1>
+</div></div></div>
+<p>The Java client uses a very consistent code structure, using modern code
+patterns that make complex requests easier to write and complex responses easier
+to process. This page explains these so that you quickly feel at home.</p>
+<h3><a id="_package_structure_and_namespace_clients"></a>Package structure and namespace clients<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-java/edit/main/docs/api-conventions.asciidoc">edit</a></h3>
+<p>The Elasticsearch API is large and is organized into feature groups, as can be seen in
+the <a href="/guide/en/elasticsearch/reference/master/rest-apis.html" class="ulink" target="_top">Elasticsearch API documentation</a>.</p>
+<p>The Java client follows this structure: feature groups are called “namespaces”,
+and each namespace is located in a subpackage of
+<code class="literal">co.elastic.clients.elasticsearch</code>. The only exceptions are the “search” and
+“document” APIs which are located in the <code class="literal">_core</code> subpackage.</p>
+<p>Each of the namespace clients can be accessed from the top level Elasticsearch client.
+The snippet below shows how to use the indices namespace client to create an
+index:</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">ElasticsearchClient esClient = ...
+esClient.indices().create(c -&gt; c.index("my-index"));</pre>
+</div>
+<p>Namespace clients are very lightweight objects that can be created on the fly.</p>
+<h3><a id="_method_naming_conventions"></a>Method naming conventions<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-java/edit/main/docs/api-conventions.asciidoc">edit</a></h3>
+<p>Classes in the Java API Client contain two kinds of methods and properties:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Methods and properties that are part of the API, such as
+<code class="literal">ElasticsearchClient.search()</code> or <code class="literal">SearchResponse.maxScore()</code>. They are derived
+from their respective names in the Elasticsearch JSON API using the standard Java
+<code class="literal">camelCaseName</code> convention.
+</li>
+<li class="listitem">
+Methods and properties that are part of the framework on which the Java API
+Client is built, such as <code class="literal">Query._type()</code>. These methods and properties are
+prefixed with an underscore to both avoid any naming conflicts with API names
+and ease distinguishing what identifiers belong to the API or to the framework.
+</li>
+</ul>
+</div>
+<h3><a id="_immutable_objects_builders_and_builder_lambdas"></a>Immutable objects, builders and builder lambdas<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-java/edit/main/docs/api-conventions.asciidoc">edit</a></h3>
+<p>All data types in the Java client are immutable. Object creation uses the
+<a href="https://www.informit.com/articles/article.aspx?p=1216151&amp;seqNum=2" class="ulink" target="_top">builder pattern</a>
+that was popularized in <span class="strong strong"><strong>Effective Java</strong></span> in 2008.</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">CreateResponse createResponse = client.indices().create(
+    new CreateRequest.Builder()
+        .index("my-index")
+        .putAliases("foo",
+            new Alias.Builder().isWriteIndex(true).build()
+        )
+        .build()
+);</pre>
+</div>
+<p>Note that a builder should not be reused after its <code class="literal">build()</code> method has been
+called.</p>
+<p>Although this works nicely, having to instantiate builder classes and call the
+build() method is a bit verbose. So every builder setter in the Java client also
+accepts a lambda expression that takes a newly created builder as a parameter
+and returns a populated builder. The snippet above can be written also as:</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">CreateResponse createResponse = client.indices()
+    .create(createBuilder -&gt; createBuilder
+        .index("my-index")
+        .putAliases("foo", aliasBuilder -&gt; aliasBuilder
+    		.isWriteIndex(true)
+        )
+    );</pre>
+</div>
+<p>This approach allows for much more concise code, and also avoids importing
+classes (and even remembering their names) since types are inferred from the
+method parameter signature.</p>
+<p>It becomes particularly useful with complex nested queries like the one below,
+taken from the
+<a href="/guide/en/elasticsearch/reference/master/query-dsl-intervals-query.html" class="ulink" target="_top">intervals query API documentation</a>.</p>
+<p>This example also shows a useful naming convention for builder parameters in
+deeply nested structures: since we have to give them a name to comply with the
+Java syntax (Kotlin would accept <code class="literal">it</code> and Scala a simple <code class="literal">_</code>), we name them with
+an underscore followed by the depth of the item, i.e. <code class="literal">_0</code>, <code class="literal">_1</code>, and so on.
+This removes the need for finding names and makes reading the code easier to
+read by reducing the number of identifiers.</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">client.search(_0 -&gt; _0
+    .query(_1 -&gt; _1
+        .intervals(_2 -&gt; _2
+            .field("my_text")
+            .allOf(_3 -&gt; _3
+                .ordered(true)
+                .addIntervals(_4 -&gt; _4
+                    .match(_5 -&gt; _5
+                        .query("my favorite food")
+                        .maxGaps(0)
+                        .ordered(true)
+                    )
+                )
+                .addIntervals(_4 -&gt; _4
+                    .anyOf(_5 -&gt; _5
+                        .addIntervals(_6 -&gt; _6
+                            .match(_7 -&gt; _7
+                                .query("hot water")
+                            )
+                        )
+                        .addIntervals(_6 -&gt; _6
+                            .match(_7 -&gt; _7
+                                .query("cold porridge")
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    ),
+    RequestTest.AppData.class
+);</pre>
+</div>
+<h3><a id="_variant_types"></a>Variant types<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-java/edit/main/docs/api-conventions.asciidoc">edit</a></h3>
+<p>The Elasticsearch API has a lot of variant types: queries, aggregations, field mappings,
+analyzers, and so on. Finding the correct class name in such large collections
+can be challenging.</p>
+<p>The Java client builders make this easy: the builders for variant types, such as
+Query, have methods for each of the available implementations. We’ve seen this
+in action above with <code class="literal">intervals</code> (a kind of query) and <code class="literal">allOf</code>, <code class="literal">match</code> and
+<code class="literal">anyOf</code> (various kinds of intervals).</p>
+<p>This is because variant objects in the Java client are implementations of a
+“tagged union”: they contain the identifier (or tag) of the variant they hold
+and the value for that variant. For example, a <code class="literal">Query</code> object can contain an
+<code class="literal">IntervalsQuery</code> with tag <code class="literal">intervals</code>, a <code class="literal">TermQuery</code> with tag <code class="literal">term</code>, and so on.
+This approach allows writing fluent code where you can let the IDE completion
+features guide you to build and navigate complex nested structures:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>Variant builders have setter methods for every available implementation. They
+use the same conventions as regular properties and accept both a builder lambda
+expression and a ready-made object of the actual type of the variant. Here’s an
+example to build a term query:</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">Query query = new Query.Builder()
+    .term(                                <a id="CO1-1"></a><i class="conum" data-value="1"></i>
+        t -&gt; t.field("name").value("foo") <a id="CO1-2"></a><i class="conum" data-value="2"></i>
+    )
+    .build();                             <a id="CO1-3"></a><i class="conum" data-value="3"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO1-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Choose the <code class="literal">term</code> variant to build a term query.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO1-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Build the terms query with a builder lambda expression.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO1-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Build the <code class="literal">Query</code> that now holds a <code class="literal">TermQuery</code> object with tag <code class="literal">term</code>.</p>
+</td>
+</tr>
+</table>
+</div>
+</li>
+<li class="listitem">
+Variant objects have getter methods for every available implementation. These
+methods check that the object actually holds a variant of that type and return
+the value downcasted to the correct type. They throw an <code class="literal">IllegalStateException</code>
+otherwise. This approach allows writing fluent code to traverse variants.
+</li>
+</ul>
+</div>
+<h3><a id="_blocking_and_asynchronous_clients"></a>Blocking and asynchronous clients<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-java/edit/main/docs/api-conventions.asciidoc">edit</a></h3>
+<p>API clients come in two flavors: blocking and asynchronous. All methods on
+asynchronous clients return a standard <code class="literal">CompletableFuture</code>.</p>
+<p>Both flavors can be used at the same time depending on your needs, sharing the
+same transport object:</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">Transport transport = ...
+
+ElasticsearchClient client = new ElasticsearchClient(transport);
+if (client.exists(b -&gt; b.index("products").id("foo")).value()) {
+    logger.info("product exists");
+}
+
+ElasticsearchAsyncClient asyncClient = new ElasticsearchAsyncClient(transport);
+asyncClient.exists(b -&gt; b.index("products").id("foo")).thenAccept(response -&gt; {
+    if (response.value()) {
+        logger.info("product exists");
+    }
+});</pre>
+</div>
+<h3><a id="_exceptions"></a>Exceptions<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-java/edit/main/docs/api-conventions.asciidoc">edit</a></h3>
+<p>Client methods can throw two kinds of exceptions:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Requests that were received by the Elasticsearch server but that were rejected
+(validation error, server internal timeout exceeded, etc) will produce an
+<code class="literal">ApiException</code>. This exception contains details about the error provided by
+Elasticsearch.
+</li>
+<li class="listitem">
+Requests that fail to reach the server (network error, server unavailable,
+etc) will produce a subclass <code class="literal">IOException</code>. That subclass is specific to the
+transport used. In the case of the <code class="literal">RestClientTransport</code> it will be a
+<code class="literal">ResponseException</code> that contains the low level HTTP response.
+</li>
+</ul>
+</div>
+<h3><a id="_object_life_cycles"></a>Object life cycles<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-java/edit/main/docs/api-conventions.asciidoc">edit</a></h3>
+<p>There are five kinds of objects in the Java client with different life cycles:</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<span class="strong strong"><strong>Object mapper</strong></span>
+</span>
+</dt>
+<dd>
+Stateless and thread-safe, but can be costly to create.
+It’s usually a singleton that is created at application startup and used to
+create the transport.
+</dd>
+<dt>
+<span class="term">
+<span class="strong strong"><strong>Transport</strong></span>
+</span>
+</dt>
+<dd>
+Thread-safe, holds network resources through the underlying HTTP client. A
+transport object is associated with an Elasticsearch cluster and has to be explicitly
+closed to release the underlying resources such as network connections.
+</dd>
+<dt>
+<span class="term">
+<span class="strong strong"><strong>Clients</strong></span>
+</span>
+</dt>
+<dd>
+Immutable, stateless and thread-safe.
+These are very lightweight objects that just wrap a transport and provide API
+endpoints as methods.
+</dd>
+<dt>
+<span class="term">
+<span class="strong strong"><strong>Builders</strong></span>
+</span>
+</dt>
+<dd>
+Mutable, non thread-safe.
+Builders are transient objects that should not be reused after calling
+<code class="literal">build()</code>.
+</dd>
+<dt>
+<span class="term">
+<span class="strong strong"><strong>Requests &amp; other API objects</strong></span>
+</span>
+</dt>
+<dd>
+Immutable, thread-safe.
+If your application uses the same request or same parts of a request over and
+over, these objects can be prepared in advance and reused across multiple calls
+over multiple clients with different transports.
+</dd>
+</dl>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="migrate-hlrc.html">« Migrating from the High Level Rest Client</a>
+</span>
+<span class="next">
+<a href="java-rest-low.html">Java Low Level REST Client »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
