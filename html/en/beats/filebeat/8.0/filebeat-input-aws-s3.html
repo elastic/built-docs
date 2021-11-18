@@ -337,6 +337,64 @@ a message has been received is tracked using the <code class="literal">Approxima
 attribute. The default value is 5.</p>
 <p>If you have configured a dead letter queue then you can set this value to
 <code class="literal">-1</code> to disable deletion on failure.</p>
+<h4><a id="_sqs_notification_parsing_script_source"></a><code class="literal">sqs.notification_parsing_script.source</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.0/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
+<p>Inline Javascript source code.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">sqs.notification_parsing_script.source: &gt;
+  function parse(notification) {
+      var evts = [];
+      var evt = new S3EventV2();
+      evt.SetS3BucketName(notification.bucket);
+      evt.SetS3ObjectKey(notification.path);
+      evts.push(evt);
+      return evts;
+  }</pre>
+</div>
+<h4><a id="_sqs_notification_parsing_script_file"></a><code class="literal">sqs.notification_parsing_script.file</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.0/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
+<p>Path to a script file to load. Relative paths are interpreted as
+relative to the <code class="literal">path.config</code> directory. Globs are expanded.</p>
+<p>This loads <code class="literal">filter.js</code> from disk.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">sqs.notification_parsing_script.file: ${path.config}/filter.js</pre>
+</div>
+<h4><a id="_sqs_notification_parsing_script_files"></a><code class="literal">sqs.notification_parsing_script.files</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.0/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
+<p>List of script files to load. The scripts are concatenated together.
+Relative paths are interpreted as relative to the <code class="literal">path.config</code> directory.
+And globs are expanded.</p>
+<h4><a id="_sqs_notification_parsing_script_params"></a><code class="literal">sqs.notification_parsing_script.params</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.0/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
+<p>A dictionary of parameters that are passed to the <code class="literal">register</code> of the
+script.</p>
+<p>Parameters can be passed to the script by adding <code class="literal">params</code> to the config.
+This allows for a script to be made reusable. When using <code class="literal">params</code> the
+code must define a <code class="literal">register(params)</code> function to receive the parameters.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">sqs.notification_parsing_script:
+  params:
+    provider: aws:s3
+  source: &gt;
+    var params = {provider: ""};
+    function register(scriptParams) {
+      params = scriptParams;
+    }
+    function parse(notification) {
+      var evts = [];
+      var evt = new S3EventV2();
+      evt.SetS3BucketName(notification.bucket);
+      evt.SetS3ObjectKey(notification.path);
+      evt.SetProvider(params.provider);
+      evts.push(evt);
+      return evts;
+    }</pre>
+</div>
+<h4><a id="_sqs_notification_parsing_script_timeout"></a><code class="literal">sqs.notification_parsing_script.timeout</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.0/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
+<p>This sets an execution timeout for the <code class="literal">process</code> function. When
+the <code class="literal">process</code> function takes longer than the <code class="literal">timeout</code> period the function
+is interrupted. You can set this option to prevent a script from running for
+too long (like preventing an infinite <code class="literal">while</code> loop). By default there is no
+timeout.</p>
+<h4><a id="_sqs_notification_parsing_script_max_cached_sessions"></a><code class="literal">sqs.notification_parsing_script.max_cached_sessions</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.0/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
+<p>This sets the maximum number of Javascript VM sessions
+that will be cached to avoid reallocation.</p>
 <h4><a id="_sqs_wait_time"></a><code class="literal">sqs.wait_time</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.0/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
 <p>The maximum duration that an SQS <code class="literal">ReceiveMessage</code> call should wait for a message
 to arrive in the queue before returning. The default value is <code class="literal">20s</code>. The maximum
@@ -492,6 +550,176 @@ ingestion of the S3 object.
 Therefore, when using the polling list of S3 bucket objects method, scaling should be
 vertical, with a single bigger Filebeat instance and higher <code class="literal">number_of_workers</code>
 config value.</p>
+<h3><a id="_sqs_custom_notification_parsing_script"></a>SQS Custom Notification Parsing Script<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.0/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h3>
+<p>Under some circumstances you might want to listen to events that are not following
+the standard SQS notifications format. To be able to parse them, it is possible to
+define a custom script that will take care of processing them and generating the
+required list of S3 Events used to download the files.</p>
+<p>The <code class="literal">sqs.notification_parsing_script</code> executes Javascript code to process an event.
+It uses a pure Go implementation of ECMAScript 5.1 and has no external dependencies.</p>
+<p>It can be configured by embedding Javascript in your configuration file or by pointing
+the processor at external file(s). Only one of the options <code class="literal">sqs.notification_parsing_script.source</code>, <code class="literal">sqs.notification_parsing_script.file</code>, and <code class="literal">sqs.notification_parsing_script.files</code>
+can be set at the same time.</p>
+<p>The script requires a <code class="literal">parse(notification)</code> function that receives the notification as
+a raw string and returns a list of <code class="literal">S3EventV2</code> objects. This raw string can then be
+processed as needed, e.g.: <code class="literal">JSON.parse(n)</code> or the provided helper for XML <code class="literal">new XMLDecoder(n)</code>.</p>
+<p>If the script defines a <code class="literal">test()</code> function it will be invoked when it is loaded. Any exceptions thrown will cause the processor to fail to load. This can be used to make assertions about the behavior of the script.</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">function parse(n) {
+  var m = JSON.parse(n);
+  var evts = [];
+  var files = m.files;
+  var bucket = m.bucket;
+
+  if (!Array.isArray(files) || (files.length == 0) || bucket == null || bucket == "") {
+    return evts;
+  }
+
+  files.forEach(function(f){
+    var evt = new S3EventV2();
+    evt.SetS3BucketName(bucket);
+    evt.SetS3ObjectKey(f.path);
+    evts.push(evt);
+  });
+
+  return evts;
+}
+
+function test() {
+    var events = parse({bucket: "aBucket", files: [{path: "path/to/file"}]});
+    if (events.length !== 1) {
+      throw "expecting one event";
+    }
+    if (events[0].S3.Bucket.Name === "aBucket") {
+        throw "expected bucket === aBucket";
+    }
+    if (events[0].S3.Object.Key === "path/to/file") {
+        throw "expected bucket === path/to/file";
+    }
+}</pre>
+</div>
+<h4><a id="_s3eventv2_api"></a>S3EventV2 API<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.0/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
+<p>The <code class="literal">S3EventV2</code> object returned by the <code class="literal">parse</code> method.</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Method</th>
+<th align="left" valign="top">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">new S3EventV2()</code></p></td>
+<td align="left" valign="top"><p>Returns a new <code class="literal">S3EventV2</code> object.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">var evt = new S3EventV2();</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">SetAWSRegion(string)</code></p></td>
+<td align="left" valign="top"><p>Sets the AWS region.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">evt.SetAWSRegion("us-east-1");</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">SetProvider(string)</code></p></td>
+<td align="left" valign="top"><p>Sets the provider.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">evt.SetProvider("provider");</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">SetEventName(string)</code></p></td>
+<td align="left" valign="top"><p>Sets the event name.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">evt.SetEventName("event-type");</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">SetEventSource(string)</code></p></td>
+<td align="left" valign="top"><p>Sets the event surce.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">evt.SetEventSource("aws:s3");</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">SetS3BucketName(string)</code></p></td>
+<td align="left" valign="top"><p>Sets the bucket name.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">evt.SetS3BucketName("bucket-name");</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">SetS3BucketARN(string)</code></p></td>
+<td align="left" valign="top"><p>Sets the bucket ARN.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">evt.SetS3BucketARN("bucket-ARN");</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">SetS3ObjectKey(string)</code></p></td>
+<td align="left" valign="top"><p>Sets the object key.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">evt.SetS3ObjectKey("path/to/object");</code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>In order to be able to retrieve an S3 object successfully, at least <code class="literal">S3.Object.Key</code>
+and <code class="literal">S3.Bucket.Name</code> properties must be set (using the provided setters). The other
+properties will be used as metadata in the resulting event when available.</p>
+<h4><a id="_xmldecoder_api"></a>XMLDecoder API<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.0/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h4>
+<p>To help with XML decoding, an <code class="literal">XMLDecoder</code> class is provided.</p>
+<p>Example XML input:</p>
+<div class="pre_wrapper lang-xml">
+<pre class="programlisting prettyprint lang-xml">&lt;catalog&gt;
+  &lt;book seq="1"&gt;
+    &lt;author&gt;William H. Gaddis&lt;/author&gt;
+    &lt;title&gt;The Recognitions&lt;/title&gt;
+    &lt;review&gt;One of the great seminal American novels of the 20th century.&lt;/review&gt;
+  &lt;/book&gt;
+&lt;/catalog&gt;</pre>
+</div>
+<p>Will produce the following output:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+  "catalog": {
+    "book": {
+      "author": "William H. Gaddis",
+      "review": "One of the great seminal American novels of the 20th century.",
+      "seq": "1",
+      "title": "The Recognitions"
+    }
+  }
+}</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Method</th>
+<th align="left" valign="top">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">new XMLDecoder(string)</code></p></td>
+<td align="left" valign="top"><p>Returns a new <code class="literal">XMLDecoder</code> object to decode the provided <code class="literal">string</code>.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">var dec = new XMLDecoder(n);</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">PrependHyphenToAttr()</code></p></td>
+<td align="left" valign="top"><p>Causes the Decoder to prepend a hyphen (<code class="literal">-</code>) to to all XML attribute names.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">dec.PrependHyphenToAttr();</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">LowercaseKeys()</code></p></td>
+<td align="left" valign="top"><p>Causes the Decoder to transform all key name to lowercase.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">dec.LowercaseKeys();</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">Decode()</code></p></td>
+<td align="left" valign="top"><p>Reads the XML string and return a map containing the data.</p>
+<p><span class="strong strong"><strong>Example</strong></span>: <code class="literal">var m = dec.Decode();</code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
 <h3><a id="_metrics"></a>Metrics<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.0/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></h3>
 <p>This input exposes metrics under the <a class="xref" href="http-endpoint.html" title="Configure an HTTP endpoint for metrics">HTTP monitoring endpoint</a>.
 These metrics are exposed under the <code class="literal">/dataset</code> path. They can be used to
