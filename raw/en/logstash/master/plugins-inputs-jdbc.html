@@ -43,13 +43,13 @@ Not what you want? See the
 A component of the <a class="xref" href="plugins-integrations-jdbc.html" title="JDBC Integration Plugin">jdbc integration plugin</a>
 </li>
 <li class="listitem">
-Integration version: v5.1.10
+Integration version: v5.2.1
 </li>
 <li class="listitem">
-Released on: 2021-12-16
+Released on: 2021-12-22
 </li>
 <li class="listitem">
-<a href="https://github.com/logstash-plugins/logstash-integration-jdbc/blob/v5.1.10/CHANGELOG.md" class="ulink" target="_top">Changelog</a>
+<a href="https://github.com/logstash-plugins/logstash-integration-jdbc/blob/v5.2.1/CHANGELOG.md" class="ulink" target="_top">Changelog</a>
 </li>
 </ul>
 </div>
@@ -216,6 +216,12 @@ Here is the list:</p>
 this is set to Thursday, 1 January 1970, or 0 if <code class="literal">use_column_value</code> is true and
 <code class="literal">tracking_column</code> is set. It is updated accordingly after subsequent queries are run.</p></td>
 </tr>
+<tr>
+<td align="left" valign="top"><p>offset, size</p></td>
+<td align="left" valign="top"><p>Values used with manual paging mode to explicitly implement the paging.
+Supported only if <a class="xref" href="plugins-inputs-jdbc.html#plugins-inputs-jdbc-jdbc_paging_enabled" title="jdbc_paging_enabled"><code class="literal">jdbc_paging_enabled</code></a> is enabled and
+<a class="xref" href="plugins-inputs-jdbc.html#plugins-inputs-jdbc-jdbc_paging_mode" title="jdbc_paging_mode"><code class="literal">jdbc_paging_mode</code></a> has the <code class="literal">explicit</code> value.</p></td>
+</tr>
 </tbody>
 </table>
 </div>
@@ -248,7 +254,7 @@ Use the boolean setting <code class="literal">use_prepared_statements</code> to 
 <div class="note admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>Building count queries around a prepared statement is not supported at this time and because jdbc paging uses count queries under the hood, jdbc paging is not supported with prepared statements at this time either. Therefore, <code class="literal">jdbc_paging_enabled</code>, <code class="literal">jdbc_page_size</code> settings are ignored when using prepared statements.</p>
+<p>Building count queries around a prepared statement is not supported at this time. Because jdbc paging uses count queries when <code class="literal">jdbc_paging_mode</code> has value <code class="literal">auto</code>，jdbc paging is not supported with prepared statements at this time either. Therefore, <code class="literal">jdbc_paging_enabled</code>, <code class="literal">jdbc_page_size</code> settings are ignored when using prepared statements.</p>
 </div>
 </div>
 <p>Example:</p>
@@ -342,6 +348,11 @@ Use the boolean setting <code class="literal">use_prepared_statements</code> to 
 <tr>
 <td align="left" valign="top"><p><a class="xref" href="plugins-inputs-jdbc.html#plugins-inputs-jdbc-jdbc_paging_enabled" title="jdbc_paging_enabled"><code class="literal">jdbc_paging_enabled</code></a></p></td>
 <td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#boolean" title="Boolean">boolean</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-inputs-jdbc.html#plugins-inputs-jdbc-jdbc_paging_mode" title="jdbc_paging_mode"><code class="literal">jdbc_paging_mode</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#string" title="String">string</a>, one of <code class="literal">["auto", "explicit"]</code></p></td>
 <td align="left" valign="top"><p>No</p></td>
 </tr>
 <tr>
@@ -727,6 +738,63 @@ Default value is <code class="literal">false</code>
 Each query will use limits and offsets to collectively retrieve the full
 result-set. The limit size is set with <code class="literal">jdbc_page_size</code>.</p>
 <p>Be aware that ordering is not guaranteed between queries.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="plugins-inputs-jdbc-jdbc_paging_mode"></a><code class="literal">jdbc_paging_mode</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-integration-jdbc/edit/master/docs/input-jdbc.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value can be any of: <code class="literal">auto</code>, <code class="literal">explicit</code>
+</li>
+<li class="listitem">
+Default value is <code class="literal">"auto"</code>
+</li>
+</ul>
+</div>
+<p>Whether to use <code class="literal">explicit</code> or <code class="literal">auto</code> mode during the JDBC paging</p>
+<p>If <code class="literal">auto</code>, your statement will be automatically surrounded by a count query and subsequent multiple paged queries (with <code class="literal">LIMIT</code> statement, etc.).</p>
+<p>If <code class="literal">explicit</code>, multiple queries (without a count query ahead) will be performed with your statement, until no more rows are retrieved.
+You have to write your own paging conditions in your statement configuration.
+The <code class="literal">offset</code> and <code class="literal">size</code> parameters can be used in your statement (<code class="literal">size</code> equal to <code class="literal">jdbc_page_size</code>, and <code class="literal">offset</code> incremented by <code class="literal">size</code> for each query).
+When the number of rows returned by the query is not equal to <code class="literal">size</code>, SQL paging will be ended.
+Example:</p>
+<div class="pre_wrapper lang-ruby">
+<pre class="programlisting prettyprint lang-ruby">input {
+  jdbc {
+    statement =&gt; "SELECT id, mycolumn1, mycolumn2 FROM my_table WHERE id &gt; :sql_last_value LIMIT :size OFFSET :offset",
+    jdbc_paging_enabled =&gt; true,
+    jdbc_paging_mode =&gt; "explicit",
+    jdbc_page_size =&gt; 100000
+  }
+}</pre>
+</div>
+<div class="pre_wrapper lang-ruby">
+<pre class="programlisting prettyprint lang-ruby">input {
+  jdbc {
+    statement =&gt; "CALL fetch_my_data(:sql_last_value, :offset, :size)",
+    jdbc_paging_enabled =&gt; true,
+    jdbc_paging_mode =&gt; "explicit",
+    jdbc_page_size =&gt; 100000
+  }
+}</pre>
+</div>
+<p>This mode can be considered in the following situations:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Performance issues encountered in default paging mode.
+</li>
+<li class="listitem">
+Your SQL statement is complex, so simply surrounding it with paging statements is not what you want.
+</li>
+<li class="listitem">
+Your statement is a stored procedure, and the actual paging statement is inside it.
+</li>
+</ol>
+</div>
 </div>
 
 <div class="section">
