@@ -46,9 +46,8 @@ from 7.x to 8.0.</p>
 <a class="xref" href="migration.html#migration-upgrade-client" title="Upgrading the client">Upgrading the client</a>
 </li>
 <li class="listitem">
-<p><a class="xref" href="migration.html#migration-remove-deprecations" title="Removing deprecation warnings">Removing deprecation warnings</a></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
+<a class="xref" href="migration.html#migration-remove-deprecations" title="Removing deprecation warnings">Removing deprecation warnings</a>
+</li>
 <li class="listitem">
 <a class="xref" href="migration.html#migration-strict-client-config" title="Strict client configuration">Strict client configuration</a>
 </li>
@@ -58,14 +57,11 @@ from 7.x to 8.0.</p>
 <li class="listitem">
 <a class="xref" href="migration.html#migration-options" title="Start using .options() for transport parameters">Start using .options() for transport parameters</a>
 </li>
-</ul>
-</div>
+<li class="listitem">
+<a class="xref" href="migration.html#migration-response-types" title="Changes to API responses">Changes to API responses</a>
 </li>
 <li class="listitem">
-<a class="xref" href="migration.html#migration-response-types" title="Response types">Response types</a>
-</li>
-<li class="listitem">
-<a class="xref" href="migration.html#migration-error-types" title="Error types">Error types</a>
+<a class="xref" href="migration.html#migration-error-types" title="Changes to error classes">Changes to error classes</a>
 </li>
 </ul>
 </div>
@@ -218,7 +214,7 @@ resp = (
     )
 )</pre>
 </div>
-<h4><a id="migration-response-types"></a>Response types<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-py/edit/8.0/docs/guide/migration.asciidoc">edit</a></h4>
+<h4><a id="migration-response-types"></a>Changes to API responses<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-py/edit/8.0/docs/guide/migration.asciidoc">edit</a></h4>
 <p>In 7.x and earlier the return type for API methods were the raw deserialized response body.
 This meant that there was no way to access HTTP status codes, headers, or other information
 from the transport layer.</p>
@@ -284,8 +280,8 @@ False
 &gt;&gt;&gt; isinstance(resp.body, bool)
 True</pre>
 </div>
-<h4><a id="migration-error-types"></a>Error types<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-py/edit/8.0/docs/guide/migration.asciidoc">edit</a></h4>
-<p>Previously <code class="literal">elasticsearch.TransportError</code> was the base class for all transport layer errors (like errors regarding connections or TLS) in addition to the base class for API layer errors (like "404 Not Found" when accessing an index). This was pretty confusing when you wanted to capture API errors to inspect them for a response body and not capture connectivity errors.</p>
+<h4><a id="migration-error-types"></a>Changes to error classes<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-py/edit/8.0/docs/guide/migration.asciidoc">edit</a></h4>
+<p>Previously <code class="literal">elasticsearch.TransportError</code> was the base class for both transport layer errors (like timeouts, connection errors) and API layer errors (like "404 Not Found" when accessing an index). This was pretty confusing when you wanted to capture API errors to inspect them for a response body and not capture errors from the transport layer.</p>
 <p>Now in 8.0 <code class="literal">elasticsearch.TransportError</code> is a redefinition of <code class="literal">elastic_transport.TransportError</code> and will only be the base class for true transport layer errors. If you instead want to capture API layer errors you can use the new <code class="literal">elasticsearch.ApiError</code> base class.</p>
 <div class="pre_wrapper lang-python">
 <pre class="programlisting prettyprint lang-python">from elasticsearch import TransportError, Elasticsearch
@@ -299,17 +295,39 @@ try:
 except TransportError as err:
     print(f"TransportError: {err}")</pre>
 </div>
-<p>Another difference between 7.x and 8.0 errors is their properties. Previously there were <code class="literal">status_code</code>, <code class="literal">info</code>, and <code class="literal">error</code> properties that weren&#8217;t super useful as they&#8217;d be a mix of different value types depending on what the error was and what layer it&#8217;d been raised from (transport versus API). Now that there&#8217;s a cleaner split between transport and API layer errors.</p>
-<p>You can inspect the error and get response metadata via <code class="literal">.meta</code> and response via <code class="literal">body`</code> from an <code class="literal">ApiError</code> instance:</p>
+<p>The <code class="literal">elasticsearch.ElasticsearchException</code> base class has been removed as well. If you&#8217;d like to capture all errors that can be raised from the library you can capture both <code class="literal">elasticsearch.ApiError</code> and <code class="literal">elasticsearch.TransportError</code>:</p>
+<div class="pre_wrapper lang-python">
+<pre class="programlisting prettyprint lang-python">from elasticsearch import TransportError, ApiError, Elasticsearch
+
+try:
+    client.search(...)
+# This is the 'except' clause you should use if you *actually* want to
+# capture both Transport errors and API errors in one clause:
+except (ApiError, TransportError) as err:
+    ...
+
+# However I recommend you instead split each error into their own 'except'
+# clause so you can have different behavior for TransportErrors. This
+# construction wasn't possible in 7.x and earlier.
+try:
+    client.search(...)
+except ApiError as err:
+    ... # API errors handled here
+except TransportError as err:
+    ... # Transport errors handled here</pre>
+</div>
+<p><code class="literal">elasticsearch.helpers.errors.BulkIndexError</code> and <code class="literal">elasticsearch.helpers.errors.ScanError</code> now use <code class="literal">Exception</code> as a base class instead of <code class="literal">ElasticsearchException</code>.</p>
+<p>Another difference between 7.x and 8.0 errors is their properties. Previously there were <code class="literal">status_code</code>, <code class="literal">info</code>, and <code class="literal">error</code> properties that weren&#8217;t super useful as they&#8217;d be a mix of different value types depending on what the error was and what layer it&#8217;d been raised from (transport versus API). You can inspect the error and get response metadata via <code class="literal">meta</code> and response via <code class="literal">body`</code> from an <code class="literal">ApiError</code> instance:</p>
 <div class="pre_wrapper lang-python">
 <pre class="programlisting prettyprint lang-python">from elasticsearch import ApiError, Elasticsearch
 
 try:
     client.indices.get(index="index-that-does-not-exist")
 except ApiError as err:
-
     print(err.meta.status)
     # 404
+    print(err.meta.headers)
+    # {'content-length': '200', ...}
     print(err.body)
     # {
     #   'error': {
