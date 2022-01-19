@@ -176,9 +176,6 @@ Not what you want? See the
 <li class="listitem">
 <a class="xref" href="common-problems.html#server-es-down" title="What happens when APM Server or Elasticsearch is down?">What happens when APM Server or Elasticsearch is down?</a>
 </li>
-<li class="listitem">
-<a class="xref" href="common-problems.html#server-resource-exists-not-alias" title="resource 'apm-8.0.0-rc1-$type' exists, but it is not an alias"><code class="literal">resource 'apm-8.0.0-rc1-$type' exists, but it is not an alias</code></a>
-</li>
 </ul>
 </div>
 <h4><a id="no-data-indexed"></a>No data is indexed<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/8.0/docs/legacy/common-problems.asciidoc">edit</a></h4>
@@ -239,12 +236,6 @@ If the APM Server returns interleaved 503 and 202 responses, it indicates that t
 <ul class="itemizedlist">
 <li class="listitem">
 <a class="xref" href="reduce-storage.html" title="Reduce storage">Reduce storage</a>
-</li>
-<li class="listitem">
-<a class="xref" href="tune-apm-server.html#tune-output-config" title="Tune APM Server output parameters for your Elasticsearch cluster">Tune APM Server output parameters for your Elasticsearch cluster</a>
-</li>
-<li class="listitem">
-<a class="xref" href="tune-apm-server.html#adjust-queue-size" title="Adjust internal queue size">Adjust internal queue size</a>
 </li>
 <li class="listitem">
 <a class="xref" href="tune-es.html" title="Tune Elasticsearch">Tune Elasticsearch for higher ingestion</a>
@@ -379,11 +370,9 @@ Your load balancer should be set somewhere between these numbers.</p>
 </div>
 <h4><a id="server-es-down"></a>What happens when APM Server or Elasticsearch is down?<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/8.0/docs/legacy/common-problems.asciidoc">edit</a></h4>
 <p><span class="strong strong"><strong>If Elasticsearch is down</strong></span></p>
-<p>If Elasticsearch goes down, the APM Server will keep data in memory until Elasticsearch is back up,
-or until it runs out of space in its internal in-memory queue.
-You can <a class="xref" href="tune-apm-server.html#adjust-queue-size" title="Adjust internal queue size">adjust the internal queue size</a> if necessary.
-When the queue becomes full, APM Server will respond with <a class="xref" href="common-problems.html#queue-full" title="HTTP 503: Queue is full"><code class="literal">HTTP 503: Queue is full</code></a>,
-and data will be lost.</p>
+<p>If Elasticsearch goes down, APM will keep some data in its internal in-memory queue.
+When the queue fills up, APM will respond with <a class="xref" href="common-problems.html#queue-full" title="HTTP 503: Queue is full"><code class="literal">HTTP 503: Queue is full</code></a> and
+block requests until there is space available or until the request timeout is reached.</p>
 <p><span class="strong strong"><strong>If APM Server is down</strong></span></p>
 <p>Some agents have internal queues or buffers that will temporarily store data if the APM Server goes down.
 As a general rule of thumb, queues fill up quickly. Assume data will be lost if APM Server goes down.
@@ -419,92 +408,6 @@ with configurable size and time between flushes.
 <span class="strong strong"><strong>.NET agent</strong></span> - No internal queue. Data is lost.
 </li>
 </ul>
-</div>
-<h4><a id="server-resource-exists-not-alias"></a><code class="literal">resource 'apm-8.0.0-rc1-$type' exists, but it is not an alias</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-server/edit/8.0/docs/legacy/common-problems.asciidoc">edit</a></h4>
-<p>This error occurs when APM Server attempts to write to an index instead of an alias.
-One way this can happen, is when indices are manually deleted after APM Server&#8217;s setup process.
-Another possibility is that indices were manually set up, but not properly linked with ILM.</p>
-<p>To fix this issue, perform the steps below. This example assumes <code class="literal">apm-8.0.0-rc1-transaction</code> is the problem index.
-Update the steps with the index version and type that are specific to your error.</p>
-<div class="olist orderedlist">
-<ol class="orderedlist">
-<li class="listitem">
-<p>Block writes to the index:</p>
-<div class="pre_wrapper lang-sh">
-<pre class="programlisting prettyprint lang-sh">PUT apm-8.0.0-rc1-transaction/_settings
-{
-  "settings": {
-    "index.blocks.write": true
-  }
-}</pre>
-</div>
-</li>
-<li class="listitem">
-<p>Clone the index to retain data (optional)</p>
-<div class="pre_wrapper lang-sh">
-<pre class="programlisting prettyprint lang-sh">POST apm-8.0.0-rc1-transaction/_clone/apm-8.0.0-rc1-transaction-original</pre>
-</div>
-<p>You can check the progress of the clone with:</p>
-<div class="pre_wrapper lang-sh">
-<pre class="programlisting prettyprint lang-sh">GET _cat/recovery/apm*transaction*?s=index&amp;v=true&amp;h=index,stage</pre>
-</div>
-<p>When <code class="literal">stage: done</code>, you&#8217;re ready to move on.</p>
-</li>
-<li class="listitem">
-<p>Create the new APM transaction index</p>
-<div class="pre_wrapper lang-sh">
-<pre class="programlisting prettyprint lang-sh">PUT apm-8.0.0-rc1-transaction-000001</pre>
-</div>
-</li>
-<li class="listitem">
-<p>Delete the index <code class="literal">apm-{version}-transaction</code> and create a write alias</p>
-<div class="pre_wrapper lang-sh">
-<pre class="programlisting prettyprint lang-sh">POST _aliases
-{
-  "actions": [
-    {
-      "remove_index": { "index": "apm-8.0.0-rc1-transaction" }
-    },
-    {
-      "add": {
-        "index": "apm-8.0.0-rc1-transaction-000001",
-        "alias": "apm-8.0.0-rc1-transaction",
-        "is_write_index": true
-      }
-    },
-    {
-      "add": {
-        "index": "apm-8.0.0-rc1-transaction-original",
-        "alias": "apm-8.0.0-rc1-transaction",
-        "is_write_index": false
-      }
-    }
-]
-}</pre>
-</div>
-</li>
-<li class="listitem">
-<p>Set the indexing complete on the cloned index</p>
-<div class="pre_wrapper lang-sh">
-<pre class="programlisting prettyprint lang-sh">PUT apm-8.0.0-rc1-transaction-original/_settings
-{
-  "index.lifecycle.indexing_complete": true
-}</pre>
-</div>
-</li>
-<li class="listitem">
-<p>APM Server will resume indexing to the write alias.
-Confirm that APM Server successfully resumes sending transactions:</p>
-<div class="pre_wrapper lang-sh">
-<pre class="programlisting prettyprint lang-sh">GET _cat/aliases/apm*transaction*?s=index&amp;v=true&amp;h=alias,index,is_write_index</pre>
-</div>
-<p>If successful, you&#8217;ll see the following:</p>
-<div class="pre_wrapper lang-sh">
-<pre class="programlisting prettyprint lang-sh">alias                 index                        is_write_index
-apm-8.0.0-rc1-transaction apm-8.0.0-rc1-transaction-000001 true</pre>
-</div>
-</li>
-</ol>
 </div>
 </div>
 <div class="navfooter">
