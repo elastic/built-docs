@@ -100,17 +100,9 @@ update the Daemonset spec to include proper tolerations:</p>
 </div>
 <h5><a id="_red_hat_openshift_configuration"></a>Red Hat OpenShift configuration<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/metricbeat/docs/running-on-kubernetes.asciidoc">edit</a></h5>
 <p>If you are using Red Hat OpenShift, you need to specify additional settings in
-the manifest file and enable the container to run as privileged.</p>
+the manifest file and grant the <code class="literal">metricbeat</code> service account access to the privileged SCC:</p>
 <div class="olist orderedlist">
 <ol class="orderedlist">
-<li class="listitem">
-<p>Modify the <code class="literal">DaemonSet</code> container spec in the manifest file:</p>
-<div class="pre_wrapper lang-yaml">
-<pre class="programlisting prettyprint lang-yaml">  securityContext:
-    runAsUser: 0
-    privileged: true</pre>
-</div>
-</li>
 <li class="listitem">
 <p>In the manifest file, edit the <code class="literal">metricbeat-daemonset-modules</code> ConfigMap, and
 specify the following settings under <code class="literal">kubernetes.yml</code> in the <code class="literal">data</code> section:</p>
@@ -128,7 +120,13 @@ specify the following settings under <code class="literal">kubernetes.yml</code>
       hosts: ["https://${NODE_NAME}:10250"]
       bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
       ssl.certificate_authorities:
-        - /path/to/kubelet-service-ca.crt</pre>
+        - /path/to/kubelet-service-ca.crt
+    - module: kubernetes
+      metricsets:
+        - proxy
+      period: 10s
+      host: ${NODE_NAME}
+      hosts: ["localhost:29101"]</pre>
 </div>
 <div class="note admon">
 <div class="icon"></div>
@@ -154,10 +152,11 @@ ca-bundle.crt:</pre>
 </div>
 </li>
 <li class="listitem">
-<p>Under the <code class="literal">metricbeat</code> ClusterRole, add the following resources:</p>
+<p>If <code class="literal">https</code> is used to access <code class="literal">kube-state-metrics</code>, add the following settings to the <code class="literal">metricbeat-daemonset-config</code> ConfigMap under the kubernetes autodiscover configuration for the <code class="literal">state_*</code> metricsets:</p>
 <div class="pre_wrapper lang-yaml">
-<pre class="programlisting prettyprint lang-yaml">  - nodes/metrics
-  - nodes/stats</pre>
+<pre class="programlisting prettyprint lang-yaml">  bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+  ssl.certificate_authorities:
+    - /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt</pre>
 </div>
 </li>
 <li class="listitem">
@@ -169,8 +168,9 @@ ca-bundle.crt:</pre>
 OpenShift.</p>
 </li>
 <li class="listitem">
-<p>Override the default node selector for the <code class="literal">kube-system</code> namespace (or your
-custom namespace) to allow for scheduling on any node:</p>
+<p>If the namespace where elastic-agent is running has the <code class="literal">"openshift.io/node-selector"</code> annotation set, elastic-agent
+might not run on all nodes. In this case consider overriding the node selector for the namespace to allow scheduling
+on any node:</p>
 <div class="pre_wrapper lang-shell">
 <pre class="programlisting prettyprint lang-shell">oc patch namespace kube-system -p \
 '{"metadata": {"annotations": {"openshift.io/node-selector": ""}}}'</pre>
@@ -179,6 +179,17 @@ custom namespace) to allow for scheduling on any node:</p>
 don&#8217;t run this command, the default node selector will skip master nodes.</p>
 </li>
 </ol>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>for openshift versions prior to the version 4.x additionally you need to modify the <code class="literal">DaemonSet</code> container spec in the manifest file to enable the container to run as privileged:</p>
+</div>
+</div>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">  securityContext:
+    runAsUser: 0
+    privileged: true</pre>
 </div>
 <h4><a id="_load_kibana_dashboards"></a>Load Kibana dashboards<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/metricbeat/docs/running-on-kubernetes.asciidoc">edit</a></h4>
 <p>Metricbeat comes packaged with various pre-built Kibana dashboards
