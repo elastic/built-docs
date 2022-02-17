@@ -473,6 +473,54 @@ reported in Elastic Observability.</p>
 <a href="https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/spanmetricsprocessor#span-metrics-processor" class="ulink" target="_top">OpenTelemetry Collector Span Metrics Processor</a>
 to derive pipeline execution traces into KPI metrics like throughput and the error rate
 of pipelines.</p>
+<h3><a id="check-service-health-from-cd-pipelines"></a>Check service health from deployment pipelines<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/7.16/docs/en/observability/ci-cd-observability.asciidoc">edit</a></h3>
+<p>Integrating automated service health checks in deployment pipelines is critical for end-to-end deployment automation, which crucially enables deployment frequency to be increased.</p>
+<p>Elastic Observability exposes HTTP APIs to check the health of services. You can integrate these APIs in deployment pipelines to verify the behaviour of newly deployed instances, and either automatically continue the deployments or roll back according to the health status.</p>
+<p>The following example shows a canary deployment pipeline that leverages Elastic health check HTTP APIs to automate the quality check before rolling out the deployment from the canary to the entire set of instances:</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/ci-cd-canary-deployment-pipeline.png" alt="Canary Deployment Pipeline">
+</div>
+</div>
+<p>Perform the health check by invoking the <code class="literal">KIBANA_URL/internal/apm/services</code> API to compare the transaction error rate of the service on the newly deployed instances with a threshold value. Pass the following parameters to the invocation:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">start</code> and <code class="literal">end</code>: time interval using the <a href="https://en.wikipedia.org/wiki/ISO_8601" class="ulink" target="_top">ISO-8601</a> format (e.g. "2021-09-01T13:24:12Z" which is a UTC time)
+</li>
+<li class="listitem">
+<code class="literal">kuery</code>: used to filter on the service name and, for example, the new version being deployed to narrow down to the canary instances. Example <code class="literal">service.name:"MY_SERVICE_NAME" AND service.version:"1.2.3"</code>
+</li>
+<li class="listitem">
+<code class="literal">environment</code>: the environment on which the canary instances are deployed. Example: <code class="literal">production</code>.
+</li>
+</ul>
+</div>
+<p>To define the time range, use the <code class="literal">start</code> and <code class="literal">end</code> parameters. These parameters are
+dates in ISO-8601 format. To query only one service, compose a filter in the param <code class="literal">kuery</code>,
+then filter by the service name using the expression <code class="literal">service.name:MY_SERVICE_NAME
+and service.version: SERVICE_VERSION</code>. Finally apply an <code class="literal">environment</code> filter by passing
+the <code class="literal">environment</code> parameter. To select all environments, use <code class="literal">ENVIRONMENT_ALL</code>.</p>
+<p>The API call requires authentication. We recommend to use an API Token to authenticate.</p>
+<p>The API is subject to changes and a stable API optimized for Continous Delivery use cases will soon be published.</p>
+<div class="pre_wrapper lang-python">
+<pre class="programlisting prettyprint lang-python">def check_service_health(service_name, service_version, error_rate_threshold, kibana_url, api_token):
+    now = datetime.now()
+    five_minutes_ago = now - timedelta(minutes=5)
+    params = {
+        "start": five_minutes_ago.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "end": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "kuery": "service.name:{} and service.version:{}".format(service_name, service_version),
+        "environment": "ENVIRONMENT_ALL"
+    }
+    url = "{}/internal/apm/services?{}".format(kibana_url, urllib.parse.urlencode(params))
+    req = urllib.request.Request(url=url, headers={"Authorization": "Bearer {}".format(api_token)})
+    with urllib.request.urlopen(req) as response:
+     body = response.read().decode("utf8")
+     obj = json.loads(body)
+     if len(obj['items']) &gt; 0 and obj['items'][0].transactionErrorRate &gt; error_rate_threshold:
+            raise Exception("Error rate for service {} is higher than threshold {}, current value is {}".format(service_name, error_rate_threshold, obj['items'][0].transactionErrorRate))</pre>
+</div>
 </div>
 <div class="navfooter">
 <span class="prev">
