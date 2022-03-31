@@ -1291,6 +1291,113 @@ fault detection pings:</p>
 
 </div>
 
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="modules-network-threading-model"></a>Networking threading model<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.1/docs/reference/modules/network/threading.asciidoc">edit</a></h3>
+</div></div></div>
+<p>This section describes the threading model used by the networking subsystem in
+Elasticsearch. This information isn&#8217;t required to use Elasticsearch, but it may be useful to
+advanced users who are diagnosing network problems in a cluster.</p>
+<p>Elasticsearch nodes communicate over a collection of TCP channels that together form a
+transport connection. Elasticsearch clients communicate with the cluster over HTTP,
+which also uses one or more TCP channels. Each of these TCP channels is owned
+by exactly one of the <code class="literal">transport_worker</code> threads in the node. This owning
+thread is chosen when the channel is opened and remains the same for the
+lifetime of the channel.</p>
+<p>Each <code class="literal">transport_worker</code> thread has sole responsibility for sending and
+receiving data over the channels it owns. One of the <code class="literal">transport_worker</code> threads
+is also responsible for accepting new incoming transport connections, and one
+is responsible for accepting new HTTP connections.</p>
+<p>If a thread in Elasticsearch wants to send data over a particular channel, it passes the
+data to the owning <code class="literal">transport_worker</code> thread for the actual transmission.</p>
+<p>Normally the <code class="literal">transport_worker</code> threads will not completely handle the messages
+they receive. Instead, they will do a small amount of preliminary processing
+and then dispatch (hand off) the message to a different
+<a class="xref" href="modules-threadpool.html" title="Thread pools">threadpool</a> for the rest of their handling. For instance,
+bulk messages are dispatched to the <code class="literal">write</code> threadpool, searches are dispatched
+to one of the <code class="literal">search</code> threadpools, and requests for statistics and other
+management tasks are mostly dispatched to the <code class="literal">management</code> threadpool. However
+in some cases the processing of a message is expected to be so quick that Elasticsearch
+will do all of the processing on the <code class="literal">transport_worker</code> thread rather than
+incur the overhead of dispatching it elsewhere.</p>
+<p>By default, there is one <code class="literal">transport_worker</code> thread per CPU. In contrast, there
+may sometimes be tens-of-thousands of TCP channels. If data arrives on a TCP
+channel and its owning <code class="literal">transport_worker</code> thread is busy, the data isn&#8217;t
+processed until the thread finishes whatever it is doing. Similarly, outgoing
+data are not sent over a channel until the owning <code class="literal">transport_worker</code> thread is
+free. This means that we require every <code class="literal">transport_worker</code> thread to be idle
+frequently. An idle <code class="literal">transport_worker</code> looks something like this in a stack
+dump:</p>
+<div class="pre_wrapper lang-text">
+<pre class="programlisting prettyprint lang-text">"elasticsearch[instance-0000000004][transport_worker][T#1]" #32 daemon prio=5 os_prio=0 cpu=9645.94ms elapsed=501.63s tid=0x00007fb83b6307f0 nid=0x1c4 runnable  [0x00007fb7b8ffe000]
+   java.lang.Thread.State: RUNNABLE
+	at sun.nio.ch.EPoll.wait(java.base@17.0.2/Native Method)
+	at sun.nio.ch.EPollSelectorImpl.doSelect(java.base@17.0.2/EPollSelectorImpl.java:118)
+	at sun.nio.ch.SelectorImpl.lockAndDoSelect(java.base@17.0.2/SelectorImpl.java:129)
+	- locked &lt;0x00000000c443c518&gt; (a sun.nio.ch.Util$2)
+	- locked &lt;0x00000000c38f7700&gt; (a sun.nio.ch.EPollSelectorImpl)
+	at sun.nio.ch.SelectorImpl.select(java.base@17.0.2/SelectorImpl.java:146)
+	at io.netty.channel.nio.NioEventLoop.select(NioEventLoop.java:813)
+	at io.netty.channel.nio.NioEventLoop.run(NioEventLoop.java:460)
+	at io.netty.util.concurrent.SingleThreadEventExecutor$4.run(SingleThreadEventExecutor.java:986)
+	at io.netty.util.internal.ThreadExecutorMap$2.run(ThreadExecutorMap.java:74)
+	at java.lang.Thread.run(java.base@17.0.2/Thread.java:833)</pre>
+</div>
+<p>In the <a class="xref" href="cluster-nodes-hot-threads.html" title="Nodes hot threads API">Nodes hot threads</a> API an idle <code class="literal">transport_worker</code> thread is
+reported like this:</p>
+<div class="pre_wrapper lang-text">
+<pre class="programlisting prettyprint lang-text">   100.0% [cpu=0.0%, other=100.0%] (500ms out of 500ms) cpu usage by thread 'elasticsearch[instance-0000000004][transport_worker][T#1]'
+     10/10 snapshots sharing following 9 elements
+       java.base@17.0.2/sun.nio.ch.EPoll.wait(Native Method)
+       java.base@17.0.2/sun.nio.ch.EPollSelectorImpl.doSelect(EPollSelectorImpl.java:118)
+       java.base@17.0.2/sun.nio.ch.SelectorImpl.lockAndDoSelect(SelectorImpl.java:129)
+       java.base@17.0.2/sun.nio.ch.SelectorImpl.select(SelectorImpl.java:146)
+       io.netty.channel.nio.NioEventLoop.select(NioEventLoop.java:813)
+       io.netty.channel.nio.NioEventLoop.run(NioEventLoop.java:460)
+       io.netty.util.concurrent.SingleThreadEventExecutor$4.run(SingleThreadEventExecutor.java:986)
+       io.netty.util.internal.ThreadExecutorMap$2.run(ThreadExecutorMap.java:74)
+       java.base@17.0.2/java.lang.Thread.run(Thread.java:833)</pre>
+</div>
+<p>Note that <code class="literal">transport_worker</code> threads should always be in state <code class="literal">RUNNABLE</code>, even
+when waiting for input, because they block in the native <code class="literal">EPoll#wait</code> method.
+This means the hot threads API will report these threads at 100% overall
+utilisation. This is normal, and the breakdown of time into <code class="literal">cpu=</code> and <code class="literal">other=</code>
+fractions shows how much time the thread spent running and waiting for input
+respectively.</p>
+<p>If a <code class="literal">transport_worker</code> thread is not frequently idle, it may build up a
+backlog of work. This can cause delays in processing messages on the channels
+that it owns. It&#8217;s hard to predict exactly which work will be delayed:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+There are many more channels than threads. If work related to one channel is
+causing delays to its worker thread, all other channels owned by that thread
+will also suffer delays.
+</li>
+<li class="listitem">
+The mapping from TCP channels to worker threads is fixed but arbitrary. Each
+channel is assigned an owning thread in a round-robin fashion when the channel
+is opened. Each worker thread is responsible for many different kinds of
+channel.
+</li>
+<li class="listitem">
+There are many channels open between each pair of nodes. For each request,
+Elasticsearch will choose from the appropriate channels in a round-robin fashion. Some
+requests may end up on a channel owned by a delayed worker while other
+identical requests will be sent on a channel that&#8217;s working smoothly.
+</li>
+</ul>
+</div>
+<p>If the backlog builds up too far, some messages may be delayed by many seconds.
+The node might even <a class="xref" href="cluster-fault-detection.html" title="Cluster fault detection">fail its health checks</a> and be
+removed from the cluster. Sometimes, you can find evidence of busy
+<code class="literal">transport_worker</code> threads using the <a class="xref" href="cluster-nodes-hot-threads.html" title="Nodes hot threads API">Nodes hot threads</a> API.
+However, this API itself sends network messages so may not work correctly if
+the <code class="literal">transport_worker</code> threads are too busy. It is more reliable to use
+<code class="literal">jstack</code> to obtain stack dumps or use Java Flight Recorder to obtain a
+profiling trace. These tools are independent of any work the JVM is performing.</p>
+</div>
+
 </div>
 <div class="navfooter">
 <span class="prev">
