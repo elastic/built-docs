@@ -172,7 +172,7 @@ Not what you want? See the
   column-gap: 5px;
 }
 
-[role="select-input"]{
+[role="select-input"] {
     border: none;
     margin-left: 1px;
     color: #2b4590;
@@ -180,8 +180,16 @@ Not what you want? See the
     border-radius: 5px;
 }
 
-[role="lambda-selector-header"]{
+[role="lambda-selector-header"] {
   align-self: flex-start;
+}
+
+#fallback-extension-arn-selector-section {
+  display: none;
+}
+
+#fallback-agent-arn-selector-section {
+  display: none;
 }
 </style>
 
@@ -202,16 +210,15 @@ const addArnGenerator = async (type, ghRepo, arnPattern) => {
     tab.innerHTML = tab.innerHTML.replace(rgx, `<span role="replace${type}Arn"></span>`);
   });
 
-  var version = "ver-1-0-0";
+  var version = undefined;
   var releaseArns = [];
 
   const retrieveLatestLayerVersion = async () => {
     const releases = await fetch(`https://api.github.com/repos/elastic/${ghRepo}/releases`).then(data => {
-        return data.json();
+        return data.status >= 400 ? undefined : data.json();
       });
 
-      releases.filter(release => !release.draft && release.body.includes('arn:aws:lambda:'));
-
+    if(releases){
       var latestRelease = releases[0];
 
       releases.forEach(release => {
@@ -223,11 +230,25 @@ const addArnGenerator = async (type, ghRepo, arnPattern) => {
       releaseArns = latestRelease.body.match(layerArnPattern);
 
       version = latestRelease.tag_name.replace("v","ver-").replace(/\./g, '-');
+    } else {
+      document.getElementById("default-arn-selector-section").style.display = "none";
+      const fallbackSection = document.getElementById(`fallback-${type}-arn-selector-section`);
+      if(fallbackSection){
+        fallbackSection.innerHTML = fallbackSection.innerHTML.replace(/RELEASE_LINK/, `https://github.com/elastic/${ghRepo}/releases/latest`);
+        fallbackSection.style.display = "block";
+      }
+    }
   };
 
   const updateARN = (region, arch) => {
-      const arnWithoutLayerVersion = arnPattern.replace(/\$\{region\}/, region).replace(/\$\{arch\}/, arch).replace(/\$\{version\}/, version);
-      const arn = releaseArns.length === 0 ? arnWithoutLayerVersion + ':1' : releaseArns.find(a => a.startsWith(arnWithoutLayerVersion));
+      var arn = `&lt;SELECTED_${type.toUpperCase()}_LAYER_ARN&gt;`;
+      if(version && releaseArns.length > 0){
+        const arnWithoutLayerVersion = arnPattern.replace(/\$\{region\}/, region).replace(/\$\{arch\}/, arch).replace(/\$\{version\}/, version);
+        const lookedUpArn = releaseArns.find(a => a.startsWith(arnWithoutLayerVersion));
+        if(lookedUpArn){
+          arn = lookedUpArn;
+        }
+      }
       document.querySelectorAll(`[role="replace${type}Arn"]`).forEach(span => {
         span.innerHTML = arn;
       });
@@ -247,8 +268,10 @@ window.addEventListener("DOMContentLoaded", async () => {
 });
 </script>
 
-<div role="lambda-selector">
-  <div role="lambda-selector-header">Select the AWS region and architecture of your Lambda function:</div>
+<p id="fallback-extension-arn-selector-section">Pick the right ARN from <a target="_blank" href="RELEASE_LINK">this release table for the APM Lambda Extension Layer</a>.</p>
+<p id="fallback-agent-arn-selector-section">In addition, pick the right ARN from <a target="_blank" href="RELEASE_LINK">this release table for the APM Agent Layer</a>.</p>
+<div id="default-arn-selector-section" role="lambda-selector">
+  <div role="lambda-selector-header">Select the AWS region and architecture of your Lambda function. This documentation will update based on your selections.</div>
   <div role="lambda-selector-content">
     <div role="lambda-selector-input">
       <div>region:</div>
@@ -394,13 +417,14 @@ AGENT_ARN</pre>
 <p>In your SAM <code class="literal">template.yml</code> file add the Layer ARNs of the APM Extension and the APM Agent as follows:</p>
 <div class="pre_wrapper lang-yml">
 <pre class="programlisting prettyprint lang-yml">...
-ServerlessFunction:
-  Type: AWS::Serverless::Function
-  Properties:
-    ...
-    Layers:
-        - EXTENSION_ARN
-        - AGENT_ARN
+Resources:
+  yourLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      ...
+      Layers:
+          - EXTENSION_ARN
+          - AGENT_ARN
 ...</pre>
 </div>
   </div>
@@ -432,7 +456,6 @@ functions:
 <div class="pre_wrapper lang-terraform">
 <pre class="programlisting prettyprint lang-terraform">...
 resource "aws_lambda_function" "your_lambda_function" {
-  function_name = "yourLambdaFunctionName"
   ...
   layers = ["EXTENSION_ARN", "AGENT_ARN"]
 }
