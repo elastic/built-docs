@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>AWS Lambda Support | APM Python Agent Reference [master] | Elastic</title>
+<title>Monitoring AWS Lambda Python Functions | APM Python Agent Reference [master] | Elastic</title>
 <link rel="home" href="index.html" title="APM Python Agent Reference [master]"/>
 <link rel="up" href="set-up.html" title="Set up the Agent"/>
 <link rel="prev" href="sanic-support.html" title="Sanic Support"/>
@@ -22,7 +22,7 @@ Not what you want? See the
 »
 <span class="breadcrumb-link"><a href="set-up.html">Set up the Agent</a></span>
 »
-<span class="breadcrumb-node">AWS Lambda Support</span>
+<span class="breadcrumb-node">Monitoring AWS Lambda Python Functions</span>
 </div>
 <div class="navheader">
 <span class="prev">
@@ -34,27 +34,309 @@ Not what you want? See the
 </div>
 <div class="section">
 <div class="titlepage"><div><div>
-<h2 class="title"><a id="lambda-support"></a>AWS Lambda Support<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-python/edit/main/docs/serverless.asciidoc">edit</a></h2>
+<h2 class="title"><a id="lambda-support"></a>Monitoring AWS Lambda Python Functions<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-python/edit/main/docs/serverless.asciidoc">edit</a></h2>
 </div></div></div>
+<p>Incorporating Elastic APM into your AWS Lambda functions is easy!
+Follow the steps below to setup Elastic APM for your AWS Lambda Python functions.</p>
+<h4><a id="_prerequisites"></a>Prerequisites<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-python/edit/main/docs/serverless.asciidoc">edit</a></h4>
+<p>You need an APM Server to send APM data to. Follow the <a href="/guide/en/apm/guide/8.1/apm-quick-start.html" class="ulink" target="_top">APM Quick start</a> if you have not set one up yet. For the best-possible performance, we recommend setting up APM on Elastic Cloud in the same AWS region as your AWS Lambda functions.</p>
+<h4><a id="_step_1_setup_the_apm_lambda_extension"></a>Step 1: Setup the APM Lambda Extension<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-python/edit/main/docs/serverless.asciidoc">edit</a></h4>
+<style>
+[role="lambda-selector"] {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  border: 1px solid hsl(219, 1%, 72%);
+  border-radius: 0.2em 0.2em 0 0;
+  overflow: visible;
+  font-family: inherit;
+  font-size: inherit;
+  background: hsl(220, 43%, 99%);
+  margin-top: 20px;
+  margin-bottom: 20px;
+}
+
+[role="lambda-selector-content"] {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-evenly;
+  margin-top: 10px;
+  column-gap: 50px;
+}
+
+[role="lambda-selector-input"] {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  column-gap: 5px;
+}
+
+[role="select-input"]{
+    border: none;
+    margin-left: 1px;
+    color: #2b4590;
+    font-weight: bold;
+    border-radius: 5px;
+}
+
+[role="lambda-selector-header"]{
+  align-self: flex-start;
+}
+</style>
+
+<script>
+const lambdaAttributesUpdateListeners = [];
+const layerArnPattern = /arn:aws:lambda:[^:]*:[^:]*:layer:[^:]*:\d*/g;
+
+const updateLambdaAttributes = () => {
+      const region = document.getElementById("lambda-aws-region").value;
+      const arch = document.getElementById("lambda-arch").value;
+      lambdaAttributesUpdateListeners.forEach(listener => listener(region, arch));
+    };
+
+const addArnGenerator = async (type, ghRepo, arnPattern) => {
+  const tabs = document.getElementsByName("lambda-tabpanel");
+  const rgx = type === 'agent' ? /AGENT_ARN/ : /EXTENSION_ARN/;
+  tabs.forEach(tab => {
+    tab.innerHTML = tab.innerHTML.replace(rgx, `<span role="replace${type}Arn"></span>`);
+  });
+
+  var version = "ver-1-0-0";
+  var releaseArns = [];
+
+  const retrieveLatestLayerVersion = async () => {
+    const releases = await fetch(`https://api.github.com/repos/elastic/${ghRepo}/releases`).then(data => {
+        return data.json();
+      });
+
+      releases.filter(release => !release.draft && release.body.includes('arn:aws:lambda:'));
+
+      var latestRelease = releases[0];
+
+      releases.forEach(release => {
+        if(Date.parse(release.created_at) > Date.parse(latestRelease.created_at)){
+          latestRelease = release;
+        }
+      });
+
+      releaseArns = latestRelease.body.match(layerArnPattern);
+
+      version = latestRelease.tag_name.replace("v","ver-").replace(/\./g, '-');
+  };
+
+  const updateARN = (region, arch) => {
+      const arnWithoutLayerVersion = arnPattern.replace(/\$\{region\}/, region).replace(/\$\{arch\}/, arch).replace(/\$\{version\}/, version);
+      const arn = releaseArns.length === 0 ? arnWithoutLayerVersion + ':1' : releaseArns.find(a => a.startsWith(arnWithoutLayerVersion));
+      document.querySelectorAll(`[role="replace${type}Arn"]`).forEach(span => {
+        span.innerHTML = arn;
+      });
+    };
+
+  lambdaAttributesUpdateListeners.push(updateARN);
+  await retrieveLatestLayerVersion();
+  updateLambdaAttributes();
+}
+
+window.addEventListener("DOMContentLoaded", async () => {
+  const arnInputs = document.querySelectorAll('[role="select-input"]');
+
+  arnInputs.forEach(input => {
+    input.addEventListener("change", e => updateLambdaAttributes());
+  });
+});
+</script>
+
+<div role="lambda-selector">
+  <div role="lambda-selector-header">Select the AWS region and architecture of your Lambda function:</div>
+  <div role="lambda-selector-content">
+    <div role="lambda-selector-input">
+      <div>region:</div>
+      <select id="lambda-aws-region" role="select-input">
+        <option value="af-south-1">af-south-1</option>
+        <option value="ap-east-1">ap-east-1</option>
+        <option value="ap-northeast-1">ap-northeast-1</option>
+        <option value="ap-northeast-2">ap-northeast-2</option>
+        <option value="ap-northeast-3">ap-northeast-3</option>
+        <option value="ap-south-1">ap-south-1</option>
+        <option value="ap-southeast-1">ap-southeast-1</option>
+        <option value="ap-southeast-2">ap-southeast-2</option>
+        <option value="ap-southeast-3">ap-southeast-3</option>
+        <option value="ca-central-1">ca-central-1</option>
+        <option value="eu-central-1">eu-central-1</option>
+        <option value="eu-north-1">eu-north-1</option>
+        <option value="eu-south-1">eu-south-1</option>
+        <option value="eu-west-1">eu-west-1</option>
+        <option value="eu-west-2">eu-west-2</option>
+        <option value="eu-west-3">eu-west-3</option>
+        <option value="me-south-1">me-south-1</option>
+        <option value="sa-east-1">sa-east-1</option>
+        <option value="us-east-1" selected="selected">us-east-1</option>
+        <option value="us-east-2">us-east-2</option>
+        <option value="us-west-1">us-west-1</option>
+        <option value="us-west-2">us-west-2</option>
+      </select>
+    </div>
+    <div role="lambda-selector-input">
+      <div>architecture:</div>
+      <select id="lambda-arch" role="select-input">
+        <option value="x86_64">x86_64</option>
+        <option value="arm64">arm64</option>
+      </select>
+    </div>
+  </div>
+</div>
 <div class="warning admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>This functionality is in technical preview and may be changed or removed in a future release. Elastic will apply best effort to fix any issues, but features in technical preview are not subject to the support SLA of official GA features.</p>
+<p>The selected <em>AWS region</em> and the <em>architecture</em> must match the AWS region and architecture of your AWS Lambda function!</p>
 </div>
 </div>
-<p>Incorporating Elastic APM into your AWS Lambda functions is easy!</p>
-<h4><a id="lambda-installation"></a>Installation<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-python/edit/main/docs/serverless.asciidoc">edit</a></h4>
-<p>First, you need to add <code class="literal">elastic-apm</code> as a dependency for your python function.
+<p>Add the <a href="/guide/en/apm/guide/8.1/aws-lambda-arch.html" class="ulink" target="_top">APM Lambda Extension</a> as an <a href="https://docs.aws.amazon.com/lambda/latest/dg/invocation-layers.html" class="ulink" target="_top">AWS Lambda Layer</a> to your AWS Lambda function.</p>
+<script>
+window.addEventListener("DOMContentLoaded", async () => {
+  addArnGenerator('extension', 'apm-aws-lambda', 'arn:aws:lambda:${region}:267093732750:layer:elastic-apm-extension-${version}-${arch}');
+});
+</script>
+<div class="tabs" data-tab-group="os">
+  <div role="tablist" aria-label="dependency">
+    <button role="tab"
+            aria-selected="true"
+            aria-controls="console-tab-layer"
+            id="console-layer">
+      AWS Web Console
+    </button>
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="cli-tab-layer"
+            id="cli-layer"
+            tabindex="-1">
+      AWS CLI
+    </button>
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="sam-tab-layer"
+            id="sam-layer"
+            tabindex="-1">
+      SAM
+    </button>
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="serverless-tab-layer"
+            id="serverless-layer"
+            tabindex="-1">
+      Serverless
+    </button>
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="terraform-tab-layer"
+            id="terraform-layer"
+            tabindex="-1">
+      Terraform
+    </button>
+  </div>
+  <div tabindex="0"
+      role="tabpanel"
+      id="console-tab-layer"
+      name="lambda-tabpanel"
+      aria-labelledby="console-layer">
+<p>To add a layer to a Lambda function through the AWS Management Console:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Navigate to your function in the AWS Management Console
+</li>
+<li class="listitem">
+Scroll to the Layers section and click the <em>Add a layer</em> button <span class="image"><img src="images/config-layer.png" alt="image of layer configuration section in AWS Console"></span>
+</li>
+<li class="listitem">
+Choose the <em>Specify an ARN</em> radio button
+</li>
+<li class="listitem">
+Copy and paste the following ARN of the APM Lambda Extension layer in the <em>Specify an ARN</em> text input:<br>
+<span style="font-size:10pt"><b>EXTENSION_ARN</b></span>
+<span class="image"><img src="images/choose-a-layer.png" alt="image of choosing a layer in AWS Console"></span>
+</li>
+<li class="listitem">
+Click the <em>Add</em> button
+</li>
+</ol>
+</div>
+  </div>
+  <div tabindex="0"
+      role="tabpanel"
+      id="cli-tab-layer"
+      name="lambda-tabpanel"
+      aria-labelledby="cli-layer"
+      hidden="">
+<p>To add the APM Extension Layer ARN through the AWS command line interface execute the following command:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">aws lambda update-function-configuration --function-name yourLambdaFunctionName \
+--layers EXTENSION_ARN</pre>
+</div>
+  </div>
+  <div tabindex="0"
+      role="tabpanel"
+      id="sam-tab-layer"
+      name="lambda-tabpanel"
+      aria-labelledby="sam-layer"
+      hidden="">
+<p>In your SAM <code class="literal">template.yml</code> file add the APM Extension Layer ARN as follows:</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">...
+ServerlessFunction:
+  Type: AWS::Serverless::Function
+  Properties:
+    ...
+    Layers:
+        - EXTENSION_ARN
+...</pre>
+</div>
+  </div>
+  <div tabindex="0"
+      role="tabpanel"
+      id="serverless-tab-layer"
+      name="lambda-tabpanel"
+      aria-labelledby="serverless-layer"
+      hidden="">
+<p>In your <code class="literal">serverless.yml</code> file add the APM Extension Layer ARN to your function as follows:</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">...
+functions:
+  yourLambdaFunction:
+    handler: ...
+    layers:
+      - EXTENSION_ARN
+...</pre>
+</div>
+  </div>
+  <div tabindex="0"
+      role="tabpanel"
+      id="terraform-tab-layer"
+      name="lambda-tabpanel"
+      aria-labelledby="terraform-layer"
+      hidden="">
+<p>To add the APM Extension Layer to your function add the ARN to the <code class="literal">layers</code> property in your Terraform file:</p>
+<div class="pre_wrapper lang-terraform">
+<pre class="programlisting prettyprint lang-terraform">...
+resource "aws_lambda_function" "your_lambda_function" {
+  function_name = "yourLambdaFunctionName"
+  ...
+  layers = ["EXTENSION_ARN"]
+}
+...</pre>
+</div>
+  </div>
+</div>
+<h4><a id="_step_2_setup_the_apm_python_agent"></a>Step 2: Setup the APM Python Agent<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-python/edit/main/docs/serverless.asciidoc">edit</a></h4>
+<p>You need to add <code class="literal">elastic-apm</code> as a dependency for your python function.
 Depending on your deployment strategy, this could be as easy as adding
 <code class="literal">elastic-apm</code> to your <code class="literal">requirements.txt</code> file, or installing it in the directory
 you plan to deploy using pip:</p>
 <div class="pre_wrapper lang-bash">
 <pre class="programlisting prettyprint lang-bash">$ pip install -t &lt;target_dir&gt; elastic-apm</pre>
 </div>
-<p>You should also add the
-<a href="https://github.com/elastic/apm-aws-lambda" class="ulink" target="_top">Elastic AWS Lambda Extension layer</a>
-to your function.</p>
-<h4><a id="lambda-setup"></a>Setup<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-python/edit/main/docs/serverless.asciidoc">edit</a></h4>
 <p>Once the library is included as a dependency in your function, you must
 import the <code class="literal">capture_serverless</code> decorator and apply it to your handler:</p>
 <div class="pre_wrapper lang-python">
@@ -64,16 +346,150 @@ import the <code class="literal">capture_serverless</code> decorator and apply i
 def handler(event, context):
     return {"statusCode": r.status_code, "body": "Success!"}</pre>
 </div>
-<p>The agent uses environment variables for <a class="xref" href="configuration.html" title="Configuration">configuration</a></p>
-<pre class="screen">ELASTIC_APM_LAMBDA_APM_SERVER=&lt;apm-server url&gt;
-ELASTIC_APM_SECRET_TOKEN=&lt;apm-server token&gt;
-ELASTIC_APM_SERVICE_NAME=my-awesome-service</pre>
-<p>Note that the above configuration assumes you&#8217;re using the Elastic Lambda
-Extension. The agent will automatically send data to the extension at <code class="literal">localhost</code>,
-and the extension will then send to the APM Server as specified with
-<code class="literal">ELASTIC_APM_LAMBDA_APM_SERVER</code>.</p>
-<h4><a id="lambda-usage"></a>Usage<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-python/edit/main/docs/serverless.asciidoc">edit</a></h4>
-<p>Once the agent is installed and working, spans will be captured for
+<h4><a id="_step_3_configure_apm_on_aws_lambda"></a>Step 3: Configure APM on AWS Lambda<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-python/edit/main/docs/serverless.asciidoc">edit</a></h4>
+<p>The APM Lambda Extension and the APM Python agent are configured through environment variables on the AWS Lambda function.</p>
+<p>For the minimal configuration, you will need the <em>APM Server URL</em> to set the destination for APM data and an <em><a href="/guide/en/apm/guide/8.1/secret-token.html" class="ulink" target="_top">APM Secret Token</a></em>.
+If you prefer to use an <a href="/guide/en/apm/guide/8.1/api-key.html" class="ulink" target="_top">APM API key</a> instead of the APM secret token, use the <code class="literal">ELASTIC_APM_API_KEY</code> environment variable instead of <code class="literal">ELASTIC_APM_SECRET_TOKEN</code> in the following configuration.</p>
+<div class="tabs" data-tab-group="os">
+  <div role="tablist" aria-label="dependency">
+    <button role="tab"
+            aria-selected="true"
+            aria-controls="console-tab-lambda-python-config"
+            id="console-lambda-python-config">
+      AWS Web Console
+    </button>
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="cli-tab-lambda-python-config"
+            id="cli-lambda-python-config"
+            tabindex="-1">
+      AWS CLI
+    </button>
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="sam-tab-lambda-python-config"
+            id="sam-lambda-python-config"
+            tabindex="-1">
+      SAM
+    </button>
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="serverless-tab-lambda-python-config"
+            id="serverless-lambda-python-config"
+            tabindex="-1">
+      Serverless
+    </button>
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="terraform-tab-lambda-python-config"
+            id="terraform-lambda-python-config"
+            tabindex="-1">
+      Terraform
+    </button>
+  </div>
+  <div tabindex="0"
+      role="tabpanel"
+      id="console-tab-lambda-python-config"
+      name="lambda-tabpanel"
+      aria-labelledby="console-lambda-python-config">
+<p>To configure APM through the AWS Management Console:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Navigate to your function in the AWS Management Console
+</li>
+<li class="listitem">
+Click on the <em>Configuration</em> tab
+</li>
+<li class="listitem">
+Click on <em>Environment variables</em>
+</li>
+<li class="listitem">
+Add the following required variables:
+</li>
+</ol>
+</div>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">ELASTIC_APM_LAMBDA_APM_SERVER = &lt;YOUR-APM-SERVER-URL&gt;     # this is your APM Server URL
+ELASTIC_APM_SECRET_TOKEN      = &lt;YOUR-APM-SECRET-TOKEN&gt;   # this is your APM secret token</pre>
+</div>
+<p><span class="image"><img src="./python-lambda-env-vars.png" alt="Python environment variables configuration section in AWS Console"></span></p>
+  </div>
+  <div tabindex="0"
+      role="tabpanel"
+      id="cli-tab-lambda-python-config"
+      name="lambda-tabpanel"
+      aria-labelledby="cli-lambda-python-config"
+      hidden="">
+<p>To configure APM through the AWS command line interface execute the following command:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">aws lambda update-function-configuration --function-name yourLambdaFunctionName \
+    --environment "Variables={ELASTIC_APM_LAMBDA_APM_SERVER=&lt;YOUR-APM-SERVER-URL&gt;,ELASTIC_APM_SECRET_TOKEN=&lt;YOUR-APM-SECRET-TOKEN&gt;}"</pre>
+</div>
+  </div>
+  <div tabindex="0"
+      role="tabpanel"
+      id="sam-tab-lambda-python-config"
+      name="lambda-tabpanel"
+      aria-labelledby="sam-lambda-python-config"
+      hidden="">
+<p>In your SAM <code class="literal">template.yml</code> file add the Layer ARNs of the APM Extension and the APM Agent as follows:</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">...
+Resources:
+  yourLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      ...
+      Environment:
+          Variables:
+            ELASTIC_APM_LAMBDA_APM_SERVER: &lt;YOUR-APM-SERVER-URL&gt;
+            ELASTIC_APM_SECRET_TOKEN: &lt;YOUR-APM-SECRET-TOKEN&gt;
+...</pre>
+</div>
+  </div>
+  <div tabindex="0"
+      role="tabpanel"
+      id="serverless-tab-lambda-python-config"
+      name="lambda-tabpanel"
+      aria-labelledby="serverless-lambda-python-config"
+      hidden="">
+<p>In your <code class="literal">serverless.yml</code> file add the Layer ARNs of the APM Extension and the APM Agent to your function as follows:</p>
+<div class="pre_wrapper lang-yml">
+<pre class="programlisting prettyprint lang-yml">...
+functions:
+  yourLambdaFunction:
+    ...
+    environment:
+      ELASTIC_APM_LAMBDA_APM_SERVER: &lt;YOUR-APM-SERVER-URL&gt;
+      ELASTIC_APM_SECRET_TOKEN: &lt;YOUR-APM-SECRET-TOKEN&gt;
+...</pre>
+</div>
+  </div>
+  <div tabindex="0"
+      role="tabpanel"
+      id="terraform-tab-lambda-python-config"
+      name="lambda-tabpanel"
+      aria-labelledby="terraform-lambda-python-config"
+      hidden="">
+<p>To add the APM Extension and the APM Agent to your function add the ARNs to the <code class="literal">layers</code> property in your Terraform file:</p>
+<div class="pre_wrapper lang-terraform">
+<pre class="programlisting prettyprint lang-terraform">...
+resource "aws_lambda_function" "your_lambda_function" {
+  ...
+  environment {
+    variables = {
+      ELASTIC_APM_LAMBDA_APM_SERVER = "&lt;YOUR-APM-SERVER-URL&gt;"
+      ELASTIC_APM_SECRET_TOKEN      = "&lt;YOUR-APM-SECRET-TOKEN&gt;"
+    }
+  }
+}
+...</pre>
+</div>
+  </div>
+</div>
+<p>You can optionally <a class="xref" href="configuration.html" title="Configuration">fine-tune the Python agent</a> or the <a href="/guide/en/apm/guide/8.1/aws-lambda-config-options.html" class="ulink" target="_top">configuration of the APM Lambda Extension</a>.</p>
+<p>That&#8217;s it; Once the agent is installed and working, spans will be captured for
 <a class="xref" href="supported-technologies.html" title="Supported Technologies">supported technologies</a>. You can also use
 <a class="xref" href="api.html#api-capture-span" title="elasticapm.capture_span"><code class="literal">capture_span</code></a> to capture custom spans, and
 you can retrieve the <code class="literal">Client</code> object for capturing exceptions/messages
