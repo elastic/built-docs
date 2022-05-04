@@ -183,6 +183,41 @@ By counting rules as recurring tasks and actions as non-recurring tasks, a rough
 <p>Because Kibana uses the documents to display historic data, you should set the delete phase longer than you would like the historic data to be shown. For example, if you would like to see one month&#8217;s worth of historic data, you should set the delete phase to at least one month.</p>
 <p>For more information on index lifecycle management, see:
 <a href="/guide/en/elasticsearch/reference/master/index-lifecycle-management.html" class="ulink" target="_top">Index Lifecycle Policies</a>.</p>
+<h3><a id="alerting-circuit-breakers"></a>Circuit breakers<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/main/docs/user/production-considerations/alerting-production-considerations.asciidoc">edit</a></h3>
+<p>There are several scenarios where running alerting rules and actions can start to negatively impact the overall health of a Kibana instance either by clogging up Task Manager throughput or by consuming so much CPU/memory that other operations cannot complete in a reasonable amount of time. There are several <a class="xref" href="alert-action-settings-kb.html#alert-settings" title="Alerting settings">configurable</a> circuit breakers to help minimize these effects.</p>
+<h4><a id="_rules_with_very_short_intervals"></a>Rules with very short intervals<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/main/docs/user/production-considerations/alerting-production-considerations.asciidoc">edit</a></h4>
+<p>Running large numbers of rules at very short intervals can quickly clog up Task Manager throughput, leading to higher schedule drift. Use <code class="literal">xpack.alerting.rules.minimumScheduleInterval.value</code> to set a minimum schedule interval for rules. The default (and recommended) value for this configuration is <code class="literal">1m</code>. Use <code class="literal">xpack.alerting.rules.minimumScheduleInterval.enforce</code> to specify whether to strictly enforce this minimum. While the default value for this setting is <code class="literal">false</code> to maintain backwards compatibility with existing rules, set this to <code class="literal">true</code> to prevent new and updated rules from running at an interval below the minimum.</p>
+<h4><a id="_rules_that_run_for_a_long_time"></a>Rules that run for a long time<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/main/docs/user/production-considerations/alerting-production-considerations.asciidoc">edit</a></h4>
+<p>Rules that run for a long time typically do so because they are issuing resource-intensive Elasticsearch queries or performing CPU-intensive processing. This can block the event loop, making Kibana inaccessible while the rule runs. By default, rule processing is cancelled after <code class="literal">5m</code> but this can be overriden using the <code class="literal">xpack.alerting.rules.run.timeout</code> configuration. This value can also be configured per rule type using <code class="literal">xpack.alerting.rules.run.ruleTypeOverrides</code>. For example, the following configuration sets the global timeout value to <code class="literal">1m</code> while allowing <span class="strong strong"><strong>Index Threshold</strong></span> rules to run for <code class="literal">10m</code> before being cancelled.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">xpack.alerting.rules.run:
+  timeout: '1m'
+  ruleTypeOverrides:
+    - id: '.index-threshold'
+      timeout: '10m'</pre>
+</div>
+<p>When a rule run is cancelled, any alerts and actions that were generated during the run are discarded. This behavior is controlled by the <code class="literal">xpack.alerting.cancelAlertsOnRuleTimeout</code> configuration, which defaults to <code class="literal">true</code>. Set this to <code class="literal">false</code> to receive alerts and actions after the timeout, although be aware that these may be incomplete and possibly inaccurate.</p>
+<h4><a id="_rules_that_spawn_too_many_actions"></a>Rules that spawn too many actions<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/main/docs/user/production-considerations/alerting-production-considerations.asciidoc">edit</a></h4>
+<p>Rules that spawn too many actions can quickly clog up Task Manager throughput. This can occur if:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+A rule configured with a single action generates many alerts. For example, if a rule configured to run a single email action generates 100,000 alerts, then 100,000 actions will be scheduled during a run.
+</li>
+<li class="listitem">
+A rule configured with multiple actions generates alerts. For example, if a rule configured to run an email action, a server log action and a webhook action generates 30,000 alerts, then 90,000 actions will be scheduled during a run.
+</li>
+</ul>
+</div>
+<p>Use <code class="literal">xpack.alerting.rules.run.actions.max</code> to limit the maximum number of actions a rule can generate per run. This value can also be configured by connector type using <code class="literal">xpack.alerting.rules.run.actions.connectorTypeOverrides</code>. For example, the following config sets the global maximum number of actions to 100 while allowing rules with <span class="strong strong"><strong>Email</strong></span> actions to generate up to 200 actions.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">xpack.alerting.rules.run:
+  actions:
+    max: 100
+    connectorTypeOverrides:
+      - id: '.email'
+        max: 200</pre>
+</div>
 </div>
 <div class="navfooter">
 <span class="prev">
