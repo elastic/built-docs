@@ -142,7 +142,7 @@ Not what you want? See the
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Use Logstash to ingest the TriMet REST API into Elasticsearch.
+Use Filebeat to ingest the TriMet REST API into Elasticsearch.
 </li>
 <li class="listitem">
 Create a map with layers that visualize asset tracks and last-known locations.
@@ -171,12 +171,12 @@ If you don’t already have Kibana, set it up with <a href="/cloud/elasticsearch
 Obtain an API key for <a href="https://developer.trimet.org/" class="ulink" target="_top">TriMet web services</a> at <a href="https://developer.trimet.org/appid/registration/" class="ulink" target="_top">https://developer.trimet.org/appid/registration/</a>.
 </li>
 <li class="listitem">
-<a href="/guide/en/logstash/current/getting-started-with-logstash.html" class="ulink" target="_top">Install Logstash</a>.
+<a href="/guide/en/beats/filebeat/current/filebeat-installation-configuration.html" class="ulink" target="_top">Install Filebeat</a>.
 </li>
 </ul>
 </div>
 <h3><a id="_part_1_ingest_the_portland_bus_data"></a>Part 1: Ingest the Portland bus data<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/main/docs/maps/asset-tracking-tutorial.asciidoc">edit</a></h3>
-<p>To get to the fun of visualizing and alerting on Portland buses, you must first create a Logstash pipeline to ingest the TriMet Portland bus data into Elasticsearch.</p>
+<p>To get to the fun of visualizing and alerting on Portland buses, you must first create a Filebeat input to ingest the TriMet Portland bus data into Elasticsearch.</p>
 <h4><a id="_step_1_set_up_an_elasticsearch_index"></a>Step 1: Set up an Elasticsearch index<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/main/docs/maps/asset-tracking-tutorial.asciidoc">edit</a></h4>
 <div class="olist orderedlist">
 <ol class="orderedlist">
@@ -184,109 +184,266 @@ Obtain an API key for <a href="https://developer.trimet.org/" class="ulink" targ
 In Kibana, open the main menu, then click <span class="strong strong"><strong>Dev Tools</strong></span>.
 </li>
 <li class="listitem">
-<p>In <span class="strong strong"><strong>Console</strong></span>, create the <code class="literal">tri_met_tracks</code> index:</p>
+<p>In <span class="strong strong"><strong>Console</strong></span>, create the <code class="literal">tri_met_tracks</code> index lifecyle policy. This policy will keep the events in the hot data phase for 7 days. The data then moves to the warm phase. After 365 days in the warm phase, the data is deleted.</p>
 <div class="pre_wrapper lang-js">
-<pre class="programlisting prettyprint lang-js">PUT tri_met_tracks</pre>
+<pre class="programlisting prettyprint lang-js">PUT _ilm/policy/tri_met_tracks
+{
+  "policy": {
+    "phases": {
+      "hot": {
+        "min_age": "0ms",
+        "actions": {
+          "rollover": {
+            "max_primary_shard_size": "50gb",
+            "max_age": "7d"
+          },
+          "set_priority": {
+            "priority": 100
+          }
+        }
+      },
+      "warm": {
+        "min_age": "0d",
+        "actions": {
+          "set_priority": {
+            "priority": 50
+          }
+        }
+      },
+      "delete": {
+        "min_age": "365d",
+        "actions": {
+          "delete": {
+            "delete_searchable_snapshot": true
+          }
+        }
+      }
+    }
+  }
+}</pre>
 </div>
 </li>
 <li class="listitem">
-<p>To configure the <code class="literal">tri_met_tracks</code> index mappings, run:</p>
+<p>In <span class="strong strong"><strong>Console</strong></span>, create the <code class="literal">tri_met_tracks</code> index template, which is configured to use datastreams:</p>
 <div class="pre_wrapper lang-js">
-<pre class="programlisting prettyprint lang-js">PUT tri_met_tracks/_mapping
+<pre class="programlisting prettyprint lang-js">PUT _index_template/tri_met_tracks
 {
-  "properties": {
-    "in_congestion": {
-      "type": "boolean"
+  "template": {
+    "settings": {
+      "index": {
+        "lifecycle": {
+          "name": "tri_met_tracks"
+        }
+      }
     },
-    "location": {
-      "type": "geo_point"
-    },
-    "route": {
-      "type": "keyword"
-    },
-    "time": {
-      "type": "date",
-      "format": "epoch_millis"
-    },
-    "type": {
-      "type": "keyword"
-    },
-    "vehicle_id": {
-      "type": "keyword"
+    "mappings": {
+      "_routing": {
+        "required": false
+      },
+      "numeric_detection": false,
+      "dynamic_date_formats": [
+        "strict_date_optional_time",
+        "yyyy/MM/dd HH:mm:ss Z||yyyy/MM/dd Z"
+      ],
+      "dynamic": true,
+      "_source": {
+        "excludes": [],
+        "includes": [],
+        "enabled": true
+      },
+      "dynamic_templates": [],
+      "date_detection": true,
+      "properties": {
+        "trimet": {
+          "type": "object",
+          "properties": {
+            "expires": {
+              "type": "date"
+            },
+            "signMessage": {
+              "type": "text"
+            },
+            "serviceDate": {
+              "type": "date"
+            },
+            "loadPercentage": {
+              "type": "float"
+            },
+            "nextStopSeq": {
+              "type": "integer"
+            },
+            "source": {
+              "type": "keyword"
+            },
+            "type": {
+              "type": "keyword"
+            },
+            "blockID": {
+              "type": "integer"
+            },
+            "signMessageLong": {
+              "type": "text"
+            },
+            "lastLocID": {
+              "type": "integer"
+            },
+            "nextLocID": {
+              "type": "integer"
+            },
+            "locationInScheduleDay": {
+              "type": "integer"
+            },
+            "newTrip": {
+              "type": "boolean"
+            },
+            "direction": {
+              "type": "integer"
+            },
+            "inCongestion": {
+              "type": "boolean"
+            },
+            "routeNumber": {
+              "type": "integer"
+            },
+            "bearing": {
+              "type": "integer"
+            },
+            "garage": {
+              "type": "keyword"
+            },
+            "tripID": {
+              "type": "integer"
+            },
+            "delay": {
+              "type": "integer"
+            },
+            "extraBlockID": {
+              "type": "integer"
+            },
+            "messageCode": {
+              "type": "integer"
+            },
+            "lastStopSeq": {
+              "type": "integer"
+            },
+            "location": {
+              "type": "geo_point"
+            },
+            "time": {
+              "index": true,
+              "ignore_malformed": false,
+              "store": false,
+              "type": "date",
+              "doc_values": true
+            },
+            "vehicleID": {
+              "type": "integer"
+            },
+            "offRoute": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
     }
-  }
+  },
+  "index_patterns": [
+    "tri_met_tracks*"
+  ],
+  "data_stream": {
+    "hidden": false,
+    "allow_custom_routing": false
+  },
+  "composed_of": []
+}</pre>
+</div>
+</li>
+<li class="listitem">
+<p>In <span class="strong strong"><strong>Console</strong></span>, add the <code class="literal">tri_met_track</code> ingest pipeline.</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">PUT _ingest/pipeline/tri_met_tracks
+{
+  "processors": [
+    {
+      "set": {
+        "field": "trimet.inCongestion",
+        "value": "false",
+        "if": "ctx?.trimet?.inCongestion == null"
+      }
+    },
+    {
+      "convert": {
+        "field": "trimet.bearing",
+        "type": "float"
+      }
+    },
+    {
+      "convert": {
+        "field": "trimet.inCongestion",
+        "type": "boolean"
+      }
+    },
+    {
+      "script": {
+        "source": "ctx['trimet']['location'] = ctx['trimet']['latitude'] + \",\" + ctx['trimet']['longitude']"
+      }
+    },
+    {
+      "script": {
+        "source": "ctx['_id'] = ctx['trimet']['vehicleID'] + \"_\" + ctx['trimet']['time']",
+        "description": "Generate documentID"
+      }
+    },
+    {
+      "remove": {
+        "field": [
+          "message",
+          "input",
+          "agent",
+          "ecs",
+          "host",
+          "event",
+          "trimet.longitude",
+          "trimet.latitude"
+        ]
+      }
+    },
+    {
+      "set": {
+        "field": "_index",
+        "value": "tri_met_tracks"
+      }
+    }
+  ]
 }</pre>
 </div>
 </li>
 </ol>
 </div>
-<h4><a id="_step_2_start_logstash"></a>Step 2: Start Logstash<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/main/docs/maps/asset-tracking-tutorial.asciidoc">edit</a></h4>
+<h4><a id="_step_2_start_filebeat"></a>Step 2: Start Filebeat<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/main/docs/maps/asset-tracking-tutorial.asciidoc">edit</a></h4>
 <div class="olist orderedlist">
 <ol class="orderedlist">
 <li class="listitem">
-In your <code class="literal">logstash/config</code> folder, create the file <code class="literal">trimet-pipeline.conf</code>.
-</li>
-<li class="listitem">
-<p>Copy the pipeline script into your <code class="literal">trimet-pipeline.conf</code> file.</p>
+<p>Replace the contents in your <code class="literal">filebeat.yml</code> file with the following:</p>
 <div class="pre_wrapper lang-yaml">
-<pre class="programlisting prettyprint lang-yaml">input {
-  http_poller {
-    urls =&gt; {
-      trimet =&gt; "https://developer.trimet.org/ws/v2/vehicles?appID=&lt;tri_met_app_id&gt;"
-    }
-    request_timeout =&gt; 60
-    schedule =&gt; { cron =&gt; "* * * * * UTC"}
-    codec =&gt; "json"
-  }
-}
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+# Fetch trimet bus data every minute.
+- type: httpjson
+  interval: 1m
+  request.url: "https://developer.trimet.org/ws/v2/vehicles?appID=&lt;tri_met_app_id&gt;"
+  response.split:
+    target: body.resultSet.vehicle
+  processors:
+    - decode_json_fields:
+        fields: ["message"]
+        target: "trimet"
 
-filter {
-  split {
-    field =&gt; "[resultSet][vehicle]"
-  }
+  pipeline: "tri_met_tracks"
 
-  if ![resultSet][vehicle][inCongestion] {
-    mutate {
-      update =&gt; {
-        "[resultSet][vehicle][inCongestion]" =&gt; "false"
-      }
-    }
-  }
 
-  mutate {
-    add_field =&gt; {
-      "bearing" =&gt; "%{[resultSet][vehicle][bearing]}"
-      "in_congestion" =&gt; "%{[resultSet][vehicle][inCongestion]}"
-      "location" =&gt; "%{[resultSet][vehicle][latitude]},%{[resultSet][vehicle][longitude]}"
-      "route" =&gt; "%{[resultSet][vehicle][routeNumber]}"
-      "time" =&gt; "%{[resultSet][vehicle][time]}"
-      "type" =&gt; "%{[resultSet][vehicle][type]}"
-      "vehicle_id" =&gt; "%{[resultSet][vehicle][vehicleID]}"
-    }
-    remove_field =&gt; [ "resultSet", "@version", "@timestamp", "[event][original]" ]
-  }
-
-  mutate {
-    convert =&gt; {
-      "bearing" =&gt; "float"
-  "in_congestion" =&gt; "boolean"
-      "time" =&gt; "integer"
-    }
-  }
-}
-
-output {
-  stdout {
-    codec =&gt; rubydebug
-  }
-
-  elasticsearch {
-    cloud_auth =&gt; "&lt;username:password&gt;"
-    cloud_id =&gt; "&lt;cloud_id&gt;"
-    index =&gt; "tri_met_tracks"
-    document_id =&gt; "%{[vehicle_id]}_%{[time]}"
-  }
-}</pre>
+# ---------------------------- Elastic Cloud Output ----------------------------
+cloud.id: &lt;cloud_id&gt;
+cloud.auth: &lt;username:password&gt;</pre>
 </div>
 </li>
 <li class="listitem">
@@ -299,24 +456,19 @@ Replace <code class="literal">&lt;username:password&gt;</code> with your Elastic
 Replace <code class="literal">&lt;cloud_id&gt;</code> with your Elastic Cloud Enterprise/ece-cloud-id.html[elastic cloud id].
 </li>
 <li class="listitem">
-Open a terminal window, and then navigate to the Logstash folder.
+Open a terminal window, and then navigate to the Filebeat folder.
 </li>
 <li class="listitem">
-<p>In your <code class="literal">logstash</code> folder, run Logstash with the TriMet pipeline:</p>
+<p>In your <code class="literal">filebeat</code> folder, run Filebeat with the edited config:</p>
 <div class="pre_wrapper lang-bash">
-<pre class="programlisting prettyprint lang-bash">bin/logstash -f config/trimet-pipeline.conf</pre>
+<pre class="programlisting prettyprint lang-bash">/bin/filebeat -c filebeat.yml</pre>
 </div>
 </li>
 <li class="listitem">
-<p>Wait for Logstash to initialize and confirm data is flowing. You should see messages similar to this:</p>
-<div class="imageblock screenshot">
-<div class="content">
-<img src="maps/images/asset-tracking-tutorial/logstash_output.png" alt="logstash output">
-</div>
-</div>
+Wait for Filebeat to start shipping data to Elastic Cloud. Filebeat should not produce any output to stdout.
 </li>
 <li class="listitem">
-Leave the terminal window open and Logstash running throughout this tutorial.
+Leave the terminal window open and Filebeat running throughout this tutorial.
 </li>
 </ol>
 </div>
@@ -336,7 +488,7 @@ Give the data view a name: <span class="strong strong"><strong>tri_met_tracks</s
 Click <span class="strong strong"><strong>Next step</strong></span>.
 </li>
 <li class="listitem">
-Set the <span class="strong strong"><strong>Time field</strong></span> to <span class="strong strong"><strong>time</strong></span>.
+Set the <span class="strong strong"><strong>Time field</strong></span> to <span class="strong strong"><strong>trimet.time</strong></span>.
 </li>
 <li class="listitem">
 Click <span class="strong strong"><strong>Create data view</strong></span>.
@@ -346,7 +498,7 @@ Click <span class="strong strong"><strong>Create data view</strong></span>.
 <p>Kibana shows the fields in your data view.</p>
 <div class="imageblock screenshot">
 <div class="content">
-<img src="maps/images/asset-tracking-tutorial/index_pattern.png" alt="index pattern">
+<img src="maps/images/asset-tracking-tutorial/data_view.png" alt="data view">
 </div>
 </div>
 <h4><a id="_step_4_explore_the_portland_bus_data"></a>Step 4: Explore the Portland bus data<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/main/docs/maps/asset-tracking-tutorial.asciidoc">edit</a></h4>
@@ -362,7 +514,7 @@ Set the data view to <span class="strong strong"><strong>tri_met_tracks</strong>
 Open the <a class="xref" href="set-time-filter.html" title="Set the time range">time filter</a>, and set the time range to the last 15 minutes.
 </li>
 <li class="listitem">
-Expand a document and explore some of the fields that you will use later in this tutorial: <code class="literal">bearing</code>, <code class="literal">in_congestion</code>, <code class="literal">location</code>, and <code class="literal">vehicle_id</code>.
+Expand a document and explore some of the fields that you will use later in this tutorial: <code class="literal">trimet.bearing</code>, <code class="literal">trimet.inCongestion</code>, <code class="literal">trimet.location</code>, and <code class="literal">trimet.vehicleID</code>.
 </li>
 </ol>
 </div>
@@ -372,7 +524,7 @@ Expand a document and explore some of the fields that you will use later in this
 </div>
 </div>
 <h3><a id="_part_2_build_an_operational_map"></a>Part 2: Build an operational map<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/main/docs/maps/asset-tracking-tutorial.asciidoc">edit</a></h3>
-<p>It&#8217;s hard to get an overview of Portland buses by looking at individual events. Let&#8217;s create a map to show the bus routes and current location for each bus, along with the direction the buses are headed.</p>
+<p>It&#8217;s hard to get an overview of Portland buses by looking at individual events. Let&#8217;s create a map to show the bus routes and current location for each bus, along with the direction the buses are heading.</p>
 <h4><a id="_step_1_create_your_map"></a>Step 1: Create your map<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/kibana/edit/main/docs/maps/asset-tracking-tutorial.asciidoc">edit</a></h4>
 <p>Create your map and set the theme for the default layer to dark mode.</p>
 <div class="olist orderedlist">
@@ -412,10 +564,10 @@ Select the <span class="strong strong"><strong>tri_met_tracks</strong></span>* d
 <div class="olist orderedlist">
 <ol class="orderedlist">
 <li class="listitem">
-Set <span class="strong strong"><strong>Entity</strong></span> to <span class="strong strong"><strong>vehicle_id</strong></span>.
+Set <span class="strong strong"><strong>Entity</strong></span> to <span class="strong strong"><strong>trimet.vehicleID</strong></span>.
 </li>
 <li class="listitem">
-Set <span class="strong strong"><strong>Sort</strong></span> to <span class="strong strong"><strong>time</strong></span>.
+Set <span class="strong strong"><strong>Sort</strong></span> to <span class="strong strong"><strong>trimet.time</strong></span>.
 </li>
 </ol>
 </div>
@@ -468,13 +620,13 @@ Select the <span class="strong strong"><strong>tri_met_tracks</strong></span>* d
 <div class="olist orderedlist">
 <ol class="orderedlist">
 <li class="listitem">
-Set <span class="strong strong"><strong>Entity</strong></span> to <span class="strong strong"><strong>vehicle_id</strong></span>.
+Set <span class="strong strong"><strong>Entity</strong></span> to <span class="strong strong"><strong>trimet.vehicleID</strong></span>.
 </li>
 <li class="listitem">
 Set <span class="strong strong"><strong>Documents per entity</strong></span> to 1.
 </li>
 <li class="listitem">
-Set <span class="strong strong"><strong>Sort field</strong></span> to <span class="strong strong"><strong>time</strong></span>.
+Set <span class="strong strong"><strong>Sort field</strong></span> to <span class="strong strong"><strong>trimet.time</strong></span>.
 </li>
 <li class="listitem">
 Set <span class="strong strong"><strong>Sort order</strong></span> to <span class="strong strong"><strong>descending</strong></span>.
@@ -500,7 +652,7 @@ Set <span class="strong strong"><strong>Icon</strong></span> to <span class="str
 <div class="olist lowerroman">
 <ol class="lowerroman" type="i">
 <li class="listitem">
-Select <span class="strong strong"><strong>By value</strong></span> styling, and set the field to <span class="strong strong"><strong>in_congestion</strong></span>.
+Select <span class="strong strong"><strong>By value</strong></span> styling, and set the field to <span class="strong strong"><strong>trimet.inCongestion</strong></span>.
 </li>
 <li class="listitem">
 Use a <span class="strong strong"><strong>Custom color palette</strong></span>.
@@ -521,7 +673,7 @@ Add a red class for <span class="strong strong"><strong>true</strong></span>, me
 Set <span class="strong strong"><strong>Border width</strong></span> to 0.
 </li>
 <li class="listitem">
-<p>Change <span class="strong strong"><strong>Symbol orientation</strong></span> to use <span class="strong strong"><strong>By value</strong></span> and the <span class="strong strong"><strong>bearing</strong></span> field.</p>
+<p>Change <span class="strong strong"><strong>Symbol orientation</strong></span> to use <span class="strong strong"><strong>By value</strong></span> and the <span class="strong strong"><strong>trimet.bearing</strong></span> field.</p>
 <div class="imageblock screenshot">
 <div class="content">
 <img src="maps/images/asset-tracking-tutorial/top_hits_layer_style.png" alt="top hits layer style">
@@ -558,7 +710,7 @@ Click <span class="strong strong"><strong>Add layer</strong></span>.
 Click <span class="strong strong"><strong>Create index</strong></span>.
 </li>
 <li class="listitem">
-Set <span class="strong strong"><strong>Index name</strong></span> to <span class="strong strong"><strong>construction_zones</strong></span>.
+Set <span class="strong strong"><strong>Index name</strong></span> to <span class="strong strong"><strong>trimet_construction_zones</strong></span>.
 </li>
 <li class="listitem">
 Click <span class="strong strong"><strong>Create index</strong></span>.
@@ -651,13 +803,13 @@ Select the <span class="strong strong"><strong>Tracking containment</strong></sp
 Set <span class="strong strong"><strong>INDEX</strong></span> to <span class="strong strong"><strong>tri_met_tracks</strong></span>*.
 </li>
 <li class="listitem">
-Set <span class="strong strong"><strong>BY</strong></span> to <span class="strong strong"><strong>vehicle_id</strong></span>.
+Set <span class="strong strong"><strong>BY</strong></span> to <span class="strong strong"><strong>trimet.vehicleID</strong></span>.
 </li>
 </ol>
 </div>
 </li>
 <li class="listitem">
-<p>Set <span class="strong strong"><strong>Select boundary</strong></span> <span class="strong strong"><strong>INDEX</strong></span> to <span class="strong strong"><strong>construction_zones</strong></span>.</p>
+<p>Set <span class="strong strong"><strong>Select boundary</strong></span> <span class="strong strong"><strong>INDEX</strong></span> to <span class="strong strong"><strong>trimet_construction_zones</strong></span>.</p>
 <div class="imageblock screenshot">
 <div class="content">
 <img src="maps/images/asset-tracking-tutorial/tracking_containment_configuration.png" alt="tracking containment configuration">
