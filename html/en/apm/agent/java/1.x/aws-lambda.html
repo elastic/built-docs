@@ -383,6 +383,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 <script>
 window.addEventListener("DOMContentLoaded", async () => {
   addArnGenerator('agent', 'apm-agent-java', 'arn:aws:lambda:${region}:267093732750:layer:elastic-apm-java-${version}');
+  replaceAgentDockerImageParams('FROM docker.elastic.co/observability/apm-agent-java:latest AS java-agent',
+                                'COPY --from=java-agent /usr/agent/ /opt/');
 });
 </script>
 <p>Both the <a href="/guide/en/apm/guide/8.3/aws-lambda-arch.html" class="ulink" target="_top">APM Lambda Extension</a> and the Java APM Agent are added to your Lambda function as <a href="https://docs.aws.amazon.com/lambda/latest/dg/invocation-layers.html" class="ulink" target="_top">AWS Lambda Layers</a>. Therefore, you need to add the corresponding Layer ARNs (identifiers) to your Lambda function.</p>
@@ -552,6 +554,7 @@ AGENT_COPY
 <p>The APM Lambda Extension and the APM Java agent are configured through environment variables on the AWS Lambda function.</p>
 <p>For the minimal configuration, you will need the <em>APM Server URL</em> to set the destination for APM data and an <em><a href="/guide/en/apm/guide/8.3/secret-token.html" class="ulink" target="_top">APM Secret Token</a></em>.
 If you prefer to use an <a href="/guide/en/apm/guide/8.3/api-key.html" class="ulink" target="_top">APM API key</a> instead of the APM secret token, use the <code class="literal">ELASTIC_APM_API_KEY</code> environment variable instead of <code class="literal">ELASTIC_APM_SECRET_TOKEN</code> in the following configuration.</p>
+<p>For production environments, we recommend <a href="/guide/en/apm/guide/8.3/aws-lambda-secrets-manager.html" class="ulink" target="_top">using the AWS Secrets Manager to store your APM authentication key</a> instead of providing the secret value as plaintext in the environment variables.</p>
 <div class="tabs" data-tab-group="os">
   <div role="tablist" aria-label="dependency">
     <button role="tab"
@@ -587,6 +590,13 @@ If you prefer to use an <a href="/guide/en/apm/guide/8.3/api-key.html" class="ul
             id="terraform-lambda-java-config"
             tabindex="-1">
       Terraform
+    </button>
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="container-tab-lambda-java-config"
+            id="container-lambda-java-config"
+            tabindex="-1">
+      Container Image
     </button>
   </div>
   <div tabindex="0"
@@ -636,7 +646,7 @@ ELASTIC_APM_SECRET_TOKEN      = &lt;YOUR-APM-SECRET-TOKEN&gt;   # this is your A
       name="lambda-tabpanel"
       aria-labelledby="sam-lambda-java-config"
       hidden="">
-<p>In your SAM <code class="literal">template.yml</code> file add the Layer ARNs of the APM Extension and the APM Agent as follows:</p>
+<p>In your SAM <code class="literal">template.yml</code> file configure the following environment variables:</p>
 <div class="pre_wrapper lang-yml">
 <pre class="programlisting prettyprint lang-yml">...
 Resources:
@@ -658,7 +668,7 @@ Resources:
       name="lambda-tabpanel"
       aria-labelledby="serverless-lambda-java-config"
       hidden="">
-<p>In your <code class="literal">serverless.yml</code> file add the Layer ARNs of the APM Extension and the APM Agent to your function as follows:</p>
+<p>In your <code class="literal">serverless.yml</code> file configure the following environment variables:</p>
 <div class="pre_wrapper lang-yml">
 <pre class="programlisting prettyprint lang-yml">...
 functions:
@@ -677,7 +687,7 @@ functions:
       name="lambda-tabpanel"
       aria-labelledby="terraform-lambda-java-config"
       hidden="">
-<p>To add the APM Extension and the APM Agent to your function add the ARNs to the <code class="literal">layers</code> property in your Terraform file:</p>
+<p>In your Terraform file configure the following environment variables:</p>
 <div class="pre_wrapper lang-terraform">
 <pre class="programlisting prettyprint lang-terraform">...
 resource "aws_lambda_function" "your_lambda_function" {
@@ -691,6 +701,35 @@ resource "aws_lambda_function" "your_lambda_function" {
   }
 }
 ...</pre>
+</div>
+  </div>
+  <div tabindex="0"
+      role="tabpanel"
+      id="container-tab-lambda-java-config"
+      name="lambda-tabpanel"
+      aria-labelledby="container-lambda-java-config"
+      hidden="">
+<p>Environment variables configured for an AWS Lambda function are passed to the container running the lambda function.
+You can use one of the other options (through AWS Web Console, AWS CLI, etc.) to configure the environment variables
+or <a href="https://docs.docker.com/engine/reference/builder/#env" class="ulink" target="_top">define them directly in your Dockerfile</a>.</p>
+<p>We recommend to use an <a href="https://gallery.ecr.aws/lambda/java" class="ulink" target="_top">official AWS Lambda base image</a> for your function&#8217;s container image.
+In this case, you will only need to configure the following three environment variables:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">AWS_LAMBDA_EXEC_WRAPPER       = "/opt/elastic-apm-handler"
+ELASTIC_APM_LAMBDA_APM_SERVER = &lt;YOUR-APM-SERVER-URL&gt;     # this is your APM Server URL
+ELASTIC_APM_SECRET_TOKEN      = &lt;YOUR-APM-SECRET-TOKEN&gt;   # this is your APM secret token</pre>
+</div>
+<p>If your container image is based on a different base image (not including the AWS Lambda runtime utilities),
+the <code class="literal">AWS_LAMBDA_EXEC_WRAPPER</code> configuration option won&#8217;t be supported. In this case, you will need to define an extended
+set of environment variables (which, in the above case, are set through the wrapper script):</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">JAVA_TOOL_OPTIONS              = "-javaagent:/opt/elastic-apm-agent.jar"
+ELASTIC_APM_AWS_LAMBDA_HANDLER = &lt;HANDLER_CLASS_NAME&gt; # the fully qualified class name of your Lambda handler
+ELASTIC_APM_METRICS_INTERVAL   = "0s"
+ELASTIC_APM_CENTRAL_CONFIG     = "false"
+ELASTIC_APM_CLOUD_PROVIDER     = "none"
+ELASTIC_APM_LAMBDA_APM_SERVER  = &lt;YOUR-APM-SERVER-URL&gt;     # this is your APM Server URL
+ELASTIC_APM_SECRET_TOKEN       = &lt;YOUR-APM-SECRET-TOKEN&gt;   # this is your APM secret token</pre>
 </div>
   </div>
 </div>
