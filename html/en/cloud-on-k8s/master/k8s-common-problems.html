@@ -124,10 +124,49 @@ Not what you want? See the
 <div class="titlepage"><div><div>
 <h3 class="title"><a id="k8s-common-problems-operator-oom"></a>Operator crashes on startup with <code class="literal">OOMKilled</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/main/docs/operating-eck/troubleshooting/common-problems.asciidoc">edit</a></h3>
 </div></div></div>
-<p>On very large Kubernetes clusters with many hundreds of resources (pods, secrets, config maps, and so on), the operator may fail to start with its pod getting killed with a <code class="literal">OOMKilled</code> message. This is an issue with the <code class="literal">controller-runtime</code> framework on top of which the operator is built. Even though the operator is only interested in the resources created by itself, the framework code needs to gather information about all relevant resources in the Kubernetes cluster in order to provide the filtered view of cluster state required by the operator. On very large clusters, this information gathering can use up a lot of memory and exceed the default resource limit defined for the operator pod.</p>
+<p>On very large Kubernetes clusters with many hundreds of resources (pods, secrets, config maps, and so on), the operator may fail to start with its pod getting terminated with a <code class="literal">OOMKilled</code> reason:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl -n elastic-system \
+  get pods -o=jsonpath='{.items[].status.containerStatuses}' | jq</pre>
+</div>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">[
+  {
+    "containerID": "containerd://...",
+    "image": "docker.elastic.co/eck/eck-operator:2.3.0",
+    "imageID": "docker.elastic.co/eck/eck-operator@sha256:...",
+    "lastState": {
+      "terminated": {
+        "containerID": "containerd://...",
+        "exitCode": 137,
+        "finishedAt": "2022-07-04T09:47:02Z",
+        "reason": "OOMKilled",
+        "startedAt": "2022-07-04T09:46:43Z"
+      }
+    },
+    "name": "manager",
+    "ready": false,
+    "restartCount": 2,
+    "started": false,
+    "state": {
+      "waiting": {
+        "message": "back-off 20s restarting failed container=manager pod=elastic-operator-0_elastic-system(57de3efd-57e0-4c1e-8151-72b0ac4d6b14)",
+        "reason": "CrashLoopBackOff"
+      }
+    }
+  }
+]</pre>
+</div>
+<p>This is an issue with the <code class="literal">controller-runtime</code> framework on top of which the operator is built. Even though the operator is only interested in the resources created by itself, the framework code needs to gather information about all relevant resources in the Kubernetes cluster in order to provide the filtered view of cluster state required by the operator. On very large clusters, this information gathering can use up a lot of memory and exceed the default resource limit defined for the operator pod.</p>
 <p>The default <a href="https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#meaning-of-memory" class="ulink" target="_top">memory limit</a> for the operator pod is set to 1 Gi. You can increase (or decrease) this limit to a value suited to your cluster as follows:</p>
 <div class="pre_wrapper lang-sh">
 <pre class="programlisting prettyprint lang-sh">kubectl patch sts elastic-operator -n elastic-system -p '{"spec":{"template":{"spec":{"containers":[{"name":"manager", "resources":{"limits":{"memory":"2Gi"}}}]}}}}'</pre>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Set limits (<code class="literal">spec.containers[].resources.limits</code>) that match requests (<code class="literal">spec.containers[].resources.requests</code>) to prevent operator&#8217;s Pod from being terminated during <a href="https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/" class="ulink" target="_top">node-pressure eviction</a>.</p>
+</div>
 </div>
 </div>
 
