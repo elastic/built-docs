@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Using the Client in a Function-as-a-Service Environment | Elasticsearch .NET Client [8.4] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch .NET Client [8.4]"/>
+<link rel="up" href="connecting-nest-hl.html" title="Connecting"/>
+<link rel="prev" href="working-with-certificates.html" title="Working with certificates"/>
+<link rel="next" href="serialization.html" title="Serialization"/>
+<meta name="DC.type" content="Learn/Docs/Clients/.Net/8.4"/>
+<meta name="DC.subject" content="Clients"/>
+<meta name="DC.identifier" content="8.4"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch .NET Client [8.4]</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="nest.html">NEST - High level client</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="connecting-nest-hl.html">Connecting</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="working-with-certificates.html">« Working with certificates</a>
+</span>
+<span class="next">
+<a href="serialization.html">Serialization »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="function-as-a-service-environments"></a>Using the Client in a Function-as-a-Service Environment<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch-net/edit/8.4/docs/client-concepts/connection/function-as-a-service-environments.asciidoc">edit</a></h2>
+</div></div></div>
+<p>This section illustrates the best practices for leveraging the Elasticsearch client in a Function-as-a-Service (FaaS) environment.
+The most influential optimization is to initialize the client outside of the function, the global scope.
+This practice does not only improve performance but also enables background functionality as – for example –
+<a href="/blog/elasticsearch-sniffing-best-practices-what-when-why-how" class="ulink" target="_top">sniffing</a>.
+The following examples provide a skeleton for the best practices.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_azure_functions"></a>Azure Functions<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch-net/edit/8.4/docs/client-concepts/connection/function-as-a-service-environments.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Dependency injection in Azure Functions is built on the .NET Core Dependency Injection features. Azure recommends the
+use of the singleton lifetime for connections and clients (such as the ElasticsearchClient). The singleton service lifetime
+matches the host lifetime and is reused across function executions on that instance.</p>
+<p>Your project will require the latest applicable version of the following packages:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Microsoft.NET.Sdk.Functions
+</li>
+<li class="listitem">
+Microsoft.Azure.Functions.Extensions
+</li>
+<li class="listitem">
+Microsoft.Extensions.DependencyInjection
+</li>
+<li class="listitem">
+NEST
+</li>
+</ul>
+</div>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">using System;
+using System.Threading.Tasks;
+using Elasticsearch.Net;
+using ElasticsearchExampleAzure;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Azure.Functions.Extensions.DependencyInjection;
+using Microsoft.Azure.WebJobs;
+using Microsoft.Azure.WebJobs.Extensions.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Nest;
+
+[assembly: FunctionsStartup(typeof(Startup))]
+
+namespace ElasticsearchExampleAzure
+{
+    // Use the startup method to configure services into the DI container.
+    public class Startup : FunctionsStartup
+    {
+        public override void Configure(IFunctionsHostBuilder builder)
+        {
+            // Registering the ElasticClient as a singleton instance ensures we use the same underlying node pool for requests and
+            // avoid first call overhead per invocation.
+            builder.Services.AddSingleton(s =&gt; new ElasticClient(Environment.GetEnvironmentVariable("ELASTIC_CLOUD_ID"),
+                new ApiKeyAuthenticationCredentials(Environment.GetEnvironmentVariable("ELASTIC_API_KEY"))));
+        }
+    }
+
+    public class MyHttpTrigger
+    {
+        // Store the client in a private field for use from the function
+        private readonly ElasticClient _client;
+
+        // Add a constructor accepting the client which is provided by the DI container.
+        public MyHttpTrigger(ElasticClient client)
+        {
+            _client = client;
+        }
+
+        [FunctionName("Function1")]
+        public async Task&lt;IActionResult&gt; Run(
+            [HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = null)]
+            HttpRequest req, ILogger log)
+        {
+            var response = await _client.PingAsync();
+            return new OkObjectResult(response.DebugInformation);
+        }
+    }
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_gcp_cloud_functions"></a>GCP Cloud Functions<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch-net/edit/8.4/docs/client-concepts/connection/function-as-a-service-environments.asciidoc">edit</a></h3>
+</div></div></div>
+<p>To ensure reuse of the client and avoid a first request penalty per invocation, define it as a static field in the Function class. Once
+instantiated, it retains its value between invocations in the same execution environment. There is no guarantee that the state of a Cloud Function
+will be preserved for future invocations. However, Cloud Functions often recycles the execution environment of a previous invocation. If you
+declare a variable in global scope, its value can be reused in subsequent invocations without having to be recomputed.</p>
+<p>Your project will require the latest applicable version of the following packages:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Google.Cloud.Functions.Hosting
+</li>
+<li class="listitem">
+NEST
+</li>
+</ul>
+</div>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">using Elasticsearch.Net;
+using Google.Cloud.Functions.Framework;
+using Microsoft.AspNetCore.Http;
+using Nest;
+using System;
+using System.Threading.Tasks;
+
+namespace ElasticsearchExampleGCP
+{
+    public class Function : IHttpFunction
+    {
+        // Define a static client instance which is reused within the execution environment
+        // Environment variables need to be configured to provide the cloud ID and API key we're going to use
+        public static ElasticClient Client = new ElasticClient(Environment.GetEnvironmentVariable("ELASTIC_CLOUD_ID"),
+            new ApiKeyAuthenticationCredentials(Environment.GetEnvironmentVariable("ELASTIC_API_KEY")));
+
+        /// &lt;summary&gt;
+        /// Logic for your function goes here.
+        /// &lt;/summary&gt;
+        /// &lt;param name="context"&gt;The HTTP context, containing the request and the response.&lt;/param&gt;
+        /// &lt;returns&gt;A task representing the asynchronous operation.&lt;/returns&gt;
+        public async Task HandleAsync(HttpContext context)
+        {
+            var response = await Client.PingAsync();
+            await context.Response.WriteAsync(response.DebugInformation);
+        }
+    }
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_aws_lambda"></a>AWS Lambda<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch-net/edit/8.4/docs/client-concepts/connection/function-as-a-service-environments.asciidoc">edit</a></h3>
+</div></div></div>
+<p>To ensure reuse of the client and avoid a first request penalty per invocation, define it as a static field in the Function class. Once
+instantiated, it retains its value between invocations in the same execution environment.</p>
+<p>Your project will require the latest applicable version of the following packages:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Amazon.Lambda.Core
+</li>
+<li class="listitem">
+Amazon.Lambda.Serialization.SystemTextJson
+</li>
+<li class="listitem">
+NEST
+</li>
+</ul>
+</div>
+<div class="pre_wrapper lang-csharp">
+<pre class="programlisting prettyprint lang-csharp">using System;
+using Amazon.Lambda.Core;
+using Amazon.Lambda.Serialization.SystemTextJson;
+using Elasticsearch.Net;
+using Nest;
+
+// Assembly attribute to enable the Lambda function's JSON input to be converted into a .NET class.
+[assembly: LambdaSerializer(typeof(DefaultLambdaJsonSerializer))]
+
+namespace ElasticsearchExampleLambda
+{
+    public class Function
+    {
+        // Define a static client instance which is reused within the execution environment
+        // Environment variables need to be configured to provide the cloud ID and API key we're going to use
+        public static ElasticClient Client = new ElasticClient(Environment.GetEnvironmentVariable("ELASTIC_CLOUD_ID"),
+            new ApiKeyAuthenticationCredentials(Environment.GetEnvironmentVariable("ELASTIC_API_KEY")));
+
+        public void FunctionHandler(ILambdaContext context)
+        {
+            var response = Client.Ping();
+            context.Logger.LogLine(response.DebugInformation);
+        }
+    }
+}</pre>
+</div>
+<p>Resources used to assess these recommendations:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://cloud.google.com/functions/docs/bestpractices/tips#use_global_variables_to_reuse_objects_in_future_invocations" class="ulink" target="_top">GCP Cloud Functions: Tips &amp; Tricks</a>
+</li>
+<li class="listitem">
+<a href="https://docs.aws.amazon.com/lambda/latest/dg/best-practices.html" class="ulink" target="_top">Best practices for working with AWS Lambda functions</a>
+</li>
+<li class="listitem">
+<a href="https://docs.microsoft.com/en-us/azure/azure-functions/functions-reference-python?tabs=azurecli-linux%2Capplication-level#global-variables" class="ulink" target="_top">Azure Functions Python developer guide</a>
+</li>
+<li class="listitem">
+<a href="https://docs.microsoft.com/en-us/azure/azure-functions/functions-dotnet-dependency-injection" class="ulink" target="_top">Use dependency injection in .NET Azure Functions</a>
+</li>
+<li class="listitem">
+<a href="https://docs.aws.amazon.com/lambda/latest/operatorguide/global-scope.html" class="ulink" target="_top">AWS Lambda: Comparing the effect of global scope</a>
+</li>
+</ul>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="working-with-certificates.html">« Working with certificates</a>
+</span>
+<span class="next">
+<a href="serialization.html">Serialization »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
