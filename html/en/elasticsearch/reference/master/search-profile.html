@@ -1272,7 +1272,7 @@ overall time, the breakdown is inclusive of all children times.</p>
 <div class="titlepage"><div><div>
 <h4 class="title"><a id="profiling-fetch"></a>Profiling Fetch<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/profile.asciidoc">edit</a></h4>
 </div></div></div>
-<p>All shards the fetched documents will have a <code class="literal">fetch</code> section in the profile.
+<p>All shards that fetched documents will have a <code class="literal">fetch</code> section in the profile.
 Let&#8217;s execute a small search and have a look a the fetch profile:</p>
 <a id="578808065fee8691355b8f25c35782cd"></a>
 <div class="pre_wrapper lang-console">
@@ -1363,6 +1363,252 @@ loading stored fields by setting
 
 <div class="section">
 <div class="titlepage"><div><div>
+<h4 class="title"><a id="profiling-dfs"></a>Profiling DFS<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/profile.asciidoc">edit</a></h4>
+</div></div></div>
+<p>The DFS phase runs before the query phase to collect global information
+relevant to the query. It&#8217;s currently used in two cases:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+When the <code class="literal">search_type</code> is set to
+<a class="xref" href="search-profile.html#profiling-dfs-statistics" title="Profiling DFS Statistics"><code class="literal">dfs_query_then_fetch</code></a> and the index has
+multiple shards.
+</li>
+<li class="listitem">
+When the search request contains a <a class="xref" href="search-profile.html#profiling-knn-search" title="Profiling kNN Search">knn section</a>.
+</li>
+</ol>
+</div>
+<p>Both of these cases can be profiled by setting <code class="literal">profile</code> to <code class="literal">true</code> as
+part of the search request.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="profiling-dfs-statistics"></a>Profiling DFS Statistics<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/profile.asciidoc">edit</a></h5>
+</div></div></div>
+<p>When the <code class="literal">search_type</code> is set to <code class="literal">dfs_query_then_fetch</code> and the index
+has multiple shards, the dfs phase collects term statistics to improve
+the relevance of search results.</p>
+<p>The following is an example of setting <code class="literal">profile</code> to <code class="literal">true</code> on a search
+that uses <code class="literal">dfs_query_then_fetch</code>:</p>
+<p>Let&#8217;s first setup an index with multiple shards and index
+a pair of documents with different values on a <code class="literal">keyword</code> field.</p>
+<a id="558b3f9b987771e9f9f35e51a0d7e062"></a>
+<a id="profile_dfs"></a><div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT my-dfs-index
+{
+  "settings": {
+    "number_of_shards": 2, <a id="CO729-1"></a><i class="conum" data-value="1"></i>
+    "number_of_replicas": 1
+  },
+  "mappings": {
+      "properties": {
+        "my-keyword": { "type": "keyword" }
+      }
+    }
+}
+
+POST my-dfs-index/_bulk?refresh=true
+{ "index" : { "_id" : "1" } }
+{ "my-keyword" : "a" }
+{ "index" : { "_id" : "2" } }
+{ "my-keyword" : "b" }</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/2625.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO729-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">my-dfs-index</code> is created with multiple shards.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>With an index setup, we can now profile the dfs phase of a
+search query. For this example we use a term query.</p>
+<a id="b6e385760e036e36827f719b540d9c11"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /my-dfs-index/_search?search_type=dfs_query_then_fetch&amp;pretty&amp;size=0 <a id="CO730-1"></a><i class="conum" data-value="1"></i>
+{
+  "profile": true, <a id="CO730-2"></a><i class="conum" data-value="2"></i>
+  "query": {
+    "term": {
+      "my-keyword": {
+        "value": "a"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/2626.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO730-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">search_type</code> url parameter is set to <code class="literal">dfs_query_then_fetch</code> to
+ensure the dfs phase is run.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO730-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">profile</code> parameter is set to <code class="literal">true</code>.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>In the response, we see a profile which includes a <code class="literal">dfs</code> section
+for each shard along with profile output for the rest of the search phases.
+One of the <code class="literal">dfs</code> sections for a shard looks like the following:</p>
+<a id="6ef93f300fa4465ad884f4ae5ac030a1"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">"dfs" : {
+    "statistics" : {
+        "type" : "statistics",
+        "description" : "collect term statistics",
+        "time_in_nanos" : 236955,
+        "breakdown" : {
+            "term_statistics" : 4815,
+            "collection_statistics" : 27081,
+            "collection_statistics_count" : 1,
+            "create_weight" : 153278,
+            "term_statistics_count" : 1,
+            "rewrite_count" : 0,
+            "create_weight_count" : 1,
+            "rewrite" : 0
+        }
+    }
+}</pre>
+</div>
+<p>In the <code class="literal">dfs.statistics</code> portion of this response we see a <code class="literal">time_in_nanos</code>
+which is the total time it took to collect term statistics for this
+shard along with a further breakdown of the individual parts.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="profiling-knn-search"></a>Profiling kNN Search<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/profile.asciidoc">edit</a></h5>
+</div></div></div>
+<p>A <a class="xref" href="knn-search.html#approximate-knn" title="Approximate kNN">k-nearest neighbor (kNN)</a> search runs during
+the dfs phase.</p>
+<p>The following is an example of setting <code class="literal">profile</code> to <code class="literal">true</code> on a search
+that has a <code class="literal">knn</code> section:</p>
+<p>Let&#8217;s first setup an index with several dense vectors.</p>
+<a id="7ebeb6cf26be5b5ecdfd408bd0fc3215"></a>
+<a id="profile_knn"></a><div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT my-knn-index
+{
+  "mappings": {
+    "properties": {
+      "my-vector": {
+        "type": "dense_vector",
+        "dims": 3,
+        "index": true,
+        "similarity": "l2_norm"
+      }
+    }
+  }
+}
+
+POST my-knn-index/_bulk?refresh=true
+{ "index": { "_id": "1" } }
+{ "my-vector": [1, 5, -20] }
+{ "index": { "_id": "2" } }
+{ "my-vector": [42, 8, -15] }
+{ "index": { "_id": "3" } }
+{ "my-vector": [15, 11, 23] }</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/2627.console"></div>
+<p>With an index setup, we can now profile a kNN search query.</p>
+<a id="49e8773a34fcbf825de38426cff5509c"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST my-knn-index/_search
+{
+  "profile": true, <a id="CO731-1"></a><i class="conum" data-value="1"></i>
+  "knn": {
+    "field": "my-vector",
+    "query_vector": [-5, 9, -12],
+    "k": 3,
+    "num_candidates": 100
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/2628.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO731-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">profile</code> parameter is set to <code class="literal">true</code>.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>In the response, we see a profile which includes a <code class="literal">knn</code> section
+as part of the <code class="literal">dfs</code> section for each shard along with profile output for the
+rest of the search phases.</p>
+<p>One of the <code class="literal">dfs.knn</code> sections for a shard looks like the following:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">"dfs" : {
+    "knn" : {
+        "query" : [
+            {
+                "type" : "DocAndScoreQuery",
+                "description" : "DocAndScore[100]",
+                "time_in_nanos" : 444414,
+                "breakdown" : {
+                  "set_min_competitive_score_count" : 0,
+                  "match_count" : 0,
+                  "shallow_advance_count" : 0,
+                  "set_min_competitive_score" : 0,
+                  "next_doc" : 1688,
+                  "match" : 0,
+                  "next_doc_count" : 3,
+                  "score_count" : 3,
+                  "compute_max_score_count" : 0,
+                  "compute_max_score" : 0,
+                  "advance" : 4153,
+                  "advance_count" : 1,
+                  "score" : 2099,
+                  "build_scorer_count" : 2,
+                  "create_weight" : 128879,
+                  "shallow_advance" : 0,
+                  "create_weight_count" : 1,
+                  "build_scorer" : 307595
+                }
+            }
+        ],
+        "rewrite_time" : 1275732,
+        "collector" : [
+            {
+                "name" : "SimpleTopScoreDocCollector",
+                "reason" : "search_top_hits",
+                "time_in_nanos" : 17163
+            }
+        ]
+    }
+}</pre>
+</div>
+<p>In the <code class="literal">dfs.knn</code> portion of the response we can see the output
+the of timings for <a class="xref" href="search-profile.html#query-section" title="query Section">query</a>, <a class="xref" href="search-profile.html#rewrite-section" title="rewrite Section">rewrite</a>,
+and <a class="xref" href="search-profile.html#collectors-section" title="collectors Section">collector</a>. Unlike many other queries, kNN
+search does the bulk of the work during the query rewrite. This means
+<code class="literal">rewrite_time</code> represents the time spent on kNN search.</p>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
 <h4 class="title"><a id="profiling-considerations"></a>Profiling Considerations<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/profile.asciidoc">edit</a></h4>
 </div></div></div>
 <p>Like any profiler, the Profile API introduces a non-negligible overhead to
@@ -1392,8 +1638,7 @@ responses on the coordinating node, or additional work such as building global
 ordinals (an internal data structure used to speed up search).
 </li>
 <li class="listitem">
-Profiling statistics are currently not available for suggestions,
-highlighting, <code class="literal">dfs_query_then_fetch</code>.
+Profiling statistics are currently not available for suggestions.
 </li>
 <li class="listitem">
 Profiling of the reduce phase of aggregation is currently not available.
