@@ -136,23 +136,249 @@
 <p>In order to prepare your environment to be production ready, you&#8217;ll need to set up secure communication between each of your Elastic resources.</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<h3 class="title"><a id="security-set-up-tls"></a>Setting up TLS<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/main/docsk8s/setting-up/ls-k8s-secure.asciidoc">edit</a></h3>
+<h3 class="title"><a id="security-communication"></a>Secure communication<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/main/docsk8s/setting-up/ls-k8s-secure.asciidoc">edit</a></h3>
 </div></div></div>
-<p>It&#8217;s important to set up transport layer security (TLS) to ensure safe communication between the Elastic Stack components running in Kubernetes.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="security-tls"></a>Setting up TLS<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/main/docsk8s/setting-up/ls-k8s-secure.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Transport layer security (TLS) helps ensure safe communication between the Elastic Stack components running in Kubernetes.
+Let&#8217;s take Filebeat and Logstash TLS mutual verification as an <a href="/guide/en/beats/filebeat/master/configuring-ssl-logstash.html" class="ulink" target="_top">example</a>. Logstash serves as the server side, while Filebeat is the client.</p>
+<p>Create a <code class="literal">Secret</code> containing server and client SSL keys:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl create secret generic logstash-beats-tls --from-file=ca.crt --from-file=client.crt --from-file=client.key --from-file=server.crt --from-file=server.pkcs8.key</pre>
+</div>
+<p>On Logstash, configure the server certificates to the pipeline:</p>
+<div class="pre_wrapper lang-ruby">
+<pre class="programlisting prettyprint lang-ruby">input {
+    beats {
+        port =&gt; "5044"
+        ssl =&gt; true
+        ssl_certificate_authorities =&gt; ["/usr/share/logstash/config/ca.crt"]
+        ssl_certificate =&gt; "/usr/share/logstash/config/server.crt"
+        ssl_key =&gt; "/usr/share/logstash/config/server.pkcs8.key"
+        ssl_verify_mode =&gt; "force_peer"
+    }
+}</pre>
+</div>
+<p>Mount the keys we just created to Logstash <code class="literal">Deployment</code>:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">          volumeMounts:
+            - name: logstash-beats-tls
+              mountPath: /usr/share/logstash/config/ca.crt
+              subPath: ca.crt
+            - name: logstash-beats-tls
+              mountPath: /usr/share/logstash/config/server.pkcs8.key
+              subPath: server.pkcs8.key
+            - name: logstash-beats-tls
+              mountPath: /usr/share/logstash/config/server.crt
+              subPath: server.crt
+      volumes:
+        - name: logstash-beats-tls
+          secret:
+            secretName: logstash-beats-tls</pre>
+</div>
+<p>On Filebeat, configure the client certificates:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: beat.k8s.elastic.co/v1beta1
+kind: Beat
+metadata:
+  name: demo
+spec:
+  type: filebeat
+  config:
+    output.logstash:
+      ssl.certificate_authorities: ["/usr/share/filebeat/ca.crt"]
+      ssl.certificate: "/usr/share/filebeat/client.crt"
+      ssl.key: "/usr/share/filebeat/client.key"
+(...)
+  deployment:
+    podTemplate:
+      spec:
+        containers:
+          - name: filebeat
+            volumeMounts:
+              - name: logstash-beats-tls
+                mountPath: /usr/share/filebeat/ca.crt
+                subPath: ca.crt
+              - name: logstash-beats-tls
+                mountPath: /usr/share/filebeat/client.key
+                subPath: client.key
+              - name: logstash-beats-tls
+                mountPath: /usr/share/filebeat/client.crt
+                subPath: client.crt
+        volumes:
+          - name: logstash-beats-tls
+            secret:
+              secretName: logstash-beats-tls</pre>
+</div>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<h3 class="title"><a id="security-eck-secrets"></a>Using secrets from an ECK installation<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/main/docsk8s/setting-up/ls-k8s-secure.asciidoc">edit</a></h3>
+<h4 class="title"><a id="security-eck-secrets"></a>Securing connection to Elasticsearch on ECK<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/main/docsk8s/setting-up/ls-k8s-secure.asciidoc">edit</a></h4>
 </div></div></div>
-<p>Description.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="security-eck-secrets-pw"></a>Authentication<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/main/docsk8s/setting-up/ls-k8s-secure.asciidoc">edit</a></h5>
+</div></div></div>
+<p>ECK creates a user for every Elastic resource. To access these resources, such as Elasticsearch, Logstash needs a username and password.</p>
+<p>The default username of Elasticsearch is <code class="literal">elastic</code>. You can also run the command to check the username:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">&gt; kubectl describe secret demo-es-elastic-user
+Name:         demo-es-elastic-user
+Namespace:    default
+Labels:       common.k8s.elastic.co/type=elasticsearch
+              eck.k8s.elastic.co/credentials=true
+              eck.k8s.elastic.co/owner-kind=Elasticsearch
+              eck.k8s.elastic.co/owner-name=demo
+              eck.k8s.elastic.co/owner-namespace=default
+              elasticsearch.k8s.elastic.co/cluster-name=demo
+Annotations:  &lt;none&gt;
+
+Type:  Opaque
+
+Data
+====
+elastic:  24 bytes <a id="CO1-1"></a><i class="conum" data-value="1"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO1-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">elastic</code> is the username of the resources</p>
+</td>
+</tr>
+</table>
+</div>
+<p>To get the password, set <code class="literal">SecretKeyRef</code> and pass it as a container environment variable in <code class="literal">Deployment</code>:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">    spec:
+      containers:
+        - name: logstash
+          env:
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: demo-es-elastic-user
+                  key: elastic</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="security-eck-secrets-self-signed"></a>Using self-signed certificate<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/main/docsk8s/setting-up/ls-k8s-secure.asciidoc">edit</a></h5>
+</div></div></div>
+<p>If your certificate is issued by a well-known CA, you can skip this section, otherwise, you need to mount the CA certificate from the <code class="literal">Secret</code> created by ECK.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">          volumeMounts:
+            - name: es-certs
+              mountPath: /usr/share/logstash/config/es_ca.crt
+              subPath: ca.crt
+      volumes:
+        - name: es-certs
+          secret:
+            secretName: demo-es-http-certs-public</pre>
+</div>
+</div>
+
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="security-k8s-secret"></a>Using secrets<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/main/docsk8s/setting-up/ls-k8s-secure.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This is for illustration purposes. In production, managing Kubernetes secrets should be done using recognized <a href="https://kubernetes.io/docs/concepts/security/secrets-good-practices/" class="ulink" target="_top">good practices</a> to ensure the protection of sensitive information.</p>
+</div>
+</div>
+<p>To store sensitive information, such as a password, we can use a Kubernetes <code class="literal">Secret</code>, and reference it as a container environment variable.</p>
+<p>Encode confidential data with Base64:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">echo -n "changeme" | base64</pre>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Base64 is an encoding algorithm not encryption.</p>
+</div>
+</div>
+<p>Create <code class="literal">Secret</code> to hold the result of the encoding:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: v1
+kind: Secret
+metadata:
+  name: logstash-secret
+type: Opaque
+data:
+  ES_PW: Y2hhbmdlbWU=</pre>
+</div>
+<p>Reference the confidential data in <code class="literal">Deployment</code>:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">    spec:
+      containers:
+        - name: logstash
+          env:
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: logstash-secret
+                  key: ES_PW</pre>
+</div>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
 <h3 class="title"><a id="security-logstash-keystore"></a>Using the Logstash keystore<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/main/docsk8s/setting-up/ls-k8s-secure.asciidoc">edit</a></h3>
 </div></div></div>
-<p>Description.</p>
+<p>Logstash can use the key of <a href="/guide/en/logstash/master/keystore.html" class="ulink" target="_top">keystore</a> in place of the confidential data when configure sensitive settings.</p>
+<p>To create <code class="literal">Secret</code> from an existing keystore <code class="literal">logstash.keystore</code>:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl create secret generic logstash-keystore --from-file=logstash.keystore --dry-run=client -o yaml</pre>
+</div>
+<p>Mount the <code class="literal">Secret</code> to the Logstash config directory in <code class="literal">Deployment</code>:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: apps/v1
+kind: Deployment
+(...)
+    spec:
+      containers:
+        - name: logstash
+          env:
+            - name: LOGSTASH_KEYSTORE_PASS <a id="CO2-1"></a><i class="conum" data-value="1"></i>
+              valueFrom:
+                secretKeyRef:
+                  name: logstash-secret
+                  key: LOGSTASH_KEYSTORE_PASS
+(...)
+          volumeMounts:
+            - name: logstash-keystore
+              mountPath: /usr/share/logstash/config/logstash.keystore
+              subPath: logstash.keystore
+      volumes:
+        - name: logstash-keystore
+          secret:
+            secretName: logstash-keystore</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO2-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p><code class="literal">LOGSTASH_KEYSTORE_PASS</code> is required when the keystore is protected by <a href="/guide/en/logstash/master/keystore.html#keystore-password" class="ulink" target="_top">password</a></p>
+</td>
+</tr>
+</table>
+</div>
 </div>
 
 </div>
