@@ -83,18 +83,18 @@ Threat Detection
 Persistence
 </li>
 <li class="listitem">
-has_guide
+Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 101 (<a class="xref" href="adobe-hijack-persistence.html#adobe-hijack-persistence-history" title="Rule version history">version history</a>)</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 102 (<a class="xref" href="adobe-hijack-persistence.html#adobe-hijack-persistence-history" title="Rule version history">version history</a>)</p>
 <p><span class="strong strong"><strong>Added (Elastic Stack release)</strong></span>: 7.6.0</p>
-<p><span class="strong strong"><strong>Last modified (Elastic Stack release)</strong></span>: 8.5.0</p>
+<p><span class="strong strong"><strong>Last modified (Elastic Stack release)</strong></span>: 8.6.0</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>: Elastic</p>
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<h3 class="title"><a id="_investigation_guide_66"></a>Investigation guide<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/main/docs/detections/prebuilt-rules/rule-details/adobe-hijack-persistence.asciidoc">edit</a></h3>
+<h3 class="title"><a id="_investigation_guide_68"></a>Investigation guide<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/main/docs/detections/prebuilt-rules/rule-details/adobe-hijack-persistence.asciidoc">edit</a></h3>
 </div></div></div>
 <div class="pre_wrapper lang-markdown">
 <pre class="programlisting prettyprint lang-markdown">## Triage and analysis
@@ -104,6 +104,9 @@ has_guide
 Attackers can replace the `RdrCEF.exe` executable with their own to maintain their access, which will be launched
 whenever Adobe Acrobat Reader is executed.
 
+&gt; **Note**:
+&gt; This investigation guide uses the [Osquery Markdown Plugin]({security-guide}/invest-guide-run-osquery.html) introduced in Elastic stack version 8.5.0. Older Elastic stacks versions will see unrendered markdown in this guide.
+
 #### Possible investigation steps
 
 - Investigate the process execution chain (parent process tree) for unknown processes. Examine their executable files
@@ -111,15 +114,22 @@ for prevalence, whether they are located in expected locations, and if they are 
 - Identify the user account that performed the action and whether it should perform this kind of action.
 - Investigate other alerts associated with the user/host during the past 48 hours.
 - Assess whether this behavior is prevalent in the environment by looking for similar occurrences across hosts.
-- Retrieve the file and determine if it is malicious:
-  - Use a private sandboxed malware analysis system to perform analysis.
-    - Observe and collect information about the following activities:
-      - Attempts to contact external domains and addresses.
-      - File and registry access, modification, and creation activities.
-      - Service creation and launch activities.
-      - Scheduled task creation.
-  - Use the PowerShell Get-FileHash cmdlet to get the files' SHA-256 hash values.
-    - Search for the existence and reputation of the hashes in resources like VirusTotal, Hybrid-Analysis, CISCO Talos, Any.run, etc.
+- Examine the host for derived artifacts that indicates suspicious activities:
+  - Analyze the file using a private sandboxed analysis system.
+  - Observe and collect information about the following activities in both the sandbox and the alert subject host:
+    - Attempts to contact external domains and addresses.
+      - Use the Elastic Defend network events to determine domains and addresses contacted by the subject process by
+      filtering by the process' `process.entity_id`.
+      - Examine the DNS cache for suspicious or anomalous entries.
+        - !{osquery{"query":"SELECT * FROM dns_cache", "label":"Osquery - Retrieve DNS Cache"}}
+    - Use the Elastic Defend registry events to examine registry keys accessed, modified, or created by the related
+    processes in the process tree.
+    - Examine the host services for suspicious or anomalous entries.
+      - !{osquery{"query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services","label":"Osquery - Retrieve All Services"}}
+      - !{osquery{"query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services WHERE NOT (user_account LIKE "%LocalSystem" OR user_account LIKE "%LocalService" OR user_account LIKE "%NetworkService" OR user_account == null)","label":"Osquery - Retrieve Services Running on User Accounts"}}
+      - !{osquery{"query":"SELECT concat('https://www.virustotal.com/gui/file/', sha1) AS VtLink, name, description, start_type, status, pid, services.path FROM services JOIN authenticode ON services.path = authenticode.path OR services.module_path = authenticode.path JOIN hash ON services.path = hash.path WHERE authenticode.result != "trusted"","label":"Osquery - Retrieve Service Unsigned Executables with Virustotal Link"}}
+  - Retrieve the files' SHA-256 hash values using the PowerShell `Get-FileHash` cmdlet and search for the existence and
+  reputation of the hashes in resources like VirusTotal, Hybrid-Analysis, CISCO Talos, Any.run, etc.
 
 ### False positive analysis
 
@@ -149,7 +159,7 @@ mean time to respond (MTTR).</pre>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<h3 class="title"><a id="_rule_query_70"></a>Rule query<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/main/docs/detections/prebuilt-rules/rule-details/adobe-hijack-persistence.asciidoc">edit</a></h3>
+<h3 class="title"><a id="_rule_query_73"></a>Rule query<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/main/docs/detections/prebuilt-rules/rule-details/adobe-hijack-persistence.asciidoc">edit</a></h3>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <pre class="programlisting prettyprint lang-js">file where event.type == "creation" and file.path : ("?:\\Program
@@ -162,7 +172,7 @@ DC\\Reader\\AcroCEF\\RdrCEF.exe") and not process.name :
 
 <div class="section">
 <div class="titlepage"><div><div>
-<h3 class="title"><a id="_threat_mapping_70"></a>Threat mapping<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/main/docs/detections/prebuilt-rules/rule-details/adobe-hijack-persistence.asciidoc">edit</a></h3>
+<h3 class="title"><a id="_threat_mapping_73"></a>Threat mapping<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/main/docs/detections/prebuilt-rules/rule-details/adobe-hijack-persistence.asciidoc">edit</a></h3>
 </div></div></div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
@@ -209,6 +219,20 @@ Reference URL: <a href="https://attack.mitre.org/techniques/T1574/" class="ulink
 </div></div></div>
 <div class="variablelist">
 <dl class="variablelist">
+<dt>
+<span class="term">
+Version 102 (8.6.0 release)
+</span>
+</dt>
+<dd>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Formatting only
+</li>
+</ul>
+</div>
+</dd>
 <dt>
 <span class="term">
 Version 101 (8.5.0 release)
