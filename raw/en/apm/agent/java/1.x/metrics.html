@@ -64,6 +64,9 @@ When multiple JVMs are running on the same host and report data for the same ser
 <li class="listitem">
 <a class="xref" href="metrics.html#metrics-micrometer" title="Micrometer metrics">Micrometer metrics</a>
 </li>
+<li class="listitem">
+<a class="xref" href="metrics.html#metrics-agenthealth" title="Agent Health Metrics">Agent Health Metrics</a>
+</li>
 </ul>
 </div>
 <h3><a id="metrics-system"></a>System metrics<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-java/edit/1.x/docs/metrics.asciidoc">edit</a></h3>
@@ -406,7 +409,7 @@ The labels you set on non-sampled transactions will be lost.</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<a class="xref" href="metrics.html#metrics-micrometer-beta-caveats" title="Caveats">Caveats</a>
+<a class="xref" href="metrics.html#metrics-micrometer-beta-notes" title="Notes">Notes</a>
 </li>
 <li class="listitem">
 <a class="xref" href="metrics.html#metrics-micrometer-get-started-existing" title="Get started with existing Micrometer setup">Get started with existing Micrometer setup</a>
@@ -422,9 +425,7 @@ The labels you set on non-sampled transactions will be lost.</p>
 </li>
 </ul>
 </div>
-<h4><a id="metrics-micrometer-beta-caveats"></a>Caveats<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-java/edit/1.x/docs/metrics.asciidoc">edit</a></h4>
-<p>To fix some of the caveats listed here, we may have to introduce breaking changes.
-Please look for Micrometer-related release notes before updating.</p>
+<h4><a id="metrics-micrometer-beta-notes"></a>Notes<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-java/edit/1.x/docs/metrics.asciidoc">edit</a></h4>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
@@ -435,17 +436,11 @@ De-dotting can be disabled via <a class="xref" href="config-metrics.html#config-
 Histograms (<a href="https://www.javadoc.io/doc/io.micrometer/micrometer-core/latest/io/micrometer/core/instrument/DistributionSummary.html" class="ulink" target="_top">DistributionSummary</a>,
 <a href="https://www.javadoc.io/doc/io.micrometer/micrometer-core/latest/io/micrometer/core/instrument/Timer.html" class="ulink" target="_top">Timer</a>,
 and <a href="https://www.javadoc.io/doc/io.micrometer/micrometer-core/latest/io/micrometer/core/instrument/LongTaskTimer.html" class="ulink" target="_top">LongTaskTimer</a>)
-are partially supported by converting the histogram metric into two derived metrics: a counter of the values and the sum of the values.
-For example, <code class="literal">DistributionSummary.builder("order").register(...).record(orderPrice)</code> will create two metrics: <code class="literal">order.sum</code> and <code class="literal">order.count</code>.
+are supported by converting the histogram metric into three derived metrics: a counter of the values, the sum of the values, and the <a href="/guide/en/elasticsearch/reference/current/histogram.html" class="ulink" target="_top">histogram</a>.
+For example, <code class="literal">DistributionSummary.builder("order").register(...).record(orderPrice)</code> will create three metrics: <code class="literal">order.sum</code>, <code class="literal">order.count</code> and <code class="literal">order.histogram</code> (which has a <code class="literal">values</code> array for the buckets and a <code class="literal">counts</code> array for counts of samples in each bucket).
 </li>
 <li class="listitem">
-When multiple <code class="literal">MeterRegistry</code> s are used, the metrics are de-duplicated based on their meter id.
-  However, it is non-deterministic which metrics are favored if multiple meter registries are used within a compound meter registry.
-See <a href="https://github.com/elastic/apm-agent-java/issues/1476" class="ulink" target="_top">#1476</a>
-</li>
-<li class="listitem">
-When using <code class="literal">CountingMode.STEP</code>, the step duration has to be aligned with <a class="xref" href="config-reporter.html#config-metrics-interval" title="metrics_interval ()"><code class="literal">metrics_interval</code></a>.
-But even if doing that there can be missing values. See <a href="https://github.com/elastic/apm-agent-java/issues/1476" class="ulink" target="_top">#1476</a>
+When multiple <code class="literal">MeterRegistry</code> s are used, the metrics are de-duplicated based on their meter id. A warning is issued if a collision occurs from multiple meter registries within a compound meter registry.
 </li>
 <li class="listitem">
 When using <code class="literal">CountingMode.CUMULATIVE</code>, you can use TSVB&#8217;s "Positive Rate" aggregation to convert the counter to a rate.
@@ -689,6 +684,126 @@ This is equivalent to <code class="literal">distributionSummary.count()</code>.
 </li>
 </ul>
 </div>
+</dd>
+</dl>
+</div>
+<h3><a id="metrics-agenthealth"></a>Agent Health Metrics<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-java/edit/1.x/docs/metrics.asciidoc">edit</a></h3>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This functionality is in technical preview and may be changed or removed in a future release. Elastic will apply best effort to fix any issues, but features in technical preview are not subject to the support SLA of official GA features.</p>
+</div>
+</div>
+<p>The agent internally uses a queue to buffer the various events (e.g. transactions, spans, metrics) before sending them to the APM server.
+When <a class="xref" href="config-metrics.html#config-agent-reporter-health-metrics" title="agent_reporter_health_metrics ( experimental)"><code class="literal">agent_reporter_health_metrics</code></a> is enabled, the agent will expose several metrics regarding the health state of this queue and the network connectivity to the APM server.
+In addition, if <a class="xref" href="config-metrics.html#config-agent-background-overhead-metrics" title="agent_background_overhead_metrics ( experimental)"><code class="literal">agent_background_overhead_metrics</code></a> is enabled, the agent will continuously measure the resource consumption of its own background tasks and provide the results as metrics.</p>
+<h4><a id="metrics-agenthealth-events"></a>Agent Reporting and Event Metrics<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-java/edit/1.x/docs/metrics.asciidoc">edit</a></h4>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<span class="strong strong"><strong><code class="literal">agent.events.total</code></strong></span>
+</span>
+</dt>
+<dd>
+<p>type: long</p>
+<p>format: number of events</p>
+<p>The total number of events attempted to report to the APM server.</p>
+</dd>
+<dt>
+<span class="term">
+<span class="strong strong"><strong><code class="literal">agent.events.dropped</code></strong></span>
+</span>
+</dt>
+<dd>
+<p>type: long</p>
+<p>format: number of events</p>
+<p>The number of events which could not be sent to the APM server, e.g. due to a full queue or an error.</p>
+</dd>
+<dt>
+<span class="term">
+<span class="strong strong"><strong><code class="literal">agent.events.queue.min_size.pct</code></strong></span>
+</span>
+</dt>
+<dd>
+<p>type: double</p>
+<p>format: percentage [0-1]</p>
+<p>The minimum size of the reporting queue since the last metrics report.</p>
+</dd>
+<dt>
+<span class="term">
+<span class="strong strong"><strong><code class="literal">agent.events.queue.max_size.pct</code></strong></span>
+</span>
+</dt>
+<dd>
+<p>type: double</p>
+<p>format: percentage [0-1]</p>
+<p>The maximum size of the reporting queue since the last metrics report.</p>
+</dd>
+<dt>
+<span class="term">
+<span class="strong strong"><strong><code class="literal">agent.events.requests.count</code></strong></span>
+</span>
+</dt>
+<dd>
+<p>type: long</p>
+<p>format: number of requests</p>
+<p>The number of requests made (successful and failed) to the APM server to report data.</p>
+</dd>
+<dt>
+<span class="term">
+<span class="strong strong"><strong><code class="literal">agent.events.requests.bytes</code></strong></span>
+</span>
+</dt>
+<dd>
+<p>type: long</p>
+<p>format: bytes</p>
+<p>The number of bytes attempted to send (successful and failed) to the APM server to report data.</p>
+</dd>
+</dl>
+</div>
+<h4><a id="metrics-agenthealth-overhead"></a>Agent Background Resource Consumption Metrics<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-java/edit/1.x/docs/metrics.asciidoc">edit</a></h4>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<span class="strong strong"><strong><code class="literal">agent.background.cpu.total.pct</code></strong></span>
+</span>
+</dt>
+<dd>
+<p>type: double</p>
+<p>format: percentage [0-1]</p>
+<p>The total CPU usage caused by background tasks running in the agent.</p>
+</dd>
+<dt>
+<span class="term">
+<span class="strong strong"><strong><code class="literal">agent.background.cpu.overhead.pct</code></strong></span>
+</span>
+</dt>
+<dd>
+<p>type: double</p>
+<p>format: percentage [0-1]</p>
+<p>The share of process CPU usage caused by background tasks running in the agent.</p>
+</dd>
+<dt>
+<span class="term">
+<span class="strong strong"><strong><code class="literal">agent.background.memory.allocation.bytes</code></strong></span>
+</span>
+</dt>
+<dd>
+<p>type: long</p>
+<p>format: bytes</p>
+<p>The number of bytes allocated in the heap by background tasks running in the agent.</p>
+</dd>
+<dt>
+<span class="term">
+<span class="strong strong"><strong><code class="literal">agent.background.threads.count</code></strong></span>
+</span>
+</dt>
+<dd>
+<p>type: long</p>
+<p>format: number of threads</p>
+<p>The number of threads used by background tasks in the agent.</p>
 </dd>
 </dl>
 </div>
