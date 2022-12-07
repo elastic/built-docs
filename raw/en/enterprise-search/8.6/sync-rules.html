@@ -35,6 +35,200 @@ Not what you want? See the
 <div class="titlepage"><div><div>
 <h2 class="title"><a id="sync-rules"></a>Sync rules<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.6/enterprise-search-docs/sync-rules.asciidoc">edit</a></h2>
 </div></div></div>
+<p>Use connector sync rules to control which documents are synced between the third-party data source and Elasticsearch.
+Define sync rules in the Kibana UI for each connector index, under the <code class="literal">Sync rules</code> tab for the index.</p>
+<p>There are two types of sync rules:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong>Basic rules</strong></span> - these rules are represented in a table-like view.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Advanced rules</strong></span> - these rules cover complex query-and-filter scenarios that cannot be expressed with basic rules.
+Advanced rules are defined through a source-specific DSL JSON snippet.
+</li>
+</ul>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/filtering-rules-zero-state.png" alt="Sync rules tab">
+</div>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="sync-rules-overview"></a>Overview<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.6/enterprise-search-docs/sync-rules.asciidoc">edit</a></h3>
+</div></div></div>
+<p>At a high level, sync rules enable you to limit how much data is available for search <em>after</em> ingestion.
+Often times, your data lake has far more data than you want exposed to the end user.
+For example, you may want to search a product catolog, but not include vendor contact information, even if the two are co-located for business purposes.</p>
+<p>The optimal time to filter data is early in the data pipeline, for two reasons:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong>Performance</strong></span>:
+It&#8217;s more efficient to send a query to the backing data source than to obtain all the data and then filter it in the connector.
+It&#8217;s faster to send a smaller dataset over a network and to process it on the connector side.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Security</strong></span>:
+The query-time filtering is applied on the data source side, so the data is not sent over the network and into the connector, which can limit the exposure of your data.
+</li>
+</ul>
+</div>
+<p>In a perfect world, all filtering would be done at data source query time.</p>
+<p>In practice, however, this is not always possible.
+Some sources do not allow robust query-time filtering.
+Others do, but require special setup (building indexes on specific fields, tweaking settings) that may require attention from other members of your business.</p>
+<p>With this in mind, sync rules were designed to operate in two phases: "pre-processing" and "post-processing".
+Your goal should be to do as much filtering in "pre-processing" as possible, but "post-processing" is a perfectly viable fall-back.
+By definition, the pre-processing rules are applied before the data is obtained from a third-party source.
+The post-processing rules are applied after the data is obtained from a third-party source, but before it is ingested into the elasticsearch index.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Both phases of sync rules occur on a given document <em>before</em> any <a class="xref" href="ingest-pipelines.html" title="Ingest pipelines">ingest pipelines</a> are run on that same document.
+Therefore, you could use your ingest pipelines for any processing that must occur <em>after</em> sync rules post-processing.</p>
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="sync-rules-basic"></a>Basic rules<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.6/enterprise-search-docs/sync-rules.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Each basic rule can be one of two "policies": <code class="literal">include</code> and <code class="literal">exclude</code>.
+<code class="literal">Include</code> rules are used to include the documents that "match" the specified condition.
+<code class="literal">Exclude</code> rules are used to exclude the documents that "match" the specified condition.</p>
+<p>A "match" is determined based on a condition defined by a combination of "field", "rule", and "value".</p>
+<p>The <code class="literal">Field</code> column should be used to define which field on a given document should be considered.</p>
+<p>The following rules are available in the <code class="literal">Rule</code> column:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">equals</code> - The field value is equal to the specified value.
+</li>
+<li class="listitem">
+<code class="literal">starts_with</code> - The field value starts with the specified (string) value.
+</li>
+<li class="listitem">
+<code class="literal">ends_with</code> - The field value ends with the specified (string) value.
+</li>
+<li class="listitem">
+<code class="literal">contains</code> - The field value includes the specified (string) value.
+</li>
+<li class="listitem">
+<code class="literal">regex</code> - The field value matches the specified <a href="https://en.wikipedia.org/wiki/Regular_expression" class="ulink" target="_blank" rel="noopener">regular expression</a>.
+</li>
+<li class="listitem">
+<code class="literal">&gt;</code> - The field value is greater than the specified value.
+</li>
+<li class="listitem">
+<code class="literal">&lt;</code> - The field value is less than the specified value.
+</li>
+</ul>
+</div>
+<p>Finally, the <code class="literal">Value</code> column is dependent on:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+the data type in the specified "field"
+</li>
+<li class="listitem">
+which "rule" was selected.
+</li>
+</ul>
+</div>
+<p>For example, if a value of <code class="literal">[A-Z]{2}</code> might make sense for a <code class="literal">regex</code> rule, but much less so for a <code class="literal">&gt;</code> rule.
+Similarly, you probably wouldn&#8217;t have a value of <code class="literal">espresso</code> when operating on an <code class="literal">ip_address</code> field, but perhaps you would for a <code class="literal">beverage</code> field.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="sync-rules-basic-examples"></a>Basic rules examples<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.6/enterprise-search-docs/sync-rules.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="sync-rules-basic-examples-1"></a>Example 1<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.6/enterprise-search-docs/sync-rules.asciidoc">edit</a></h5>
+</div></div></div>
+<p>Include only documents that have a <code class="literal">state</code> field with the value <code class="literal">MA</code>.</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/simple-rule-equals.png" alt="Simple equals rule">
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="sync-rules-basic-examples-2"></a>Example 2<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.6/enterprise-search-docs/sync-rules.asciidoc">edit</a></h5>
+</div></div></div>
+<p>Exclude all documents that have an <code class="literal">ID</code> field with the value greater than 1000.</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/simple-rule-greater.png" alt="Simple greater than rule">
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="sync-rules-basic-examples-3"></a>Example 3<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.6/enterprise-search-docs/sync-rules.asciidoc">edit</a></h5>
+</div></div></div>
+<p>Exclude all documents that have a <code class="literal">state</code> field that matches a specified regex.</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/simple-rule-regex.png" alt="Simple regex rule">
+</div>
+</div>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="sync-rules-basic-pre-process"></a>Basic rules in the pre-processing phase<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.6/enterprise-search-docs/sync-rules.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Because pre-processing happens at data source query time, it is highly specific to the datasource.
+See the guides for the sources which support basic pre-processing rules:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="connectors-mongodb.html#connectors-mongodb-sync-rules" title="Sync rules">MongoDB</a>
+</li>
+</ul>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If the connector cannot determine how to combine one or more basic rules into a single query to the data source, the unused basic rules will not be used for pre-processing, but will <em>instead be applied in post-processing</em>.
+If you observe this happening and want to tune performance, consider using the advanced rules to fine-tune your pre-processing query.</p>
+</div>
+</div>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="sync-rules-advanced"></a>Advanced rules<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.6/enterprise-search-docs/sync-rules.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Advanced rules overwrite any pre-processing phase query that could have been inferred from the basic rules.
+If an advanced rule snippet is defined, any defined basic rules will be used exclusively in the post-processing phase.</p>
+</div>
+</div>
+<p>Advanced rules are only used in the pre-processing phase.
+You can think of advanced rules as a language-agnostic way to represent queries to the data source.
+Therefore, these queries are highly source-specific.</p>
+<p>See the individual source guides for details on the DSL for this configuration:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="connectors-mongodb.html#connectors-mongodb-sync-rules" title="Sync rules">MongoDB</a>
+</li>
+</ul>
+</div>
+</div>
 
 </div>
 <div class="navfooter">
