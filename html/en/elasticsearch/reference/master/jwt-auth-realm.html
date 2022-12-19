@@ -143,25 +143,88 @@ as bearer tokens for authentication.</p>
 between the <em>client</em> that is connecting to Elasticsearch, and the <em>user</em> on whose behalf
 the request should run. The JWT authenticates the user, and a separate credential
 authenticates the client.</p>
-<p>A common scenario for JWTs is when an existing front-end application uses
-OpenID Connect (OIDC) to authenticate and identify a user, and then accesses Elasticsearch
-on behalf of the authenticated user.</p>
-<div class="tip admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p>If the front-end application does not exist, you can use the
-<a class="xref" href="token-authentication-services.html" title="Token-based authentication services">Token-based authentication services</a> instead.</p>
+<p>The JWT realm is designed to cater for the following two scenarios:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+An application authenticates and identifies a user with an authentication flow, e.g.
+OpenID Connect (OIDC), and then accesses Elasticsearch on behalf of the authenticated user.
+A common scenario for JWTs is when an existing application uses
+</li>
+<li class="listitem">
+An application itself goes through an authentication flow, e.g. OAuth2 Client Credentials
+Flow, and then accesses Elasticsearch for itself.
+</li>
+</ol>
 </div>
+<p>In both scenarios, the application should present a JWT to Elasticsearch that represents either the user (scenario 1)
+or itself (scenario 2). Elasticsearch categorizes the JWT into two types, ID Token and Access token,
+and validates them accordingly. The ID Token type basically follows the OIDC specification.
+The access token type is similar to the ID Token type, but with more relaxed rules which makes it
+suitable for loosely-defined JWTs, including self-signed ones.
+Tokens of both types must contain the following 5 pieces of information. While ID Tokens follow
+strict rules on which claim should provide each piece of the information,
+access tokens allow certain configurable options.</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="left" valign="top"><p></p></td>
+<td align="center" colspan="2" valign="top"><p><span class="strong strong"><strong>Claims</strong></span></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Information</strong></span></p></td>
+<td align="left" valign="top"><p>ID Token</p></td>
+<td align="left" valign="top"><p>Access Token</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>Issuer</p></td>
+<td align="left" valign="top"><p><code class="literal">iss</code></p></td>
+<td align="left" valign="top"><p><code class="literal">iss</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>Subject</p></td>
+<td align="left" valign="top"><p><code class="literal">sub</code></p></td>
+<td align="left" valign="top"><p>Defaults to <code class="literal">sub</code>, but can fall back to another claim if <code class="literal">sub</code> does not exist</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>Audiences</p></td>
+<td align="left" valign="top"><p><code class="literal">aud</code></p></td>
+<td align="left" valign="top"><p>Defaults to <code class="literal">aud</code>, but can fall back to another claim if <code class="literal">aud</code> does not exist</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>Issue Time</p></td>
+<td align="left" valign="top"><p><code class="literal">iat</code></p></td>
+<td align="left" valign="top"><p><code class="literal">iat</code></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>Expiration Time</p></td>
+<td align="left" valign="top"><p><code class="literal">exp</code></p></td>
+<td align="left" valign="top"><p><code class="literal">exp</code></p></td>
+</tr>
+</tbody>
+</table>
 </div>
+<p>In addition, Elasticsearch also validates <code class="literal">nbf</code> and <code class="literal">auth_time</code> claims for ID Tokens if these claims are present.
+But these claims are ignored for access tokens.</p>
+<p>A single JWT realm can only work with a single token type. The default token
+type is <code class="literal">id_token</code>. To handle both token types, you must configure at least
+two JWT realms.</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<h3 class="title"><a id="jwt-realm-oidc"></a>JWT uses OIDC workflows<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/x-pack/docs/en/security/authentication/jwt-realm.asciidoc">edit</a></h3>
+<h3 class="title"><a id="jwt-realm-oidc"></a>JWT from OIDC workflows<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/x-pack/docs/en/security/authentication/jwt-realm.asciidoc">edit</a></h3>
 </div></div></div>
 <p>JWT authentication in Elasticsearch is derived from OIDC user workflows, where different
-tokens can be issued by an OIDC Provider (OP). One possible token is an
-<em>ID token</em>, which uses the JWT format. If the ID token is presented to a JWT
-realm, Elasticsearch can use it as a bearer token to authenticate, identify, and authorize an individual
-user.</p>
+tokens can be issued by an OIDC Provider (OP), including ID Tokens and access
+tokens. ID Tokens are well-defined JWT and should be always compatible with
+what JWT realm supports. Access tokens can be arbitrary in theory. For them to
+be usable with JWT realm, they must at least use the JWT format and satisfy
+relevant requirements in the above table.</p>
 <div class="note admon">
 <div class="icon"></div>
 <div class="admon_content">
@@ -171,17 +234,14 @@ Web Signature (JWS). The JWS header and JWS signature are validated using OIDC
 ID token validation rules.</p>
 </div>
 </div>
-<p>Elasticsearch supports a separate <a class="xref" href="oidc-realm.html" title="OpenID Connect authentication">OpenID Connect realm</a>, which provides
-stronger security guarantees than the JWT realm, and is preferred for any
+<p>Elasticsearch supports a separate <a class="xref" href="oidc-realm.html" title="OpenID Connect authentication">OpenID Connect realm</a>. It is preferred for any
 use case where Elasticsearch can act as an OIDC RP. The OIDC realm is the only supported
 way to enable OIDC authentication in Kibana.</p>
 <div class="tip admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>If JWTs are issued for the front-end application, the application is the realm client and JWT user.
-That is not supported by OIDC flows, but it may be supported by bespoke JWT issuers.
-In that case, use the client secret and JWT for the client application, and the
-<code class="literal">es-security-runas-user</code> HTTP request header for the different user. See <a class="xref" href="jwt-auth-realm.html#jwt-realm-runas" title="Applying the run_as privilege to JWT realm users">Applying the <code class="literal">run_as</code> privilege to JWT realm users</a>.</p>
+<p>The JWT realm is compatible with the <a class="xref" href="run-as-privilege.html" title="Submitting requests on behalf of other users"><code class="literal">run_as</code></a> feature.
+See also <a class="xref" href="jwt-auth-realm.html#jwt-realm-runas" title="Applying the run_as privilege to JWT realm users">Applying the <code class="literal">run_as</code> privilege to JWT realm users</a>.</p>
 </div>
 </div>
 </div>
@@ -209,6 +269,7 @@ includes the most common settings, which are not intended for every use case:</p
 <div class="pre_wrapper lang-yaml">
 <pre class="programlisting prettyprint lang-yaml">xpack.security.authc.realms.jwt.jwt1:
   order: 3
+  token_type: id_token
   client_authentication.type: shared_secret
   allowed_issuer: "https://issuer.example.com/jwt/"
   allowed_audiences: [ "8fb85eba-979c-496c-8ae2-a57fde3f12d0" ]
@@ -227,6 +288,14 @@ includes the most common settings, which are not intended for every use case:</p
 Specifies a realm <code class="literal">order</code> of <code class="literal">3</code>, which indicates the order in which the
 configured realm is checked when authenticating a user. Realms are consulted in
 ascending order, where the realm with the lowest order value is consulted first.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">token_type</code>
+</span>
+</dt>
+<dd>
+Instructs the realm to treat and validate incoming JWTs as ID Tokens (<code class="literal">id_token</code>).
 </dd>
 <dt>
 <span class="term">
@@ -285,6 +354,87 @@ use an absolute path starting with <code class="literal">/app/config/</code>.
 </dt>
 <dd>
 The name of the JWT claim that contains the user&#8217;s principal (username).
+</dd>
+</dl>
+</div>
+<p>The following is an example snippet for configure a JWT realm for handling
+access tokens:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">xpack.security.authc.realms.jwt.jwt2:
+  order: 4
+  token_type: access_token
+  client_authentication.type: shared_secret
+  allowed_issuer: "https://issuer.example.com/jwt/"
+  allowed_subjects: [ "123456-compute@developer.example.com" ]
+  allowed_audiences: [ "elasticsearch" ]
+  required_claims:
+    token_use: access
+    version: ["1.0", "2.0"]
+  allowed_signature_algorithms: [RS256,HS256]
+  pkc_jwkset_path: "https://idp-42.example.com/.well-known/configuration"
+  fallback_claims.sub: client_id
+  fallback_claims.aud: scope
+  claims.principal: sub</pre>
+</div>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">token_type</code>
+</span>
+</dt>
+<dd>
+Instructs the realm to treat and validate incoming JWTs as access tokens (<code class="literal">access_token</code>).
+</dd>
+<dt>
+<span class="term">
+<code class="literal">allowed_subjects</code>
+</span>
+</dt>
+<dd>
+Specifies a list of JWT subjects that the realm will allow.
+These values are typically URLs, UUIDs, or other case-sensitive string values.
+</dd>
+</dl>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This setting is mandatory for when <code class="literal">token_type</code> is <code class="literal">access_token</code>.</p>
+</div>
+</div>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">required_claims</code>
+</span>
+</dt>
+<dd>
+Specifies a list of key/value pairs for additional verifications to be performed
+against a JWT. The values are either a string or an array of strings.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">fallback_claims.sub</code>
+</span>
+</dt>
+<dd>
+The name of the JWT claim to extract the subject information if the <code class="literal">sub</code> claim does not exist.
+This setting is only available when <code class="literal">token_type</code> is <code class="literal">access_token</code>.
+The fallback is applied everywhere the <code class="literal">sub</code> claim is used.
+In the above snippet, it means the <code class="literal">claims.principal</code> will also fallback to <code class="literal">client_id</code>
+if <code class="literal">sub</code> does not exist.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">fallback_claims.aud</code>
+</span>
+</dt>
+<dd>
+The name of the JWT claim to extract the audiences information if the <code class="literal">aud</code> claim does not exist.
+This setting is only available when <code class="literal">token_type</code> is <code class="literal">access_token</code>.
+The fallback is applied everywhere the <code class="literal">aud</code> claim is used.
 </dd>
 </dl>
 </div>
@@ -421,11 +571,13 @@ as <code class="literal">HS256</code>. The algorithm must be in the realm&#8217;
 <div class="titlepage"><div><div>
 <h4 class="title"><a id="jwt-validation-payload"></a>Payload claims<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/x-pack/docs/en/security/authentication/jwt-realm.asciidoc">edit</a></h4>
 </div></div></div>
-<p>OIDC ID tokens contain several claims, which provide information about the user
-who is issuing the token, and the token itself.</p>
+<p>Tokens contain several claims, which provide information about the user
+who is issuing the token, and the token itself.
+Depending on the token type, these information can optionally be identified
+by different claims.</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<h5 class="title"><a id="jwt-validation-payload-oidc"></a>OIDC payload claims<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/x-pack/docs/en/security/authentication/jwt-realm.asciidoc">edit</a></h5>
+<h5 class="title"><a id="_jwt_payload_claims"></a>JWT payload claims<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/x-pack/docs/en/security/authentication/jwt-realm.asciidoc">edit</a></h5>
 </div></div></div>
 <p>The following claims are validated by a subset of OIDC ID token rules.</p>
 <p>Elasticsearch doesn&#8217;t validate <code class="literal">nonce</code> claims, but a custom JWT issuer can add a
@@ -452,6 +604,20 @@ be an exact, case-sensitive match to the value in the <code class="literal">allo
 </dd>
 <dt>
 <span class="term">
+<code class="literal">sub</code>
+</span>
+</dt>
+<dd>
+(Required, String) Indicates the subject that the ID token is created for.
+A JWT realm of the <code class="literal">id_token</code> type by defaults accepts all subjects.
+A JWT realm of the <code class="literal">access_token</code> type can specify a fallback claim that will
+be used in place where the <code class="literal">sub</code> claim does not exist. Such JWT realm
+must also specify the <code class="literal">allowed_subjects</code> setting and the subject value
+must be an exact, case-sensitive match to any of the CSV values in the
+<code class="literal">allowed_subjects</code> setting.
+</dd>
+<dt>
+<span class="term">
 <code class="literal">aud</code>
 </span>
 </dt>
@@ -459,6 +625,8 @@ be an exact, case-sensitive match to the value in the <code class="literal">allo
 (Required, String) Indicates the audiences that the ID token is for, expressed as a
 comma-separated value (CSV). One of the values must be an exact, case-sensitive
 match to any of the CSV values in the <code class="literal">allowed_audiences</code> setting.
+A JWT realm of the <code class="literal">access_token</code> type can specify a fallback claim that will
+be used in place where the <code class="literal">aud</code> claim does not exist.
 </dd>
 <dt>
 <span class="term">
@@ -486,6 +654,8 @@ seconds since epoch.
 <dd>
 (Optional, integer) Indicates the time before which the JWT must not be accepted,
 expressed as UTC seconds since epoch.
+This claim is optional. If it exists, a JWT realm of <code class="literal">id_token</code> type will verify
+it, while a JWT realm of <code class="literal">access_token</code> will just ignore it.
 </dd>
 <dt>
 <span class="term">
@@ -495,6 +665,8 @@ expressed as UTC seconds since epoch.
 <dd>
 (Optional, integer) Time when the user authenticated to the JWT issuer,
 expressed as UTC seconds since epoch.
+This claim is optional. If it exists, a JWT realm of <code class="literal">id_token</code> type will verify
+it, while a JWT realm of <code class="literal">access_token</code> will just ignore it.
 </dd>
 </dl>
 </div>
@@ -502,9 +674,9 @@ expressed as UTC seconds since epoch.
 
 <div class="section">
 <div class="titlepage"><div><div>
-<h5 class="title"><a id="jwt-validation-payload-es"></a>Elasticsearch settings for consuming OIDC claims<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/x-pack/docs/en/security/authentication/jwt-realm.asciidoc">edit</a></h5>
+<h5 class="title"><a id="jwt-validation-payload-es"></a>Elasticsearch settings for consuming JWT claims<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/x-pack/docs/en/security/authentication/jwt-realm.asciidoc">edit</a></h5>
 </div></div></div>
-<p>Elasticsearch uses OIDC ID token claims for the following settings.</p>
+<p>Elasticsearch uses JWT claims for the following settings.</p>
 <div class="variablelist">
 <dl class="variablelist">
 <dt>
@@ -947,8 +1119,7 @@ JWT realm itself.</p>
 <pre class="programlisting prettyprint lang-sh">{"username":"user2","roles":["jwt_role1"],"full_name":null,"email":"user2@something.example.com",
 "metadata":{"jwt_claim_email":"user2@something.example.com","jwt_claim_aud":["es01","es02","es03"],
 "jwt_claim_sub":"user2","jwt_claim_iss":"my-issuer"},"enabled":true,"authentication_realm":
-{"name":"jwt2","type":"jwt"},"lookup_realm":{"name":"jwt2","type":"jwt"},"authentication_type":"realm"}
-%</pre>
+{"name":"jwt2","type":"jwt"},"lookup_realm":{"name":"jwt2","type":"jwt"},"authentication_type":"realm"}</pre>
 </div>
 </div>
 
