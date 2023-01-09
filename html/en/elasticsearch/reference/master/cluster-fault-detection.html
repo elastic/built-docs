@@ -185,7 +185,7 @@ The master may appear busy due to frequent cluster state updates.
 </ul>
 </div>
 <p>To troubleshoot a cluster in this state, first ensure the cluster has a
-<a class="xref" href="modules-discovery-hosts-providers.html#modules-discovery-troubleshooting" title="Troubleshooting node discovery">stable master</a>. Next, focus on the nodes
+<a class="xref" href="discovery-troubleshooting.html" title="Troubleshooting discovery">stable master</a>. Next, focus on the nodes
 unexpectedly leaving the cluster ahead of all other issues. It will not be
 possible to solve other issues until the cluster has a stable master node and
 stable node membership.</p>
@@ -194,20 +194,26 @@ tools only offer a view of the state of the cluster at a single point in time.
 Instead, look at the cluster logs to see the pattern of behaviour over time.
 Focus particularly on logs from the elected master. When a node leaves the
 cluster, logs for the elected master include a message like this (with line
-breaks added for clarity):</p>
+breaks added to make it easier to read):</p>
 <div class="pre_wrapper lang-text">
-<pre class="programlisting prettyprint lang-text">[2022-03-21T11:02:35,513][INFO ][o.e.c.s.MasterService    ]
-    [instance-0000000000] node-left[
-        {instance-0000000004}{bfcMDTiDRkietFb9v_di7w}{aNlyORLASam1ammv2DzYXA}{172.27.47.21}{172.27.47.21:19054}{m}
-            reason: disconnected,
-        {tiebreaker-0000000003}{UNw_RuazQCSBskWZV8ID_w}{bltyVOQ-RNu20OQfTHSLtA}{172.27.161.154}{172.27.161.154:19251}{mv}
-            reason: disconnected
-        ], term: 14, version: 1653415, ...</pre>
+<pre class="programlisting prettyprint lang-text">[2022-03-21T11:02:35,513][INFO ][o.e.c.c.NodeLeftExecutor] [instance-0000000000] node-left:
+    removed [{instance-0000000004}{bfcMDTiDRkietFb9v_di7w}{aNlyORLASam1ammv2DzYXA}{172.27.47.21}{172.27.47.21:19054}{m}]
+    with reason [test reason]</pre>
 </div>
-<p>This message says that the <code class="literal">MasterService</code> on the elected master
-(<code class="literal">instance-0000000000</code>) is processing a <code class="literal">node-left</code> task. It lists the nodes
-that are being removed and the reasons for their removal. Other nodes may log
-similar messages, but report fewer details:</p>
+<p>This message says that the <code class="literal">NodeLeftExecutor</code> on the elected master
+(<code class="literal">instance-0000000000</code>) processed a <code class="literal">node-left</code> task, identifying the node that
+was removed and the reason for its removal. When the node joins the cluster
+again, logs for the elected master will include a message like this (with line
+breaks added to make it easier to read):</p>
+<div class="pre_wrapper lang-text">
+<pre class="programlisting prettyprint lang-text">[2022-03-21T11:02:59,892][INFO ][o.e.c.c.NodeJoinExecutor] [instance-0000000000] node-join:
+    added [{instance-0000000004}{bfcMDTiDRkietFb9v_di7w}{UNw_RuazQCSBskWZV8ID_w}{172.27.47.21}{172.27.47.21:19054}{m}]
+    with reason [joining after restart, removed [24s] ago with reason [disconnected]]</pre>
+</div>
+<p>This message says that the <code class="literal">NodeJoinExecutor</code> on the elected master
+(<code class="literal">instance-0000000000</code>) processed a <code class="literal">node-join</code> task, identifying the node that
+was added to the cluster and the reason for the task.</p>
+<p>Other nodes may log similar messages, but report fewer details:</p>
 <div class="pre_wrapper lang-text">
 <pre class="programlisting prettyprint lang-text">[2020-01-29T11:02:36,985][INFO ][o.e.c.s.ClusterApplierService]
     [instance-0000000001] removed {
@@ -215,9 +221,10 @@ similar messages, but report fewer details:</p>
         {tiebreaker-0000000003}{UNw_RuazQCSBskWZV8ID_w}{bltyVOQ-RNu20OQfTHSLtA}{172.27.161.154}{172.27.161.154:19251}{mv}
     }, term: 14, version: 1653415, reason: Publication{term=14, version=1653415}</pre>
 </div>
-<p>Focus on the one from the <code class="literal">MasterService</code> which is only emitted on the elected
-master, since it contains more details. If you don&#8217;t see the messages from the
-<code class="literal">MasterService</code>, check that:</p>
+<p>These messages are not especially useful for troubleshooting, so focus on the
+ones from the <code class="literal">NodeLeftExecutor</code> and <code class="literal">NodeJoinExecutor</code> which are only emitted
+on the elected master and which contain more details. If you don&#8217;t see the
+messages from the <code class="literal">NodeLeftExecutor</code> and <code class="literal">NodeJoinExecutor</code>, check that:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
@@ -235,17 +242,13 @@ Logging is enabled at <code class="literal">INFO</code> level.
 start or stop following the elected master. You can use these messages to
 determine each node&#8217;s view of the state of the master over time.</p>
 <p>If a node restarts, it will leave the cluster and then join the cluster again.
-When it rejoins, the <code class="literal">MasterService</code> will log that it is processing a
-<code class="literal">node-join</code> task. You can tell from the master logs that the node was restarted
-because the <code class="literal">node-join</code> message will indicate that it is
-<code class="literal">joining after restart</code>. In older Elasticsearch versions, you can also determine that a
-node restarted by looking at the second "ephemeral" ID in the <code class="literal">node-left</code> and
-subsequent <code class="literal">node-join</code> messages. This ephemeral ID is different each time the
-node starts up. If a node is unexpectedly restarting, you&#8217;ll need to look at
-the node&#8217;s logs to see why it is shutting down.</p>
+When it rejoins, the <code class="literal">NodeJoinExecutor</code> will log that it processed a
+<code class="literal">node-join</code> task indicating that the node is <code class="literal">joining after restart</code>. If a node
+is unexpectedly restarting, look at the node&#8217;s logs to see why it is shutting
+down.</p>
 <p>If the node did not restart then you should look at the reason for its
-departure in the <code class="literal">node-left</code> message, which is reported after each node. There
-are three possible reasons:</p>
+departure more closely. Each reason has different troubleshooting steps,
+described below. There are three possible reasons:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
@@ -272,6 +275,9 @@ control this mechanism.
 <div class="titlepage"><div><div>
 <h4 class="title"><a id="_diagnosing_disconnected_nodes"></a>Diagnosing <code class="literal">disconnected</code> nodes<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/modules/discovery/fault-detection.asciidoc">edit</a></h4>
 </div></div></div>
+<p>Nodes typically leave the cluster with reason <code class="literal">disconnected</code> when they shut
+down, but if they rejoin the cluster without restarting then there is some
+other problem.</p>
 <p>Elasticsearch is designed to run on a fairly reliable network. It opens a number of TCP
 connections between nodes and expects these connections to remain open forever.
 If a connection is closed then Elasticsearch will try and reconnect, so the occasional
@@ -328,6 +334,9 @@ the logs on the elected master.</p>
 <div class="titlepage"><div><div>
 <h4 class="title"><a id="_diagnosing_follower_check_retry_count_exceeded_nodes"></a>Diagnosing <code class="literal">follower check retry count exceeded</code> nodes<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/modules/discovery/fault-detection.asciidoc">edit</a></h4>
 </div></div></div>
+<p>Nodes sometimes leave the cluster with reason <code class="literal">follower check retry count
+exceeded</code> when they shut down, but if they rejoin the cluster without
+restarting then there is some other problem.</p>
 <p>Elasticsearch needs every node to respond to network messages successfully and
 reasonably quickly. If a node rejects requests or does not respond at all then
 it can be harmful to the cluster. If enough consecutive checks fail then the
