@@ -116,17 +116,8 @@ if (result.errors()) {
 </table>
 </div>
 <h4><a id="_indexing_raw_json_data"></a>Indexing raw JSON data<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-java/edit/7.17/docs/usage/indexing-bulk.asciidoc">edit</a></h4>
-<p>The <code class="literal">document</code> property of a bulk index request can be any object that can be serialized to JSON using your Elasticsearch client&#8217;s JSON mapper. In the example below we will use the Java API Client&#8217;s <code class="literal">JsonData</code> object to read json files from a log directory and send them in a bulk request.</p>
-<p>Since <code class="literal">JsonData</code> doesn&#8217;t allow reading directly from an input stream (this will be added in a future release), we will use the following function for that:</p>
-<div class="pre_wrapper lang-java">
-<pre class="programlisting prettyprint lang-java">public static JsonData readJson(InputStream input, ElasticsearchClient esClient) {
-    JsonpMapper jsonpMapper = esClient._transport().jsonpMapper();
-    JsonProvider jsonProvider = jsonpMapper.jsonProvider();
-
-    return JsonData.from(jsonProvider.createParser(input), jsonpMapper);
-}</pre>
-</div>
-<p>We can now read the contents of the log directory and send it to Elasticsearch:</p>
+<p>The <code class="literal">document</code> property of a bulk index request can be any object that can be serialized to JSON using your Elasticsearch client&#8217;s JSON mapper. However, data that is ingested in bulk is often available as JSON text (e.g. files on disk), and parsing this JSON just to re-serialize it to send the bulk request would be a waste of resources. So documents in bulk operations can also be of type <code class="literal">BinaryData</code> that are sent verbatim (without parsing) to the Elasticsearch server.</p>
+<p>In the example below we will use the Java API Client&#8217;s <code class="literal">BinaryData</code> to read json files from a log directory and send them in a bulk request.</p>
 <div class="pre_wrapper lang-java">
 <pre class="programlisting prettyprint lang-java">// List json log files in the log directory
 File[] logFiles = logDir.listFiles(
@@ -136,15 +127,200 @@ File[] logFiles = logDir.listFiles(
 BulkRequest.Builder br = new BulkRequest.Builder();
 
 for (File file: logFiles) {
-    JsonData json = readJson(new FileInputStream(file), esClient);
+    FileInputStream input = new FileInputStream(file);
+    BinaryData data = BinaryData.of(IOUtils.toByteArray(input));
 
     br.operations(op -&gt; op
         .index(idx -&gt; idx
             .index("logs")
-            .document(json)
+            .document(data)
         )
     );
 }</pre>
+</div>
+<h4><a id="_streaming_ingestion_with_the_bulk_ingester"></a>Streaming ingestion with the Bulk Ingester<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-java/edit/7.17/docs/usage/indexing-bulk.asciidoc">edit</a></h4>
+<p>The <code class="literal">BulkIngester</code> simplifies the usage of the Bulk API by providing a utility class that allows index/update/delete operations to be transparently grouped in bulk requests. You only have to <code class="literal">add()</code> bulk operations to the ingester and
+it will take care of grouping and sending them in bulk according to its configuration.</p>
+<p>The ingester will send a bulk request when one of the following criteria is met:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+the number of operations exceeds a maximum (defaults to 1000)
+</li>
+<li class="listitem">
+the bulk request size in bytes exceeds a maximum (defaults to 5 MiB)
+</li>
+<li class="listitem">
+a delay since the last request has expired (periodic flush, no default)
+</li>
+</ul>
+</div>
+<p>Additionally, you can define a maximum number of concurrent request waiting to be executed by Elasticsearch (defaults to 1). When that maximum is reached and the maximum number of operations have been collected, adding a new operation to the indexer will block. This is avoids overloading the Elasticsearch server by putting backpressure on the client application.</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">BulkIngester&lt;Void&gt; ingester = BulkIngester.of(b -&gt; b
+    .client(esClient)    <a id="CO10-1"></a><i class="conum" data-value="1"></i>
+    .maxOperations(100)  <a id="CO10-2"></a><i class="conum" data-value="2"></i>
+    .flushInterval(1, TimeUnit.SECONDS) <a id="CO10-3"></a><i class="conum" data-value="3"></i>
+);
+
+for (File file: logFiles) {
+    FileInputStream input = new FileInputStream(file);
+    BinaryData data = BinaryData.of(IOUtils.toByteArray(input));
+
+    ingester.add(op -&gt; op <a id="CO10-4"></a><i class="conum" data-value="4"></i>
+        .index(idx -&gt; idx
+            .index("logs")
+            .document(data)
+        )
+    );
+}
+
+ingester.close(); <a id="CO10-5"></a><i class="conum" data-value="5"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO10-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Sets the Elasticsearch client used to send bulk requests.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO10-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Sets the maximum number of operations to collect before sending a bulk request.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO10-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Sets the flush interval.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO10-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Adds a bulk operation to the ingester.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO10-5"><i class="conum" data-value="5"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Closes the ingester to flush the pending operations and release resources.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>Additionally, the bulk ingester accepts a listener so that your application can be notified of bulk requests that are
+sent and their result. To allow correlating bulk operations to application context, the <code class="literal">add()</code> method optionally
+accepts a <code class="literal">context</code> parameter. The type of this context parameter is used as the generic parameter of the <code class="literal">BulkIngester</code>
+object. You may have noticed the <code class="literal">Void</code> type in <code class="literal">BulkIngester&lt;Void&gt;</code> above: this is because we did not register a listener,
+and therefore did not care about context values.</p>
+<p>The following example shows how you can use context values to implement a bulk ingestion listener: as previously it
+sends JSON log files in bulk, but tracks bulk request errors and failed operations. When an operation fails, depending on the error type you may want to re-add it to the ingester.</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">BulkListener&lt;String&gt; listener = new BulkListener&lt;String&gt;() { <a id="CO11-1"></a><i class="conum" data-value="1"></i>
+    @Override
+    public void beforeBulk(long executionId, BulkRequest request, List&lt;String&gt; contexts) {
+    }
+
+    @Override
+    public void afterBulk(long executionId, BulkRequest request, List&lt;String&gt; contexts, BulkResponse response) {
+        // The request was accepted, but may contain failed items.
+        // The "context" list gives the file name for each bulk item.
+        logger.debug("Bulk request " + executionId + " completed");
+        for (int i = 0; i &lt; contexts.size(); i++) {
+            BulkResponseItem item = response.items().get(i);
+            if (item.error() != null) {
+                // Inspect the failure cause
+                logger.error("Failed to index file " + contexts.get(i) + " - " + item.error().reason());
+            }
+        }
+    }
+
+    @Override
+    public void afterBulk(long executionId, BulkRequest request, List&lt;String&gt; contexts, Throwable failure) {
+        // The request could not be sent
+        logger.debug("Bulk request " + executionId + " failed", failure);
+    }
+};
+
+BulkIngester&lt;String&gt; ingester = BulkIngester.of(b -&gt; b
+    .client(esClient)
+    .maxOperations(100)
+    .flushInterval(1, TimeUnit.SECONDS)
+    .listener(listener) <a id="CO11-2"></a><i class="conum" data-value="2"></i>
+);
+
+for (File file: logFiles) {
+    FileInputStream input = new FileInputStream(file);
+    BinaryData data = BinaryData.of(IOUtils.toByteArray(input));
+
+    ingester.add(op -&gt; op
+        .index(idx -&gt; idx
+            .index("logs")
+            .document(data)
+        ),
+        file.getName() <a id="CO11-3"></a><i class="conum" data-value="3"></i>
+    );
+}
+
+ingester.close();</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO11-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Creates a listener where context values are strings for the ingested file name.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO11-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Registers the listener on the bulk ingester.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO11-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Sets the file name as the context value for a bulk operation.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The bulk ingest also exposes statistic information that allows monitoring the ingestion process and tune its configuration:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+number of operations added,
+</li>
+<li class="listitem">
+number of calls to <code class="literal">add()</code> that were blocked because the maximum number of concurrent requests was reached (contention),
+</li>
+<li class="listitem">
+number of bulk requests sent,
+</li>
+<li class="listitem">
+number of bulk requests that were blocked because the maximum number of concurrent requests was reached.
+</li>
+</ul>
 </div>
 <p>The source code for the examples above can be found in the <a href="https://github.com/elastic/elasticsearch-java/tree/7.17/java-client/src/test/java/co/elastic/clients/documentation" class="ulink" target="_top">Java API Client tests</a>.</p>
 </div>
