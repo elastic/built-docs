@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Map data | Elastic Cloud on Kubernetes [2.6] | Elastic</title>
+<link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [2.6]"/>
+<link rel="up" href="k8s-maps.html" title="Run Elastic Maps Server on ECK"/>
+<link rel="prev" href="k8s-maps-es.html" title="Deploy Elastic Maps Server"/>
+<link rel="next" href="k8s-maps-advanced-configuration.html" title="Advanced configuration"/>
+<meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/2.6"/>
+<meta name="DC.subject" content="ECK"/>
+<meta name="DC.identifier" content="2.6"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes [2.6]</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="k8s-orchestrating-elastic-stack-applications.html">Orchestrating Elastic Stack applications</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="k8s-maps.html">Run Elastic Maps Server on ECK</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="k8s-maps-es.html">« Deploy Elastic Maps Server</a>
+</span>
+<span class="next">
+<a href="k8s-maps-advanced-configuration.html">Advanced configuration »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="k8s-maps-data"></a>Map data<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/2.6/docs/orchestrating-elastic-stack-applications/maps.asciidoc">edit</a></h2>
+</div></div></div>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This functionality is in technical preview and may be changed or removed in a future release. Elastic will apply best effort to fix any issues, but features in technical preview are not subject to the support SLA of official GA features.</p>
+</div>
+</div>
+<p>The Elastic Maps Server Docker image contains only a few zoom levels of data. To get the map data up to the highest zoom level, Elastic Maps Server needs a basemap file mounted into its container.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s-maps-basemap-download"></a>Basemap download<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/2.6/docs/orchestrating-elastic-stack-applications/maps.asciidoc">edit</a></h3>
+</div></div></div>
+<p>You have to download the basemap ahead of time on a machine that is not air-gapped and populate a volume that can be mounted into the Elastic Maps Server Pods. Check also the <a href="/guide/en/kibana/current/maps-connect-to-ems.html#elastic-maps-server" class="ulink" target="_top">Elastic Maps Server documentation.</a></p>
+<p>The procedure on how to get a Kubernetes volume populated with that data is outside the scope of this document, as it depends on your specific Kubernetes setup and choice of volume provisioner. This is a possible approach that works for most setups:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Download the basemap zip archive using the link shown in the Elastic Maps Server UI or extracted from the <code class="literal">/status</code> endpoint.
+</li>
+<li class="listitem">
+<p>Create a PersistentVolumeClaim of sufficient size (&gt; 90G for the maximal resolution) and a temporary Pod to mount the corresponding volume.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ems-basemap
+spec:
+  storageClassName: "standard"
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 250G
+---
+kind: Pod
+apiVersion: v1
+metadata:
+  name: ems-data-setup
+spec:
+  terminationGracePeriodSeconds: 0
+  volumes:
+    - name: ems-storage
+      persistentVolumeClaim:
+       claimName: ems-basemap
+  containers:
+    - name: ems-setup
+      image: ubuntu
+      command: [bash, -c, "apt-get update &amp;&amp; apt-get install unzip &amp;&amp; while true; do sleep 10; done"]
+      volumeMounts:
+        - mountPath: "/usr/share/planet"
+          name: ems-storage</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Use <code class="literal">kubectl</code> to copy the basemap data into the volume</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl cp planet.zip ems-data-setup:/usr/share/planet/planet.zip</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Unzip the archive on the temporary Pod</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl exec ems-data-setup -- unzip /usr/share/data/planet.zip -d /usr/share/planet</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Delete the temporary Pod and remount the volume into the Elastic Maps Server Pods as described in <a class="xref" href="k8s-maps-data.html#k8s-maps-pod-configuration" title="Pod configuration">Pod configuration</a>.</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl delete pod ems-data-setup</pre>
+</div>
+</li>
+</ol>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s-maps-pod-configuration"></a>Pod configuration<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/2.6/docs/orchestrating-elastic-stack-applications/maps.asciidoc">edit</a></h3>
+</div></div></div>
+<p>You can <a class="xref" href="k8s-customize-pods.html" title="Customize Pods">customize the Elastic Maps Server Pod</a> using a Pod template.</p>
+<p>The following example demonstrates how to create a Elastic Maps Server deployment which mounts a data volume with the complete basemap.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: maps.k8s.elastic.co/v1alpha1
+kind: ElasticMapsServer
+metadata:
+  name: quickstart
+spec:
+  version: 8.6.0
+  count: 1
+  podTemplate:
+    spec:
+      containers:
+      - name: maps
+        volumeMounts:
+        - name: map-data
+          readOnly: true
+          mountPath: /usr/src/app/data
+      volumes:
+        - name: map-data
+          persistentVolumeClaim:
+            claimName: ems-basemap</pre>
+</div>
+<p>The name of the container in the Pod template must be <code class="literal">maps</code>.</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="k8s-maps-es.html">« Deploy Elastic Maps Server</a>
+</span>
+<span class="next">
+<a href="k8s-maps-advanced-configuration.html">Advanced configuration »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Quickstart | Elastic Cloud on Kubernetes [2.6] | Elastic</title>
+<link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [2.6]"/>
+<link rel="up" href="k8s-elastic-agent-fleet.html" title="Run Fleet-managed Elastic Agent on ECK"/>
+<link rel="prev" href="k8s-elastic-agent-fleet.html" title="Run Fleet-managed Elastic Agent on ECK"/>
+<link rel="next" href="k8s-elastic-agent-fleet-configuration.html" title="Configuration"/>
+<meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/2.6"/>
+<meta name="DC.subject" content="ECK"/>
+<meta name="DC.identifier" content="2.6"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes [2.6]</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="k8s-orchestrating-elastic-stack-applications.html">Orchestrating Elastic Stack applications</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="k8s-elastic-agent-fleet.html">Run Fleet-managed Elastic Agent on ECK</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="k8s-elastic-agent-fleet.html">« Run Fleet-managed Elastic Agent on ECK</a>
+</span>
+<span class="next">
+<a href="k8s-elastic-agent-fleet-configuration.html">Configuration »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="k8s-elastic-agent-fleet-quickstart"></a>Quickstart<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/2.6/docs/orchestrating-elastic-stack-applications/agent-fleet.asciidoc">edit</a></h2>
+</div></div></div>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>To deploy Fleet Server, Elastic Agents, Elasticsearch, and Kibana, apply the following specification:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">cat &lt;&lt;EOF | kubectl apply -f -
+apiVersion: agent.k8s.elastic.co/v1alpha1
+kind: Agent
+metadata:
+  name: fleet-server-quickstart
+  namespace: default
+spec:
+  version: 8.6.0
+  kibanaRef:
+    name: kibana-quickstart
+  elasticsearchRefs:
+  - name: elasticsearch-quickstart
+  mode: fleet
+  fleetServerEnabled: true
+  deployment:
+    replicas: 1
+    podTemplate:
+      spec:
+        serviceAccountName: elastic-agent
+        automountServiceAccountToken: true
+        securityContext:
+          runAsUser: 0
+---
+apiVersion: agent.k8s.elastic.co/v1alpha1
+kind: Agent
+metadata:
+  name: elastic-agent-quickstart
+  namespace: default
+spec:
+  version: 8.6.0
+  kibanaRef:
+    name: kibana-quickstart
+  fleetServerRef:
+    name: fleet-server-quickstart
+  mode: fleet
+  daemonSet:
+    podTemplate:
+      spec:
+        serviceAccountName: elastic-agent
+        automountServiceAccountToken: true
+        securityContext:
+          runAsUser: 0
+---
+apiVersion: kibana.k8s.elastic.co/v1
+kind: Kibana
+metadata:
+  name: kibana-quickstart
+  namespace: default
+spec:
+  version: 8.6.0
+  count: 1
+  elasticsearchRef:
+    name: elasticsearch-quickstart
+  config:
+    xpack.fleet.agents.elasticsearch.hosts: ["https://elasticsearch-quickstart-es-http.default.svc:9200"]
+    xpack.fleet.agents.fleet_server.hosts: ["https://fleet-server-quickstart-agent-http.default.svc:8220"]
+    xpack.fleet.packages:
+      - name: system
+        version: latest
+      - name: elastic_agent
+        version: latest
+      - name: fleet_server
+        version: latest
+    xpack.fleet.agentPolicies:
+      - name: Fleet Server on ECK policy
+        id: eck-fleet-server
+        is_default_fleet_server: true
+        namespace: default
+        monitoring_enabled:
+          - logs
+          - metrics
+        unenroll_timeout: 900
+        package_policies:
+        - name: fleet_server-1
+          id: fleet_server-1
+          package:
+            name: fleet_server
+      - name: Elastic Agent on ECK policy
+        id: eck-agent
+        namespace: default
+        monitoring_enabled:
+          - logs
+          - metrics
+        unenroll_timeout: 900
+        is_default: true
+        package_policies:
+          - name: system-1
+            id: system-1
+            package:
+              name: system
+---
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: elasticsearch-quickstart
+  namespace: default
+spec:
+  version: 8.6.0
+  nodeSets:
+  - name: default
+    count: 3
+    config:
+      node.store.allow_mmap: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: elastic-agent
+rules:
+- apiGroups: [""] # "" indicates the core API group
+  resources:
+  - pods
+  - nodes
+  - namespaces
+  verbs:
+  - get
+  - watch
+  - list
+- apiGroups: ["coordination.k8s.io"]
+  resources:
+  - leases
+  verbs:
+  - get
+  - create
+  - update
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: elastic-agent
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: elastic-agent
+subjects:
+- kind: ServiceAccount
+  name: elastic-agent
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: elastic-agent
+  apiGroup: rbac.authorization.k8s.io
+EOF</pre>
+</div>
+<p>Check <a class="xref" href="k8s-elastic-agent-fleet-configuration-examples.html" title="Configuration Examples">Configuration Examples</a> for more ready-to-use manifests.</p>
+</li>
+</ol>
+</div>
+<p>ECK automatically configures secure connections between all components. Fleet will be set up, and all agents are enrolled in the default policy.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Monitor the status of Fleet Server and Elastic Agent.</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl get agent</pre>
+</div>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">NAME            HEALTH   AVAILABLE   EXPECTED   VERSION      AGE
+elastic-agent   green    3           3          8.6.0    14s
+fleet-server    green    1           1          8.6.0    19s</pre>
+</div>
+</li>
+<li class="listitem">
+<p>List all the Pods belonging to a given Elastic Agent specification.</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl get pods --selector='agent.k8s.elastic.co/name=elastic-agent'</pre>
+</div>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">NAME                        READY   STATUS    RESTARTS   AGE
+elastic-agent-agent-t49fd   1/1     Running   0          54s
+elastic-agent-agent-xbcxr   1/1     Running   0          54s
+elastic-agent-agent-zqp55   1/1     Running   0          54s</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Access logs for one of the Pods.</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">kubectl logs -f elastic-agent-agent-xbcxr</pre>
+</div>
+</li>
+<li class="listitem">
+Configure the policy used by Elastic Agents. Check <a href="/guide/en/fleet/current/agent-policy.html" class="ulink" target="_top">Elastic Agent policies</a> for more details.
+</li>
+</ol>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="k8s-elastic-agent-fleet.html">« Run Fleet-managed Elastic Agent on ECK</a>
+</span>
+<span class="next">
+<a href="k8s-elastic-agent-fleet-configuration.html">Configuration »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
