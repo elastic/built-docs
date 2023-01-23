@@ -143,28 +143,34 @@ as bearer tokens for authentication.</p>
 between the <em>client</em> that is connecting to Elasticsearch, and the <em>user</em> on whose behalf
 the request should run. The JWT authenticates the user, and a separate credential
 authenticates the client.</p>
-<p>The JWT realm is designed to cater for the following two scenarios:</p>
+<p>The JWT realm supports two token types, <code class="literal">id_token</code> (the default) and <code class="literal">access_token</code>.
+They are designed to work for the following two scenarios, respectively:</p>
 <div class="olist orderedlist">
 <ol class="orderedlist">
 <li class="listitem">
-An application authenticates and identifies a user with an authentication flow, e.g.
-OpenID Connect (OIDC), and then accesses Elasticsearch on behalf of the authenticated user.
-A common scenario for JWTs is when an existing application uses
+<code class="literal">id_token</code> - An application authenticates and identifies a user with an authentication flow,
+e.g. OpenID Connect (OIDC), and then accesses Elasticsearch on behalf of the authenticated user using
+a JSON Web Token (JWT) conforming to OIDC ID Token specification.
 </li>
 <li class="listitem">
-An application itself goes through an authentication flow, e.g. OAuth2 Client Credentials
-Flow, and then accesses Elasticsearch for itself.
+<code class="literal">access_token</code> - An application accesses Elasticsearch using its own identity, encoded as a JWT,
+e.g. The application authenticates itself to a central identity platform using an
+OAuth2 Client Credentials Flow and then uses the resulting JWT-based access token to connect to Elasticsearch.
 </li>
 </ol>
 </div>
-<p>In both scenarios, the application should present a JWT to Elasticsearch that represents either the user (scenario 1)
-or itself (scenario 2). Elasticsearch categorizes the JWT into two types, ID Token and Access token,
-and validates them accordingly. The ID Token type basically follows the OIDC specification.
-The access token type is similar to the ID Token type, but with more relaxed rules which makes it
-suitable for loosely-defined JWTs, including self-signed ones.
-Tokens of both types must contain the following 5 pieces of information. While ID Tokens follow
-strict rules on which claim should provide each piece of the information,
-access tokens allow certain configurable options.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>A single JWT realm can only work with a single token type. To handle both token types,
+you must configure at least two JWT realms. You should choose the token type carefully based
+on the use case because it impacts on how validations are performed.</p>
+</div>
+</div>
+<p>The JWT realm validates the incoming JWT based on its configured token type.
+JSON Web Tokens (JWT) of both types must contain the following 5 pieces of information.
+While ID Tokens, based on the OIDC specification, have strict rules for what claims should provide these information,
+access tokens allow some claims to be configurable.</p>
 <div class="informaltable">
 <table border="1" cellpadding="4px">
 <colgroup>
@@ -212,19 +218,18 @@ access tokens allow certain configurable options.</p>
 </div>
 <p>In addition, Elasticsearch also validates <code class="literal">nbf</code> and <code class="literal">auth_time</code> claims for ID Tokens if these claims are present.
 But these claims are ignored for access tokens.</p>
-<p>A single JWT realm can only work with a single token type. The default token
-type is <code class="literal">id_token</code>. To handle both token types, you must configure at least
-two JWT realms.</p>
+<p>Overall, the access token type has more relaxed validation rules and is suitable for more generic JWTs,
+including self-signed ones.</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<h3 class="title"><a id="jwt-realm-oidc"></a>JWT from OIDC workflows<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/x-pack/docs/en/security/authentication/jwt-realm.asciidoc">edit</a></h3>
+<h3 class="title"><a id="jwt-realm-oidc"></a>ID Tokens from OIDC workflows<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/x-pack/docs/en/security/authentication/jwt-realm.asciidoc">edit</a></h3>
 </div></div></div>
 <p>JWT authentication in Elasticsearch is derived from OIDC user workflows, where different
-tokens can be issued by an OIDC Provider (OP), including ID Tokens and access
-tokens. ID Tokens are well-defined JWT and should be always compatible with
-what JWT realm supports. Access tokens can be arbitrary in theory. For them to
-be usable with JWT realm, they must at least use the JWT format and satisfy
-relevant requirements in the above table.</p>
+tokens can be issued by an OIDC Provider (OP), including ID Tokens.
+ID Tokens from an OIDC provider are well-defined JSON Web Tokens (JWT) and should be always compatible with
+a JWT realm of the <code class="literal">id_token</code> token type. The subject claim of an ID token represents the end-user.
+This means that ID tokens will generally have many allowed subjects.
+Therefore, a JWT realm of <code class="literal">id_token</code> token type does <em>not</em> mandate the <code class="literal">allowed_subjects</code> validation.</p>
 <div class="note admon">
 <div class="icon"></div>
 <div class="admon_content">
@@ -240,8 +245,29 @@ way to enable OIDC authentication in Kibana.</p>
 <div class="tip admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>The JWT realm is compatible with the <a class="xref" href="run-as-privilege.html" title="Submitting requests on behalf of other users"><code class="literal">run_as</code></a> feature.
-See also <a class="xref" href="jwt-auth-realm.html#jwt-realm-runas" title="Applying the run_as privilege to JWT realm users">Applying the <code class="literal">run_as</code> privilege to JWT realm users</a>.</p>
+<p>Users authenticating with a JWT realm can optionally impersonate another user
+with the <a class="xref" href="run-as-privilege.html" title="Submitting requests on behalf of other users"><code class="literal">run_as</code></a> feature. See also <a class="xref" href="jwt-auth-realm.html#jwt-realm-runas" title="Applying the run_as privilege to JWT realm users">Applying the <code class="literal">run_as</code> privilege to JWT realm users</a>.</p>
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="jwt-realm-oauth2"></a>Access Tokens<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/x-pack/docs/en/security/authentication/jwt-realm.asciidoc">edit</a></h3>
+</div></div></div>
+<p>A common method to obtain access tokens is with the OAuth2 Client Credentials Flow.
+A typical usage of this flow is for an application to get a credential for itself.
+This is the use case that the <code class="literal">access_token</code> token type is designed for.
+It is likely that this application also obtains ID Tokens for its end-users.
+To prevent end-user ID Tokens being used to authenticate with the JWT realm configured
+for the application, we mandate <code class="literal">allowed_subjects</code> validation when a JWT realm
+has token type <code class="literal">access_token</code>.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Not every access token is formatted as a JSON Web Token (JWT).
+For it to be compatible with the JWT realm, it must at least use the JWT format and satisfies
+relevant requirements in the above table.</p>
 </div>
 </div>
 </div>
@@ -608,13 +634,14 @@ be an exact, case-sensitive match to the value in the <code class="literal">allo
 </span>
 </dt>
 <dd>
-(Required, String) Indicates the subject that the ID token is created for.
+(Required*, String) Indicates the subject that the ID token is created for.
+If the JWT realm is of the <code class="literal">id_token</code> type, this claim is mandatory.
 A JWT realm of the <code class="literal">id_token</code> type by defaults accepts all subjects.
-A JWT realm of the <code class="literal">access_token</code> type can specify a fallback claim that will
-be used in place where the <code class="literal">sub</code> claim does not exist. Such JWT realm
-must also specify the <code class="literal">allowed_subjects</code> setting and the subject value
+A JWT realm of the access_token type must specify the <code class="literal">allowed_subjects</code> setting and the subject value
 must be an exact, case-sensitive match to any of the CSV values in the
-<code class="literal">allowed_subjects</code> setting.
+allowed_subjects setting.
+A JWT realm of the access_token type can specify a fallback claim that will
+be used in place where the <code class="literal">sub</code> claim does not exist.
 </dd>
 <dt>
 <span class="term">
@@ -622,9 +649,10 @@ must be an exact, case-sensitive match to any of the CSV values in the
 </span>
 </dt>
 <dd>
-(Required, String) Indicates the audiences that the ID token is for, expressed as a
+(Required*, String) Indicates the audiences that the ID token is for, expressed as a
 comma-separated value (CSV). One of the values must be an exact, case-sensitive
 match to any of the CSV values in the <code class="literal">allowed_audiences</code> setting.
+If the JWT realm is of the <code class="literal">id_token</code> type, this claim is mandatory.
 A JWT realm of the <code class="literal">access_token</code> type can specify a fallback claim that will
 be used in place where the <code class="literal">aud</code> claim does not exist.
 </dd>
