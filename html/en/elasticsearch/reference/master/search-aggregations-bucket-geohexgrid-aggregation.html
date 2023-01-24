@@ -132,8 +132,8 @@ Not what you want? See the
 <h2 class="title"><a id="search-aggregations-bucket-geohexgrid-aggregation"></a>Geohex grid aggregation<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/aggregations/bucket/geohexgrid-aggregation.asciidoc">edit</a></h2>
 </div></div></div>
 
-<p>A multi-bucket aggregation that groups <a class="xref" href="geo-point.html" title="Geopoint field type"><code class="literal">geo_point</code></a>
-values into buckets that represent a grid.
+<p>A multi-bucket aggregation that groups <a class="xref" href="geo-point.html" title="Geopoint field type"><code class="literal">geo_point</code></a> and
+<a class="xref" href="geo-shape.html" title="Geoshape field type"><code class="literal">geo_shape</code></a> values into buckets that represent a grid.
 The resulting grid can be sparse and only
 contains cells that have matching data. Each cell corresponds to a
 <a href="https://h3geo.org/docs/core-library/h3Indexing#h3-cell-indexp" class="ulink" target="_top">H3 cell index</a> and is
@@ -146,7 +146,7 @@ Precision for this aggregation can be between 0 and 15, inclusive.</p>
 <div class="admon_content">
 <p>High-precision requests can be very expensive in terms of RAM and
 result sizes. For example, the highest-precision geohex with a precision of 15
-produces cells that cover less than 10cm by 10cm. We recommend you use a
+produces cells that cover less than one square meter. We recommend you use a
 filter to limit high-precision requests to a smaller geographic area. For an example,
 refer to <a class="xref" href="search-aggregations-bucket-geohexgrid-aggregation.html#geohexgrid-high-precision" title="High-precision requests">High-precision requests</a>.</p>
 </div>
@@ -343,11 +343,36 @@ to any additional <code class="literal">geo_bounding_box</code> queries defined 
   }
 }</pre>
 </div>
+<h4 class="xpack"><a id="geohexgrid-aggregating-geo-shape"></a>Aggregating <code class="literal">geo_shape</code> fields<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/aggregations/bucket/geohexgrid-aggregation.asciidoc">edit</a></h4>
+<p>Aggregating on <a class="xref" href="geo-shape.html" title="Geoshape field type">Geoshape</a> fields works almost as it does for points. There are two key differences:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+When aggregating over <code class="literal">geo_point</code> data, points are considered within a hexagonal tile if they lie
+within the edges defined by great circles. In other words the calculation is done using spherical coordinates.
+However, when aggregating over <code class="literal">geo_shape</code> data, the shapes are considered within a hexagon if they lie
+within the edges defined as straight lines on an equirectangular projection.
+The reason is that Elasticsearch and Lucene treat edges using the equirectangular projection at index and search time.
+In order to ensure that search results and aggregation results are aligned, we therefore also use equirectangular
+projection in aggregations.
+For most data, the difference is subtle or not noticed.
+However, for low zoom levels (low precision), especially far from the equator,  this can be noticeable.
+For example, if the same point data is indexed as <code class="literal">geo_point</code> and <code class="literal">geo_shape</code>, it is possible  to get
+different results when aggregating at lower resolutions.
+</li>
+<li class="listitem">
+As is the case with <a class="xref" href="search-aggregations-bucket-geotilegrid-aggregation.html#geotilegrid-aggregating-geo-shape" title="Aggregating geo_shape fields"><code class="literal">geotile_grid</code></a>,
+a single shape can be counted for in multiple tiles. A shape will contribute to the count of matching values
+if any part of its shape intersects with that tile. Below is an image that demonstrates this:
+</li>
+</ul>
+</div>
+<p><span class="image"><img src="images/spatial/geoshape_hexgrid.png" alt="geoshape hexgrid"></span></p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<h3 class="title"><a id="geohexgrid-options"></a>Options<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/aggregations/bucket/geohexgrid-aggregation.asciidoc">edit</a></h3>
+<h3 class="title"><a id="_options_4"></a>Options<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/aggregations/bucket/geohexgrid-aggregation.asciidoc">edit</a></h3>
 </div></div></div>
 <div class="informaltable">
 <table border="0" cellpadding="4px">
@@ -364,9 +389,9 @@ field
 </td>
 <td valign="top">
 <p>
-(Required, string) Field containing indexed geo-point values. Must be explicitly
-mapped as a <a class="xref" href="geo-point.html" title="Geopoint field type"><code class="literal">geo_point</code></a> field. If the field contains an array,
-<code class="literal">geohex_grid</code> aggregates all array values.
+(Required, string) Field containing indexed geo-point or geo-shape values.
+Must be explicitly mapped as a <a class="xref" href="geo-point.html" title="Geopoint field type"><code class="literal">geo_point</code></a> or a <a class="xref" href="geo-shape.html" title="Geoshape field type"><code class="literal">geo_shape</code></a> field.
+If the field contains an array, <code class="literal">geohex_grid</code> aggregates all array values.
 </p>
 </td>
 </tr>
@@ -391,7 +416,7 @@ bounds
 </td>
 <td valign="top">
 <p>
-(Optional, object) Bounding box used to filter the geo-points in each bucket.
+(Optional, object) Bounding box used to filter the geo-points or geo-shapes in each bucket.
 Accepts the same bounding box formats as the
 <a class="xref" href="query-dsl-geo-bounding-box-query.html#query-dsl-geo-bounding-box-query-accepted-formats" title="Accepted formats">geo-bounding box query</a>.
 </p>
@@ -420,8 +445,9 @@ shard_size
 <td valign="top">
 <p>
 (Optional, integer) Number of buckets returned from each shard. Defaults to
-<code class="literal">max(10,(size x number-of-shards))</code> to allow for more a accurate count of the
-top cells in the final result.
+<code class="literal">max(10,(size x number-of-shards))</code> to allow for a more accurate count of the
+top cells in the final result. Since each shard could have a different top result order,
+using a larger number here reduces the risk of inaccurate counts, but incurs a performance cost.
 </p>
 </td>
 </tr>
