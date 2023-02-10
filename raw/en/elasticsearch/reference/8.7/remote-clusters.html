@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Remote clusters | Elasticsearch Guide [8.7] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.7]"/>
+<link rel="up" href="setup.html" title="Set up Elasticsearch"/>
+<link rel="prev" href="restart-cluster.html" title="Full-cluster restart and rolling restart"/>
+<link rel="next" href="remote-clusters-security.html" title="Configure remote clusters with security"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.7"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.7"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.7]</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="setup.html">Set up Elasticsearch</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="restart-cluster.html">« Full-cluster restart and rolling restart</a>
+</span>
+<span class="next">
+<a href="remote-clusters-security.html">Configure remote clusters with security »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="remote-clusters"></a>Remote clusters<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/modules/remote-clusters.asciidoc">edit</a></h2>
+</div></div></div>
+<p>You can connect a local cluster to other Elasticsearch clusters, known as <em>remote
+clusters</em>. Remote clusters can be located in different datacenters or
+geographic regions, and contain indices or data streams that can be replicated
+with cross-cluster replication or searched by a local cluster using cross-cluster search.</p>
+<p>With <a class="xref" href="xpack-ccr.html" title="Cross-cluster replication">cross-cluster replication</a>, you ingest data to an index on a remote cluster. This
+<em>leader</em> index is replicated to one or more read-only <em>follower</em> indices on your local cluster. Creating a multi-cluster architecture with cross-cluster replication enables you to
+configure disaster recovery, bring data closer to your users, or establish a
+centralized reporting cluster to process reports locally.</p>
+<p><a class="xref" href="modules-cross-cluster-search.html" title="Search across clusters">Cross-cluster search</a> enables you to run a search request
+against one or more remote clusters. This capability provides each region
+with a global view of all clusters, allowing you to send a search request from
+a local cluster and return results from all connected remote clusters.</p>
+<p>Enabling and configuring security is important on both local and remote
+clusters. When connecting a local cluster to remote clusters, an Elasticsearch superuser
+(such as the <code class="literal">elastic</code> user) on the local cluster gains total read access to the
+remote clusters. To use cross-cluster replication and cross-cluster search safely,
+<a class="xref" href="remote-clusters-security.html" title="Configure remote clusters with security">enable security</a> on all connected clusters
+and configure Transport Layer Security (TLS) on at least the transport level on
+every node.</p>
+<p>Furthermore, a local administrator at the operating system level
+with sufficient access to Elasticsearch configuration files and private keys can
+potentially take over a remote cluster. Ensure that your security strategy
+includes securing local <em>and</em> remote clusters at the operating system level.</p>
+<p>To register a remote cluster,
+<a class="xref" href="remote-clusters-connect.html" title="Connect to remote clusters">connect the local cluster</a> to nodes in the
+remote cluster using sniff mode (default) or proxy mode. After registering
+remote clusters, <a class="xref" href="remote-clusters-privileges.html" title="Configure roles and users for remote clusters">configure privileges</a> for cross-cluster replication
+and cross-cluster search.</p>
+<h3><a id="sniff-mode"></a>Sniff mode<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/modules/remote-clusters.asciidoc">edit</a></h3>
+<p>In sniff mode, a cluster is created using a name and a list of seed nodes. When
+a remote cluster is registered, its cluster state is retrieved from one of the
+seed nodes and up to three <em>gateway nodes</em> are selected as part of remote
+cluster requests. This mode requires that the gateway node&#8217;s publish addresses
+are accessible by the local cluster.</p>
+<p>Sniff mode is the default connection mode.</p>
+<p><a id="gateway-nodes-selection"></a>The <em>gateway nodes</em> selection depends on the following criteria:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p><span class="strong strong"><strong>version</strong></span>: Remote nodes must be compatible with the cluster they are
+registered to:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Any node can communicate with another node on the same
+major version. For example, 7.0 can talk to any 7.x node.
+</li>
+<li class="listitem">
+Only nodes on the last minor version of a certain major version can
+communicate with nodes on the following major version. In the 6.x series, 6.8
+can communicate with any 7.x node, while 6.7 can only communicate with 7.0.
+</li>
+<li class="listitem">
+<p>Version compatibility is
+symmetric, meaning that if 6.7 can communicate with 7.0, 7.0 can also
+communicate with 6.7. The following table depicts version compatibility between
+local and remote nodes.</p>
+<details open>
+<summary class="title">Version compatibility table</summary>
+<div class="content">
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+<col class="col_4"/>
+<col class="col_5"/>
+<col class="col_6"/>
+<col class="col_7"/>
+<col class="col_8"/>
+<col class="col_9"/>
+<col class="col_10"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="center" valign="top"><p></p></td>
+<td align="center" colspan="9" valign="top"><p><span class="strong strong"><strong>Local cluster</strong></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p><span class="strong strong"><strong>Remote cluster</strong></span></p></td>
+<td align="center" valign="top"><p>5.0–5.5</p></td>
+<td align="center" valign="top"><p>5.6</p></td>
+<td align="center" valign="top"><p>6.0–6.6</p></td>
+<td align="center" valign="top"><p>6.7</p></td>
+<td align="center" valign="top"><p>6.8</p></td>
+<td align="center" valign="top"><p>7.0</p></td>
+<td align="center" valign="top"><p>7.1–7.16</p></td>
+<td align="center" valign="top"><p>7.17</p></td>
+<td align="center" valign="top"><p>8.0–8.7</p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>5.0–5.5</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>5.6</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>6.0–6.6</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>6.7</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>6.8</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>7.0</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>7.1–7.16</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>7.17</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>8.0–8.7</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This documentation is for Elasticsearch version 8.7.0, which is not yet
+released. The above compatibility table applies if both clusters are running a
+released version of Elasticsearch, or if one of the clusters is running a released
+version and the other is running a pre-release build with a later build date. A
+cluster running a pre-release build of Elasticsearch can also communicate with remote
+clusters running the same pre-release build. Running a mix of pre-release
+builds is unsupported and typically will not work, even if the builds have the
+same version number.</p>
+</div>
+</div>
+</div>
+</details>
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Elastic only supports cross-cluster search on a subset of these configurations. See
+<a class="xref" href="modules-cross-cluster-search.html#ccs-supported-configurations" title="Supported cross-cluster search configurations">Supported cross-cluster search configurations</a>.</p>
+</div>
+</div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong>role</strong></span>: By default, any non-<a class="xref" href="modules-node.html#master-node" title="Master-eligible node">master-eligible</a> node can act as a
+gateway node. Dedicated master nodes are never selected as gateway nodes.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>attributes</strong></span>: You can define the gateway nodes for a cluster by setting
+<a class="xref" href="remote-clusters-settings.html#cluster-remote-node-attr"><code class="literal">cluster.remote.node.attr.gateway</code></a> to <code class="literal">true</code>.
+However, such nodes still have to satisfy the two above requirements.
+</li>
+</ul>
+</div>
+<h3><a id="proxy-mode"></a>Proxy mode<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/modules/remote-clusters.asciidoc">edit</a></h3>
+<p>In proxy mode, a cluster is created using a name and a single proxy address.
+When you register a remote cluster, a configurable number of socket connections
+are opened to the proxy address. The proxy is required to route those
+connections to the remote cluster. Proxy mode does not require remote cluster
+nodes to have accessible publish addresses.</p>
+<p>The proxy mode is not the default connection mode and must be configured.
+Proxy mode has the same <a class="xref" href="remote-clusters.html#gateway-nodes-selection">version compatibility
+requirements</a> as sniff mode.</p>
+<details id="proxy-mode-version-compatibility">
+<summary class="title">Version compatibility matrix</summary>
+<div class="content">
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+<col class="col_4"/>
+<col class="col_5"/>
+<col class="col_6"/>
+<col class="col_7"/>
+<col class="col_8"/>
+<col class="col_9"/>
+<col class="col_10"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="center" valign="top"><p></p></td>
+<td align="center" colspan="9" valign="top"><p><span class="strong strong"><strong>Local cluster</strong></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p><span class="strong strong"><strong>Remote cluster</strong></span></p></td>
+<td align="center" valign="top"><p>5.0–5.5</p></td>
+<td align="center" valign="top"><p>5.6</p></td>
+<td align="center" valign="top"><p>6.0–6.6</p></td>
+<td align="center" valign="top"><p>6.7</p></td>
+<td align="center" valign="top"><p>6.8</p></td>
+<td align="center" valign="top"><p>7.0</p></td>
+<td align="center" valign="top"><p>7.1–7.16</p></td>
+<td align="center" valign="top"><p>7.17</p></td>
+<td align="center" valign="top"><p>8.0–8.7</p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>5.0–5.5</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>5.6</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>6.0–6.6</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>6.7</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>6.8</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>7.0</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>7.1–7.16</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>7.17</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+</tr>
+<tr>
+<td align="center" valign="top"><p>8.0–8.7</p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-no.png" alt="No" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+<td align="center" valign="top"><p><span class="image"><img src="https://doc-icons.s3.us-east-2.amazonaws.com/icon-yes.png" alt="Yes" width="20" height="15"></span></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This documentation is for Elasticsearch version 8.7.0, which is not yet
+released. The above compatibility table applies if both clusters are running a
+released version of Elasticsearch, or if one of the clusters is running a released
+version and the other is running a pre-release build with a later build date. A
+cluster running a pre-release build of Elasticsearch can also communicate with remote
+clusters running the same pre-release build. Running a mix of pre-release
+builds is unsupported and typically will not work, even if the builds have the
+same version number.</p>
+</div>
+</div>
+</div>
+</details>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Elastic only supports cross-cluster search on a subset of these configurations. See
+<a class="xref" href="modules-cross-cluster-search.html#ccs-supported-configurations" title="Supported cross-cluster search configurations">Supported cross-cluster search configurations</a>.</p>
+</div>
+</div>
+
+
+
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="restart-cluster.html">« Full-cluster restart and rolling restart</a>
+</span>
+<span class="next">
+<a href="remote-clusters-security.html">Configure remote clusters with security »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

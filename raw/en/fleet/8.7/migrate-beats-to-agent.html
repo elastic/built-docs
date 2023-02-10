@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Migrate from Beats to Elastic Agent | Fleet and Elastic Agent Guide [8.7] | Elastic</title>
+<link rel="home" href="index.html" title="Fleet and Elastic Agent Guide [8.7]"/>
+<link rel="up" href="index.html" title="Fleet and Elastic Agent Guide [8.7]"/>
+<link rel="prev" href="fleet-elastic-agent-quick-start.html" title="Quick starts"/>
+<link rel="next" href="migrate-auditbeat-to-agent.html" title="Migrate from Auditbeat to Elastic Agent"/>
+<meta name="DC.type" content="Learn/Docs/Fleet/Guide/Elastic Agent/8.7"/>
+<meta name="DC.subject" content="Fleet and Elastic Agent"/>
+<meta name="DC.identifier" content="8.7"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="index.html">Fleet and Elastic Agent Guide [8.7]</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="fleet-elastic-agent-quick-start.html">« Quick starts</a>
+</span>
+<span class="next">
+<a href="migrate-auditbeat-to-agent.html">Migrate from Auditbeat to Elastic Agent »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h1 class="title"><a id="migrate-beats-to-agent"></a>Migrate from Beats to Elastic Agent<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.7/docs/en/ingest-management/migrate-beats-to-agent.asciidoc">edit</a></h1>
+</div></div></div>
+<p>Learn how to replace your existing Filebeat and Metricbeat deployments
+with Elastic Agent, our single agent for logs, metrics, security, and threat
+prevention.</p>
+<h3><a id="why-migrate-to-elastic-agent"></a>Why migrate to Elastic Agent?<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.7/docs/en/ingest-management/migrate-beats-to-agent.asciidoc">edit</a></h3>
+<p>Elastic Agent and Beats provide similar functionality for log collection and
+host monitoring, but Elastic Agent has some distinct advantages over Beats.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong>Easier to deploy and manage.</strong></span> Instead of deploying multiple Beats,
+you deploy a single Elastic Agent. The Elastic Agent downloads, configures, and manages any
+underlying programs required to collect and parse your data.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Easier to configure.</strong></span> You no longer have to define and manage separate
+configuration files for each Beat running on a host. Instead you define a single
+agent policy that specifies which integration settings to use, and the Elastic Agent
+generates the configuration required by underlying programs, like Beats.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Central management.</strong></span> Unlike Beats, which require you to set up your own
+automation strategy for upgrades and configuration management, Elastic Agents can be
+managed from a central location in Kibana called Fleet. In Fleet, you can
+view the status of running Elastic Agents, update agent policies and push them to your
+hosts, and even trigger binary upgrades.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Endpoint protection.</strong></span> Probably the biggest advantage of using Elastic Agent is that
+it enables you to protect your endpoints from security threats.
+</li>
+</ul>
+</div>
+<h3><a id="_limitations_and_requirements"></a>Limitations and requirements<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.7/docs/en/ingest-management/migrate-beats-to-agent.asciidoc">edit</a></h3>
+<p>There are currently some limitations and requirements to be aware of before
+migrating to Elastic Agent:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong>No support for configuring the Beats internal queue.</strong></span>
+Each Beat has an internal queue that stores events before batching and
+publishing them to the output. To improve data throughput, Beats users can set
+<a href="/guide/en/beats/filebeat/8.7/configuring-internal-queue.html" class="ulink" target="_top">configuration options</a> to tune
+the performance of the internal queue. However, the endless fine tuning
+required to configure the queue is cumbersome and not always fruitful. Instead
+of expecting users to configure the internal queue, Elastic Agent uses sensible
+defaults. This means you won&#8217;t be able to migrate internal queue configurations
+to Elastic Agent.
+</li>
+</ul>
+</div>
+<p>For more information about Elastic Agent limitations, see
+<a class="xref" href="beats-agent-comparison.html" title="Beats and Elastic Agent capabilities"><em>Beats and Elastic Agent capabilities</em></a>.</p>
+<h3><a id="prepare-for-migration"></a>Prepare for the migration<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.7/docs/en/ingest-management/migrate-beats-to-agent.asciidoc">edit</a></h3>
+<p>Before you begin:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Review your existing Beats configurations and make a list of the
+integrations that are required. For example, if your existing implementation
+collects logs and metrics from Nginx, add Nginx to your list.
+</li>
+<li class="listitem">
+Make a note of any processors or custom configurations you want to migrate.
+Some of these customizations may no longer be needed or possible in Elastic Agent.
+</li>
+<li class="listitem">
+Decide if it&#8217;s the right time to migrate to Elastic Agent. Review the information
+under <a class="xref" href="beats-agent-comparison.html" title="Beats and Elastic Agent capabilities"><em>Beats and Elastic Agent capabilities</em></a>. Make sure the integrations you need
+are supported and Generally Available, and that the output and features you
+require are also supported.
+</li>
+</ol>
+</div>
+<p>If everything checks out, proceed to the next step. Otherwise, you might want
+to continue using Beats and possibly deploy Elastic Agent alongside Beats to
+use features like endpoint protection.</p>
+<h3><a id="_set_up_fleet_server_self_managed_deployments_only"></a>Set up Fleet Server (self-managed deployments only)<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.7/docs/en/ingest-management/migrate-beats-to-agent.asciidoc">edit</a></h3>
+<p>To use Fleet for central management, a <a class="xref" href="fleet-server.html" title="Set up Fleet Server">Fleet Server</a> must be
+running and accessible to your hosts.</p>
+<p>If you&#8217;re using Elastic Cloud, you can skip this step because Elastic Cloud runs a hosted
+version of Fleet Server.</p>
+<p>Otherwise, follow the steps for self-managed deployments described
+in <a class="xref" href="add-a-fleet-server.html" title="Add a Fleet Server">Add a Fleet Server</a>, then return to this page when you are done.</p>
+<h3><a id="_deploy_elastic_agent_to_your_hosts_to_collect_logs_and_metrics"></a>Deploy Elastic Agent to your hosts to collect logs and metrics<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.7/docs/en/ingest-management/migrate-beats-to-agent.asciidoc">edit</a></h3>
+<p>To begin the migration, deploy an Elastic Agent to a host where Beats shippers are
+running. It&#8217;s recommended that you set up and test the migration in a
+development environment before deploying across your infrastructure.</p>
+<p>You can continue to run Beats alongside Elastic Agent until you&#8217;re satisfied with
+the data its sending to Elasticsearch.</p>
+<p>Read our <a href="/guide/en/observability/8.7/ingest-logs-metrics-uptime.html" class="ulink" target="_top">quick start
+guide</a> to learn how to deploy an Elastic Agent. (Skip the step about setting up
+Fleet Server if it&#8217;s already running.) To save time, return to this page when
+the Elastic Agent is deployed, healthy, and successfully sending data. You don&#8217;t have
+to complete all the steps in the quick start.</p>
+<p>Here&#8217;s a high-level overview to help you understand the deployment process.</p>
+<div class="sidebar">
+<div class="titlepage"><div><div>
+<p class="title"><strong>Overview of the Elastic Agent deployment process</strong></p>
+</div></div></div>
+<p>During the deployment process you:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong>Create an agent policy.</strong></span> An agent policy is similar to a configuration file,
+but unlike a regular configuration file, which needs to be maintained on many
+different host systems, you can configure and maintain the agent policy in a
+central location in Fleet and apply it to multiple Elastic Agents.
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Add integrations to the agent policy.</strong></span> Elastic Agent integrations provide a simple,
+unified way to collect data from popular apps and services, and protect systems
+from security threats. To define the agent policy, you add integrations for each
+service or system you want to monitor. For example, to collect logs and metrics
+from a system running Nginx, you might add the Nginx integration and the System
+integration.</p>
+<p><span class="strong strong"><strong>What happens when you add an integration to an agent policy?</strong></span> The assets for the
+integration, such as dashboards and ingest pipelines, get installed if they
+aren&#8217;t already. Plus the settings you specify for the integration, such as how
+to connect to the source system or locate logs, are added as an integration
+policy.</p>
+<p>For the example described earlier, you would have an agent policy that
+contains two integration policies: one for collecting Nginx logs and metrics,
+and another for collecting system logs and metrics.</p>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Install Elastic Agent on the host and enroll it in the agent policy.</strong></span> When you
+enroll the Elastic Agent in an agent policy, the agent gets added to Fleet, where
+you can monitor and manage the agent.
+</li>
+</ul>
+</div>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>It&#8217;s best to add one integration at a time and test it before adding more
+integrations to your agent policy. The System integration is a good way to
+get started if it&#8217;s supported on your OS.</p>
+</div>
+</div>
+<h3><a id="_view_agent_details_and_inspect_the_data_streams"></a>View agent details and inspect the data streams<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.7/docs/en/ingest-management/migrate-beats-to-agent.asciidoc">edit</a></h3>
+<p>After deploying an Elastic Agent to a host, view details about the agent and inspect
+the data streams it creates. To learn more about the benefits of using data streams,
+refer to <a class="xref" href="data-streams.html" title="Data streams">Data streams</a>.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>On the <span class="strong strong"><strong>Agents</strong></span> tab in <span class="strong strong"><strong>Fleet</strong></span>, confirm that the Elastic Agent status is <code class="literal">Healthy</code>.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/migration-agent-status-healthy.png" alt="Screen showing that agent status is Healthy">
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Click the host name to examine the Elastic Agent details. This page shows the
+integrations that are currently installed, the policy the agent is enrolled in,
+and information about the host machine:</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/migration-agent-details.png" alt="Screen showing that agent status is Healthy">
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Go back to the main Fleet page and click the <span class="strong strong"><strong>Data streams</strong></span> tab. You should
+be able to see the data streams for various logs and metrics from the host. This
+is out-of-the-box without any extra configuration or dashboard creation:</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/migration-agent-data-streams.png" alt="Screen showing data streams created by the Elastic Agent">
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Go to <span class="strong strong"><strong>Analytics &gt; Discover</strong></span> and examine the data streams. Note that documents
+indexed by Elastic Agent match these patterns:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">logs-*</code>
+</li>
+<li class="listitem">
+<code class="literal">metrics-*</code>
+</li>
+</ul>
+</div>
+<p>If Beats are installed on the host machine, the data in Elasticsearch will be
+duplicated, with one set coming from Beats and another from Elastic Agent for the
+<em>same</em> data source.</p>
+<p>For example, filter on <code class="literal">filebeat-*</code> to see the data ingested by Filebeat.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/migration-event-from-filebeat.png" alt="Screen showing event from Filebeat">
+</div>
+</div>
+<p>Next, filter on <code class="literal">logs-*</code>. Notice that the document contains <code class="literal">data_stream.*</code>
+fields that come from logs ingested by the Elastic Agent.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/migration-event-from-agent.png" alt="Screen showing event from Elastic Agent">
+</div>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This duplication is superfluous and will consume extra storage space on
+your Elasticsearch deployment. After you&#8217;ve finished migrating all your configuration
+settings to Elastic Agent, you&#8217;ll remove Beats to prevent redundant messages.</p>
+</div>
+</div>
+</li>
+</ol>
+</div>
+<h3><a id="_add_integrations_to_the_agent_policy"></a>Add integrations to the agent policy<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.7/docs/en/ingest-management/migrate-beats-to-agent.asciidoc">edit</a></h3>
+<p>Now that you&#8217;ve deployed an Elastic Agent to your host and it&#8217;s successfully sending
+data to Elasticsearch, add another integration. For guidance on which integrations you
+need, look at the list you created earlier when you
+<a class="xref" href="migrate-beats-to-agent.html#prepare-for-migration" title="Prepare for the migration">prepared for the migration</a>.</p>
+<p>For example, if the agent policy you created earlier includes the System
+integration, but you also want to monitor Nginx:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>From the main menu in Kibana, click <span class="strong strong"><strong>Add integrations</strong></span> and add the Nginx
+integration.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/migration-add-nginx-integration.png" alt="Screen showing the Nginx integration">
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Configure the integration, then apply it to the agent policy you used earlier.
+Make sure you expand collapsed sections to see all the settings like log paths.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/migration-add-integration-policy.png" alt="Screen showing Nginx configuration">
+</div>
+</div>
+<p>When you save and deploy your changes, the agent policy is updated to include a
+new integration policy for Nginx. All Elastic Agents enrolled in the agent policy get
+the updated policy, and the Elastic Agent running on your host will begin collecting
+Nginx data.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Integration policy names must be globally unique across all agent
+policies.</p>
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Go back to <span class="strong strong"><strong>Fleet &gt; Agents</strong></span> and verify that the agent status is still
+healthy. Click the host name to drill down into the agent details. From there,
+you can see the agent policy and integration policies that are applied.</p>
+<p>If the agent status is not Healthy, click <span class="strong strong"><strong>Logs</strong></span> to view the agent log and
+troubleshoot the problem.</p>
+</li>
+<li class="listitem">
+Go back to the main <span class="strong strong"><strong>Fleet</strong></span> page, and click <span class="strong strong"><strong>Data streams</strong></span> to inspect the
+data streams and navigate to the pre-built dashboards installed with the
+integration.
+</li>
+</ol>
+</div>
+<p>Notice again that the data is duplicated because you still have Beats
+running and sending data.</p>
+<h3><a id="_migrate_processor_configurations"></a>Migrate processor configurations<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.7/docs/en/ingest-management/migrate-beats-to-agent.asciidoc">edit</a></h3>
+<p>Processors enable you to filter and enhance the data before it’s sent to the
+output. Each processor receives an event, applies a defined action to the event,
+and returns the event. If you define a list of processors, they are executed in
+the order they are defined. Elastic provides a
+<a href="/guide/en/beats/filebeat/8.7/defining-processors.html" class="ulink" target="_top">rich set of processors</a> that are
+supported by all Beats and by Elastic Agent.</p>
+<p>Prior to migrating from Beats, you defined processors in the configuration
+file for each Beat. After migrating to Elastic Agent, however, the Beats
+configuration files are redundant. All configuration is policy-driven from
+Fleet (or for advanced use cases, specified in a standalone agent policy). Any
+processors you defined previously in the Beats configuration need to be added
+to an integration policy; they cannot be defined in the Beats configuration.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Globally-defined processors are not currently supported by Elastic Agent.
+You must define processors in each integration policy where they are required.</p>
+</div>
+</div>
+<p>To add processors to an integration policy:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+In Kibana, go to <span class="strong strong"><strong>Fleet &gt; Agent policies</strong></span>, and click the policy name to view
+its integration policies.
+</li>
+<li class="listitem">
+Click the name of the integration policy to edit it.
+</li>
+<li class="listitem">
+<p>Click the down arrow next to enabled streams, and under <span class="strong strong"><strong>Advanced options</strong></span>,
+add the processor definition. The processor will be applied to the data set
+where it&#8217;s defined.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/migration-add-processor.png" alt="Screen showing how to add a processor to an integration policy">
+</div>
+</div>
+<p>For example, the following processor adds geographically specific metadata to host events:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">- add_host_metadata:
+    cache.ttl: 5m
+    geo:
+      name: nyc-dc1-rack1
+      location: 40.7128, -74.0060
+      continent_name: North America
+      country_iso_code: US
+      region_name: New York
+      region_iso_code: NY
+      city_name: New York</pre>
+</div>
+</li>
+</ol>
+</div>
+<p>In Kibana, look at the data again to confirm it contains the fields you expect.</p>
+<h3><a id="_preserve_raw_events"></a>Preserve raw events<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.7/docs/en/ingest-management/migrate-beats-to-agent.asciidoc">edit</a></h3>
+<p>In some cases, Beats modules preserve the original, raw event, which consumes
+more storage space, but may be a requirement for compliance or forensic use
+cases.</p>
+<p>In Elastic Agent, this behavior is optional and disabled by default.</p>
+<p>If you must preserve the raw event, edit the integration policy, and for each
+enabled data stream, click the <span class="strong strong"><strong>Preserve original event</strong></span> toggle.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/migration-preserve-raw-event.png" alt="Screen showing how to add a processor to an integration policy">
+</div>
+</div>
+<p>Do this for every data stream with a raw event you want to preserve.</p>
+<h3><a id="_migrate_custom_dashboards"></a>Migrate custom dashboards<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.7/docs/en/ingest-management/migrate-beats-to-agent.asciidoc">edit</a></h3>
+<p>Elastic integration packages provide many assets, such as pre-built dashboards,
+to make it easier for you to visualize your data. In some cases, however, you
+might have custom dashboards you want to migrate.</p>
+<p>Because Elastic Agent uses different data streams, the fields exported by an Elastic Agent
+are slightly different from those exported Beats. Any custom dashboards that
+you created for Beats need to be modified or recreated to use the new fields.</p>
+<p>You have a couple of options for migrating custom dashboards:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+(Recommended) Recreate the custom dashboards based on the new data streams.
+</li>
+<li class="listitem">
+<a class="xref" href="migrate-beats-to-agent.html#create-index-aliases" title="Create index aliases to point to data streams">Create index aliases to point to the new data streams</a>
+and continue using custom dashboards.
+</li>
+</ul>
+</div>
+<h4><a id="create-index-aliases"></a>Create index aliases to point to data streams<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.7/docs/en/ingest-management/migrate-beats-to-agent.asciidoc">edit</a></h4>
+<p>You may want to continue using your custom dashboards if the dashboards
+installed with an integration are not adequate. To do this, use index aliases to
+feed data streams into your existing custom dashboards.</p>
+<p>For example, custom dashboards that point to <code class="literal">filebeat-</code> or <code class="literal">metricbeat-</code> can be
+aliased to use the equivalent data streams, <code class="literal">logs-</code> and <code class="literal">metrics-</code>.</p>
+<p>To use aliases:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Add a <code class="literal">filebeat</code> alias to the <code class="literal">logs-</code> data stream. For example:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">POST _aliases
+{
+  "actions": [
+    {
+      "add": {
+        "index": "logs-*",
+        "alias": "filebeat-"
+      }
+    }
+
+ ]
+}</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Add a <code class="literal">metribeat</code> alias to the <code class="literal">metrics-</code> data stream.</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">POST _aliases
+{
+  "actions": [
+    {
+      "add": {
+        "index": "metrics-*",
+        "alias": "metricbeat-"
+      }
+    }
+ ]
+}</pre>
+</div>
+</li>
+</ol>
+</div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>These aliases must be added to both the index template and existing
+indices.</p>
+</div>
+</div>
+<p>Note that custom dashboards will show duplicated data until you remove Beats
+from your hosts.</p>
+<p>For more information, see the <a href="/guide/en/elasticsearch/reference/8.7/aliases.html" class="ulink" target="_top">Aliases documentation</a>.</p>
+<h3><a id="_migrate_index_lifecycle_policies"></a>Migrate index lifecycle policies<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.7/docs/en/ingest-management/migrate-beats-to-agent.asciidoc">edit</a></h3>
+<p>Index lifecycle management (index lifecycle management) policies in Elasticsearch enable you to manage indices
+according to your performance, resiliency, and retention requirements. To learn
+more about index lifecycle management, refer to the
+<a href="/guide/en/elasticsearch/reference/8.7/index-lifecycle-management.html" class="ulink" target="_top">index lifecycle management documentation</a>.</p>
+<p>index lifecycle management is configured by default in Beats (version 7.0 and later) and in Elastic Agent
+(all versions). To view the index lifecycle policies defined in Elasticsearch, go to
+<span class="strong strong"><strong>Management &gt; Index Lifecycle Policies</strong></span>.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/migration-index-lifecycle-policies.png" alt="Screen showing how to add a processor to an integration policy">
+</div>
+</div>
+<p>If you used index lifecycle management with Beats, you&#8217;ll see index lifecycle policies like
+<span class="strong strong"><strong>filebeat</strong></span> and <span class="strong strong"><strong>metricbeat</strong></span> in the list. After migrating to Elastic Agent, you&#8217;ll see
+polices named <span class="strong strong"><strong>logs</strong></span> and <span class="strong strong"><strong>metrics</strong></span>, which encapsulate the index lifecycle management policies for all
+<code class="literal">logs-*</code> and <code class="literal">metrics-*</code> index templates.</p>
+<p>When you migrate from Beats to Elastic Agent, you have a couple of options for
+migrating index policy settings:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p><span class="strong strong"><strong>Modify the newly created index lifecycle policies (recommended).</strong></span> As
+mentioned earlier, index lifecycle management is enabled by default when the Elastic Agent is installed.
+Index lifecycle policies are created and added to the index templates for
+data streams created by integrations.</p>
+<p>If you have existing index lifecycle policies for Beats, it&#8217;s highly
+recommended that you modify the lifecycle policies for Elastic Agent to match your
+previous policy. To do this:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+In Kibana, go to <span class="strong strong"><strong>Stack Management &gt; Index Lifecycle Policies</strong></span> and search for a
+Beats policy, for example, <span class="strong strong"><strong>filebeat</strong></span>. Under <span class="strong strong"><strong>Linked indices</strong></span>, notice you can
+view indices linked to the policy. Click the policy name to see the settings.
+</li>
+<li class="listitem">
+Click the <span class="strong strong"><strong>logs</strong></span> policy and, if necessary, edit the settings to match the old
+policy.
+</li>
+<li class="listitem">
+Under <span class="strong strong"><strong>Index Lifecycle Policies</strong></span>, search for another Beats policy, for
+example, <span class="strong strong"><strong>metricbeat</strong></span>.
+</li>
+<li class="listitem">
+Click the <span class="strong strong"><strong>metrics</strong></span> policy and edit the settings to match the old policy.
+</li>
+</ol>
+</div>
+<p>Optionally delete the Beats index lifecycle policies when they are no longer
+used by an index.</p>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Keep the Beats policy and apply it to the index templates created for data
+streams.</strong></span> To preserve an existing policy, modify it, as needed, and apply it to
+all the index templates created for data streams:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Under <span class="strong strong"><strong>Index Lifecycle Policies</strong></span>, find the Beats policy, for example,
+<span class="strong strong"><strong>filebeat</strong></span>.
+</li>
+<li class="listitem">
+In the <span class="strong strong"><strong>Actions</strong></span> column, click the <span class="strong strong"><strong>Add policy to index template</strong></span> icon.
+</li>
+<li class="listitem">
+Under <span class="strong strong"><strong>Index template</strong></span>, choose a data stream index template, then add the
+policy.
+</li>
+<li class="listitem">
+Repeat this procedure, as required, to apply the policy to other data stream
+index templates.
+</li>
+</ol>
+</div>
+</li>
+</ul>
+</div>
+<div class="sidebar">
+<div class="titlepage"><div><div>
+<p class="title"><strong>What if you&#8217;re not using index lifecycle management with Beats?</strong></p>
+</div></div></div>
+<p>You can begin to use index lifecycle management now with Elastic Agent. Under <span class="strong strong"><strong>Index lifecycle policies</strong></span>,
+click the policy name and edit the settings to meet your requirements.</p>
+</div>
+<h3><a id="_remove_beats_from_your_host"></a>Remove Beats from your host<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.7/docs/en/ingest-management/migrate-beats-to-agent.asciidoc">edit</a></h3>
+<p>Any installed Beats shippers will continue to work until you remove them. This
+allows you to roll out the migration in stages. You will continue to see
+duplicated data until you remove Beats.</p>
+<p>When you&#8217;re satisfied with your Elastic Agent deployment, remove Beats from your
+hosts. All the data collected before installing the Elastic Agent will still be
+available in Elasticsearch until you delete the data or it&#8217;s removed according to the
+data retention policies you&#8217;ve specified for index lifecycle management.</p>
+<p>To remove Beats from your host:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Stop the service by using the correct command for your system.
+</li>
+<li class="listitem">
+(Optional) Back up your Beats configuration files in case you need to refer
+to them in the future.
+</li>
+<li class="listitem">
+Delete the Beats installation directory. If necessary, stop any orphan
+processes that are running after you stopped the service.
+</li>
+<li class="listitem">
+If you added firewall rules to allow Beats to communicate on your network,
+remove them.
+</li>
+<li class="listitem">
+After you&#8217;ve removed all Beats, revoke any API keys or remove privileges for
+any Beats users created to send data to Elasticsearch.
+</li>
+</ol>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="fleet-elastic-agent-quick-start.html">« Quick starts</a>
+</span>
+<span class="next">
+<a href="migrate-auditbeat-to-agent.html">Migrate from Auditbeat to Elastic Agent »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

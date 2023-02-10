@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Extract custom fields using web crawler and proxy | Elastic Enterprise Search documentation [8.7] | Elastic</title>
+<link rel="home" href="index.html" title="Elastic Enterprise Search documentation [8.7]"/>
+<link rel="up" href="crawler.html" title="Elastic web crawler"/>
+<link rel="prev" href="crawler-custom-values-ingest-pipeline.html" title="Customize crawler field values using an ingest pipeline"/>
+<link rel="next" href="crawler-private-network-cloud.html" title="Crawl a private network using a web crawler on Elastic Cloud"/>
+<meta name="DC.type" content="Learn/Docs/Enterprise Search/Guide/8.7"/>
+<meta name="DC.subject" content="Enterprise Search"/>
+<meta name="DC.identifier" content="8.7"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="index.html">Elastic Enterprise Search documentation [8.7]</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="crawler.html">Elastic web crawler</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="crawler-custom-values-ingest-pipeline.html">« Customize crawler field values using an ingest pipeline</a>
+</span>
+<span class="next">
+<a href="crawler-private-network-cloud.html">Crawl a private network using a web crawler on Elastic Cloud »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="crawler-custom-fields-proxy"></a>Extract custom fields using web crawler and proxy<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.7/enterprise-search-docs/crawler-proxy.asciidoc">edit</a></h2>
+</div></div></div>
+
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If you can change the source code of the web pages you&#8217;re crawling, see <a class="xref" href="crawler-content.html" title="Optimizing web content for the web crawler"><em>Optimizing web content</em></a> instead.</p>
+</div>
+</div>
+<p>When parsing body text from a webpage, the Elastic web crawler extracts the content and organizes it into fields based on HTML tags:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Text within <code class="literal">title</code> tags are mapped to the <code class="literal">title</code> field
+</li>
+<li class="listitem">
+Anchor tags (<code class="literal">&lt;a&gt;&lt;/a&gt;</code>) are parsed as links
+</li>
+<li class="listitem">
+The body tag is parsed as one big field (<code class="literal">body_content</code>) containing everything else.
+</li>
+</ul>
+</div>
+<p>But what if a website has a custom structure — for example, the color, size, and price included on product pages — and you want to capture these in specific fields?</p>
+<p>You can add <a class="xref" href="crawler-content.html#crawler-content-meta-tags-content-extraction" title="Meta tags and data attributes to extract custom fields">meta tags or data attributes</a> to your website to create custom fields.
+But sometimes making changes on the website is too complicated, or you don&#8217;t have access to the source code.
+In this case, you can use a proxy to parse the content and add these custom fields on the fly.</p>
+<p>This document explains how to create a proxy between the crawler and the website, to perform the extraction, create the meta tags, and inject them into the new response.</p>
+<h3><a id="crawler-custom-fields-proxy-tools"></a>Tools<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.7/enterprise-search-docs/crawler-proxy.asciidoc">edit</a></h3>
+<p>You will need the following tools for this exercise:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://nodejs.org/en/" class="ulink" target="_blank" rel="noopener"><span class="strong strong"><strong>Nodejs</strong></span></a>: to create the example page and proxy
+</li>
+<li class="listitem">
+<a href="https://ngrok.com/download" class="ulink" target="_blank" rel="noopener"><span class="strong strong"><strong>Ngrok</strong></span></a>: to expose the local proxy to the internet
+</li>
+<li class="listitem">
+<a class="xref" href="crawler.html" title="Elastic web crawler"><span class="strong strong"><strong>Elastic web crawler</strong></span></a>: to crawl the page
+</li>
+</ul>
+</div>
+<h3><a id="crawler-custom-fields-proxy-solution"></a>The body parsing solution<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.7/enterprise-search-docs/crawler-proxy.asciidoc">edit</a></h3>
+<p>In this example, we&#8217;ll create a NodeJS server that hosts a product page and a proxy that stands in front.
+This will receive the crawler request, hit the product page, inject the meta tags, and then return the page to the crawler.</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/blog-elastic-crawler-1.png" alt="Proxy solution schematic diagram">
+</div>
+</div>
+<p>The following code block adds custom fields using meta tags:</p>
+<div class="pre_wrapper lang-html">
+<pre class="programlisting prettyprint lang-html">&lt;head&gt;
+  &lt;meta class="elastic" name="product_price" content="99.99"&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;h1 data-elastic-name="product_name"&gt;Printer&lt;/h1&gt;
+&lt;/body&gt;</pre>
+</div>
+<p>In this example, the first step is to serve a page that emulates a product page for a printer:</p>
+<div class="pre_wrapper lang-html">
+<pre class="programlisting prettyprint lang-html">index.html
+&lt;html&gt;
+  &lt;head&gt;
+    &lt;title&gt;Printer Page&lt;/title&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;h1&gt;Printer&lt;/h1&gt;
+    &lt;div class="price-container"&gt;
+      &lt;div class="title"&gt;Price&lt;/div&gt;
+      &lt;div class="value"&gt;2.99&lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</pre>
+</div>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">server.js
+const express = require("express");
+const app = express();
+
+app.listen(1337, () =&gt; {
+  console.log("Application started and Listening on port 1337");
+});
+
+app.get("/", (req, res) =&gt; {
+  res.sendFile(__dirname + "/index.html");
+});</pre>
+</div>
+<p>Now it&#8217;s time to crawl the page.
+The data you want to have as fields, such as the price, is put inside the body content field:</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/blog-elastic-crawler-2.jpg" alt="Crawler fields">
+</div>
+</div>
+<p>Next, create a proxy capable of recognizing this data and injecting a meta tag to the response, so the crawler can recognize this is a field.</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">proxy.js
+const http = require("http"),
+  connect = require("connect"),
+  app = connect(),
+  httpProxy = require("http-proxy");
+
+app.use(function (req, res, next) {
+  var _write = res.write;
+  res.write = function (data) {
+    _write.call(
+      res,
+      data
+        .toString()
+        .replace('class="value"', 'class="value" data-elastic-name="price"')
+    );
+  };
+  next();
+});
+
+app.use(function (req, res) {
+  proxy.web(req, res);
+});
+
+http.createServer(app).listen(8013);
+
+var proxy = httpProxy.createProxyServer({
+  target: "http://localhost:1337",
+});
+
+console.log("http proxy server" + " started " + "on port " + "8013");</pre>
+</div>
+<p>Finally, start your server and proxy to expose the proxy with Ngrok.
+Provide this domain to the crawler so that it crawls your website <em>through</em> the proxy.
+The price is now a separate field:</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/blog-elastic-crawler-3.jpg" alt="Crawler custom fields">
+</div>
+</div>
+<p>Use this guide as a blueprint for more sophisticated solutions.
+For example, you could build middleware that transforms the body response to add meta tags based on existing classes, but also based on the <em>content</em> itself.</p>
+<h3><a id="crawler-custom-fields-proxy-learn-more"></a>Learn more<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.7/enterprise-search-docs/crawler-proxy.asciidoc">edit</a></h3>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="crawler-content.html#crawler-content-meta-tags-content-extraction" title="Meta tags and data attributes to extract custom fields">Meta tags and data attributes to extract custom fields</a> documents how to extract custom fields by editing webpage source files.
+</li>
+<li class="listitem">
+<a class="xref" href="crawler-content.html" title="Optimizing web content for the web crawler"><em>Optimizing web content</em></a> details all the options for optimizing webpage source files for the crawler.
+</li>
+<li class="listitem">
+<a class="xref" href="crawler.html" title="Elastic web crawler"><em>Web crawler</em></a> provides an overview of all our web crawler documentation.
+</li>
+</ul>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="crawler-custom-values-ingest-pipeline.html">« Customize crawler field values using an ingest pipeline</a>
+</span>
+<span class="next">
+<a href="crawler-private-network-cloud.html">Crawl a private network using a web crawler on Elastic Cloud »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Scroll | Elasticsearch JavaScript Client [8.7] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch JavaScript Client [8.7]"/>
+<link rel="up" href="examples.html" title="Examples"/>
+<link rel="prev" href="msearch_examples.html" title="MSearch"/>
+<link rel="next" href="search_examples.html" title="Search"/>
+<meta name="DC.type" content="Learn/Docs/Clients/JavaScript/8.7"/>
+<meta name="DC.subject" content="Clients"/>
+<meta name="DC.identifier" content="8.7"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch JavaScript Client [8.7]</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="examples.html">Examples</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="msearch_examples.html">« MSearch</a>
+</span>
+<span class="next">
+<a href="search_examples.html">Search »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="scroll_examples"></a>Scroll<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch-js/edit/8.7/docs/examples/scroll.asciidoc">edit</a></h2>
+</div></div></div>
+<p>While a search request returns a single “page” of results, the scroll API can be
+used to retrieve large numbers of results (or even all results) from a single
+search request, in much the same way as you would use a cursor on a traditional
+database.</p>
+<p>Scrolling is not intended for real time user requests, but rather for processing
+large amounts of data, for example in order to reindex the contents of one index
+into a new index with a different configuration.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The results that are returned from a scroll request reflect the state of
+the index at the time that the initial search request was made, like a snapshot
+in time. Subsequent changes to documents (index, update or delete) will only
+affect later search requests.</p>
+</div>
+</div>
+<p>In order to use scrolling, the initial search request should specify the scroll
+parameter in the query string, which tells Elasticsearch how long it should keep the
+“search context” alive.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Did you know that we provide an helper for sending scroll requests? You can find it <a href="/guide/en/elasticsearch/client/javascript-api/master/client-helpers.html" class="ulink" target="_top">here</a>.</p>
+</div>
+</div>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">'use strict'
+
+const { Client } = require('@elastic/elasticsearch')
+const client = new Client({
+  cloud: { id: '&lt;cloud-id&gt;' },
+  auth: { apiKey: 'base64EncodedKey' }
+})
+
+async function run () {
+  const allQuotes = []
+  const responseQueue = []
+
+  // Let's index some data!
+  const bulkResponse = await client.bulk({
+    // here we are forcing an index refresh,
+    // otherwise we will not get any result
+    // in the consequent search
+    refresh: true,
+    operations: [
+      // operation to perform
+      { index: { _index: 'game-of-thrones' } },
+      // the document to index
+      {
+        character: 'Ned Stark',
+        quote: 'Winter is coming.'
+      },
+
+      { index: { _index: 'game-of-thrones' } },
+      {
+        character: 'Daenerys Targaryen',
+        quote: 'I am the blood of the dragon.'
+      },
+
+      { index: { _index: 'game-of-thrones' } },
+      {
+        character: 'Tyrion Lannister',
+        quote: 'A mind needs books like a sword needs a whetstone.'
+      }
+    ]
+  })
+
+  if (bulkResponse.errors) {
+    console.log(bulkResponse)
+    process.exit(1)
+  }
+
+  // start things off by searching, setting a scroll timeout, and pushing
+  // our first response into the queue to be processed
+  const response = await client.search({
+    index: 'game-of-thrones',
+    // keep the search results "scrollable" for 30 seconds
+    scroll: '30s',
+    // for the sake of this example, we will get only one result per search
+    size: 1,
+    // filter the source to only include the quote field
+    _source: ['quote'],
+    query: {
+      match_all: {}
+    }
+  })
+
+  responseQueue.push(response)
+
+  while (responseQueue.length) {
+    const body = responseQueue.shift()
+
+    // collect the titles from this response
+    body.hits.hits.forEach(function (hit) {
+      allQuotes.push(hit._source.quote)
+    })
+
+    // check to see if we have collected all of the quotes
+    if (body.hits.total.value === allQuotes.length) {
+      console.log('Every quote', allQuotes)
+      break
+    }
+
+    // get the next response if there are more quotes to fetch
+    responseQueue.push(
+      await client.scroll({
+        scrollId: body._scroll_id,
+        scroll: '30s'
+      })
+    )
+  }
+}
+
+run().catch(console.log)</pre>
+</div>
+<p>Another cool usage of the <code class="literal">scroll</code> API can be done with Node.js ≥ 10, by using
+async iteration!</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">'use strict'
+
+const { Client } = require('@elastic/elasticsearch')
+const client = new Client({
+  cloud: { id: '&lt;cloud-id&gt;' },
+  auth: { apiKey: 'base64EncodedKey' }
+})
+
+// Scroll utility
+async function * scrollSearch (params) {
+  let response = await client.search(params)
+
+  while (true) {
+    const sourceHits = response.hits.hits
+
+    if (sourceHits.length === 0) {
+      break
+    }
+
+    for (const hit of sourceHits) {
+      yield hit
+    }
+
+    if (!response._scroll_id) {
+      break
+    }
+
+    response = await client.scroll({
+      scrollId: response._scroll_id,
+      scroll: params.scroll
+    })
+  }
+}
+
+async function run () {
+  await client.bulk({
+    refresh: true,
+    operations: [
+      { index: { _index: 'game-of-thrones' } },
+      {
+        character: 'Ned Stark',
+        quote: 'Winter is coming.'
+      },
+
+      { index: { _index: 'game-of-thrones' } },
+      {
+        character: 'Daenerys Targaryen',
+        quote: 'I am the blood of the dragon.'
+      },
+
+      { index: { _index: 'game-of-thrones' } },
+      {
+        character: 'Tyrion Lannister',
+        quote: 'A mind needs books like a sword needs a whetstone.'
+      }
+    ]
+  })
+
+  const params = {
+    index: 'game-of-thrones',
+    scroll: '30s',
+    size: 1,
+    _source: ['quote'],
+    query: {
+      match_all: {}
+    }
+  }
+
+  for await (const hit of scrollSearch(params)) {
+    console.log(hit._source)
+  }
+}
+
+run().catch(console.log)</pre>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="msearch_examples.html">« MSearch</a>
+</span>
+<span class="next">
+<a href="search_examples.html">Search »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

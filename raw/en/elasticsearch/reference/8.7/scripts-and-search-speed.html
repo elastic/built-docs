@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Scripts, caching, and search speed | Elasticsearch Guide [8.7] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.7]"/>
+<link rel="up" href="modules-scripting-using.html" title="How to write scripts"/>
+<link rel="prev" href="modules-scripting-using.html" title="How to write scripts"/>
+<link rel="next" href="dissect.html" title="Dissecting data"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.7"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.7"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.7]</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="modules-scripting.html">Scripting</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="modules-scripting-using.html">How to write scripts</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="modules-scripting-using.html">« How to write scripts</a>
+</span>
+<span class="next">
+<a href="dissect.html">Dissecting data »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="scripts-and-search-speed"></a>Scripts, caching, and search speed<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/scripting/using.asciidoc">edit</a></h2>
+</div></div></div>
+<p>Elasticsearch performs a number of optimizations to make using scripts as fast as
+possible. One important optimization is a script cache. The compiled script is
+placed in a cache so that requests that reference the script do not incur a
+compilation penalty.</p>
+<p>Cache sizing is important. Your script cache should be large enough to hold all
+of the scripts that users need to be accessed concurrently.</p>
+<p>If you see a large number of script cache evictions and a rising number of
+compilations in <a class="xref" href="cluster-nodes-stats.html" title="Nodes stats API">node stats</a>, your cache might be too
+small.</p>
+<p>All scripts are cached by default so that they only need to be recompiled
+when updates occur. By default, scripts do not have a time-based expiration.
+You can change this behavior by using the <code class="literal">script.cache.expire</code> setting.
+Use the <code class="literal">script.cache.max_size</code> setting to configure the size of the cache.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The size of scripts is limited to 65,535 bytes. Set the value of <code class="literal">script.max_size_in_bytes</code> to increase that soft limit. If your scripts are
+really large, then consider using a
+<a class="xref" href="modules-scripting-engine.html" title="Advanced scripts using script engines">native script engine</a>.</p>
+</div>
+</div>
+<h4><a id="_improving_search_speed"></a>Improving search speed<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/scripting/using.asciidoc">edit</a></h4>
+<p>Scripts are incredibly useful, but can&#8217;t use Elasticsearch&#8217;s index structures or related
+optimizations. This relationship can sometimes result in slower search speeds.</p>
+<p>If you often use scripts to transform indexed data, you can make search faster
+by transforming data during ingest instead. However, that often means slower
+index speeds. Let&#8217;s look at a practical example to illustrate how you can
+increase search speed.</p>
+<p>When running searches, it&#8217;s common to sort results by the sum of two values.
+For example, consider an index named <code class="literal">my_test_scores</code> that contains test score
+data. This index includes two fields of type <code class="literal">long</code>:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">math_score</code>
+</li>
+<li class="listitem">
+<code class="literal">verbal_score</code>
+</li>
+</ul>
+</div>
+<p>You can run a query with a script that adds these values together. There&#8217;s
+nothing wrong with this approach, but the query will be slower because the
+script valuation occurs as part of the request. The following request returns
+documents where <code class="literal">grad_year</code> equals <code class="literal">2099</code>, and sorts by the results by the
+valuation of the script.</p>
+<a id="3b606631284877f9bca15051630995ad"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /my_test_scores/_search
+{
+  "query": {
+    "term": {
+      "grad_year": "2099"
+    }
+  },
+  "sort": [
+    {
+      "_script": {
+        "type": "number",
+        "script": {
+          "source": "doc['math_score'].value + doc['verbal_score'].value"
+        },
+        "order": "desc"
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1512.console"></div>
+<p>If you&#8217;re searching a small index, then including the script as part of your
+search query can be a good solution. If you want to make search faster, you can
+perform this calculation during ingest and index the sum to a field instead.</p>
+<p>First, we&#8217;ll add a new field to the index named <code class="literal">total_score</code>, which will
+contain sum of the <code class="literal">math_score</code> and <code class="literal">verbal_score</code> field values.</p>
+<a id="dda949d20d07a9edbe64cefc623df945"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT /my_test_scores/_mapping
+{
+  "properties": {
+    "total_score": {
+      "type": "long"
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1513.console"></div>
+<p>Next, use an <a class="xref" href="ingest.html" title="Ingest pipelines">ingest pipeline</a> containing the
+<a class="xref" href="script-processor.html" title="Script processor">script processor</a> to calculate the sum of <code class="literal">math_score</code> and
+<code class="literal">verbal_score</code> and index it in the <code class="literal">total_score</code> field.</p>
+<a id="295b3aaeb223612afdd991744dc9c873"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my_test_scores_pipeline
+{
+  "description": "Calculates the total test score",
+  "processors": [
+    {
+      "script": {
+        "source": "ctx.total_score = (ctx.math_score + ctx.verbal_score)"
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1514.console"></div>
+<p>To update existing data, use this pipeline to <a class="xref" href="docs-reindex.html" title="Reindex API">reindex</a> any
+documents from <code class="literal">my_test_scores</code> to a new index named <code class="literal">my_test_scores_2</code>.</p>
+<a id="f70ff57c80cdbce3f1e7c63ee307c92d"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_reindex
+{
+  "source": {
+    "index": "my_test_scores"
+  },
+  "dest": {
+    "index": "my_test_scores_2",
+    "pipeline": "my_test_scores_pipeline"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1515.console"></div>
+<p>Continue using the pipeline to index any new documents to <code class="literal">my_test_scores_2</code>.</p>
+<a id="c23e32775340d7bc6f46820313014d8a"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /my_test_scores_2/_doc/?pipeline=my_test_scores_pipeline
+{
+  "student": "kimchy",
+  "grad_year": "2099",
+  "math_score": 1200,
+  "verbal_score": 800
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1516.console"></div>
+<p>These changes slow the index process, but allow for faster searches. Instead of
+using a script, you can sort searches made on <code class="literal">my_test_scores_2</code> using the
+<code class="literal">total_score</code> field. The response is near real-time! Though this process slows
+ingest time, it greatly increases queries at search time.</p>
+<a id="9a743b6575c6fe5acdf46024a7fda8a1"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /my_test_scores_2/_search
+{
+  "query": {
+    "term": {
+      "grad_year": "2099"
+    }
+  },
+  "sort": [
+    {
+      "total_score": {
+        "order": "desc"
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1517.console"></div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="modules-scripting-using.html">« How to write scripts</a>
+</span>
+<span class="next">
+<a href="dissect.html">Dissecting data »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

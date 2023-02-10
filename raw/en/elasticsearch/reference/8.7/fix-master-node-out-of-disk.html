@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Fix master nodes out of disk | Elasticsearch Guide [8.7] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.7]"/>
+<link rel="up" href="troubleshooting.html" title="Troubleshooting"/>
+<link rel="prev" href="decrease-disk-usage-data-node.html" title="Decrease the disk usage of data nodes"/>
+<link rel="next" href="fix-other-node-out-of-disk.html" title="Fix other role nodes out of disk"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.7"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.7"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.7]</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="troubleshooting.html">Troubleshooting</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="decrease-disk-usage-data-node.html">« Decrease the disk usage of data nodes</a>
+</span>
+<span class="next">
+<a href="fix-other-node-out-of-disk.html">Fix other role nodes out of disk »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="fix-master-node-out-of-disk"></a>Fix master nodes out of disk<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/troubleshooting/disk/fix-master-node-out-of-disk.asciidoc">edit</a></h2>
+</div></div></div>
+<p>Elasticsearch is using master nodes to coordinate the cluster. If the master or any master eligible nodes are running
+out of space, you need to ensure that they have enough disk space to function. If the <a class="xref" href="health-api.html" title="Health API">health API</a>
+reports that your master node is out of space you need to increase the disk capacity of your master nodes.</p>
+<div class="tabs" data-tab-group="host">
+  <div role="tablist" aria-label="Increase master node capacity">
+    <button role="tab"
+            aria-selected="true"
+            aria-controls="cloud-tab-increase-master-node-capacity"
+            id="cloud-increase-data-node-capacity">
+      Elasticsearch Service
+    </button>
+    <button role="tab"
+            aria-selected="false"
+            aria-controls="self-managed-tab-increase-master-node-capacity"
+            id="self-managed-increase-master-node-capacity"
+            tabindex="-1">
+      Self-managed
+    </button>
+  </div>
+  <div tabindex="0"
+       role="tabpanel"
+       id="cloud-tab-increase-master-node-capacity"
+       aria-labelledby="cloud-increase-master-node-capacity">
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Log in to the <a href="https://cloud.elastic.co?baymax=docs-body&amp;elektra=docs" class="ulink" target="_top">Elastic Cloud console</a>.
+</li>
+<li class="listitem">
+On the <span class="strong strong"><strong>Elasticsearch Service</strong></span> panel, click the gear under the <code class="literal">Manage deployment</code> column that corresponds to the
+name of your deployment.
+</li>
+<li class="listitem">
+<p>Go to <code class="literal">Actions &gt; Edit deployment</code> and then go to the <code class="literal">Master instances</code> section:</p>
+<div class="imageblock text-center screenshot">
+<div class="content">
+<img src="images/troubleshooting/disk/increase-disk-capacity-master-node.png" alt="Increase disk capacity of master nodes">
+</div>
+</div>
+</li>
+<li class="listitem">
+Choose a larger than the pre-selected capacity configuration from the drop-down menu and click <code class="literal">save</code>. Wait for
+the plan to be applied and the problem should be resolved.
+</li>
+</ol>
+</div>
+  </div>
+  <div tabindex="0"
+       role="tabpanel"
+       id="self-managed-tab-increase-master-node-capacity"
+       aria-labelledby="self-managed-increase-master-node-capacity"
+       hidden="">
+<p>In order to increase the disk capacity of a master node, you will need to replace <span class="strong strong"><strong>all</strong></span> the master nodes with
+master nodes of higher disk capacity.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>First, retrieve the disk threshold that will indicate how much disk space is needed. The relevant threshold is
+the <a class="xref" href="modules-cluster.html#cluster-routing-watermark-high">high watermark</a> and can be retrieved via the following command:</p>
+<a id="60299454aa19fec15a604a0dd06fe522"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _cluster/settings?include_defaults&amp;filter_path=*.cluster.routing.allocation.disk.watermark.high*</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1924.console"></div>
+<p>The response will look like this:</p>
+<a id="ff48c30f5c74cfc9a8bb6ac6f9daeba8"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "defaults": {
+    "cluster": {
+      "routing": {
+        "allocation": {
+          "disk": {
+            "watermark": {
+              "high": "90%",
+              "high.max_headroom": "150GB"
+            }
+          }
+        }
+      }
+    }
+  }</pre>
+</div>
+<p>The above means that in order to resolve the disk shortage we need to either drop our disk usage below the 90% or have
+more than 150GB available, read more how this threshold works <a class="xref" href="modules-cluster.html#cluster-routing-watermark-high">here</a>.</p>
+</li>
+<li class="listitem">
+<p>The next step is to find out the current disk usage, this will allow to calculate how much extra space is needed.
+In the following example, we show only the master nodes for readability purposes:</p>
+<a id="ed7fa1971ac322aeccd6391ab32d0490"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /_cat/nodes?v&amp;h=name,master,node.role,disk.used_percent,disk.used,disk.avail,disk.total</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1925.console"></div>
+<p>The response will look like this:</p>
+<a id="d7fc937139b46a7eeea7b5855807e2d1"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">name                master node.role disk.used_percent disk.used disk.avail disk.total
+instance-0000000000 *      m                    85.31    3.4gb     500mb       4gb
+instance-0000000001 *      m                    50.02    2.1gb     1.9gb       4gb
+instance-0000000002 *      m                    50.02    1.9gb     2.1gb       4gb</pre>
+</div>
+</li>
+<li class="listitem">
+The desired situation is to drop the disk usages below the relevant threshold, in our example 90%. Consider adding
+some padding, so it will not go over the threshold soon. If you have multiple master nodes you need to ensure that <span class="strong strong"><strong>all</strong></span>
+master nodes will have this capacity. Assuming you have the new nodes ready, follow the next three steps for every
+master node.
+</li>
+<li class="listitem">
+Bring down one of the master nodes.
+</li>
+<li class="listitem">
+<p>Start up one of the new master nodes and wait for it to join the cluster. You can check this via:</p>
+<a id="ed7fa1971ac322aeccd6391ab32d0490"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET /_cat/nodes?v&amp;h=name,master,node.role,disk.used_percent,disk.used,disk.avail,disk.total</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1926.console"></div>
+</li>
+<li class="listitem">
+Only after you have confirmed that your cluster has the initial number of master nodes, move forward to the next one
+until all the initial master nodes have been replaced.
+</li>
+</ol>
+</div>
+  </div>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="decrease-disk-usage-data-node.html">« Decrease the disk usage of data nodes</a>
+</span>
+<span class="next">
+<a href="fix-other-node-out-of-disk.html">Fix other role nodes out of disk »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

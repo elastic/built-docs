@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Variant types | Elasticsearch Java API Client [8.7] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Java API Client [8.7]"/>
+<link rel="up" href="api-conventions.html" title="API conventions"/>
+<link rel="prev" href="lists-and-maps.html" title="Lists and maps"/>
+<link rel="next" href="object-lifecycles.html" title="Object life cycles and thread safety"/>
+<meta name="DC.type" content="Learn/Docs/Clients/Java/8.7"/>
+<meta name="DC.subject" content="Clients"/>
+<meta name="DC.identifier" content="8.7"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Java API Client [8.7]</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="api-conventions.html">API conventions</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="lists-and-maps.html">« Lists and maps</a>
+</span>
+<span class="next">
+<a href="object-lifecycles.html">Object life cycles and thread safety »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="variant-types"></a>Variant types<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch-java/edit/8.7/docs/api-conventions/variant-types.asciidoc">edit</a></h2>
+</div></div></div>
+<p>The Elasticsearch API has a lot of variant types: queries, aggregations, field mappings,
+analyzers, and so on. Finding the correct class name in such large collections
+can be challenging.</p>
+<p>The Java API Client builders make this easy: the builders for variant types, such as
+<code class="literal">Query</code>, have methods for each of the available implementations. We’ve seen this
+in action above with <code class="literal">intervals</code> (a kind of query) and <code class="literal">allOf</code>, <code class="literal">match</code> and
+<code class="literal">anyOf</code> (various kinds of intervals).</p>
+<p>This is because variant objects in the Java API Client are implementations of a
+“tagged union”: they contain the identifier (or tag) of the variant they hold
+and the value for that variant. For example, a <code class="literal">Query</code> object can contain an
+<code class="literal">IntervalsQuery</code> with tag <code class="literal">intervals</code>, a <code class="literal">TermQuery</code> with tag <code class="literal">term</code>, and so on.
+This approach allows writing fluent code where you can let the IDE completion
+features guide you to build and navigate complex nested structures:</p>
+<p>Variant builders have setter methods for every available implementation. They
+use the same conventions as regular properties and accept both a builder lambda
+expression and a ready-made object of the actual type of the variant. Here’s an
+example to build a term query:</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">Query query = new Query.Builder()
+    .term(t -&gt; t                          <a id="CO6-1"></a><i class="conum" data-value="1"></i>
+        .field("name")                    <a id="CO6-2"></a><i class="conum" data-value="2"></i>
+        .value(v -&gt; v.stringValue("foo"))
+    )
+    .build();                             <a id="CO6-3"></a><i class="conum" data-value="3"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO6-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Choose the <code class="literal">term</code> variant to build a term query.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO6-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Build the terms query with a builder lambda expression.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO6-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Build the <code class="literal">Query</code> that now holds a <code class="literal">TermQuery</code> object of kind <code class="literal">term</code>.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>Variant objects have getter methods for every available implementation. These
+methods check that the object actually holds a variant of that kind and return
+the value downcasted to the correct type. They throw an <code class="literal">IllegalStateException</code>
+otherwise. This approach allows writing fluent code to traverse variants.</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">assertEquals("foo", query.term().value().stringValue());</pre>
+</div>
+<p>Variant objects also provide information on the variant kind they currently hold:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+with <code class="literal">is</code> methods for each of the variant kinds: <code class="literal">isTerm()</code>, <code class="literal">isIntervals()</code>, <code class="literal">isFuzzy()</code>, etc.
+</li>
+<li class="listitem">
+with a nested <code class="literal">Kind</code> enumeration that defines all variant kinds.
+</li>
+</ul>
+</div>
+<p>This information can then be used to navigate down into specific variants after checking
+their actual kind:</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">if (query.isTerm()) { <a id="CO7-1"></a><i class="conum" data-value="1"></i>
+    doSomething(query.term());
+}
+
+switch(query._kind()) { <a id="CO7-2"></a><i class="conum" data-value="2"></i>
+    case Term:
+        doSomething(query.term());
+        break;
+    case Intervals:
+        doSomething(query.intervals());
+        break;
+    default:
+        doSomething(query._kind(), query._get()); <a id="CO7-3"></a><i class="conum" data-value="3"></i>
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO7-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Test if the variant is of a specific kind.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO7-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Test a larger set of variant kinds.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO7-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Get the kind and value held by the variant object.</p>
+</td>
+</tr>
+</table>
+</div>
+<h4><a id="variant-types-custom"></a>Custom extensions provided by Elasticsearch plugins<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch-java/edit/8.7/docs/api-conventions/variant-types.asciidoc">edit</a></h4>
+<p>Elasticsearch accepts plugins that can extend the available variants for a number of types. This includes queries, aggregations, text analyzers and tokenizers, ingest processors, etc.</p>
+<p>The Java API Client classes for these types accept a <code class="literal">_custom</code> variant in addition to the builtin ones. This allows you to use these plugin-defined extensions by providing arbitrary JSON in requests, and also receive arbitrary JSON produced by the plugins in responses.</p>
+<p>In the examples below we use a hypothetical plugin that adds a <code class="literal">sphere-distance</code> aggregation that groups documents containing 3D coordinates according to their distance to a reference location.</p>
+<p>To create a custom aggregation, use the <code class="literal">_custom()</code> aggregation type and provide its identifier, defined by the plugin, and parameters. The parameters can be any object or value that can be serialized to JSON. In the example below we use a simple map:</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">Map&lt;String, Object&gt; params = new HashMap&lt;&gt;(); <a id="CO8-1"></a><i class="conum" data-value="1"></i>
+params.put("interval", 10);
+params.put("scale", "log");
+params.put("origin", new Double[]{145.0, 12.5, 1649.0});
+
+SearchRequest request = SearchRequest.of(r -&gt; r
+    .index("stars")
+    .aggregations("neighbors", agg -&gt; agg
+        ._custom("sphere-distance", params) <a id="CO8-2"></a><i class="conum" data-value="2"></i>
+    )
+);</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO8-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Parameters for the custom aggregation.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO8-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Create a custom aggregation named <code class="literal">neighbors</code> of kind <code class="literal">sphere-distance</code> with its parameters.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The results of custom variants are returned as raw JSON represented by a <code class="literal">JsonData</code> object. You can then traverse the JSON tree to get the data. Since this is not always convenient, you can also define classes that represent that JSON data and deserialize them from the raw JSON.</p>
+<p>Traversing the JSON tree:</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">SearchResponse&lt;Void&gt; response = esClient.search(request, Void.class); <a id="CO9-1"></a><i class="conum" data-value="1"></i>
+
+JsonData neighbors = response
+    .aggregations().get("neighbors")
+    ._custom(); <a id="CO9-2"></a><i class="conum" data-value="2"></i>
+
+JsonArray buckets = neighbors.toJson() <a id="CO9-3"></a><i class="conum" data-value="3"></i>
+    .asJsonObject()
+    .getJsonArray("buckets");
+
+for (JsonValue item : buckets) {
+    JsonObject bucket = item.asJsonObject();
+    double key = bucket.getJsonNumber("key").doubleValue();
+    double docCount = bucket.getJsonNumber("doc_count").longValue();
+    doSomething(key, docCount);
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO9-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Use <code class="literal">Void</code> if you&#8217;re only interested in aggregation results, not search hits (see also <a class="xref" href="aggregations.html" title="Aggregations">Aggregations</a>).</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO9-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Get the <code class="literal">neighbors</code> aggregation result as custom JSON result.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO9-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Traverse the JSON tree to extract the result data.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>Using a class that represents the custom aggregation results:</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">SearchResponse&lt;Void&gt; response = esClient.search(request, Void.class);
+
+SphereDistanceAggregate neighbors = response
+    .aggregations().get("neighbors")
+    ._custom()
+    .to(SphereDistanceAggregate.class); <a id="CO10-1"></a><i class="conum" data-value="1"></i>
+
+for (Bucket bucket : neighbors.buckets()) {
+    doSomething(bucket.key(), bucket.docCount());
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO10-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Deserialize the custom JSON to a dedicated <code class="literal">SphereDistanceAggregate</code> class.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>Where <code class="literal">SphereDistanceAggregate</code> can be defined as follows:</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">public static class SphereDistanceAggregate {
+    private final List&lt;Bucket&gt; buckets;
+    @JsonCreator
+    public SphereDistanceAggregate(
+        @JsonProperty("buckets") List&lt;Bucket&gt; buckets
+    ) {
+        this.buckets = buckets;
+    }
+    public List&lt;Bucket&gt; buckets() {
+        return buckets;
+    };
+}
+
+public static class Bucket {
+    private final double key;
+    private final double docCount;
+    @JsonCreator
+    public Bucket(
+        @JsonProperty("key") double key,
+        @JsonProperty("doc_count") double docCount) {
+        this.key = key;
+        this.docCount = docCount;
+    }
+    public double key() {
+        return key;
+    }
+    public double docCount() {
+        return docCount;
+    }
+}</pre>
+</div>
+<p>The source code for the examples above can be found in the <a href="https://github.com/elastic/elasticsearch-java/tree/8.7/java-client/src/test/java/co/elastic/clients/documentation" class="ulink" target="_top">Java API Client tests</a>.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="lists-and-maps.html">« Lists and maps</a>
+</span>
+<span class="next">
+<a href="object-lifecycles.html">Object life cycles and thread safety »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

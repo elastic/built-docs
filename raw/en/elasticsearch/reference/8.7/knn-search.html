@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>k-nearest neighbor (kNN) search | Elasticsearch Guide [8.7] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.7]"/>
+<link rel="up" href="search-your-data.html" title="Search your data"/>
+<link rel="prev" href="sort-search-results.html" title="Sort search results"/>
+<link rel="next" href="query-dsl.html" title="Query DSL"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.7"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.7"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.7]</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="search-your-data.html">Search your data</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="sort-search-results.html">« Sort search results</a>
+</span>
+<span class="next">
+<a href="query-dsl.html">Query DSL »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="knn-search"></a>k-nearest neighbor (kNN) search<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>A <em>k-nearest neighbor</em> (kNN) search finds the <em>k</em> nearest vectors to a query
+vector, as measured by a similarity metric.</p>
+<p>Common use cases for kNN include:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Relevance ranking based on natural language processing (NLP) algorithms
+</li>
+<li class="listitem">
+Product recommendations and recommendation engines
+</li>
+<li class="listitem">
+Similarity search for images or videos
+</li>
+</ul>
+</div>
+<h3><a id="knn-prereqs"></a>Prerequisites<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></h3>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>To run a kNN search, you must be able to convert your data into meaningful
+vector values. You create these vectors outside of Elasticsearch and add them to
+documents as <a class="xref" href="dense-vector.html" title="Dense vector field type"><code class="literal">dense_vector</code></a> field values. Queries are
+represented as vectors with the same dimension.</p>
+<p>Design your vectors so that the closer a document&#8217;s vector is to a query vector,
+based on a similarity metric, the better its match.</p>
+</li>
+<li class="listitem">
+<p>To complete the steps in this guide, you must have the following
+<a class="xref" href="security-privileges.html#privileges-list-indices" title="Indices privileges">index privileges</a>:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">create_index</code> or <code class="literal">manage</code> to create an index with a <code class="literal">dense_vector</code> field
+</li>
+<li class="listitem">
+<code class="literal">create</code>, <code class="literal">index</code>, or <code class="literal">write</code> to add data to the index you created
+</li>
+<li class="listitem">
+<code class="literal">read</code> to search the index
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+<h3><a id="knn-methods"></a>kNN methods<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></h3>
+<p>Elasticsearch supports two methods for kNN search:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="knn-search.html#exact-knn" title="Exact kNN">Exact, brute-force kNN</a> using a <code class="literal">script_score</code> query with a
+vector function
+</li>
+<li class="listitem">
+<a class="xref" href="knn-search.html#approximate-knn" title="Approximate kNN">Approximate kNN</a> using the <code class="literal">knn</code> search
+option
+</li>
+</ul>
+</div>
+<p>In most cases, you&#8217;ll want to use approximate kNN. Approximate kNN offers lower
+latency at the cost of slower indexing and imperfect accuracy.</p>
+<p>Exact, brute-force kNN guarantees accurate results but doesn&#8217;t scale well with
+large datasets. With this approach, a <code class="literal">script_score</code> query must scan each
+matching document to compute the vector function, which can result in slow
+search speeds. However, you can improve latency by using a <a class="xref" href="query-dsl.html" title="Query DSL">query</a>
+to limit the number of matching documents passed to the function. If you
+filter your data to a small subset of documents, you can get good search
+performance using this approach.</p>
+<h3><a id="exact-knn"></a>Exact kNN<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></h3>
+<p>To run an exact kNN search, use a <code class="literal">script_score</code> query with a vector function.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Explicitly map one or more <code class="literal">dense_vector</code> fields. If you don&#8217;t intend to use
+the field for approximate kNN, omit the <code class="literal">index</code> mapping option or set it to
+<code class="literal">false</code>. This can significantly improve indexing speed.</p>
+<a id="ea68e3428cc2ca3455bf312d09451489"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT product-index
+{
+  "mappings": {
+    "properties": {
+      "product-vector": {
+        "type": "dense_vector",
+        "dims": 5,
+        "index": false
+      },
+      "price": {
+        "type": "long"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/899.console"></div>
+</li>
+<li class="listitem">
+<p>Index your data.</p>
+<a id="ba70b92f745a1765f1eb62e3457a86c3"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST product-index/_bulk?refresh=true
+{ "index": { "_id": "1" } }
+{ "product-vector": [230.0, 300.33, -34.8988, 15.555, -200.0], "price": 1599 }
+{ "index": { "_id": "2" } }
+{ "product-vector": [-0.5, 100.0, -13.0, 14.8, -156.0], "price": 799 }
+{ "index": { "_id": "3" } }
+{ "product-vector": [0.5, 111.3, -13.0, 14.8, -156.0], "price": 1099 }
+...</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/900.console"></div>
+</li>
+<li class="listitem">
+<p>Use the <a class="xref" href="search-search.html" title="Search API">search API</a> to run a <code class="literal">script_score</code> query containing
+a <a class="xref" href="query-dsl-script-score-query.html#vector-functions" title="Functions for vector fields">vector function</a>.</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>To limit the number of matched documents passed to the vector function, we
+recommend you specify a filter query in the <code class="literal">script_score.query</code> parameter. If
+needed, you can use a <a class="xref" href="query-dsl-match-all-query.html" title="Match all query"><code class="literal">match_all</code> query</a> in this
+parameter to match all documents. However, matching all documents can
+significantly increase search latency.</p>
+</div>
+</div>
+<a id="9ab351893dae65ec97fd8cb6832950fb"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST product-index/_search
+{
+  "query": {
+    "script_score": {
+      "query" : {
+        "bool" : {
+          "filter" : {
+            "range" : {
+              "price" : {
+                "gte": 1000
+              }
+            }
+          }
+        }
+      },
+      "script": {
+        "source": "cosineSimilarity(params.queryVector, 'product-vector') + 1.0",
+        "params": {
+          "queryVector": [-0.5, 90.0, -10, 14.8, -156.0]
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/901.console"></div>
+</li>
+</ol>
+</div>
+<h3><a id="approximate-knn"></a>Approximate kNN<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></h3>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Compared to other types of search, approximate kNN search has specific
+resource requirements. In particular, all vector data must fit in the node&#8217;s
+page cache for it to be efficient. Please consult the
+<a class="xref" href="tune-knn-search.html" title="Tune approximate kNN search">approximate kNN search tuning guide</a> for important notes on
+configuration and sizing.</p>
+</div>
+</div>
+<p>To run an approximate kNN search, use the <a class="xref" href="search-search.html#search-api-knn"><code class="literal">knn</code> option</a>
+to search one or more <code class="literal">dense_vector</code> fields with indexing enabled.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Explicitly map one or more <code class="literal">dense_vector</code> fields. Approximate kNN search
+requires the following mapping options:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+An <code class="literal">index</code> value of <code class="literal">true</code>.
+</li>
+<li class="listitem">
+A <code class="literal">similarity</code> value. This value determines the similarity metric used to
+score documents based on similarity between the query and document vector. For a
+list of available metrics, see the <a class="xref" href="dense-vector.html#dense-vector-similarity"><code class="literal">similarity</code></a>
+parameter documentation.
+</li>
+</ul>
+</div>
+<a id="6894596e924b6180bfc77428ba89769f"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT image-index
+{
+  "mappings": {
+    "properties": {
+      "image-vector": {
+        "type": "dense_vector",
+        "dims": 3,
+        "index": true,
+        "similarity": "l2_norm"
+      },
+      "title-vector": {
+        "type": "dense_vector",
+        "dims": 5,
+        "index": true,
+        "similarity": "l2_norm"
+      },
+      "title": {
+        "type": "text"
+      },
+      "file-type": {
+        "type": "keyword"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/902.console"></div>
+</li>
+<li class="listitem">
+<p>Index your data.</p>
+<a id="c9c21191ae15a49955bffde0ac749a49"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST image-index/_bulk?refresh=true
+{ "index": { "_id": "1" } }
+{ "image-vector": [1, 5, -20], "title-vector": [12, 50, -10, 0, 1], "title": "moose family", "file-type": "jpg" }
+{ "index": { "_id": "2" } }
+{ "image-vector": [42, 8, -15], "title-vector": [25, 1, 4, -12, 2], "title": "alpine lake", "file-type": "png" }
+{ "index": { "_id": "3" } }
+{ "image-vector": [15, 11, 23], "title-vector": [1, 5, 25, 50, 20], "title": "full moon", "file-type": "jpg" }
+...</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/903.console"></div>
+</li>
+<li class="listitem">
+<p>Run the search using the <a class="xref" href="search-search.html#search-api-knn"><code class="literal">knn</code> option</a>.</p>
+<a id="9c6ea5fe2339d6c7e5e4bf1b98990248"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST image-index/_search
+{
+  "knn": {
+    "field": "image-vector",
+    "query_vector": [-5, 9, -12],
+    "k": 10,
+    "num_candidates": 100
+  },
+  "fields": [ "title", "file-type" ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/904.console"></div>
+</li>
+</ol>
+</div>
+<p>The <a class="xref" href="search-search.html#search-api-response-body-score">document <code class="literal">_score</code></a> is determined by
+the similarity between the query and document vector. See
+<a class="xref" href="dense-vector.html#dense-vector-similarity"><code class="literal">similarity</code></a> for more information on how kNN
+search scores are computed.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Support for approximate kNN search was added in version 8.0. Before
+this, <code class="literal">dense_vector</code> fields did not support enabling <code class="literal">index</code> in the mapping.
+If you created an index prior to 8.0 containing <code class="literal">dense_vector</code> fields, then to
+support approximate kNN search the data must be reindexed using a new field
+mapping that sets <code class="literal">index: true</code>.</p>
+</div>
+</div>
+<h4><a id="tune-approximate-knn-for-speed-accuracy"></a>Tune approximate kNN for speed or accuracy<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></h4>
+<p>To gather results, the kNN search API finds a <code class="literal">num_candidates</code> number of
+approximate nearest neighbor candidates on each shard. The search computes the
+similarity of these candidate vectors to the query vector, selecting the <code class="literal">k</code>
+most similar results from each shard. The search then merges the results from
+each shard to return the global top <code class="literal">k</code> nearest neighbors.</p>
+<p>You can increase <code class="literal">num_candidates</code> for more accurate results at the cost of
+slower search speeds. A search with a high value for <code class="literal">num_candidates</code>
+considers more candidates from each shard. This takes more time, but the
+search has a higher probability of finding the true <code class="literal">k</code> top nearest neighbors.</p>
+<p>Similarly, you can decrease <code class="literal">num_candidates</code> for faster searches with
+potentially less accurate results.</p>
+<h4><a id="approximate-knn-using-byte-vectors"></a>Approximate kNN using byte vectors<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></h4>
+<p>The approximate kNN search API supports <code class="literal">byte</code> value vectors in
+addition to <code class="literal">float</code> value vectors. Use the <a class="xref" href="search-search.html#search-api-knn"><code class="literal">knn</code> option</a>
+to search a <code class="literal">dense_vector</code> field with <a class="xref" href="dense-vector.html#dense-vector-params" title="Parameters for dense vector fields"><code class="literal">element_type</code></a> set to
+<code class="literal">byte</code> and indexing enabled.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Explicitly map one or more <code class="literal">dense_vector</code> fields with
+<a class="xref" href="dense-vector.html#dense-vector-params" title="Parameters for dense vector fields"><code class="literal">element_type</code></a> set to <code class="literal">byte</code> and indexing enabled.</p>
+<a id="75c2bb6bbeb70d263cb9a5c588e8298e"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT byte-image-index
+{
+  "mappings": {
+    "properties": {
+      "byte-image-vector": {
+        "type": "dense_vector",
+        "element_type": "byte",
+        "dims": 2,
+        "index": true,
+        "similarity": "cosine"
+      },
+      "title": {
+        "type": "text"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/905.console"></div>
+</li>
+<li class="listitem">
+<p>Index your data ensuring all vector values
+are integers within the range [-128, 127].</p>
+<a id="9851f5225150bc032fb3b195cd447f4f"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST byte-image-index/_bulk?refresh=true
+{ "index": { "_id": "1" } }
+{ "byte-image-vector": [5, -20], "title": "moose family" }
+{ "index": { "_id": "2" } }
+{ "byte-image-vector": [8, -15], "title": "alpine lake" }
+{ "index": { "_id": "3" } }
+{ "byte-image-vector": [11, 23], "title": "full moon" }</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/906.console"></div>
+</li>
+<li class="listitem">
+<p>Run the search using the <a class="xref" href="search-search.html#search-api-knn"><code class="literal">knn</code> option</a>
+ensuring the <code class="literal">query_vector</code> values are integers within the
+range [-128, 127].</p>
+<a id="55f0fec6342f677af74de2124b801aa2"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST byte-image-index/_search
+{
+  "knn": {
+    "field": "byte-image-vector",
+    "query_vector": [-5, 9],
+    "k": 10,
+    "num_candidates": 100
+  },
+  "fields": [ "title" ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/907.console"></div>
+</li>
+</ol>
+</div>
+<h4><a id="knn-search-filter-example"></a>Filtered kNN search<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></h4>
+<p>The kNN search API supports restricting the search using a filter. The search
+will return the top <code class="literal">k</code> documents that also match the filter query.</p>
+<p>The following request performs an approximate kNN search filtered by the
+<code class="literal">file-type</code> field:</p>
+<a id="621f4553e24592d40c8cdbbdfaeb027e"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST image-index/_search
+{
+  "knn": {
+    "field": "image-vector",
+    "query_vector": [54, 10, -2],
+    "k": 5,
+    "num_candidates": 50,
+    "filter": {
+      "term": {
+        "file-type": "png"
+      }
+    }
+  },
+  "fields": ["title"],
+  "_source": false
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/908.console"></div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The filter is applied <span class="strong strong"><strong>during</strong></span> the approximate kNN search to ensure
+that <code class="literal">k</code> matching documents are returned. This contrasts with a
+post-filtering approach, where the filter is applied <span class="strong strong"><strong>after</strong></span> the approximate
+kNN search completes. Post-filtering has the downside that it sometimes
+returns fewer than k results, even when there are enough matching documents.</p>
+</div>
+</div>
+<h4><a id="_combine_approximate_knn_with_other_features"></a>Combine approximate kNN with other features<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></h4>
+<p>You can perform <em>hybrid retrieval</em> by providing both the
+<a class="xref" href="search-search.html#search-api-knn"><code class="literal">knn</code> option</a> and a <a class="xref" href="search-search.html#request-body-search-query"><code class="literal">query</code></a>:</p>
+<a id="c6abe91b5527870face2b826f37ba1da"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST image-index/_search
+{
+  "query": {
+    "match": {
+      "title": {
+        "query": "mountain lake",
+        "boost": 0.9
+      }
+    }
+  },
+  "knn": {
+    "field": "image-vector",
+    "query_vector": [54, 10, -2],
+    "k": 5,
+    "num_candidates": 50,
+    "boost": 0.1
+  },
+  "size": 10
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/909.console"></div>
+<p>This search finds the global top <code class="literal">k = 5</code> vector matches, combines them with the matches from the <code class="literal">match</code> query, and
+finally returns the 10 top-scoring results. The <code class="literal">knn</code> and <code class="literal">query</code> matches are combined through a disjunction, as if you
+took a boolean <em>or</em> between them. The top <code class="literal">k</code> vector results represent the global nearest neighbors across all index
+shards.</p>
+<p>The score of each hit is the sum of the <code class="literal">knn</code> and <code class="literal">query</code> scores. You can specify a <code class="literal">boost</code> value to give a weight to
+each score in the sum. In the example above, the scores will be calculated as</p>
+<pre class="screen">score = 0.9 * match_score + 0.1 * knn_score</pre>
+<p>The <code class="literal">knn</code> option can also be used with <a class="xref" href="search-aggregations.html" title="Aggregations"><code class="literal">aggregations</code></a>. In general, Elasticsearch computes aggregations
+over all documents that match the search. So for approximate kNN search, aggregations are calculated on the top <code class="literal">k</code>
+nearest documents. If the search also includes a <code class="literal">query</code>, then aggregations are calculated on the combined set of <code class="literal">knn</code>
+and <code class="literal">query</code> matches.</p>
+<h4><a id="_search_multiple_knn_fields"></a>Search multiple kNN fields<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></h4>
+<p>In addition to <em>hybrid retrieval</em>, you can search more than one kNN vector field at a time:</p>
+<a id="7021ddb273a3a00847324d2f670c4c04"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST image-index/_search
+{
+  "query": {
+    "match": {
+      "title": {
+        "query": "mountain lake",
+        "boost": 0.9
+      }
+    }
+  },
+  "knn": [ {
+    "field": "image-vector",
+    "query_vector": [54, 10, -2],
+    "k": 5,
+    "num_candidates": 50,
+    "boost": 0.1
+  },
+  {
+    "field": "title-vector",
+    "query_vector": [1, 20, -52, 23, 10],
+    "k": 10,
+    "num_candidates": 10,
+    "boost": 0.5
+  }],
+  "size": 10
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/910.console"></div>
+<p>This search finds the global top <code class="literal">k = 5</code> vector matches for <code class="literal">image-vector</code> and the global <code class="literal">k = 10</code> for the <code class="literal">title-vector</code>.
+These top values are then combined with the matches from the <code class="literal">match</code> query and the top-10 documents are returned.
+The multiple <code class="literal">knn</code> entries and the <code class="literal">query</code> matches are combined through a disjunction,
+as if you took a boolean <em>or</em> between them. The top <code class="literal">k</code> vector results represent the global nearest neighbors across
+all index shards.</p>
+<p>The scoring for a doc with the above configured boosts would be:</p>
+<pre class="screen">score = 0.9 * match_score + 0.1 * knn_score_image-vector + 0.5 * knn_score_title-vector</pre>
+<h4><a id="knn-indexing-considerations"></a>Indexing considerations<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></h4>
+<p>For approximate kNN search, Elasticsearch stores the dense vector values of each
+segment as an <a href="https://arxiv.org/abs/1603.09320" class="ulink" target="_top">HNSW graph</a>. Indexing vectors for
+approximate kNN search can take substantial time because of how expensive it is
+to build these graphs. You may need to increase the client request timeout for
+index and bulk requests. The <a class="xref" href="tune-knn-search.html" title="Tune approximate kNN search">approximate kNN tuning guide</a>
+contains important guidance around indexing performance, and how the index
+configuration can affect search performance.</p>
+<p>In addition to its search-time tuning parameters, the HNSW algorithm has
+index-time parameters that trade off between the cost of building the graph,
+search speed, and accuracy. When setting up the <code class="literal">dense_vector</code> mapping, you
+can use the <a class="xref" href="dense-vector.html#dense-vector-index-options"><code class="literal">index_options</code></a> argument to adjust
+these parameters:</p>
+<a id="c93e63f3fb62f588d62ffbbefe73212e"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT image-index
+{
+  "mappings": {
+    "properties": {
+      "image-vector": {
+        "type": "dense_vector",
+        "dims": 3,
+        "index": true,
+        "similarity": "l2_norm",
+        "index_options": {
+          "type": "hnsw",
+          "m": 32,
+          "ef_construction": 100
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/911.console"></div>
+<h4><a id="approximate-knn-limitations"></a>Limitations for approximate kNN search<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></h4>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+You can&#8217;t run an approximate kNN search on a <code class="literal">dense_vector</code> field within a
+<a class="xref" href="nested.html" title="Nested field type"><code class="literal">nested</code></a> mapping.
+</li>
+<li class="listitem">
+When using kNN search in <a class="xref" href="modules-cross-cluster-search.html" title="Search across clusters">cross-cluster search</a>, the <a class="xref" href="modules-cross-cluster-search.html#ccs-min-roundtrips" title="Minimize network roundtrips"><code class="literal">ccs_minimize_roundtrips</code></a>
+option is not supported.
+</li>
+<li class="listitem">
+
+Elasticsearch uses the <a href="https://arxiv.org/abs/1603.09320" class="ulink" target="_top">HNSW algorithm</a> to support
+efficient kNN search. Like most kNN algorithms, HNSW is an approximate method
+that sacrifices result accuracy for improved search speed. This means the
+results returned are not always the true <em>k</em> closest neighbors.
+</li>
+</ul>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Approximate kNN search always uses the
+<a class="xref" href="search-search.html#dfs-query-then-fetch"><code class="literal">dfs_query_then_fetch</code></a> search type in order to gather
+the global top <code class="literal">k</code> matches across shards. You cannot set the
+<code class="literal">search_type</code> explicitly when running kNN search.</p>
+</div>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="sort-search-results.html">« Sort search results</a>
+</span>
+<span class="next">
+<a href="query-dsl.html">Query DSL »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

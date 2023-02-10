@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Set up basic security for the Elastic Stack | Elasticsearch Guide [8.7] | Elastic</title>
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.7]"/>
+<link rel="up" href="manually-configure-security.html" title="Manually configure security"/>
+<link rel="prev" href="security-minimal-setup.html" title="Set up minimal security for Elasticsearch"/>
+<link rel="next" href="security-basic-setup-https.html" title="Set up basic security for the Elastic Stack plus secured HTTPS traffic"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.7"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.7"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.7]</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="secure-cluster.html">Secure the Elastic Stack</a></span><span class="chevron-right">›</span>
+<span class="breadcrumb-link"><a href="manually-configure-security.html">Manually configure security</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="security-minimal-setup.html">« Set up minimal security for Elasticsearch</a>
+</span>
+<span class="next">
+<a href="security-basic-setup-https.html">Set up basic security for the Elastic Stack plus secured HTTPS traffic »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="security-basic-setup"></a>Set up basic security for the Elastic Stack<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/x-pack/docs/en/security/securing-communications/security-basic-setup.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>When you start Elasticsearch for the first time, passwords are generated for the <code class="literal">elastic</code>
+user and TLS is automatically configured for you. If you configure security
+manually <em>before</em> starting your Elasticsearch nodes, the auto-configuration process will
+respect your security configuration. You can adjust your TLS configuration at
+any time, such as <a class="xref" href="update-node-certs.html" title="Updating node security certificates">updating node certificates</a>.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If your cluster has multiple nodes, then you must configure
+TLS between nodes. <a class="xref" href="bootstrap-checks.html#dev-vs-prod-mode" title="Development vs. production mode">Production mode</a> clusters will not start
+if you do not enable TLS.</p>
+</div>
+</div>
+<p>The transport layer relies on mutual TLS for both encryption and
+authentication of nodes. Correctly applying TLS ensures that a malicious node
+cannot join the cluster and exchange data with other nodes. While implementing
+username and password authentication at the HTTP layer is useful for securing a
+local cluster, the security of communication between nodes requires TLS.</p>
+<p>Configuring TLS between nodes is the basic security setup to prevent
+unauthorized nodes from accessing to your cluster.</p>
+<div class="sidebar">
+<div class="titlepage"><div><div>
+<p class="title"><strong>Understanding transport contexts</strong></p>
+</div></div></div>
+<p>Transport Layer Security (TLS) is the name of an industry standard protocol for
+applying security controls (such as encryption) to network communications. TLS
+is the modern name for what used to be called Secure Sockets Layer (SSL). The
+Elasticsearch documentation uses the terms TLS and SSL interchangeably.</p>
+<p>Transport Protocol is the name of the protocol that Elasticsearch nodes use to
+communicate with one another. This name is specific to Elasticsearch and distinguishes
+the transport port (default <code class="literal">9300</code>) from the HTTP port (default <code class="literal">9200</code>). Nodes
+communicate with one another using the transport port, and REST clients
+communicate with Elasticsearch using the HTTP port.</p>
+<p>Although the word <em>transport</em> appears in both contexts, they mean different
+things. It&#8217;s possible to apply TLS to both the Elasticsearch transport port and the HTTP
+port. We know that these overlapping terms can be confusing, so to clarify, in
+this scenario we&#8217;re applying TLS to the Elasticsearch transport port. In
+<a class="xref" href="security-basic-setup-https.html" title="Set up basic security for the Elastic Stack plus secured HTTPS traffic">the next scenario</a>, we&#8217;ll apply TLS to the Elasticsearch
+HTTP port.</p>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="generate-certificates"></a>Generate the certificate authority<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/x-pack/docs/en/security/securing-communications/security-basic-setup.asciidoc">edit</a></h3>
+</div></div></div>
+<p>You can add as many nodes as you want in a cluster but they must be able to
+communicate with each other. The communication between nodes in a cluster is
+handled by the transport module. To secure your cluster, you must ensure that
+internode communications are encrypted and verified, which is achieved with
+mutual TLS.</p>
+<p>In a secured cluster, Elasticsearch nodes use certificates to identify
+themselves when communicating with other nodes.</p>
+<p>The cluster must validate the authenticity of these certificates. The
+recommended approach is to trust a specific certificate authority (CA). When
+nodes are added to your cluster they must use a certificate signed by the same
+CA.</p>
+<p>For the transport layer, we recommend using a separate, dedicated CA instead
+of an existing, possibly shared CA so that node membership is tightly controlled. Use the <code class="literal">elasticsearch-certutil</code> tool to
+generate a CA for your cluster.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Before starting Elasticsearch, use the <code class="literal">elasticsearch-certutil</code> tool on any single node
+to generate a CA for your cluster.</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">./bin/elasticsearch-certutil ca</pre>
+</div>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+When prompted, accept the default file name, which is <code class="literal">elastic-stack-ca.p12</code>. This file contains the public certificate for your CA and the private key used to sign certificates for each node.
+</li>
+<li class="listitem">
+Enter a password for your CA. You can choose to leave the password blank
+if you&#8217;re not deploying to a production environment.
+</li>
+</ol>
+</div>
+</li>
+<li class="listitem">
+<p>On any single node, generate a certificate and private key for the nodes in
+your cluster. You include the <code class="literal">elastic-stack-ca.p12</code> output file that you
+generated in the previous step.</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">./bin/elasticsearch-certutil cert --ca elastic-stack-ca.p12</pre>
+</div>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">--ca &lt;ca_file&gt;</code>
+</span>
+</dt>
+<dd>
+<p>
+Name of the CA file used to sign your certificates. The
+default file name from the <code class="literal">elasticsearch-certutil</code> tool is <code class="literal">elastic-stack-ca.p12</code>.
+</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Enter the password for your CA, or press <span class="strong strong"><strong>Enter</strong></span> if you did not configure one in the previous step.
+</li>
+<li class="listitem">
+<p>Create a password for the certificate and accept the default file name.</p>
+<p>The output file is a keystore named <code class="literal">elastic-certificates.p12</code>. This file
+contains a node certificate, node key, and CA certificate.</p>
+</li>
+</ol>
+</div>
+</dd>
+</dl>
+</div>
+</li>
+<li class="listitem">
+On <span class="strong strong"><strong>every</strong></span> node in your cluster, copy the <code class="literal">elastic-certificates.p12</code> file to
+the <code class="literal">$ES_PATH_CONF</code> directory.
+</li>
+</ol>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="encrypt-internode-communication"></a>Encrypt internode communications with TLS<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/x-pack/docs/en/security/securing-communications/security-basic-setup.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The transport networking layer is used for internal communication between
+nodes in a cluster. When security features are enabled, you must use TLS to
+ensure that communication between the nodes is encrypted.</p>
+<p>Now that you&#8217;ve generated a certificate authority and certificates, you&#8217;ll
+update your cluster to use these files.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Elasticsearch monitors all files such as certificates, keys, keystores, or
+truststores that are configured as values of TLS-related node settings. If
+you update any of these files, such as when your hostnames change or your
+certificates are due to expire, Elasticsearch reloads them. The files are polled for
+changes at a frequency determined by the global Elasticsearch
+<code class="literal">resource.reload.interval.high</code> setting, which defaults to 5 seconds.</p>
+</div>
+</div>
+<p>Complete the following steps <span class="strong strong"><strong>for each node in your cluster</strong></span>. To join the
+same cluster, all nodes must share the same <code class="literal">cluster.name</code> value.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Open the <code class="literal">$ES_PATH_CONF/elasticsearch.yml</code> file and make the following
+changes:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Add the <a class="xref" href="important-settings.html#cluster-name" title="Cluster name setting"><code class="literal">cluster-name</code></a> setting and enter a name for your cluster:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">cluster.name: my-cluster</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Add the <a class="xref" href="important-settings.html#node-name" title="Node name setting"><code class="literal">node.name</code></a> setting and enter a name for the node.
+The node name defaults to the hostname of the machine when Elasticsearch starts.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">node.name: node-1</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Add the following settings to enable internode communication and provide
+access to the node&#8217;s certificate.</p>
+<p>Because you are using the same <code class="literal">elastic-certificates.p12</code> file on every node in
+your cluster, set the verification mode to <code class="literal">certificate</code>:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">xpack.security.transport.ssl.enabled: true
+xpack.security.transport.ssl.verification_mode: certificate <a id="CO533-1"></a><i class="conum" data-value="1"></i>
+xpack.security.transport.ssl.client_authentication: required
+xpack.security.transport.ssl.keystore.path: elastic-certificates.p12
+xpack.security.transport.ssl.truststore.path: elastic-certificates.p12</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO533-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>If you want to use hostname verification, set the verification mode to
+<code class="literal">full</code>. You should generate a different certificate for each host that
+matches the DNS or IP address. See the
+<code class="literal">xpack.security.transport.ssl.verification_mode</code> parameter in <a href="/guide/en/elasticsearch/reference/8.7/security-settings.html#transport-tls-ssl-settings" class="ulink" target="_top">TLS settings</a>.</p>
+</td>
+</tr>
+</table>
+</div>
+</li>
+</ol>
+</div>
+</li>
+<li class="listitem">
+<p>If you entered a password when creating the node certificate, run the following commands to store the password in the Elasticsearch keystore:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">./bin/elasticsearch-keystore add xpack.security.transport.ssl.keystore.secure_password</pre>
+</div>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">./bin/elasticsearch-keystore add xpack.security.transport.ssl.truststore.secure_password</pre>
+</div>
+</li>
+<li class="listitem">
+Complete the previous steps for each node in your cluster.
+</li>
+<li class="listitem">
+<p>On <span class="strong strong"><strong>every</strong></span> node in your cluster, start Elasticsearch. The method for
+<a class="xref" href="starting-elasticsearch.html" title="Starting Elasticsearch">starting</a> and <a class="xref" href="starting-elasticsearch.html" title="Starting Elasticsearch">stopping</a> Elasticsearch
+varies depending on how you installed it.</p>
+<p>For example, if you installed Elasticsearch with an archive distribution
+(<code class="literal">tar.gz</code> or <code class="literal">.zip</code>), you can enter <code class="literal">Ctrl+C</code> on the command line to stop
+Elasticsearch.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>You must perform a full cluster restart. Nodes that are configured to
+use TLS for transport cannot communicate with nodes that use unencrypted transport connection (and vice-versa).</p>
+</div>
+</div>
+</li>
+</ol>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="encrypting-internode-whatsnext"></a>What&#8217;s next?<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/x-pack/docs/en/security/securing-communications/security-basic-setup.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Congratulations! You&#8217;ve encrypted communications between the nodes in your
+cluster and can pass the
+<a class="xref" href="bootstrap-checks-xpack.html#bootstrap-checks-tls" title="SSL/TLS check">TLS bootstrap check</a>.</p>
+<p>To add another layer of security, <a class="xref" href="security-basic-setup-https.html" title="Set up basic security for the Elastic Stack plus secured HTTPS traffic">Set up basic security for the Elastic Stack plus secured HTTPS traffic</a>. In addition to
+configuring TLS on the transport interface of your Elasticsearch cluster, you configure
+TLS on the HTTP interface for both Elasticsearch and Kibana.</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="security-minimal-setup.html">« Set up minimal security for Elasticsearch</a>
+</span>
+<span class="next">
+<a href="security-basic-setup-https.html">Set up basic security for the Elastic Stack plus secured HTTPS traffic »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
