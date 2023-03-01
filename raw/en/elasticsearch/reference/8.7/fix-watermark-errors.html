@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="keywords" content="Elasticsearch, high watermark, low watermark, full disk">
+<title>Fix watermark errors | Elasticsearch Guide [8.7] | Elastic</title>
+<meta class="elastic" name="content" content="Fix watermark errors | Elasticsearch Guide [8.7]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.7]"/>
+<link rel="up" href="fix-common-cluster-issues.html" title="Fix common cluster issues"/>
+<link rel="prev" href="fix-common-cluster-issues.html" title="Fix common cluster issues"/>
+<link rel="next" href="circuit-breaker-errors.html" title="Circuit breaker errors"/>
+<meta class="elastic" name="product_version" content="8.7"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.7"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.7"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.7]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="troubleshooting.html">Troubleshooting</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="fix-common-cluster-issues.html">Fix common cluster issues</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="fix-common-cluster-issues.html">« Fix common cluster issues</a>
+</span>
+<span class="next">
+<a href="circuit-breaker-errors.html">Circuit breaker errors »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="fix-watermark-errors"></a>Fix watermark errors<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.7/docs/reference/troubleshooting/common-issues/disk-usage-exceeded.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>When a data node is critically low on disk space and has reached the
+<a class="xref" href="modules-cluster.html#cluster-routing-flood-stage">flood-stage disk usage watermark</a>, the following
+error is logged: <code class="literal">Error: disk usage exceeded flood-stage watermark, index has read-only-allow-delete block</code>.</p>
+<p>To prevent a full disk, when a node reaches this watermark, Elasticsearch blocks writes
+to any index with a shard on the node. If the block affects related system
+indices, Kibana and other Elastic Stack features may become unavailable.</p>
+<p>Elasticsearch will automatically remove the write block when the affected node&#8217;s disk
+usage goes below the <a class="xref" href="modules-cluster.html#cluster-routing-watermark-high">high disk watermark</a>. To
+achieve this, Elasticsearch automatically moves some of the affected node&#8217;s shards to
+other nodes in the same data tier.</p>
+<p>To verify that shards are moving off the affected node, use the <a class="xref" href="cat-shards.html" title="cat shards API">cat
+shards API</a>.</p>
+<a id="a1070cf2f5969d42d71cda057223f152"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _cat/shards?v=true</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1843.console"></div>
+<p>If shards remain on the node, use the <a class="xref" href="cluster-allocation-explain.html" title="Cluster allocation explain API">cluster
+allocation explanation API</a> to get an explanation for their allocation status.</p>
+<a id="934ced0998552cc95a28e48554147e8b"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _cluster/allocation/explain
+{
+  "index": "my-index",
+  "shard": 0,
+  "primary": false,
+  "current_node": "my-node"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1844.console"></div>
+<p>To immediately restore write operations, you can temporarily increase the disk
+watermarks and remove the write block.</p>
+<a id="8582e918a6275472d2eba2e95f1dbe77"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _cluster/settings
+{
+  "persistent": {
+    "cluster.routing.allocation.disk.watermark.low": "90%",
+    "cluster.routing.allocation.disk.watermark.low.max_headroom": "100GB",
+    "cluster.routing.allocation.disk.watermark.high": "95%",
+    "cluster.routing.allocation.disk.watermark.high.max_headroom": "20GB",
+    "cluster.routing.allocation.disk.watermark.flood_stage": "97%",
+    "cluster.routing.allocation.disk.watermark.flood_stage.max_headroom": "5GB",
+    "cluster.routing.allocation.disk.watermark.flood_stage.frozen": "97%",
+    "cluster.routing.allocation.disk.watermark.flood_stage.frozen.max_headroom": "5GB"
+  }
+}
+
+PUT */_settings?expand_wildcards=all
+{
+  "index.blocks.read_only_allow_delete": null
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1845.console"></div>
+<p>As a long-term solution, we recommend you add nodes to the affected data tiers
+or upgrade existing nodes to increase disk space. To free up additional disk
+space, you can delete unneeded indices using the <a class="xref" href="indices-delete-index.html" title="Delete index API">delete
+index API</a>.</p>
+<a id="72d33fbd72b0766b2f14ea27d9ccf0fa"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">DELETE my-index</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1846.console"></div>
+<p>When a long-term solution is in place, reset or reconfigure the disk watermarks.</p>
+<a id="f4dc1286d0a2f8d1fde64fbf12fd9f8d"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _cluster/settings
+{
+  "persistent": {
+    "cluster.routing.allocation.disk.watermark.low": null,
+    "cluster.routing.allocation.disk.watermark.low.max_headroom": null,
+    "cluster.routing.allocation.disk.watermark.high": null,
+    "cluster.routing.allocation.disk.watermark.high.max_headroom": null,
+    "cluster.routing.allocation.disk.watermark.flood_stage": null,
+    "cluster.routing.allocation.disk.watermark.flood_stage.max_headroom": null,
+    "cluster.routing.allocation.disk.watermark.flood_stage.frozen": null,
+    "cluster.routing.allocation.disk.watermark.flood_stage.frozen.max_headroom": null
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1847.console"></div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="fix-common-cluster-issues.html">« Fix common cluster issues</a>
+</span>
+<span class="next">
+<a href="circuit-breaker-errors.html">Circuit breaker errors »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
