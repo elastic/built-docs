@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Custom HTTP certificate | Elastic Cloud on Kubernetes [2.7] | Elastic</title>
+<meta class="elastic" name="content" content="Custom HTTP certificate | Elastic Cloud on Kubernetes [2.7]">
+
+<link rel="home" href="index.html" title="Elastic Cloud on Kubernetes [2.7]"/>
+<link rel="up" href="k8s-securing-stack.html" title="Secure the Elastic Stack"/>
+<link rel="prev" href="k8s-securing-stack.html" title="Secure the Elastic Stack"/>
+<link rel="next" href="k8s-users-and-roles.html" title="Users and roles"/>
+<meta class="elastic" name="product_version" content="2.7"/>
+<meta class="elastic" name="product_name" content="ECK"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Kubernetes/Reference/2.7"/>
+<meta name="DC.subject" content="ECK"/>
+<meta name="DC.identifier" content="2.7"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elastic Cloud on Kubernetes [2.7]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="k8s-orchestrating-elastic-stack-applications.html">Orchestrating Elastic Stack applications</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="k8s-securing-stack.html">Secure the Elastic Stack</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="k8s-securing-stack.html">« Secure the Elastic Stack</a>
+</span>
+<span class="next">
+<a href="k8s-users-and-roles.html">Users and roles »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="k8s-custom-http-certificate"></a>Custom HTTP certificate<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/2.7/docs/orchestrating-elastic-stack-applications/security/custom-http-certificate.asciidoc">edit</a></h2>
+</div></div></div>
+<p>You can provide your own CA and certificates instead of the self-signed certificate to connect to Elastic stack applications through HTTPS using a Kubernetes secret.</p>
+<p>Check <a class="xref" href="k8s-tls-certificates.html#k8s-setting-up-your-own-certificate" title="Setup your own certificate">Setup your own certificate</a> to learn how to do that.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s_custom_self_signed_certificate_using_openssl"></a>Custom self-signed certificate using OpenSSL<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/2.7/docs/orchestrating-elastic-stack-applications/security/custom-http-certificate.asciidoc">edit</a></h3>
+</div></div></div>
+<p>This example illustrates how to create your own self-signed certificate for the <a class="xref" href="k8s-deploy-elasticsearch.html" title="Deploy an Elasticsearch cluster">quickstart Elasticsearch cluster</a> using the OpenSSL command line utility. Note the subject alternative name (SAN) entry for <code class="literal">quickstart-es-http.default.svc</code>.</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">$ openssl req -x509 -sha256 -nodes -newkey rsa:4096 -days 365 -subj "/CN=quickstart-es-http" -addext "subjectAltName=DNS:quickstart-es-http.default.svc" -keyout tls.key -out tls.crt
+$ kubectl create secret generic quickstart-es-cert --from-file=ca.crt=tls.crt --from-file=tls.crt=tls.crt --from-file=tls.key=tls.key</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s_custom_self_signed_certificate_using_cert_manager"></a>Custom self-signed certificate using cert-manager<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/2.7/docs/orchestrating-elastic-stack-applications/security/custom-http-certificate.asciidoc">edit</a></h3>
+</div></div></div>
+<p>This example illustrates how to issue a self-signed certificate for the <a class="xref" href="k8s-deploy-elasticsearch.html" title="Deploy an Elasticsearch cluster">quickstart Elasticsearch cluster</a> using a <a href="https://cert-manager.io" class="ulink" target="_top">cert-manager</a> self-signed issuer.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1alpha2
+kind: Certificate
+metadata:
+  name: quickstart-es-cert
+spec:
+  isCA: true
+  dnsNames:
+    - quickstart-es-http
+    - quickstart-es-http.default.svc
+    - quickstart-es-http.default.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: selfsigned-issuer
+  secretName: quickstart-es-cert
+  subject:
+    organizations:
+      - quickstart</pre>
+</div>
+<p>Here is how to issue multiple Elasticsearch certificates from a single self-signed CA. This is useful for example for <a class="xref" href="k8s-remote-clusters.html" title="Remote clusters">Remote clusters</a> which need to trust each other’s CA, in order to avoid mounting N CAs when a cluster is connected to N other clusters.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: selfsigned-ca
+spec:
+  isCA: true
+  commonName: selfsigned-ca
+  secretName: root-ca-secret
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    kind: ClusterIssuer
+    name: selfsigned-issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: ca-issuer
+spec:
+  ca:
+    secretName: root-ca-secret
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: quickstart-es-cert
+spec:
+  isCA: false
+  dnsNames:
+    - quickstart-es-http
+    - quickstart-es-http.default.svc
+    - quickstart-es-http.default.svc.cluster.local
+  subject:
+    organizations:
+      - quickstart
+  privateKey:
+    algorithm: RSA
+    encoding: PKCS1
+    size: 2048
+  issuerRef:
+    kind: Issuer
+    name: ca-issuer
+  secretName: quickstart-es-cert</pre>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="k8s-securing-stack.html">« Secure the Elastic Stack</a>
+</span>
+<span class="next">
+<a href="k8s-users-and-roles.html">Users and roles »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
