@@ -180,9 +180,67 @@ to index raw log data into <code class="literal">my-index-000001</code>. Instead
 data, you can use a small sample to experiment with runtime fields.</p>
 <p>The final document is not a valid Apache log format, but we can account for
 that scenario in our script.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.bulk(
+  index: 'my-index-000001',
+  refresh: true,
+  body: [
+    {
+      index: {}
+    },
+    {
+      timestamp: '2020-04-30T14:30:17-05:00',
+      message: '40.135.0.0 - - [30/Apr/2020:14:30:17 -0500] "GET /images/hm_bg.jpg HTTP/1.0" 200 24736'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: '2020-04-30T14:30:53-05:00',
+      message: '232.0.0.0 - - [30/Apr/2020:14:30:53 -0500] "GET /images/hm_bg.jpg HTTP/1.0" 200 24736'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: '2020-04-30T14:31:12-05:00',
+      message: '26.1.0.0 - - [30/Apr/2020:14:31:12 -0500] "GET /images/hm_bg.jpg HTTP/1.0" 200 24736'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: '2020-04-30T14:31:19-05:00',
+      message: '247.37.0.0 - - [30/Apr/2020:14:31:19 -0500] "GET /french/splash_inet.html HTTP/1.0" 200 3781'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: '2020-04-30T14:31:22-05:00',
+      message: '247.37.0.0 - - [30/Apr/2020:14:31:22 -0500] "GET /images/hm_nbg.jpg HTTP/1.0" 304 0'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: '2020-04-30T14:31:27-05:00',
+      message: '252.0.0.0 - - [30/Apr/2020:14:31:27 -0500] "GET /images/hm_bg.jpg HTTP/1.0" 200 24736'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: '2020-04-30T14:31:28-05:00',
+      message: 'not a valid apache log'
+    }
+  ]
+)
+puts response</pre>
+</div>
 <a id="77d0780c5faea4c9ec51a322a6811b3b"></a>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">POST /my-index-000001/_bulk?refresh
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">POST /my-index-000001/_bulk?refresh
 {"index":{}}
 {"timestamp":"2020-04-30T14:30:17-05:00","message":"40.135.0.0 - - [30/Apr/2020:14:30:17 -0500] \"GET /images/hm_bg.jpg HTTP/1.0\" 200 24736"}
 {"index":{}}
@@ -198,7 +256,7 @@ that scenario in our script.</p>
 {"index":{}}
 {"timestamp":"2020-04-30T14:31:28-05:00","message":"not a valid apache log"}</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/141.console"></div>
+<div class="console_widget has-ruby" data-snippet="snippets/141.console"></div>
 <p>At this point, you can view how Elasticsearch stores your raw data.</p>
 <div class="pre_wrapper lang-ruby alternative">
 <pre class="programlisting prettyprint lang-ruby alternative">response = client.indices.get(
@@ -319,9 +377,34 @@ single script. You can define a set of typed subfields and emit a map of
 values. At search time, each subfield retrieves the value associated with
 their name in the map. This means that you only need to specify your grok
 pattern one time and can return multiple values:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.indices.put_mapping(
+  index: 'my-index-000001',
+  body: {
+    runtime: {
+      http: {
+        type: 'composite',
+        script: 'emit(grok("%&lt;COMMONAPACHELOG&gt;s").extract(doc["message"].value))',
+        fields: {
+          clientip: {
+            type: 'ip'
+          },
+          verb: {
+            type: 'keyword'
+          },
+          response: {
+            type: 'long'
+          }
+        }
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
 <a id="be9836fe55c5fada404a2adc1663d832"></a>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">PUT my-index-000001/_mappings
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">PUT my-index-000001/_mappings
 {
   "runtime": {
     "http": {
@@ -342,7 +425,7 @@ pattern one time and can return multiple values:</p>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/145.console"></div>
+<div class="console_widget has-ruby" data-snippet="snippets/145.console"></div>
 <div class="section">
 <div class="titlepage"><div><div>
 <h4 class="title"><a id="runtime-examples-grok-ip"></a>Search for a specific IP address<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/mapping/runtime.asciidoc">edit</a></h4>
@@ -528,9 +611,27 @@ successful dissect patterns.</p>
 <p>You can then run a query to retrieve a specific HTTP response using the
 <code class="literal">http.responses</code> runtime field. Use the <code class="literal">fields</code> parameter of the <code class="literal">_search</code>
 request to indicate which fields you want to retrieve:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.search(
+  index: 'my-index-000001',
+  body: {
+    query: {
+      match: {
+        "http.responses": '304'
+      }
+    },
+    fields: [
+      'http.client_ip',
+      'timestamp',
+      'http.verb'
+    ]
+  }
+)
+puts response</pre>
+</div>
 <a id="445f8a6ef75fb43da52990b3a9063c78"></a>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET my-index-000001/_search
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">GET my-index-000001/_search
 {
   "query": {
     "match": {
@@ -540,7 +641,7 @@ request to indicate which fields you want to retrieve:</p>
   "fields" : ["http.client_ip","timestamp","http.verb"]
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/150.console"></div>
+<div class="console_widget has-ruby" data-snippet="snippets/150.console"></div>
 <p>The response includes a single document where the HTTP response is <code class="literal">304</code>:</p>
 <a id="e61490b6751c2e52a1087c06b037afed"></a>
 <div class="pre_wrapper lang-console-result">
