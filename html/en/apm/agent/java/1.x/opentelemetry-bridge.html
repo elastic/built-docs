@@ -163,7 +163,7 @@
 <h2 class="title"><a id="opentelemetry-bridge"></a>OpenTelemetry bridge<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-java/edit/1.x/docs/api-opentelemetry.asciidoc">edit</a></h2>
 </div></div></div>
 <p>The Elastic APM OpenTelemetry bridge allows creating Elastic APM <code class="literal">Transactions</code> and <code class="literal">Spans</code>,
-using the OpenTelemetry API.
+using the OpenTelemetry API. OpenTelemetry metrics are also collected.
 In other words,
 it translates the calls to the OpenTelemetry API to Elastic APM and thus allows for reusing existing instrumentation.</p>
 <div class="note admon">
@@ -281,11 +281,88 @@ try (Scope scope = custom.makeCurrent()) {
 </div>
 <p>To learn more about the OpenTelemetry API,
 head over do <a href="https://opentelemetry.io/docs/java/manual_instrumentation/" class="ulink" target="_top">their documentation</a>.</p>
+<h4><a id="otel-metrics"></a>Metrics<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-java/edit/1.x/docs/api-opentelemetry.asciidoc">edit</a></h4>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This functionality is in technical preview and may be changed or removed in a future release. Elastic will apply best effort to fix any issues, but features in technical preview are not subject to the support SLA of official GA features.</p>
+</div>
+</div>
+<p>The Elastic APM Java Agent supports collecting metrics defined via OpenTelemetry.
+You can either use the <a class="xref" href="opentelemetry-bridge.html#otel-metrics-api" title="API Usage">OpenTelemetry API</a> or the <a class="xref" href="opentelemetry-bridge.html#otel-metrics-sdk" title="Using a customized MeterProvider">OpenTelemetry SDK</a> in case you need more customizations.</p>
+<p>In both cases the Elastic APM Agent will respect the <a class="xref" href="config-reporter.html#config-disable-metrics" title="disable_metrics ()"><code class="literal">disable_metrics</code></a> and <a class="xref" href="config-reporter.html#config-metrics-interval" title="metrics_interval ()"><code class="literal">metrics_interval</code></a> settings for OpenTelemetry metrics.</p>
+<p>You can use the <a class="xref" href="config-metrics.html#config-custom-metrics-histogram-boundaries" title="custom_metrics_histogram_boundaries ( experimental)"><code class="literal">custom_metrics_histogram_boundaries</code></a> setting to customize histogram bucket boundaries.
+Alternatively you can use OpenTelemetry <code class="literal">Views</code> to define histogram buckets on a per-metric basis when providing your own <code class="literal">MeterProvider</code>.</p>
+<h4><a id="otel-metrics-api"></a>API Usage<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-java/edit/1.x/docs/api-opentelemetry.asciidoc">edit</a></h4>
+<p>You can define metrics and report metric data via <code class="literal">GlobalOpenTelemetry</code>:</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.metrics.LongCounter;
+import io.opentelemetry.api.metrics.Meter;
+
+Meter myMeter = GlobalOpenTelemetry.getMeter("my_meter");
+LongCounter counter = meter.counterBuilder("my_counter").build();
+counter.add(42);</pre>
+</div>
+<p>We don&#8217;t require you to setup an OpenTelemetry <code class="literal">MeterProvider</code> within <code class="literal">GlobalOpenTelemetry</code> yourself.
+The Elastic APM Java Agent will detect if no <code class="literal">MeterProvider</code> was configured and will provide its own automatically in this case.
+If you provide your own <code class="literal">MeterProvider</code> (see <a class="xref" href="opentelemetry-bridge.html#otel-metrics-sdk" title="Using a customized MeterProvider">Using a customized MeterProvider</a>), the agent will use the provided instance.</p>
+<h4><a id="otel-metrics-sdk"></a>Using a customized MeterProvider<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-java/edit/1.x/docs/api-opentelemetry.asciidoc">edit</a></h4>
+<p>In some cases using just the <a class="xref" href="opentelemetry-bridge.html#otel-metrics-api" title="API Usage">OpenTelemetry API for metrics</a> might not be flexible enough.
+Some example use cases are:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Using OpenTelemetry Views (e.g. to customize histogram buckets on a per-metric basis)
+</li>
+<li class="listitem">
+Exporting metrics to other tools in addition to Elastic APM (e.g. prometheus)
+</li>
+</ul>
+</div>
+<p>For these use cases you can just setup you OpenTelemetry SDK <code class="literal">MeterProvider</code>.
+The Elastic APM Agent will take care of installing an additional <code class="literal">MetricExporter</code> via instrumentation,
+which will ship the metric data to Elastic APM.
+This requires using OpenTelemetry version <code class="literal">1.16.0</code> or newer.</p>
+<p>To create your own <code class="literal">MeterProvider</code>, you will need to add the OpenTelemetry Metric SDK as dependency to your project:</p>
+<p><strong>pom.xml.</strong></p>
+<div class="pre_wrapper lang-xml">
+<pre class="programlisting prettyprint lang-xml">&lt;dependency&gt;
+    &lt;groupId&gt;io.opentelemetry&lt;/groupId&gt;
+    &lt;artifactId&gt;opentelemetry-sdk-metrics&lt;/artifactId&gt;
+    &lt;version&gt;${version.opentelemetry}&lt;/version&gt;
+&lt;/dependency&gt;</pre>
+</div>
+<p><strong>build.gradle.</strong></p>
+<div class="pre_wrapper lang-groovy">
+<pre class="programlisting prettyprint lang-groovy">compile "io.opentelemetry:opentelemetry-sdk-metrics:$openTelemetryVersion"</pre>
+</div>
+<p>Afterwards you can create and use your own <code class="literal">MeterProvider</code> as shown below:</p>
+<div class="pre_wrapper lang-java">
+<pre class="programlisting prettyprint lang-java">import io.opentelemetry.sdk.metrics.SdkMeterProvider;
+import io.opentelemetry.api.metrics.DoubleHistogram;
+import io.opentelemetry.api.metrics.Meter;
+import io.opentelemetry.api.metrics.MeterProvider;
+import io.opentelemetry.exporter.prometheus.PrometheusHttpServer;
+import io.opentelemetry.sdk.metrics.InstrumentSelector;
+import io.opentelemetry.sdk.metrics.View;
+
+//Elastic APM MetricReader will be registered automatically by the agent
+SdkMeterProvider meterProvider = SdkMeterProvider.builder()
+    .registerMetricReader(PrometheusHttpServer.create())
+    .registerView(
+        InstrumentSelector.builder().setName("my_histogram").build(),
+        View.builder().setAggregation(Aggregation.explicitBucketHistogram(List.of(1.0, 5.0))).build()
+    )
+    .build();
+
+Meter testMeter = meterProvider.get("my_meter");
+DoubleHistogram my_histogram = testMeter.histogramBuilder("my_histogram").build();
+
+my_histogram.record(0.5);</pre>
+</div>
 <h4><a id="otel-caveats"></a>Caveats<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-java/edit/1.x/docs/api-opentelemetry.asciidoc">edit</a></h4>
 <p>Not all features of the OpenTelemetry API are supported.</p>
-<h5><a id="otel-metrics"></a>Metrics<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-java/edit/1.x/docs/api-opentelemetry.asciidoc">edit</a></h5>
-<p>This bridge only supports the tracing API.
-The Metrics API is currently not supported.</p>
 <h5><a id="otel-propagation"></a>In process context propagation<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/apm-agent-java/edit/1.x/docs/api-opentelemetry.asciidoc">edit</a></h5>
 <p>Entries that are added to the current context,
 <code class="literal">Context.current().with(...).makeCurrent()</code> cannot be retrieved via <code class="literal">Context.current().get(...)</code>.</p>
