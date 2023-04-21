@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="description" content="ELSER is a learned sparse ranking model trained by Elastic.">
+<meta name="keywords" content="ML, Elastic Stack, natural language processing, ELSER">
+<title>Tutorial: Disaster recovery based on bi-directional cross-cluster replication | Elasticsearch Guide [master] | Elastic</title>
+<meta class="elastic" name="content" content="Tutorial: Disaster recovery based on bi-directional cross-cluster replication | Elasticsearch Guide [master]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [master]"/>
+<link rel="up" href="xpack-ccr.html" title="Cross-cluster replication"/>
+<link rel="prev" href="ccr-disaster-recovery-uni-directional-tutorial.html" title="Tutorial: Disaster recovery based on uni-directional cross-cluster replication"/>
+<link rel="next" href="snapshot-restore.html" title="Snapshot and restore"/>
+<meta class="elastic" name="product_version" content="master"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/master"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="master"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [master]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="high-availability.html">Set up a cluster for high availability</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="xpack-ccr.html">Cross-cluster replication</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="ccr-disaster-recovery-uni-directional-tutorial.html">« Tutorial: Disaster recovery based on uni-directional cross-cluster replication</a>
+</span>
+<span class="next">
+<a href="snapshot-restore.html">Snapshot and restore »</a>
+</span>
+</div>
+<div class="section xpack">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="ccr-disaster-recovery-bi-directional-tutorial"></a>Tutorial: Disaster recovery based on bi-directional cross-cluster replication<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/ccr/bi-directional-disaster-recovery.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>Learn how to set up disaster recovery between two clusters based on
+bi-directional cross-cluster replication. The following tutorial is designed for data streams which support
+<a class="xref" href="use-a-data-stream.html#update-docs-in-a-data-stream-by-query" title="Update documents in a data stream by query">update by query</a> and <a class="xref" href="use-a-data-stream.html#delete-docs-in-a-data-stream-by-query" title="Delete documents in a data stream by query">delete by query</a>. You can only perform these actions on the leader index.</p>
+<p>This tutorial works with Logstash as the source of ingestion. It takes advantage of a Logstash feature where <a href="/guide/en/logstash/master/plugins-outputs-elasticsearch.html" class="ulink" target="_top">the Logstash output to Elasticsearch</a> can be load balanced across an array of hosts specified. Beats and Elastic Agents currently do not
+support multiple outputs. It should also be possible to set up a proxy
+(load balancer) to redirect traffic without Logstash in this tutorial.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Setting up a remote cluster on <code class="literal">clusterA</code> and <code class="literal">clusterB</code>.
+</li>
+<li class="listitem">
+Setting up bi-directional cross-cluster replication with exclusion patterns.
+</li>
+<li class="listitem">
+Setting up Logstash with multiple hosts to allow automatic load balancing and switching during disasters.
+</li>
+</ul>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/ccr-bi-directional-disaster-recovery.png" alt="Bi-directional cross cluster replication failover and failback">
+</div>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="ccr-tutorial-initial-setup"></a>Initial setup<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/ccr/bi-directional-disaster-recovery.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Set up a remote cluster on both clusters.</p>
+<a id="37b84f2ab7c2f6b4fe0e14cc7e018b1f"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">### On cluster A ###
+PUT _cluster/settings
+{
+  "persistent": {
+    "cluster": {
+      "remote": {
+        "clusterB": {
+          "mode": "proxy",
+          "skip_unavailable": true,
+          "server_name": "clusterb.es.region-b.gcp.elastic-cloud.com",
+          "proxy_socket_connections": 18,
+          "proxy_address": "clusterb.es.region-b.gcp.elastic-cloud.com:9400"
+        }
+      }
+    }
+  }
+}
+### On cluster B ###
+PUT _cluster/settings
+{
+  "persistent": {
+    "cluster": {
+      "remote": {
+        "clusterA": {
+          "mode": "proxy",
+          "skip_unavailable": true,
+          "server_name": "clustera.es.region-a.gcp.elastic-cloud.com",
+          "proxy_socket_connections": 18,
+          "proxy_address": "clustera.es.region-a.gcp.elastic-cloud.com:9400"
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1657.console"></div>
+</li>
+<li class="listitem">
+<p>Set up bi-directional cross-cluster replication.</p>
+<a id="e8bd3804f4c81aab675377a4dabf04d0"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">### On cluster A ###
+PUT /_ccr/auto_follow/logs-generic-default
+{
+  "remote_cluster": "clusterB",
+  "leader_index_patterns": [
+    ".ds-logs-generic-default-20*"
+  ],
+  "leader_index_exclusion_patterns":"{{leader_index}}-replicated_from_clustera",
+  "follow_index_pattern": "{{leader_index}}-replicated_from_clusterb"
+}
+
+### On cluster B ###
+PUT /_ccr/auto_follow/logs-generic-default
+{
+  "remote_cluster": "clusterA",
+  "leader_index_patterns": [
+    ".ds-logs-generic-default-20*"
+  ],
+  "leader_index_exclusion_patterns":"{{leader_index}}-replicated_from_clusterb",
+  "follow_index_pattern": "{{leader_index}}-replicated_from_clustera"
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1658.console"></div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Existing data on the cluster will not be replicated by
+<code class="literal">_ccr/auto_follow</code> even though the patterns may match. This function will only
+replicate newly created backing indices (as part of the data stream).</p>
+</div>
+</div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Use <code class="literal">leader_index_exclusion_patterns</code> to avoid recursion.</p>
+</div>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><code class="literal">follow_index_pattern</code> allows lowercase characters only.</p>
+</div>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This step cannot be executed via the Kibana UI due to the lack of an exclusion
+pattern in the UI. Use the API in this step.</p>
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Set up the Logstash configuration file.</p>
+<p>This example uses the input generator to demonstrate the document
+count in the clusters. Reconfigure this section
+to suit your own use case.</p>
+<div class="pre_wrapper lang-logstash">
+<pre class="programlisting prettyprint lang-logstash">### On Logstash server ###
+### This is a logstash config file ###
+input {
+  generator{
+    message =&gt; 'Hello World'
+    count =&gt; 100
+  }
+}
+output {
+  elasticsearch {
+    hosts =&gt; ["https://clustera.es.region-a.gcp.elastic-cloud.com:9243","https://clusterb.es.region-b.gcp.elastic-cloud.com:9243"]
+    user =&gt; "logstash-user"
+    password =&gt; "same_password_for_both_clusters"
+  }
+}</pre>
+</div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The key point is that when <code class="literal">cluster A</code> is down, all traffic will be
+automatically redirected to <code class="literal">cluster B</code>. Once <code class="literal">cluster A</code> comes back, traffic
+is automatically redirected back to <code class="literal">cluster A</code> again. This is achieved by the
+option <code class="literal">hosts</code> where multiple ES cluster endpoints are specified in the
+array <code class="literal">[clusterA, clusterB]</code>.</p>
+</div>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Set up the same password for the same user on both clusters to use this load-balancing feature.</p>
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Start Logstash with the earlier configuration file.</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">### On Logstash server ###
+bin/logstash -f multiple_hosts.conf</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Observe document counts in data streams.</p>
+<p>The setup creates a data stream named <code class="literal">logs-generic-default</code> on each of the clusters. Logstash will write 50% of the documents to <code class="literal">cluster A</code> and 50% of the documents to <code class="literal">cluster B</code> when both clusters are up.</p>
+<p>Bi-directional cross-cluster replication will create one more data stream on each of the clusters
+with the <code class="literal">-replication_from_cluster{a|b}</code> suffix. At the end of this step:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>data streams on cluster A contain:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+50 documents in <code class="literal">logs-generic-default-replicated_from_clusterb</code>
+</li>
+<li class="listitem">
+50 documents in <code class="literal">logs-generic-default</code>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>data streams on cluster B contain:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+50 documents in <code class="literal">logs-generic-default-replicated_from_clustera</code>
+</li>
+<li class="listitem">
+50 documents in <code class="literal">logs-generic-default</code>
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Queries should be set up to search across both data streams.
+A query on <code class="literal">logs*</code>, on either of the clusters, returns 100
+hits in total.</p>
+<a id="c267e90b7873a7c8c8af06f01e958e69"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET logs*/_search?size=0</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1659.console"></div>
+</li>
+</ol>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_failover_when_clustera_is_down_2"></a>Failover when <code class="literal">clusterA</code> is down<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/ccr/bi-directional-disaster-recovery.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+You can simulate this by shutting down either of the clusters. Let&#8217;s shut down
+<code class="literal">cluster A</code> in this tutorial.
+</li>
+<li class="listitem">
+<p>Start Logstash with the same configuration file. (This step is not required in real
+use cases where Logstash ingests continuously.)</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">### On Logstash server ###
+bin/logstash -f multiple_hosts.conf</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Observe all Logstash traffic will be redirected to <code class="literal">cluster B</code> automatically.</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>You should also redirect all search traffic to the <code class="literal">clusterB</code> cluster during this time.</p>
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>The two data streams on <code class="literal">cluster B</code> now contain a different number of documents.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>data streams on cluster A (down)</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+50 documents in <code class="literal">logs-generic-default-replicated_from_clusterb</code>
+</li>
+<li class="listitem">
+50 documents in <code class="literal">logs-generic-default</code>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>data streams On cluster B (up)</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+50 documents in <code class="literal">logs-generic-default-replicated_from_clustera</code>
+</li>
+<li class="listitem">
+150 documents in <code class="literal">logs-generic-default</code>
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+</li>
+</ol>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_failback_when_clustera_comes_back_2"></a>Failback when <code class="literal">clusterA</code> comes back<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/ccr/bi-directional-disaster-recovery.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+You can simulate this by turning <code class="literal">cluster A</code> back on.
+</li>
+<li class="listitem">
+<p>Data ingested to <code class="literal">cluster B</code> during <code class="literal">cluster A</code> 's downtime will be
+automatically replicated.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>data streams on cluster A</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+150 documents in <code class="literal">logs-generic-default-replicated_from_clusterb</code>
+</li>
+<li class="listitem">
+50 documents in <code class="literal">logs-generic-default</code>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>data streams on cluster B</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+50 documents in <code class="literal">logs-generic-default-replicated_from_clustera</code>
+</li>
+<li class="listitem">
+150 documents in <code class="literal">logs-generic-default</code>
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+If you have Logstash running at this time, you will also observe traffic is
+sent to both clusters.
+</li>
+</ol>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_perform_update_or_delete_by_query"></a>Perform update or delete by query<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/ccr/bi-directional-disaster-recovery.asciidoc">edit</a></h3>
+</div></div></div>
+<p>It is possible to update or delete the documents but you can only perform these actions on the leader index.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>First identify which backing index contains the document you want to update.</p>
+<a id="0a3003fa5af850e415634b50b1029859"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">### On either of the cluster ###
+GET logs-generic-default*/_search?filter_path=hits.hits._index
+{
+"query": {
+    "match": {
+      "event.sequence": "97"
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1660.console"></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+If the hits returns <code class="literal">"_index": ".ds-logs-generic-default-replicated_from_clustera-&lt;yyyy.MM.dd&gt;-*"</code>, then you need to proceed to the next step on <code class="literal">cluster A</code>.
+</li>
+<li class="listitem">
+If the hits returns <code class="literal">"_index": ".ds-logs-generic-default-replicated_from_clusterb-&lt;yyyy.MM.dd&gt;-*"</code>, then you need to proceed to the next step on <code class="literal">cluster B</code>.
+</li>
+<li class="listitem">
+If the hits returns <code class="literal">"_index": ".ds-logs-generic-default-&lt;yyyy.MM.dd&gt;-*"</code>, then you need to proceed to the next step on the same cluster where you performed the search query.
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Perform the update (or delete) by query:</p>
+<a id="083e514297c09e91211f0d168aef1b0b"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">### On the cluster identified from the previous step ###
+POST logs-generic-default/_update_by_query
+{
+  "query": {
+    "match": {
+      "event.sequence": "97"
+    }
+  },
+  "script": {
+    "source": "ctx._source.event.original = params.new_event",
+    "lang": "painless",
+    "params": {
+      "new_event": "FOOBAR"
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1661.console"></div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If a soft delete is merged away before it can be replicated to a follower the following process will fail due to incomplete history on the leader, see <a class="xref" href="index-modules.html#ccr-index-soft-deletes-retention-period">index.soft_deletes.retention_lease.period</a> for more details.</p>
+</div>
+</div>
+</li>
+</ol>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="ccr-disaster-recovery-uni-directional-tutorial.html">« Tutorial: Disaster recovery based on uni-directional cross-cluster replication</a>
+</span>
+<span class="next">
+<a href="snapshot-restore.html">Snapshot and restore »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
