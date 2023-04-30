@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="description" content="ELSER is a learned sparse ranking model trained by Elastic.">
+<meta name="keywords" content="ML, Elastic Stack, natural language processing, ELSER">
+<title>Geotile grid aggregation | Elasticsearch Guide [8.8] | Elastic</title>
+<meta class="elastic" name="content" content="Geotile grid aggregation | Elasticsearch Guide [8.8]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.8]"/>
+<link rel="up" href="search-aggregations-bucket.html" title="Bucket aggregations"/>
+<link rel="prev" href="search-aggregations-bucket-geohexgrid-aggregation.html" title="Geohex grid aggregation"/>
+<link rel="next" href="search-aggregations-bucket-global-aggregation.html" title="Global aggregation"/>
+<meta class="elastic" name="product_version" content="8.8"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.8"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.8"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.8]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="search-aggregations.html">Aggregations</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="search-aggregations-bucket.html">Bucket aggregations</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="search-aggregations-bucket-geohexgrid-aggregation.html">« Geohex grid aggregation</a>
+</span>
+<span class="next">
+<a href="search-aggregations-bucket-global-aggregation.html">Global aggregation »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="search-aggregations-bucket-geotilegrid-aggregation"></a>Geotile grid aggregation<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.8/docs/reference/aggregations/bucket/geotilegrid-aggregation.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>A multi-bucket aggregation that groups <a class="xref" href="geo-point.html" title="Geopoint field type"><code class="literal">geo_point</code></a> and
+<a class="xref" href="geo-shape.html" title="Geoshape field type"><code class="literal">geo_shape</code></a> values into buckets that represent a grid.
+The resulting grid can be sparse and only
+contains cells that have matching data. Each cell corresponds to a
+<a href="https://en.wikipedia.org/wiki/Tiled_web_map" class="ulink" target="_top">map tile</a> as used by many online map
+sites. Each cell is labeled using a "{zoom}/{x}/{y}" format, where zoom is equal
+to the user-specified precision.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+High precision keys have a larger range for x and y, and represent tiles that
+cover only a small area.
+</li>
+<li class="listitem">
+Low precision keys have a smaller range for x and y, and represent tiles that
+each cover a large area.
+</li>
+</ul>
+</div>
+<p>See <a href="https://wiki.openstreetmap.org/wiki/Zoom_levels" class="ulink" target="_top">zoom level documentation</a>
+on how precision (zoom) correlates to size on the ground. Precision for this
+aggregation can be between 0 and 29, inclusive.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The highest-precision geotile of length 29 produces cells that cover
+less than a 10cm by 10cm of land and so high-precision requests can be very
+costly in terms of RAM and result sizes. Please see the example below on how
+to first filter the aggregation to a smaller geographic area before requesting
+high-levels of detail.</p>
+</div>
+</div>
+<p>You can only use <code class="literal">geotile_grid</code> to aggregate an explicitly mapped <code class="literal">geo_point</code> or
+<code class="literal">geo_shape</code> field. If the <code class="literal">geo_point</code> field contains an array, <code class="literal">geotile_grid</code>
+aggregates all the array values.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_simple_low_precision_request_2"></a>Simple low-precision request<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.8/docs/reference/aggregations/bucket/geotilegrid-aggregation.asciidoc">edit</a></h3>
+</div></div></div>
+<a id="935ee7c1b86ba9592604834bb673c7a3"></a>
+<a id="geotilegrid-aggregation-example"></a><div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT /museums
+{
+  "mappings": {
+    "properties": {
+      "location": {
+        "type": "geo_point"
+      }
+    }
+  }
+}
+
+POST /museums/_bulk?refresh
+{"index":{"_id":1}}
+{"location": "POINT (4.912350 52.374081)", "name": "NEMO Science Museum"}
+{"index":{"_id":2}}
+{"location": "POINT (4.901618 52.369219)", "name": "Museum Het Rembrandthuis"}
+{"index":{"_id":3}}
+{"location": "POINT (4.914722 52.371667)", "name": "Nederlands Scheepvaartmuseum"}
+{"index":{"_id":4}}
+{"location": "POINT (4.405200 51.222900)", "name": "Letterenhuis"}
+{"index":{"_id":5}}
+{"location": "POINT (2.336389 48.861111)", "name": "Musée du Louvre"}
+{"index":{"_id":6}}
+{"location": "POINT (2.327000 48.860000)", "name": "Musée d'Orsay"}
+
+POST /museums/_search?size=0
+{
+  "aggregations": {
+    "large-grid": {
+      "geotile_grid": {
+        "field": "location",
+        "precision": 8
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1227.console"></div>
+<p>Response:</p>
+<a id="1c43fa3eaca8c1ae0f854c35dea15e39"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  ...
+  "aggregations": {
+    "large-grid": {
+      "buckets": [
+        {
+          "key": "8/131/84",
+          "doc_count": 3
+        },
+        {
+          "key": "8/129/88",
+          "doc_count": 2
+        },
+        {
+          "key": "8/131/85",
+          "doc_count": 1
+        }
+      ]
+    }
+  }
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="geotilegrid-high-precision"></a>High-precision requests<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.8/docs/reference/aggregations/bucket/geotilegrid-aggregation.asciidoc">edit</a></h3>
+</div></div></div>
+<p>When requesting detailed buckets (typically for displaying a "zoomed in" map),
+a filter like <a class="xref" href="query-dsl-geo-bounding-box-query.html" title="Geo-bounding box query">geo_bounding_box</a> should be
+applied to narrow the subject area. Otherwise, potentially millions of buckets
+will be created and returned.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.search(
+  index: 'museums',
+  size: 0,
+  body: {
+    aggregations: {
+      "zoomed-in": {
+        filter: {
+          geo_bounding_box: {
+            location: {
+              top_left: 'POINT (4.9 52.4)',
+              bottom_right: 'POINT (5.0 52.3)'
+            }
+          }
+        },
+        aggregations: {
+          "zoom1": {
+            geotile_grid: {
+              field: 'location',
+              precision: 22
+            }
+          }
+        }
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
+<a id="4659f639d71a54df571260ee5798dbb3"></a>
+<a id="geotilegrid-high-precision-ex"></a><div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">POST /museums/_search?size=0
+{
+  "aggregations": {
+    "zoomed-in": {
+      "filter": {
+        "geo_bounding_box": {
+          "location": {
+            "top_left": "POINT (4.9 52.4)",
+            "bottom_right": "POINT (5.0 52.3)"
+          }
+        }
+      },
+      "aggregations": {
+        "zoom1": {
+          "geotile_grid": {
+            "field": "location",
+            "precision": 22
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1228.console"></div>
+<p>Response:</p>
+<a id="01a7976b0db92e756137671985f994fd"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  ...
+  "aggregations": {
+    "zoomed-in": {
+      "doc_count": 3,
+      "zoom1": {
+        "buckets": [
+          {
+            "key": "22/2154412/1378379",
+            "doc_count": 1
+          },
+          {
+            "key": "22/2154385/1378332",
+            "doc_count": 1
+          },
+          {
+            "key": "22/2154259/1378425",
+            "doc_count": 1
+          }
+        ]
+      }
+    }
+  }
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="geotilegrid-addtl-bounding-box-filtering"></a>Requests with additional bounding box filtering<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.8/docs/reference/aggregations/bucket/geotilegrid-aggregation.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The <code class="literal">geotile_grid</code> aggregation supports an optional <code class="literal">bounds</code> parameter
+that restricts the cells considered to those that intersect the
+provided bounds. The <code class="literal">bounds</code> parameter accepts the same
+<a class="xref" href="query-dsl-geo-bounding-box-query.html#query-dsl-geo-bounding-box-query-accepted-formats" title="Accepted formats">bounding box formats</a>
+as the geo-bounding box query. This bounding box can be used with or
+without an additional <code class="literal">geo_bounding_box</code> query for filtering the points prior to aggregating.
+It is an independent bounding box that can intersect with, be equal to, or be disjoint
+to any additional <code class="literal">geo_bounding_box</code> queries defined in the context of the aggregation.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.search(
+  index: 'museums',
+  size: 0,
+  body: {
+    aggregations: {
+      "tiles-in-bounds": {
+        geotile_grid: {
+          field: 'location',
+          precision: 22,
+          bounds: {
+            top_left: 'POINT (4.9 52.4)',
+            bottom_right: 'POINT (5.0 52.3)'
+          }
+        }
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
+<a id="641009f2147e1ca56215c701f45c970b"></a>
+<a id="geotilegrid-aggregation-with-bounds"></a><div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">POST /museums/_search?size=0
+{
+  "aggregations": {
+    "tiles-in-bounds": {
+      "geotile_grid": {
+        "field": "location",
+        "precision": 22,
+        "bounds": {
+          "top_left": "POINT (4.9 52.4)",
+          "bottom_right": "POINT (5.0 52.3)"
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1229.console"></div>
+<p>Response:</p>
+<a id="1510c4a39ef24b188e334212cc5ad9c3"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  ...
+  "aggregations": {
+    "tiles-in-bounds": {
+      "buckets": [
+        {
+          "key": "22/2154412/1378379",
+          "doc_count": 1
+        },
+        {
+          "key": "22/2154385/1378332",
+          "doc_count": 1
+        },
+        {
+          "key": "22/2154259/1378425",
+          "doc_count": 1
+        }
+      ]
+    }
+  }
+}</pre>
+</div>
+<h4 class="xpack"><a id="geotilegrid-aggregating-geo-shape"></a>Aggregating <code class="literal">geo_shape</code> fields<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.8/docs/reference/aggregations/bucket/geotilegrid-aggregation.asciidoc">edit</a></h4>
+<p>Aggregating on <a class="xref" href="geo-shape.html" title="Geoshape field type">Geoshape</a> fields works almost as it does for points, except that a single
+shape can be counted for in multiple tiles. A shape will contribute to the count of matching values
+if any part of its shape intersects with that tile. Below is an image that demonstrates this:</p>
+<p><span class="image"><img src="images/spatial/geoshape_grid.png" alt="geoshape grid"></span></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_options_5"></a>Options<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.8/docs/reference/aggregations/bucket/geotilegrid-aggregation.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="informaltable">
+<table border="0" cellpadding="4px">
+<colgroup>
+<col/>
+<col/>
+</colgroup>
+<tbody valign="top">
+<tr>
+<td valign="top">
+<p>
+field
+</p>
+</td>
+<td valign="top">
+<p>
+(Required, string) Field containing indexed geo-point or geo-shape values.
+Must be explicitly mapped as a <a class="xref" href="geo-point.html" title="Geopoint field type"><code class="literal">geo_point</code></a> or a <a class="xref" href="geo-shape.html" title="Geoshape field type"><code class="literal">geo_shape</code></a> field.
+If the field contains an array, <code class="literal">geotile_grid</code> aggregates all array values.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+precision
+</p>
+</td>
+<td valign="top">
+<p>
+(Optional, integer) Integer zoom of the key used to define cells/buckets in
+the results. Defaults to <code class="literal">7</code>. Values outside of [<code class="literal">0</code>,<code class="literal">29</code>] will be rejected.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+bounds
+</p>
+</td>
+<td valign="top">
+<p>
+(Optional, object) Bounding box used to filter the geo-points or geo-shapes in each bucket.
+Accepts the same bounding box formats as the
+<a class="xref" href="query-dsl-geo-bounding-box-query.html#query-dsl-geo-bounding-box-query-accepted-formats" title="Accepted formats">geo-bounding box query</a>.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+size
+</p>
+</td>
+<td valign="top">
+<p>
+(Optional, integer) Maximum number of buckets to return. Defaults to 10,000.
+When results are trimmed, buckets are prioritized based on the volume of
+documents they contain.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+shard_size
+</p>
+</td>
+<td valign="top">
+<p>
+(Optional, integer) Number of buckets returned from each shard. Defaults to
+<code class="literal">max(10,(size x number-of-shards))</code> to allow for a more accurate count of the
+top cells in the final result. Since each shard could have a different top result order,
+using a larger number here reduces the risk of inaccurate counts, but incurs a performance cost.
+</p>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="search-aggregations-bucket-geohexgrid-aggregation.html">« Geohex grid aggregation</a>
+</span>
+<span class="next">
+<a href="search-aggregations-bucket-global-aggregation.html">Global aggregation »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

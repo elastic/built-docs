@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="description" content="ELSER is a learned sparse ranking model trained by Elastic.">
+<meta name="keywords" content="ML, Elastic Stack, natural language processing, ELSER">
+<title>Submitting requests on behalf of other users | Elasticsearch Guide [8.8] | Elastic</title>
+<meta class="elastic" name="content" content="Submitting requests on behalf of other users | Elasticsearch Guide [8.8]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.8]"/>
+<link rel="up" href="authorization.html" title="User authorization"/>
+<link rel="prev" href="field-and-document-access-control.html" title="Setting up field and document level security"/>
+<link rel="next" href="configuring-authorization-delegation.html" title="Configuring authorization delegation"/>
+<meta class="elastic" name="product_version" content="8.8"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.8"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.8"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.8]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="secure-cluster.html">Secure the Elastic Stack</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="authorization.html">User authorization</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="field-and-document-access-control.html">« Setting up field and document level security</a>
+</span>
+<span class="next">
+<a href="configuring-authorization-delegation.html">Configuring authorization delegation »</a>
+</span>
+</div>
+<div class="section xpack">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="run-as-privilege"></a>Submitting requests on behalf of other users<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.8/x-pack/docs/en/security/authorization/run-as-privilege.asciidoc">edit</a></h2>
+</div></div></div>
+<p>Elasticsearch roles support a <code class="literal">run_as</code> privilege that enables an authenticated user to
+submit requests on behalf of other users. For example, if your external
+application is trusted to authenticate users, Elasticsearch can authenticate the external
+application and use the <em>run as</em> mechanism to issue authorized requests as
+other users without having to re-authenticate each user.</p>
+<p>To "run as" (impersonate) another user, the first user (the authenticating user)
+must be authenticated by a mechanism that supports run-as delegation. The second
+user (the <code class="literal">run_as</code> user) must be authorized by a mechanism that supports
+delegated run-as lookups by username.</p>
+<p>The <code class="literal">run_as</code> privilege essentially operates like a secondary form of
+<a class="xref" href="realm-chains.html#authorization_realms" title="Delegating authorization to another realm">delegated authorization</a>. Delegated authorization applies
+to the authenticating user, and the <code class="literal">run_as</code> privilege applies to the user who
+is being impersonated.</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+Authenticating user
+</span>
+</dt>
+</dl>
+</div>
+<p>For the authenticating user, the following realms (plus API keys) all support
+<code class="literal">run_as</code> delegation: <code class="literal">native</code>, <code class="literal">file</code>, Active Directory, JWT, Kerberos, LDAP and
+PKI.</p>
+<p>Service tokens, the Elasticsearch Token Service, SAML 2.0, and OIDC 1.0 do not
+support <code class="literal">run_as</code> delegation.</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">run_as</code> user
+</span>
+</dt>
+</dl>
+</div>
+<p>Elasticsearch supports <code class="literal">run_as</code> for any realm that supports user lookup.
+Not all realms support user lookup. Refer to the list of <a class="xref" href="user-lookup.html" title="Looking up users without authentication">supported realms</a>
+and ensure that the realm you wish to use is configured in a manner that
+supports user lookup.</p>
+<p>The <code class="literal">run_as</code> user must be retrieved from a <a class="xref" href="realms.html" title="Realms">realm</a> - it is not
+possible to run as a
+<a class="xref" href="service-accounts.html" title="Service accounts">service account</a>,
+<a class="xref" href="token-authentication-services.html#token-authentication-api-key">API key</a> or
+<a class="xref" href="token-authentication-services.html#token-authentication-access-token">access token</a>.</p>
+<p>To submit requests on behalf of other users, you need to have the <code class="literal">run_as</code>
+privilege in your <a class="xref" href="defining-roles.html" title="Defining roles">roles</a>. For example, the following request
+creates a <code class="literal">my_director</code> role that grants permission to submit request on behalf
+of <code class="literal">jacknich</code> or <code class="literal">redeniro</code>:</p>
+<a id="d23452f333b77bf5b463310e2a665560"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/role/my_director?refresh=true
+{
+  "cluster": ["manage"],
+  "indices": [
+    {
+      "names": [ "index1", "index2" ],
+      "privileges": [ "manage" ]
+    }
+  ],
+  "run_as": [ "jacknich", "rdeniro" ],
+  "metadata" : {
+    "version" : 1
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1790.console"></div>
+<p>To submit a request as another user, you specify the user in the
+<code class="literal">es-security-runas-user</code> request header. For example:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">curl -H "es-security-runas-user: jacknich" -u es-admin -X GET http://localhost:9200/</pre>
+</div>
+<p>The <code class="literal">run_as</code> user passed in through the <code class="literal">es-security-runas-user</code> header must be
+available from a realm that supports delegated authorization lookup by username.
+Realms that don&#8217;t support user lookup can&#8217;t be used by <code class="literal">run_as</code> delegation from
+other realms.</p>
+<p>For example, JWT realms can authenticate external users specified in JWTs, and
+execute requests as a <code class="literal">run_as</code> user in the <code class="literal">native</code> realm. Elasticsearch will retrieve the
+indicated <code class="literal">runas</code> user and execute the request as that user using their roles.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="run-as-privilege-apply"></a>Apply the <code class="literal">run_as</code> privilege to roles<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.8/x-pack/docs/en/security/authorization/run-as-privilege.asciidoc">edit</a></h3>
+</div></div></div>
+<p>You can apply the <code class="literal">run_as</code> privilege when creating roles with the
+<a class="xref" href="security-api-put-role.html" title="Create or update roles API">create or update roles API</a>. Users who are assigned
+a role that contains the <code class="literal">run_as</code> privilege inherit all privileges from their
+role, and can also submit requests on behalf of the indicated users.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Roles for the authenticated user and the <code class="literal">run_as</code> user are not merged. If
+a user authenticates without specifying the <code class="literal">run_as</code> parameter, only the
+authenticated user&#8217;s roles are used. If a user authenticates and their roles
+include the <code class="literal">run_as</code> parameter, only the <code class="literal">run_as</code> user&#8217;s roles are used.</p>
+</div>
+</div>
+<p>After a user successfully authenticates to Elasticsearch, an authorization process determines whether the user behind an incoming request is allowed to run
+that request. If the authenticated user has the <code class="literal">run_as</code> privilege in their list
+of permissions and specifies the run-as header, Elasticsearch <em>discards</em> the authenticated
+user and associated roles. It then looks in each of the configured realms in the
+realm chain until it finds the username that&#8217;s associated with the <code class="literal">run_as</code> user,
+and uses those roles to execute any requests.</p>
+<p>Consider an admin role and an analyst role. The admin role has higher privileges,
+but might also want to submit requests as another user to test and verify their
+permissions.</p>
+<p>First, we&#8217;ll create an admin role named <code class="literal">my_admin_role</code>. This role has <code class="literal">manage</code>
+<a class="xref" href="security-privileges.html" title="Security privileges">privileges</a> on the entire cluster, and on a subset of
+indices. This role also contains the <code class="literal">run_as</code> privilege, which enables any user
+with this role to submit requests on behalf of the specified <code class="literal">analyst_user</code>.</p>
+<a id="930a3c5667e3bf47b4e8cc28e7bf8d5f"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/role/my_admin_role?refresh=true
+{
+  "cluster": ["manage"],
+  "indices": [
+    {
+      "names": [ "index1", "index2" ],
+      "privileges": [ "manage" ]
+    }
+  ],
+  "applications": [
+    {
+      "application": "myapp",
+      "privileges": [ "admin", "read" ],
+      "resources": [ "*" ]
+    }
+  ],
+  "run_as": [ "analyst_user" ],
+  "metadata" : {
+    "version" : 1
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1791.console"></div>
+<p>Next, we&#8217;ll create an analyst role named <code class="literal">my_analyst_role</code>, which has more
+restricted <code class="literal">monitor</code> cluster privileges and <code class="literal">manage</code> privileges on a subset of
+indices.</p>
+<a id="172b18e435c400bed85227624de3acfd"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/role/my_analyst_role?refresh=true
+{
+  "cluster": [ "monitor"],
+  "indices": [
+    {
+      "names": [ "index1", "index2" ],
+      "privileges": ["manage"]
+    }
+  ],
+  "applications": [
+    {
+      "application": "myapp",
+      "privileges": [ "read" ],
+      "resources": [ "*" ]
+    }
+  ],
+  "metadata" : {
+    "version" : 1
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1792.console"></div>
+<p>We&#8217;ll create an administrator user and assign them the role named <code class="literal">my_admin_role</code>,
+which allows this user to submit requests as the <code class="literal">analyst_user</code>.</p>
+<a id="7b3f255d28ce5b46d111402b96b41351"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/user/admin_user?refresh=true
+{
+  "password": "l0ng-r4nd0m-p@ssw0rd",
+  "roles": [ "my_admin_role" ],
+  "full_name": "Eirian Zola",
+  "metadata": { "intelligence" : 7}
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1793.console"></div>
+<p>We can also create an analyst user and assign them the role named
+<code class="literal">my_analyst_role</code>.</p>
+<a id="111c31db1fd29baeaa9964eafaea6789"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/user/analyst_user?refresh=true
+{
+  "password": "l0nger-r4nd0mer-p@ssw0rd",
+  "roles": [ "my_analyst_role" ],
+  "full_name": "Monday Jaffe",
+  "metadata": { "innovation" : 8}
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1794.console"></div>
+<p>You can then authenticate to Elasticsearch as the <code class="literal">admin_user</code> or <code class="literal">analyst_user</code>. However, the <code class="literal">admin_user</code> could optionally submit requests on
+behalf of the <code class="literal">analyst_user</code>. The following request authenticates to Elasticsearch with a
+<code class="literal">Basic</code> authorization token and submits the request as the <code class="literal">analyst_user</code>:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">curl -s -X GET -H "Authorization: Basic YWRtaW5fdXNlcjpsMG5nLXI0bmQwbS1wQHNzdzByZA==" -H "es-security-runas-user: analyst_user" https://localhost:9200/_security/_authenticate</pre>
+</div>
+<p>The response indicates that the <code class="literal">analyst_user</code> submitted this request, using the
+<code class="literal">my_analyst_role</code> that&#8217;s assigned to that user. When the <code class="literal">admin_user</code> submitted
+the request, Elasticsearch authenticated that user, discarded their roles, and then used
+the roles of the <code class="literal">run_as</code> user.</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">{"username":"analyst_user","roles":["my_analyst_role"],"full_name":"Monday Jaffe","email":null,
+"metadata":{"innovation":8},"enabled":true,"authentication_realm":{"name":"native",
+"type":"native"},"lookup_realm":{"name":"native","type":"native"},"authentication_type":"realm"}
+%</pre>
+</div>
+<p>The <code class="literal">authentication_realm</code> and <code class="literal">lookup_realm</code> in the response both specify
+the <code class="literal">native</code> realm because both the <code class="literal">admin_user</code> and <code class="literal">analyst_user</code> are from
+that realm. If the two users are in different realms, the values for
+<code class="literal">authentication_realm</code> and <code class="literal">lookup_realm</code> are different (such as <code class="literal">pki</code> and
+<code class="literal">native</code>).</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="field-and-document-access-control.html">« Setting up field and document level security</a>
+</span>
+<span class="next">
+<a href="configuring-authorization-delegation.html">Configuring authorization delegation »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

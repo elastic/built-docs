@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Flattened field type | Elasticsearch Guide [8.8] | Elastic</title>
+<meta class="elastic" name="content" content="Flattened field type | Elasticsearch Guide [8.8]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.8]"/>
+<link rel="up" href="mapping-types.html" title="Field data types"/>
+<link rel="prev" href="dense-vector.html" title="Dense vector field type"/>
+<link rel="next" href="geo-point.html" title="Geopoint field type"/>
+<meta class="elastic" name="product_version" content="8.8"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.8"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.8"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.8]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="mapping.html">Mapping</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="mapping-types.html">Field data types</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="dense-vector.html">« Dense vector field type</a>
+</span>
+<span class="next">
+<a href="geo-point.html">Geopoint field type »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="flattened"></a>Flattened field type<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.8/docs/reference/mapping/types/flattened.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>By default, each subfield in an object is mapped and indexed separately. If
+the names or types of the subfields are not known in advance, then they are
+<a class="xref" href="dynamic-mapping.html" title="Dynamic mapping">mapped dynamically</a>.</p>
+<p>The <code class="literal">flattened</code> type provides an alternative approach, where the entire
+object is mapped as a single field. Given an object, the <code class="literal">flattened</code>
+mapping will parse out its leaf values and index them into one field as
+keywords. The object&#8217;s contents can then be searched through simple queries
+and aggregations.</p>
+<p>This data type can be useful for indexing objects with a large or unknown
+number of unique keys. Only one field mapping is created for the whole JSON
+object, which can help prevent a <a class="xref" href="mapping.html#mapping-limit-settings" title="Settings to prevent mapping explosion">mappings explosion</a>
+from having too many distinct field mappings.</p>
+<p>On the other hand, flattened object fields present a trade-off in terms of
+search functionality. Only basic queries are allowed, with no support for
+numeric range queries or highlighting. Further information on the limitations
+can be found in the <a class="xref" href="flattened.html#supported-operations" title="Supported operations">Supported operations</a> section.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The <code class="literal">flattened</code> mapping type should <span class="strong strong"><strong>not</strong></span> be used for indexing all
+document content, as it treats all values as keywords and does not provide full
+search functionality. The default approach, where each subfield has its own
+entry in the mappings, works well in the majority of cases.</p>
+</div>
+</div>
+<p>A flattened object field can be created as follows:</p>
+<a id="8aa74aee3dcf4b34028e4c5e1c1ed27b"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT bug_reports
+{
+  "mappings": {
+    "properties": {
+      "title": {
+        "type": "text"
+      },
+      "labels": {
+        "type": "flattened"
+      }
+    }
+  }
+}
+
+POST bug_reports/_doc/1
+{
+  "title": "Results are not sorted correctly.",
+  "labels": {
+    "priority": "urgent",
+    "release": ["v1.2.5", "v1.3.0"],
+    "timestamp": {
+      "created": 1541458026,
+      "closed": 1541457010
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/174.console"></div>
+<p>During indexing, tokens are created for each leaf value in the JSON object. The
+values are indexed as string keywords, without analysis or special handling for
+numbers or dates.</p>
+<p>Querying the top-level <code class="literal">flattened</code> field searches all leaf values in the
+object:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.search(
+  index: 'bug_reports',
+  body: {
+    query: {
+      term: {
+        labels: 'urgent'
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
+<a id="169b39bb889ecd47541bed3e48725488"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">POST bug_reports/_search
+{
+  "query": {
+    "term": {"labels": "urgent"}
+  }
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/175.console"></div>
+<p>To query on a specific key in the flattened object, object dot notation is used:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.search(
+  index: 'bug_reports',
+  body: {
+    query: {
+      term: {
+        "labels.release": 'v1.3.0'
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
+<a id="2f4a55dfeba8851b306ef9c1b216ef54"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">POST bug_reports/_search
+{
+  "query": {
+    "term": {"labels.release": "v1.3.0"}
+  }
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/176.console"></div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="supported-operations"></a>Supported operations<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.8/docs/reference/mapping/types/flattened.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Because of the similarities in the way values are indexed, <code class="literal">flattened</code>
+fields share much of the same mapping and search functionality as
+<a class="xref" href="keyword.html" title="Keyword type family"><code class="literal">keyword</code></a> fields.</p>
+<p>Currently, flattened object fields can be used with the following query types:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">term</code>, <code class="literal">terms</code>, and <code class="literal">terms_set</code>
+</li>
+<li class="listitem">
+<code class="literal">prefix</code>
+</li>
+<li class="listitem">
+<code class="literal">range</code>
+</li>
+<li class="listitem">
+<code class="literal">match</code> and <code class="literal">multi_match</code>
+</li>
+<li class="listitem">
+<code class="literal">query_string</code> and <code class="literal">simple_query_string</code>
+</li>
+<li class="listitem">
+<code class="literal">exists</code>
+</li>
+</ul>
+</div>
+<p>When querying, it is not possible to refer to field keys using wildcards, as in
+<code class="literal">{ "term": {"labels.time*": 1541457010}}</code>. Note that all queries, including
+<code class="literal">range</code>, treat the values as string keywords. Highlighting is not supported on
+<code class="literal">flattened</code> fields.</p>
+<p>It is possible to sort on a flattened object field, as well as perform simple
+keyword-style aggregations such as <code class="literal">terms</code>. As with queries, there is no
+special support for numerics&#8201;&#8212;&#8201;all values in the JSON object are treated as
+keywords. When sorting, this implies that values are compared
+lexicographically.</p>
+<p>Flattened object fields currently cannot be stored. It is not possible to
+specify the <a class="xref" href="mapping-store.html" title="store"><code class="literal">store</code></a> parameter in the mapping.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="search-fields-flattened"></a>Retrieving flattened fields<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.8/docs/reference/mapping/types/flattened.asciidoc">edit</a></h3>
+</div></div></div>
+<p>Field values and concrete subfields can be retrieved using the
+<a class="xref" href="search-fields.html#search-fields-param" title="The fields option">fields parameter</a>. content. Since the <code class="literal">flattened</code> field maps an
+entire object with potentially many subfields as a single field, the response contains
+the unaltered structure from <code class="literal">_source</code>.</p>
+<p>Single subfields, however, can be fetched by specifying them explicitly in the request.
+This only works for concrete paths, but not using wildcards:</p>
+<a id="92284d24bbb80ce6943f2ddcbf74b833"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT my-index-000001
+{
+  "mappings": {
+    "properties": {
+      "flattened_field": {
+        "type": "flattened"
+      }
+    }
+  }
+}
+
+PUT my-index-000001/_doc/1?refresh=true
+{
+  "flattened_field" : {
+    "subfield" : "value"
+  }
+}
+
+POST my-index-000001/_search
+{
+  "fields": ["flattened_field.subfield"],
+  "_source": false
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/177.console"></div>
+<a id="76fababb9fff6a0977eb549a19f78c39"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "took": 2,
+  "timed_out": false,
+  "_shards": {
+    "total": 1,
+    "successful": 1,
+    "skipped": 0,
+    "failed": 0
+  },
+  "hits": {
+    "total": {
+      "value": 1,
+      "relation": "eq"
+    },
+    "max_score": 1.0,
+    "hits": [{
+      "_index": "my-index-000001",
+      "_id": "1",
+      "_score": 1.0,
+      "fields": {
+        "flattened_field.subfield" : [ "value" ]
+      }
+    }]
+  }
+}</pre>
+</div>
+<p>You can also use a <a class="xref" href="modules-scripting-painless.html" title="Painless scripting language">Painless script</a> to retrieve
+values from sub-fields of flattened fields. Instead of including
+<code class="literal">doc['&lt;field_name&gt;'].value</code> in your Painless script, use
+<code class="literal">doc['&lt;field_name&gt;.&lt;sub-field_name&gt;'].value</code>. For example, if you have a
+flattened field called <code class="literal">label</code> with a <code class="literal">release</code> sub-field, your Painless script
+would be <code class="literal">doc['labels.release'].value</code>.</p>
+<p>For example, let&#8217;s say your mapping contains two fields, one of which is of the
+<code class="literal">flattened</code> type:</p>
+<a id="07de76cb0e7f11c7533788faf8c093c3"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT my-index-000001
+{
+  "mappings": {
+    "properties": {
+      "title": {
+        "type": "text"
+      },
+      "labels": {
+        "type": "flattened"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/178.console"></div>
+<p>Index a few documents containing your mapped fields. The <code class="literal">labels</code> field has
+three sub-fields:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.bulk(
+  index: 'my-index-000001',
+  refresh: true,
+  body: [
+    {
+      index: {}
+    },
+    {
+      title: 'Something really urgent',
+      labels: {
+        priority: 'urgent',
+        release: [
+          'v1.2.5',
+          'v1.3.0'
+        ],
+        timestamp: {
+          created: 1_541_458_026,
+          closed: 1_541_457_010
+        }
+      }
+    },
+    {
+      index: {}
+    },
+    {
+      title: 'Somewhat less urgent',
+      labels: {
+        priority: 'high',
+        release: [
+          'v1.3.0'
+        ],
+        timestamp: {
+          created: 1_541_458_026,
+          closed: 1_541_457_010
+        }
+      }
+    },
+    {
+      index: {}
+    },
+    {
+      title: 'Not urgent',
+      labels: {
+        priority: 'low',
+        release: [
+          'v1.2.0'
+        ],
+        timestamp: {
+          created: 1_541_458_026,
+          closed: 1_541_457_010
+        }
+      }
+    }
+  ]
+)
+puts response</pre>
+</div>
+<a id="c6151a0788a10a7f40da684d72c3255c"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">POST /my-index-000001/_bulk?refresh
+{"index":{}}
+{"title":"Something really urgent","labels":{"priority":"urgent","release":["v1.2.5","v1.3.0"],"timestamp":{"created":1541458026,"closed":1541457010}}}
+{"index":{}}
+{"title":"Somewhat less urgent","labels":{"priority":"high","release":["v1.3.0"],"timestamp":{"created":1541458026,"closed":1541457010}}}
+{"index":{}}
+{"title":"Not urgent","labels":{"priority":"low","release":["v1.2.0"],"timestamp":{"created":1541458026,"closed":1541457010}}}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/179.console"></div>
+<p>Because <code class="literal">labels</code> is a <code class="literal">flattened</code> field type, the entire object is mapped as a
+single field. To retrieve values from this sub-field in a Painless script, use
+the <code class="literal">doc['&lt;field_name&gt;.&lt;sub-field_name&gt;'].value</code> format.</p>
+<div class="pre_wrapper lang-painless">
+<pre class="programlisting prettyprint lang-painless">"script": {
+  "source": """
+    if (doc['labels.release'].value.equals('v1.3.0'))
+    {emit(doc['labels.release'].value)}
+    else{emit('Version mismatch')}
+  """</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="flattened-params"></a>Parameters for flattened object fields<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.8/docs/reference/mapping/types/flattened.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The following mapping parameters are accepted:</p>
+<div class="informaltable">
+<table border="0" cellpadding="4px">
+<colgroup>
+<col/>
+<col/>
+</colgroup>
+<tbody valign="top">
+<tr>
+<td valign="top">
+<p>
+<code class="literal">depth_limit</code>
+</p>
+</td>
+<td valign="top">
+<p>
+The maximum allowed depth of the flattened object field, in terms of nested
+inner objects. If a flattened object field exceeds this limit, then an
+error will be thrown. Defaults to <code class="literal">20</code>. Note that <code class="literal">depth_limit</code> can be
+updated dynamically through the <a class="xref" href="indices-put-mapping.html" title="Update mapping API">update mapping</a> API.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<a class="xref" href="doc-values.html" title="doc_values"><code class="literal">doc_values</code></a>
+</p>
+</td>
+<td valign="top">
+<p>
+Should the field be stored on disk in a column-stride fashion, so that it
+can later be used for sorting, aggregations, or scripting? Accepts <code class="literal">true</code>
+(default) or <code class="literal">false</code>.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<a class="xref" href="eager-global-ordinals.html" title="eager_global_ordinals"><code class="literal">eager_global_ordinals</code></a>
+</p>
+</td>
+<td valign="top">
+<p>
+Should global ordinals be loaded eagerly on refresh? Accepts <code class="literal">true</code> or
+<code class="literal">false</code> (default). Enabling this is a good idea on fields that are
+frequently used for terms aggregations.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<a class="xref" href="ignore-above.html" title="ignore_above"><code class="literal">ignore_above</code></a>
+</p>
+</td>
+<td valign="top">
+<p>
+Leaf values longer than this limit will not be indexed. By default, there
+is no limit and all values will be indexed. Note that this limit applies
+to the leaf values within the flattened object field, and not the length of
+the entire field.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<a class="xref" href="mapping-index.html" title="index"><code class="literal">index</code></a>
+</p>
+</td>
+<td valign="top">
+<p>
+Determines if the field should be searchable. Accepts <code class="literal">true</code> (default) or
+<code class="literal">false</code>.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<a class="xref" href="index-options.html" title="index_options"><code class="literal">index_options</code></a>
+</p>
+</td>
+<td valign="top">
+<p>
+What information should be stored in the index for scoring purposes.
+Defaults to <code class="literal">docs</code> but can also be set to <code class="literal">freqs</code> to take term frequency
+into account when computing scores.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<a class="xref" href="null-value.html" title="null_value"><code class="literal">null_value</code></a>
+</p>
+</td>
+<td valign="top">
+<p>
+A string value which is substituted for any explicit <code class="literal">null</code> values within
+the flattened object field. Defaults to <code class="literal">null</code>, which means null sields are
+treated as if it were missing.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<a class="xref" href="similarity.html" title="similarity"><code class="literal">similarity</code></a>
+</p>
+</td>
+<td valign="top">
+<p>
+Which scoring algorithm or <em>similarity</em> should be used. Defaults
+to <code class="literal">BM25</code>.
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<code class="literal">split_queries_on_whitespace</code>
+</p>
+</td>
+<td valign="top">
+<p>
+Whether <a class="xref" href="full-text-queries.html" title="Full text queries">full text queries</a> should split the input on
+whitespace when building a query for this field. Accepts <code class="literal">true</code> or <code class="literal">false</code>
+(default).
+</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>
+<code class="literal">time_series_dimensions</code>
+</p>
+</td>
+<td valign="top">
+<p>
+(Optional, array of strings) A list of fields inside the flattened object, where each field is a dimension
+of the time series. Each field is specified using the relative path from the
+root field and does not include the root field name.
+</p>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="flattened-synthetic-source"></a>Synthetic <code class="literal">_source</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.8/docs/reference/mapping/types/flattened.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Synthetic <code class="literal">_source</code> is Generally Available only for TSDB indices
+(indices that have <code class="literal">index.mode</code> set to <code class="literal">time_series</code>). For other indices
+synthetic <code class="literal">_source</code> is in technical preview. Features in technical preview may
+be changed or removed in a future release. Elastic will apply best effort to fix
+any issues, but features in technical preview are not subject to the support SLA
+of official GA features.</p>
+</div>
+</div>
+<p>Flattened fields support <a class="xref" href="mapping-source-field.html#synthetic-source" title="Synthetic _source">synthetic`_source`</a> in their default
+configuration. Synthetic <code class="literal">_source</code> cannot be used with <a class="xref" href="doc-values.html" title="doc_values"><code class="literal">doc_values</code></a>
+disabled.</p>
+<p>Synthetic source always sorts alphabetically and de-duplicates flattened fields.
+For example:</p>
+<a id="1d827ae674970692643ea81991e5396e"></a>
+<a id="synthetic-source-flattened-sorting-example"></a><div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT idx
+{
+  "mappings": {
+    "_source": { "mode": "synthetic" },
+    "properties": {
+      "flattened": { "type": "flattened" }
+    }
+  }
+}
+PUT idx/_doc/1
+{
+  "flattened": {
+    "field": [ "apple", "apple", "banana", "avocado", "10", "200", "AVOCADO", "Banana", "Tangerine" ]
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/180.console"></div>
+<p>Will become:</p>
+<a id="d19a1fe39b293292e94b326997a7ecad"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "flattened": {
+    "field": [ "10", "200", "AVOCADO", "Banana", "Tangerine", "apple", "avocado", "banana" ]
+  }
+}</pre>
+</div>
+<p>Synthetic source always uses nested objects instead of array of objects.
+For example:</p>
+<a id="f3574cfee3971d98417b8dc574a91be0"></a>
+<a id="synthetic-source-flattened-array-example"></a><div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT idx
+{
+  "mappings": {
+    "_source": { "mode": "synthetic" },
+    "properties": {
+      "flattened": { "type": "flattened" }
+    }
+  }
+}
+PUT idx/_doc/1
+{
+  "flattened": {
+      "field": [
+        { "id": 1, "name": "foo" },
+        { "id": 2, "name": "bar" },
+        { "id": 3, "name": "baz" }
+      ]
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/181.console"></div>
+<p>Will become (note the nested objects instead of the "flattened" array):</p>
+<a id="b7a51ee239cfc40b4fb93bd2343a7c40"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+    "flattened": {
+      "field": {
+          "id": [ "1", "2", "3" ],
+          "name": [ "bar", "baz", "foo" ]
+      }
+    }
+}</pre>
+</div>
+<p>Synthetic source always uses single-valued fields for one-element arrays.
+For example:</p>
+<a id="5b86d54900e2c4c043a54ca7ae2df0f0"></a>
+<a id="synthetic-source-flattened-single-value-example"></a><div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT idx
+{
+  "mappings": {
+    "_source": { "mode": "synthetic" },
+    "properties": {
+      "flattened": { "type": "flattened" }
+    }
+  }
+}
+PUT idx/_doc/1
+{
+  "flattened": {
+    "field": [ "foo" ]
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/182.console"></div>
+<p>Will become (note the nested objects instead of the "flattened" array):</p>
+<a id="9ac53871cf2ca3699f7e3a0bac3777ae"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "flattened": {
+    "field": "foo"
+  }
+}</pre>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="dense-vector.html">« Dense vector field type</a>
+</span>
+<span class="next">
+<a href="geo-point.html">Geopoint field type »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Index a runtime field | Elasticsearch Guide [8.8] | Elastic</title>
+<meta class="elastic" name="content" content="Index a runtime field | Elasticsearch Guide [8.8]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.8]"/>
+<link rel="up" href="runtime.html" title="Runtime fields"/>
+<link rel="prev" href="runtime-retrieving-fields.html" title="Retrieve a runtime field"/>
+<link rel="next" href="runtime-examples.html" title="Explore your data with runtime fields"/>
+<meta class="elastic" name="product_version" content="8.8"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.8"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.8"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.8]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="mapping.html">Mapping</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="runtime.html">Runtime fields</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="runtime-retrieving-fields.html">« Retrieve a runtime field</a>
+</span>
+<span class="next">
+<a href="runtime-examples.html">Explore your data with runtime fields »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="runtime-indexed"></a>Index a runtime field<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.8/docs/reference/mapping/runtime.asciidoc">edit</a></h2>
+</div></div></div>
+<p>Runtime fields are defined by the context where they run. For example, you
+can define runtime fields in the
+<a class="xref" href="runtime-search-request.html" title="Define runtime fields in a search request">context of a search query</a> or within the
+<a class="xref" href="runtime-mapping-fields.html" title="Map a runtime field"><code class="literal">runtime</code> section</a> of an index mapping. If you
+decide to index a runtime field for greater performance, just move the full
+runtime field definition (including the script) to the context of an index
+mapping. Elasticsearch automatically uses these indexed fields to drive queries,
+resulting in a fast response time. This capability means you can write a
+script only once, and apply it to any context that supports runtime fields.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Indexing a <code class="literal">composite</code> runtime field is currently not supported.</p>
+</div>
+</div>
+<p>You can then use runtime fields to limit the number of fields that Elasticsearch needs
+to calculate values for. Using indexed fields in tandem with runtime fields
+provides flexibility in the data that you index and how you define queries for
+other fields.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>After indexing a runtime field, you cannot update the included
+script. If you need to change the script, create a new field with the updated
+script.</p>
+</div>
+</div>
+<p>For example, let&#8217;s say your company wants to replace some old pressure
+valves. The connected sensors are only capable of reporting a fraction of
+the true readings. Rather than outfit the pressure valves with new sensors,
+you decide to calculate the values based on reported readings. Based on the
+reported data, you define the following fields in your mapping for
+<code class="literal">my-index-000001</code>:</p>
+<a id="ff1b96d2fdcf628bd938bff9e939943c"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT my-index-000001/
+{
+  "mappings": {
+    "properties": {
+      "timestamp": {
+        "type": "date"
+      },
+      "temperature": {
+        "type": "long"
+      },
+      "voltage": {
+        "type": "double"
+      },
+      "node": {
+        "type": "keyword"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/133.console"></div>
+<p>You then bulk index some sample data from your sensors. This data includes
+<code class="literal">voltage</code> readings for each sensor:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.bulk(
+  index: 'my-index-000001',
+  refresh: true,
+  body: [
+    {
+      index: {}
+    },
+    {
+      timestamp: 1_516_729_294_000,
+      temperature: 200,
+      voltage: 5.2,
+      node: 'a'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: 1_516_642_894_000,
+      temperature: 201,
+      voltage: 5.8,
+      node: 'b'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: 1_516_556_494_000,
+      temperature: 202,
+      voltage: 5.1,
+      node: 'a'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: 1_516_470_094_000,
+      temperature: 198,
+      voltage: 5.6,
+      node: 'b'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: 1_516_383_694_000,
+      temperature: 200,
+      voltage: 4.2,
+      node: 'c'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: 1_516_297_294_000,
+      temperature: 202,
+      voltage: 4,
+      node: 'c'
+    }
+  ]
+)
+puts response</pre>
+</div>
+<a id="6db118771354792646229e7a3c30c7e9"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">POST my-index-000001/_bulk?refresh=true
+{"index":{}}
+{"timestamp": 1516729294000, "temperature": 200, "voltage": 5.2, "node": "a"}
+{"index":{}}
+{"timestamp": 1516642894000, "temperature": 201, "voltage": 5.8, "node": "b"}
+{"index":{}}
+{"timestamp": 1516556494000, "temperature": 202, "voltage": 5.1, "node": "a"}
+{"index":{}}
+{"timestamp": 1516470094000, "temperature": 198, "voltage": 5.6, "node": "b"}
+{"index":{}}
+{"timestamp": 1516383694000, "temperature": 200, "voltage": 4.2, "node": "c"}
+{"index":{}}
+{"timestamp": 1516297294000, "temperature": 202, "voltage": 4.0, "node": "c"}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/134.console"></div>
+<p>After talking to a few site engineers, you realize that the sensors should
+be reporting at least <em>double</em> the current values, but potentially higher.
+You create a runtime field named <code class="literal">voltage_corrected</code> that retrieves the current
+voltage and multiplies it by <code class="literal">2</code>:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.indices.put_mapping(
+  index: 'my-index-000001',
+  body: {
+    runtime: {
+      voltage_corrected: {
+        type: 'double',
+        script: {
+          source: "\n        emit(doc['voltage'].value * params['multiplier'])\n        ",
+          params: {
+            multiplier: 2
+          }
+        }
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
+<a id="84243213614fe64930b1d430704afb29"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">PUT my-index-000001/_mapping
+{
+  "runtime": {
+    "voltage_corrected": {
+      "type": "double",
+      "script": {
+        "source": """
+        emit(doc['voltage'].value * params['multiplier'])
+        """,
+        "params": {
+          "multiplier": 2
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/135.console"></div>
+<p>You retrieve the calculated values using the <a class="xref" href="search-fields.html" title="Retrieve selected fields from a search"><code class="literal">fields</code></a>
+parameter on the <code class="literal">_search</code> API:</p>
+<a id="8c92c5e87facbae8dc4f58376ec21815"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET my-index-000001/_search
+{
+  "fields": [
+    "voltage_corrected",
+    "node"
+  ],
+  "size": 2
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/136.console"></div>
+<p>After reviewing the sensor data and running some tests, you determine that the
+multiplier for reported sensor data should be <code class="literal">4</code>. To gain greater performance,
+you decide to index the <code class="literal">voltage_corrected</code> runtime field with the new
+<code class="literal">multiplier</code> parameter.</p>
+<p>In a new index named <code class="literal">my-index-000001</code>, copy the <code class="literal">voltage_corrected</code> runtime
+field definition into the mappings of the new index. It&#8217;s that simple! You can
+add an optional parameter named <code class="literal">on_script_error</code> that determines whether to
+reject the entire document if the script throws an error at index time
+(default).</p>
+<a id="d98fb2ff2cdd154dff4a576430755d98"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT my-index-000001/
+{
+  "mappings": {
+    "properties": {
+      "timestamp": {
+        "type": "date"
+      },
+      "temperature": {
+        "type": "long"
+      },
+      "voltage": {
+        "type": "double"
+      },
+      "node": {
+        "type": "keyword"
+      },
+      "voltage_corrected": {
+        "type": "double",
+        "on_script_error": "fail", <a id="CO37-1"></a><i class="conum" data-value="1"></i>
+        "script": {
+          "source": """
+        emit(doc['voltage'].value * params['multiplier'])
+        """,
+          "params": {
+            "multiplier": 4
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/137.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO37-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Causes the entire document to be rejected if the script throws an error at
+index time. Setting the value to <code class="literal">ignore</code> will register the field in the
+document’s <code class="literal">_ignored</code> metadata field and continue indexing.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>Bulk index some sample data from your sensors into the <code class="literal">my-index-000001</code> index:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.bulk(
+  index: 'my-index-000001',
+  refresh: true,
+  body: [
+    {
+      index: {}
+    },
+    {
+      timestamp: 1_516_729_294_000,
+      temperature: 200,
+      voltage: 5.2,
+      node: 'a'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: 1_516_642_894_000,
+      temperature: 201,
+      voltage: 5.8,
+      node: 'b'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: 1_516_556_494_000,
+      temperature: 202,
+      voltage: 5.1,
+      node: 'a'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: 1_516_470_094_000,
+      temperature: 198,
+      voltage: 5.6,
+      node: 'b'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: 1_516_383_694_000,
+      temperature: 200,
+      voltage: 4.2,
+      node: 'c'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: 1_516_297_294_000,
+      temperature: 202,
+      voltage: 4,
+      node: 'c'
+    }
+  ]
+)
+puts response</pre>
+</div>
+<a id="dd792bb53703a57f9207e36d16e26255"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">POST my-index-000001/_bulk?refresh=true
+{ "index": {}}
+{ "timestamp": 1516729294000, "temperature": 200, "voltage": 5.2, "node": "a"}
+{ "index": {}}
+{ "timestamp": 1516642894000, "temperature": 201, "voltage": 5.8, "node": "b"}
+{ "index": {}}
+{ "timestamp": 1516556494000, "temperature": 202, "voltage": 5.1, "node": "a"}
+{ "index": {}}
+{ "timestamp": 1516470094000, "temperature": 198, "voltage": 5.6, "node": "b"}
+{ "index": {}}
+{ "timestamp": 1516383694000, "temperature": 200, "voltage": 4.2, "node": "c"}
+{ "index": {}}
+{ "timestamp": 1516297294000, "temperature": 202, "voltage": 4.0, "node": "c"}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/138.console"></div>
+<p>You can now retrieve calculated values in a search query, and find documents
+based on precise values. The following range query returns all documents where
+the calculated <code class="literal">voltage_corrected</code> is greater than or equal to <code class="literal">16</code>, but less
+than or equal to <code class="literal">20</code>. Again, use the <a class="xref" href="search-fields.html" title="Retrieve selected fields from a search"><code class="literal">fields</code></a> parameter on
+the <code class="literal">_search</code> API to retrieve the fields you want:</p>
+<a id="a9280b55a7284952f604ec7bece712f6"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST my-index-000001/_search
+{
+  "query": {
+    "range": {
+      "voltage_corrected": {
+        "gte": 16,
+        "lte": 20,
+        "boost": 1.0
+      }
+    }
+  },
+  "fields": ["voltage_corrected", "node"]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/139.console"></div>
+<p>The response includes the <code class="literal">voltage_corrected</code> field for the documents that
+match the range query, based on the calculated value of the included script:</p>
+<a id="c4a94701e661b36cd7a2984d8eef9356"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "hits" : {
+    "total" : {
+      "value" : 2,
+      "relation" : "eq"
+    },
+    "max_score" : 1.0,
+    "hits" : [
+      {
+        "_index" : "my-index-000001",
+        "_id" : "yoSLrHgBdg9xpPrUZz_P",
+        "_score" : 1.0,
+        "_source" : {
+          "timestamp" : 1516383694000,
+          "temperature" : 200,
+          "voltage" : 4.2,
+          "node" : "c"
+        },
+        "fields" : {
+          "voltage_corrected" : [
+            16.8
+          ],
+          "node" : [
+            "c"
+          ]
+        }
+      },
+      {
+        "_index" : "my-index-000001",
+        "_id" : "y4SLrHgBdg9xpPrUZz_P",
+        "_score" : 1.0,
+        "_source" : {
+          "timestamp" : 1516297294000,
+          "temperature" : 202,
+          "voltage" : 4.0,
+          "node" : "c"
+        },
+        "fields" : {
+          "voltage_corrected" : [
+            16.0
+          ],
+          "node" : [
+            "c"
+          ]
+        }
+      }
+    ]
+  }
+}</pre>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="runtime-retrieving-fields.html">« Retrieve a runtime field</a>
+</span>
+<span class="next">
+<a href="runtime-examples.html">Explore your data with runtime fields »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
