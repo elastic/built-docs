@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Secure your clusters with OpenID Connect | Elasticsearch Service Documentation [master] | Elastic</title>
+<meta class="elastic" name="content" content="Secure your clusters with OpenID Connect | Elasticsearch Service Documentation [master]">
+
+<link rel="home" href="index.html" title="Elasticsearch Service Documentation [master]"/>
+<link rel="up" href="ec-security.html" title="Securing your deployment"/>
+<link rel="prev" href="ec-securing-clusters-saml-azure.html" title="Set up SAML with Azure Active Directory"/>
+<link rel="next" href="ec-securing-clusters-oidc-op.html" title="Set up OpenID Connect with Azure, Google, or Okta"/>
+<meta class="elastic" name="product_version" content="master"/>
+<meta class="elastic" name="product_name" content="Elastic Cloud"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Cloud/Reference/master"/>
+<meta name="DC.subject" content="Elastic Cloud"/>
+<meta name="DC.identifier" content="master"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Service Documentation [master]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="ec-security.html">Securing your deployment</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="ec-securing-clusters-saml-azure.html">« Set up SAML with Azure Active Directory</a>
+</span>
+<span class="next">
+<a href="ec-securing-clusters-oidc-op.html">Set up OpenID Connect with Azure, Google, or Okta »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="ec-secure-clusters-oidc"></a>Secure your clusters with OpenID Connect<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/cloud/edit/master/docs/shared/ec-ce-securing-clusters-oidc.asciidoc">edit</a></h2>
+</div></div></div>
+<p>You can secure your deployment using OpenID Connect for single sign-on. OpenID Connect is an identity layer on top of the OAuth 2.0 protocol. The end user identity gets verified by an authorization server and basic profile information is sent back to the client.</p>
+<p>For a detailed description of how to implement OpenID Connect with various OpenID Connect Providers (OPs), check <a class="xref" href="ec-securing-clusters-oidc-op.html" title="Set up OpenID Connect with Azure, Google, or Okta">Set up OpenID Connect with Azure, Google, or Okta</a>.</p>
+<h3><a id="ec_before_you_begin_13"></a>Before you begin<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/cloud/edit/master/docs/shared/ec-ce-securing-clusters-oidc.asciidoc">edit</a></h3>
+<p>To prepare for using OpenID Connect for authentication for deployments:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Create or use an existing deployment version 7.2.1 and later. Make note of the Kibana endpoint URL, it will be referenced as <code class="literal">&lt;KIBANA_ENDPOINT_URL&gt;</code> in the following steps.
+</li>
+<li class="listitem">
+<p>The steps in this section required a moderate understanding of
+<a href="https://openid.net/specs/openid-connect-core-1_0.html#Authentication" class="ulink" target="_top">OpenID Connect</a> in general and
+the Authorization Code Grant flow specifically. For more information about OpenID Connect and how it works with the Elastic Stack check:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Our <a href="/guide/en/elasticsearch/reference/8.7/oidc-guide-authentication.html" class="ulink" target="_top">configuration guide for Elasticsearch</a>.
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+<h3><a id="ec-configure-oidc-provider"></a>Configure the OpenID Connect Provider<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/cloud/edit/master/docs/shared/ec-ce-securing-clusters-oidc.asciidoc">edit</a></h3>
+<p>The OpenID <em>Connect Provider</em> (OP) is the entity in OpenID Connect that is responsible for authenticating the user and for granting the necessary tokens with the authentication and user information to be consumed by the <em>Relying Parties</em> (RP).</p>
+<p>In order for Elasticsearch Service (acting as an RP) to be able use your OpenID Connect Provider for authentication, a trust relationship needs to be established between the OP and the RP. In the OpenID Connect Provider, this means registering the RP as a client.</p>
+<p>The process for registering the Elasticsearch Service RP will be different from OP to OP and following the provider&#8217;s relevant documentation is prudent. The information for the RP that you commonly need to provide for registration are the following:</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">Relying Party Name</code>
+</span>
+</dt>
+<dd>
+An arbitrary identifier for the relying party. Neither the specification nor our implementation impose any constraints on this value.
+</dd>
+<dt>
+<span class="term">
+<code class="literal">Redirect URI</code>
+</span>
+</dt>
+<dd>
+This is the URI where the OP will redirect the user&#8217;s browser after authentication. The appropriate value for this is <code class="literal">&lt;KIBANA_ENDPOINT_URL&gt;/api/security/oidc/callback</code>. This can also be called the <code class="literal">Callback URI</code>.
+</dd>
+</dl>
+</div>
+<p>At the end of the registration process, the OP assigns a Client Identifier and a Client Secret for the RP (Elasticsearch Service) to use. Note these two values as they are used in the cluster configuration.</p>
+<h3><a id="ec-secure-deployment-oidc"></a>Configure your cluster to use OpenID Connect<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/cloud/edit/master/docs/shared/ec-ce-securing-clusters-oidc.asciidoc">edit</a></h3>
+<p>You&#8217;ll need to <a class="xref" href="ec-secure-clusters-oidc.html#ec-oidc-client-secret" title="Configure the Client Secret">add the client secret</a> to the keystore and then <a class="xref" href="ec-secure-clusters-oidc.html#ec-oidc-user-settings" title="Configure the user settings">update the Elasticsearch user settings</a> to refer to that secret and use the OpenID Connect realm.</p>
+<h4><a id="ec-oidc-client-secret"></a>Configure the Client Secret<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/cloud/edit/master/docs/shared/ec-ce-securing-clusters-oidc.asciidoc">edit</a></h4>
+<p>Configure the Client Secret that was assigned to the PR by the OP during registration to the Elasticsearch keystore.</p>
+<p>This is a sensitive setting, it won&#8217;t be stored in plaintext in the cluster configuration but rather as a secure setting. In order to do so,
+follow these steps:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Find your deployment on the home page in the Elasticsearch Service card and click the gear icon to access it directly. Or, select Elasticsearch Service to go to the deployments page to view all of your deployments.</p>
+<p>On the deployments page you can narrow your deployments by name, ID, or choose from several other filters. To customize your view, use a combination of filters, or change the format from a grid to a list.</p>
+</li>
+<li class="listitem">
+From your deployment menu, select <span class="strong strong"><strong>Security</strong></span>.
+</li>
+<li class="listitem">
+Under the <span class="strong strong"><strong>Elasticsearch keystore</strong></span> section, select <span class="strong strong"><strong>Add settings</strong></span>.
+</li>
+<li class="listitem">
+On the <span class="strong strong"><strong>Create setting</strong></span> window, select the secret <span class="strong strong"><strong>Type</strong></span> to be <code class="literal">Single string</code>.
+</li>
+<li class="listitem">
+<p>Set the <span class="strong strong"><strong>Setting name</strong></span>` to <code class="literal">xpack.security.authc.realms.oidc.&lt;oidc-realm-name&gt;.rp.client_secret</code> and add the Client Secret you received
+from the OP during registration in the <code class="literal">Secret</code> field.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><code class="literal">&lt;oidc-realm-name&gt;</code> refers to the name of the OpenID Connect Realm. You can select any name that contains alphanumeric
+characters, underscores and hyphens. Replace <code class="literal">&lt;oidc-realm-name&gt;</code> with the realm name you selected.</p>
+</div>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>After you configure the Client Secret, any attempt to restart the deployment will fail until you complete the rest of the
+configuration steps. If you wish to rollback the OpenID Connect related configuration effort, you need to remove the
+<code class="literal">xpack.security.authc.realms.oidc.&lt;oidc-realm-name&gt;.rp.client_secret</code> that was just added by using the "remove" button by the
+setting name under <code class="literal">Security keys</code>.</p>
+</div>
+</div>
+</li>
+<li class="listitem">
+You must also edit your cluster configuration, sometimes also referred to as the deployment plan, in order to add the appropriate settings.
+</li>
+</ol>
+</div>
+<h4><a id="ec-oidc-user-settings"></a>Configure the user settings<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/cloud/edit/master/docs/shared/ec-ce-securing-clusters-oidc.asciidoc">edit</a></h4>
+<p>The Elasticsearch cluster needs to be configured to use the OpenID Connect realm for user authentication and to map the applicable roles to the users. If you are using machine learning or a deployment with hot-warm architecture, you must include this OpenID Connect related configuration in the user settings section for each node type.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p><a class="xref" href="ec-add-user-settings.html" title="Edit Elasticsearch user settings">Update your Elasticsearch user settings</a> for the <code class="literal">oidc</code> realm and specify the relevant configuration:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">xpack:
+  security:
+    authc:
+      realms:
+        oidc:
+          oidc-realm-name: <a id="CO32-1"></a><i class="conum" data-value="1"></i>
+            order: 2 <a id="CO32-2"></a><i class="conum" data-value="2"></i>
+            rp.client_id: "client-id" <a id="CO32-3"></a><i class="conum" data-value="3"></i>
+            rp.response_type: "code"
+            rp.redirect_uri: "&lt;KIBANA_ENDPOINT_URL&gt;/api/security/oidc/callback" <a id="CO32-4"></a><i class="conum" data-value="4"></i>
+            op.issuer: "&lt;check with your OpenID Connect Provider&gt;" <a id="CO32-5"></a><i class="conum" data-value="5"></i>
+            op.authorization_endpoint: "&lt;check with your OpenID Connect Provider&gt;" <a id="CO32-6"></a><i class="conum" data-value="6"></i>
+            op.token_endpoint: "&lt;check with your OpenID Connect Provider&gt;" <a id="CO32-7"></a><i class="conum" data-value="7"></i>
+            op.userinfo_endpoint: "&lt;check with your OpenID Connect Provider&gt;" <a id="CO32-8"></a><i class="conum" data-value="8"></i>
+            op.jwkset_path: "&lt;check with your OpenID Connect Provider&gt;" <a id="CO32-9"></a><i class="conum" data-value="9"></i>
+            claims.principal: sub <a id="CO32-10"></a><i class="conum" data-value="10"></i>
+            claims.groups: "http://example.info/claims/groups" <a id="CO32-11"></a><i class="conum" data-value="11"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO32-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Defines the OpenID Connect realm name. The realm name can only contain alphanumeric characters, underscores, and hyphens</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO32-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The order of the OpenID Connect realm in your authentication chain. Allowed values are between <code class="literal">2</code> and <code class="literal">100</code>. Set to <code class="literal">2</code> unless you plan on configuring multiple SSO realms for this cluster.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO32-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This, usually opaque, arbitrary string, is the Client Identifier that was assigned to the Elasticsearch Service RP by the OP upon registration.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO32-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Replace <code class="literal">&lt;KIBANA_ENDPOINT_URL&gt;</code> with the value noted in the previous step</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO32-5"><i class="conum" data-value="5"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>A url, used as a unique identifier for the OP. The value for this setting should be
+provided by your OpenID Connect Provider.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO32-6"><i class="conum" data-value="6"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The URL for the Authorization Endpoint in the OP. This is where the user&#8217;s browser
+will be redirected to start the authentication process. The value for this setting should be provided by your OpenID Connect Provider.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO32-7"><i class="conum" data-value="7"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The URL for the Token Endpoint in the OpenID Connect Provider. This is the endpoint where
+Elasticsearch Service will send a request to exchange the code for an ID Token, as part of the Authorization Code flow. The value for this setting should be provided by your OpenID Connect Provider.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO32-8"><i class="conum" data-value="8"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>(Optional) The URL for the UserInfo Endpoint in the OpenID Connect Provider. This is the
+endpoint of the OP that can be queried to get further user information, if required. The value
+for this setting should be provided by your OpenID Connect Provider.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO32-9"><i class="conum" data-value="9"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The path to a file or an HTTPS URL pointing to a JSON Web Key Set with the key material
+that the OpenID Connect Provider uses for signing tokens and claims responses. Your OpenID Connect Provider should provide you with this file.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO32-10"><i class="conum" data-value="10"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Defines the OpenID Connect claim that is going to be mapped to the principal (username) of the authenticated user in Kibana. In this example, we map the value of the <code class="literal">sub</code> claim, but this is not a requirement, other claims can be used too. See
+<a href="/guide/en/elasticsearch/reference/8.7/oidc-guide-authentication.html#oidc-claims-mapping" class="ulink" target="_top">the claims mapping documentation</a> for details and available options.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO32-11"><i class="conum" data-value="11"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Defines the OpenID Connect claim that is going to be used for role mapping. Note that the value <code class="literal">"http://example.info/claims/groups"</code>
+that is used here, is an arbitrary example. Check <a href="/guide/en/elasticsearch/reference/8.7/oidc-guide-authentication.html#oidc-claims-mapping" class="ulink" target="_top">the claims mapping documentation</a> for a very detailed description of how the claim mapping works and how can these be used for role mapping. The name of this claim should be determined by the configuration of your OpenID Connect Provider.
+NOTE: According to the OpenID Connect specification, the OP should also make their configuration available at a well known URL, which is the concatenation of their <code class="literal">Issuer</code> value with the <code class="literal">.well-known/openid-configuration</code> string. To configure the OpenID Connect realm, refer to the <code class="literal">https://op.org.com/.well-known/openid-configuration</code> documentation.</p>
+</td>
+</tr>
+</table>
+</div>
+</li>
+<li class="listitem">
+<p>By default, users authenticating through OpenID Connect have no roles assigned to them. For example, if you want all your users authenticating with OpenID Connect to get access to Kibana, issue the following request to Elasticsearch:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">POST /_security/role_mapping/CLOUD_OIDC_TO_KIBANA_ADMIN <a id="CO33-1"></a><i class="conum" data-value="1"></i>
+{
+   "enabled": true,
+    "roles": [ "kibana_admin" ], <a id="CO33-2"></a><i class="conum" data-value="2"></i>
+    "rules": { <a id="CO33-3"></a><i class="conum" data-value="3"></i>
+        "field": { "realm.name": "oidc-realm-name" } <a id="CO33-4"></a><i class="conum" data-value="4"></i>
+    },
+    "metadata": { "version": 1 }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO33-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The name of the new role mapping.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO33-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The role mapped to the users.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO33-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The fields to match against.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO33-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The name of the OpenID Connect realm. This needs to be the same value as the one used in the cluster configuration.</p>
+</td>
+</tr>
+</table>
+</div>
+</li>
+<li class="listitem">
+<p>Update Kibana in the
+<a class="xref" href="ec-manage-kibana-settings.html" title="Edit Kibana user settings">user settings configuration</a>
+to use OpenID Connect as the authentication provider:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>If you are using a Kibana instance of version 7.7 or later:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">xpack.security.authc.providers:
+  oidc.oidc1:
+    order: 0
+    realm: oidc-realm-name <a id="CO34-1"></a><i class="conum" data-value="1"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO34-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The name of the OpenID Connect realm. This needs to be the same value as the one used in the cluster configuration.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>This configuration disables all other realms and only allows users to authenticate with OpenID Connect. If you wish to allow your native realm users to authenticate, you need to also enable the <code class="literal">basic</code> <code class="literal">provider</code> like this:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">xpack.security.authc.providers:
+  oidc.oidc1:
+    order: 0
+    realm: oidc-realm-name
+    description: "Log in with my OpenID Connect" <a id="CO35-1"></a><i class="conum" data-value="1"></i>
+  basic.basic1:
+    order: 1</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO35-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This arbitrary string defines how OpenID Connect login is titled in the Login Selector UI that is shown when you enable multiple authentication providers in Kibana. If you have a Kibana instance of version 7.8 or later, you can also configure the optional <code class="literal">icon</code> and <code class="literal">hint</code> settings for any authentication provider.</p>
+</td>
+</tr>
+</table>
+</div>
+</li>
+<li class="listitem">
+<p>If you are using a Kibana instance of version 7.6 or earlier:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">xpack.security.authc.providers: [oidc]
+xpack.security.authc.oidc.realm: "oidc-realm-name" <a id="CO36-1"></a><i class="conum" data-value="1"></i>
+server.xsrf.whitelist: [/api/security/oidc/callback]</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO36-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The name of the OpenID Connect realm. This needs to be the same value as the one used in the cluster configuration.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>This configuration disables all other realms and only allows users to authenticate with OpenID Connect. If you wish to allow your
+native realm users to authenticate, you need to also enable the <code class="literal">basic</code> authentication provider by setting <code class="literal">xpack.security.authProviders:
+[oidc, basic]</code> in the configuration of Kibana.</p>
+<p>You can then access the Kibana login screen at <code class="literal">&lt;KIBANA_ENDPOINT_URL&gt;/login</code></p>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Optional: If your OpenID Connect Provider doesn&#8217;t publish its JWKS at an https URL, or if you want to use a local copy, you can upload the JWKS as a file.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Prepare a ZIP file with a
+<a class="xref" href="ec-custom-bundles.html" title="Upload custom plugins and bundles">custom bundle</a>
+that contains your OpenID Connect Provider&#8217;s JWKS file (<code class="literal">op_jwks.json</code>) inside of an <code class="literal">oidc</code> folder.</p>
+<p>This bundle allows all Elasticsearch containers to access the metadata file.</p>
+</li>
+<li class="listitem">
+<p>Update your Elasticsearch cluster on the <a class="xref" href="ec-adding-plugins.html" title="Add plugins and extensions">deployments page</a> to use the bundle you prepared in the previous step.</p>
+
+<p>Custom bundles are unzipped under the path <code class="literal">/app/config/BUNDLE_DIRECTORY_STRUCTURE</code>, where <code class="literal">BUNDLE_DIRECTORY_STRUCTURE</code> is the directory
+structure in the ZIP file. Make sure to save the file location where custom bundles get unzipped, as you will need it in the next step.</p>
+<p>In our example, the OpenID Connect Provider JWK set file will be located in the path <code class="literal">/app/config/oidc/op_jwks.json</code>:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">$ tree .
+.
+└── oidc
+      └── op_jwks.json</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Adjust your <code class="literal">oidc</code> realm configuration accordingly:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">xpack:
+  security:
+    authc:
+      realms:
+        oidc:
+          oidc-realm-name:
+            ...
+            op.jwks_path: /app/config/oidc/op_jwks.json <a id="CO37-1"></a><i class="conum" data-value="1"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO37-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The path to the JWKS file that was uploaded</p>
+</td>
+</tr>
+</table>
+</div>
+</li>
+</ol>
+</div>
+</li>
+</ol>
+</div>
+<h3><a id="ec-oidc-ssl-configuration"></a>Configure SSL<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/cloud/edit/master/docs/shared/ec-ce-securing-clusters-oidc.asciidoc">edit</a></h3>
+<p>OpenID Connect depends on TLS to provider security properties such as encryption in transit and endpoint authentication. The RP
+is required to establish back-channel communication with the OP in order to exchange the code for an ID Token during the
+Authorization code grant flow and in order to get additional user information from the UserInfo endpoint. As such, it is
+important that Elasticsearch Service can validate and trust the server certificate that the OP uses for TLS. Since the system truststore is
+used for the client context of outgoing https connections, if your OP is using a certificate from a trusted CA, no additional
+configuration is needed.</p>
+<p>However, if your OP uses a certificate that is issued for instance, by a CA used only in your Organization, you must configure
+Elasticsearch Service to trust that CA.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Prepare a ZIP file with a
+<a class="xref" href="ec-custom-bundles.html" title="Upload custom plugins and bundles">custom bundle</a>
+that contains the CA certificate (<code class="literal">company-ca.pem</code>) that signed the certificate your OpenID Connect Provider uses for TLS inside
+of an <code class="literal">oidc-tls</code> folder
+</li>
+<li class="listitem">
+<p>Update your Elasticsearch cluster on the <a class="xref" href="ec-adding-plugins.html" title="Add plugins and extensions">deployments page</a> to use the bundle you prepared in the previous step.</p>
+
+<p>Custom bundles are unzipped under the path <code class="literal">/app/config/BUNDLE_DIRECTORY_STRUCTURE</code>, where <code class="literal">BUNDLE_DIRECTORY_STRUCTURE</code> is the directory structure in the ZIP file. Make sure to save the file location where custom bundles get unzipped, as you will need it in the next step.</p>
+<p>In our example, the CA certificate file will be located in the path <code class="literal">/app/config/oidc-tls/company-ca.pem</code>:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">$ tree .
+.
+└── oidc-tls
+      └── company-ca.pem</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Adjust your <code class="literal">oidc</code> realm configuration accordingly:</p>
+<div class="pre_wrapper lang-sh">
+<pre class="programlisting prettyprint lang-sh">xpack:
+  security:
+    authc:
+      realms:
+        oidc:
+          oidc-realm-name:
+            ...
+            ssl.certificate_authorities: ["/app/config/oidc-tls/company-ca.pem"] <a id="CO38-1"></a><i class="conum" data-value="1"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO38-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The path where the CA Certificate file was uploaded</p>
+</td>
+</tr>
+</table>
+</div>
+</li>
+</ol>
+</div>
+<h3><a id="ec-oidc-optional-settings"></a>Optional Settings<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/cloud/edit/master/docs/shared/ec-ce-securing-clusters-oidc.asciidoc">edit</a></h3>
+<p>The following optional oidc realm settings are supported and can be set if needed:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">op.endsession_endpoint</code> The URL to the End Session Endpoint in the OpenID Connect Provider. This is the endpoint
+where the user’s browser will be redirected after local logout, if the realm is configured for RP initiated
+Single Logout and the OP supports it. The value for this setting should be provided by your OpenID Connect Provider.
+</li>
+<li class="listitem">
+<code class="literal">rp.post_logout_redirect_uri</code> The Redirect URL where the OpenID Connect Provider should redirect the user after a
+successful Single Logout. This should be set to a value that will not trigger a new OpenID Connect Authentication,
+<code class="literal">&lt;KIBANA_ENDPOINT_URL&gt;/security/logged_out</code> is a good choice for this parameter.
+</li>
+<li class="listitem">
+<code class="literal">rp.signature_algorithm</code> The signature algorithm that will be used by Elasticsearch in order to verify the signature of the ID
+tokens it will receive from the OpenID Connect Provider. Defaults to <code class="literal">RSA256</code>.
+</li>
+<li class="listitem">
+<code class="literal">rp.requested_scopes</code> The scope values that will be requested by the OpenID Connect Provider as part of the
+Authentication Request. Defaults to <code class="literal">openid</code>, which is the only required scope for authentication. If your use case
+requires that you receive additional claims, you might need to request additional scopes, one of <code class="literal">profile</code>, <code class="literal">email</code>,
+<code class="literal">address</code>, <code class="literal">phone</code>. Note that <code class="literal">openid</code> should always be included in the list of requested scopes.
+</li>
+</ul>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="ec-securing-clusters-saml-azure.html">« Set up SAML with Azure Active Directory</a>
+</span>
+<span class="next">
+<a href="ec-securing-clusters-oidc-op.html">Set up OpenID Connect with Azure, Google, or Okta »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
