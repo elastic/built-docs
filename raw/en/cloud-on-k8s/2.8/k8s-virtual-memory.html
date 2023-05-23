@@ -42,7 +42,24 @@ Not what you want? See the
 </div></div></div>
 <p>By default, Elasticsearch uses memory mapping (<code class="literal">mmap</code>) to efficiently access indices.
 Usually, default values for virtual address space on Linux distributions are too low for Elasticsearch to work properly, which may result in out-of-memory exceptions. This is why <a href="k8s-quickstart.html" class="ulink" target="_top">the quickstart example</a> disables <code class="literal">mmap</code> through the <code class="literal">node.store.allow_mmap: false</code> setting. For production workloads, it is strongly recommended to increase the kernel setting <code class="literal">vm.max_map_count</code> to <code class="literal">262144</code> and leave <code class="literal">node.store.allow_mmap</code> unset.</p>
-<p>The kernel setting <code class="literal">vm.max_map_count=262144</code> can be set on the host either directly or by a dedicated init container, which must be privileged. To add an init container that changes the host kernel setting before your Elasticsearch pod starts, you can use the following example Elasticsearch spec:</p>
+<p>The kernel setting <code class="literal">vm.max_map_count=262144</code> can be set on the host directly, by a dedicated init container which must be privileged, or a dedicated Daemonset.</p>
+<p>For more information, check the Elasticsearch documentation on
+<a href="/guide/en/elasticsearch/reference/current/vm-max-map-count.html" class="ulink" target="_top">Virtual memory</a>.</p>
+<p>Optionally, you can select a different type of file system implementation for the storage. For possible options, check the
+<a href="/guide/en/elasticsearch/reference/current/index-modules-store.html" class="ulink" target="_top">store module documentation</a>.</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">spec:
+  nodeSets:
+  - name: default
+    count: 3
+    config:
+      index.store.type: niofs</pre>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s_using_an_init_container_to_set_virtual_memory"></a>Using an Init Container to set virtual memory<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/2.8/docs/orchestrating-elastic-stack-applications/elasticsearch/virtual-memory.asciidoc">edit</a></h3>
+</div></div></div>
+<p>To add an init container that changes the host kernel setting before your Elasticsearch container starts, you can use the following example Elasticsearch spec:</p>
 <div class="pre_wrapper lang-yaml">
 <pre class="programlisting prettyprint lang-yaml">cat &lt;&lt;EOF | kubectl apply -f -
 apiVersion: elasticsearch.k8s.elastic.co/v1
@@ -65,18 +82,74 @@ spec:
 EOF</pre>
 </div>
 <p>Note that this requires the ability to run privileged containers, which is likely not the case on many secure clusters.</p>
-<p>For more information, check the Elasticsearch documentation on
-<a href="/guide/en/elasticsearch/reference/current/vm-max-map-count.html" class="ulink" target="_top">Virtual memory</a>.</p>
-<p>Optionally, you can select a different type of file system implementation for the storage. For possible options, check the
-<a href="/guide/en/elasticsearch/reference/current/index-modules-store.html" class="ulink" target="_top">store module documentation</a>.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s_using_a_daemonset_to_set_virtual_memory"></a>Using a Daemonset to set virtual memory<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/2.8/docs/orchestrating-elastic-stack-applications/elasticsearch/virtual-memory.asciidoc">edit</a></h3>
+</div></div></div>
+<p>To use a Daemonset that changes the host kernel setting on all nodes:</p>
 <div class="pre_wrapper lang-yaml">
-<pre class="programlisting prettyprint lang-yaml">spec:
+<pre class="programlisting prettyprint lang-yaml">cat &lt;&lt;EOF | kubectl apply -n elastic-system -f -
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: max-map-count-setter
+  labels:
+    k8s-app: max-map-count-setter
+spec:
+  selector:
+    matchLabels:
+      name: max-map-count-setter
+  template:
+    metadata:
+      labels:
+        name: max-map-count-setter
+    spec:
+      initContainers:
+        - name: max-map-count-setter
+          image: docker.io/bash:5.2.15
+          resources:
+            limits:
+              cpu: 100m
+              memory: 32Mi
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          command: ['/usr/local/bin/bash', '-e', '-c', 'echo 262144 &gt; /proc/sys/vm/max_map_count']
+      containers:
+        - name: sleep
+          image: docker.io/bash:5.2.15
+          command: ['sleep', 'infinity']
+EOF</pre>
+</div>
+<p>To run an Elasticsearch instance that waits for the kernel setting to be in place:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">cat &lt;&lt;EOF | kubectl apply -f -
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: elasticsearch-sample
+spec:
+  version: 8.7.1
   nodeSets:
   - name: default
-    count: 3
-    config:
-      index.store.type: niofs</pre>
+    count: 1
+    # Only uncomment the below section if you are not using the previous Daemonset to set max_map_count.
+    # config:
+    #  node.store.allow_mmap: false
+    podTemplate:
+      spec:
+        # This init container ensures that the <code class="literal">max_map_count</code> setting has been applied before starting Elasticsearch.
+        # This is not required, but is encouraged when using the previous Daemonset to set max_map_count.
+        # Do not use this if setting config.node.store.allow_mmap: false
+        initContainers:
+        - name: max-map-count-check
+          command: ['sh', '-c', "while true; do mmc=$(cat /proc/sys/vm/max_map_count); if [ ${mmc} -eq 262144 ]; then exit 0; fi; sleep 1; done"]
+EOF</pre>
 </div>
+</div>
+
 </div>
 <div class="navfooter">
 <span class="prev">
