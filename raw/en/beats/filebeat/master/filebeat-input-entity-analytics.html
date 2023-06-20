@@ -65,7 +65,7 @@ external identity providers.</p>
 <p>The <code class="literal">entity-analytics</code> input supports the following configuration options plus
 the <a class="xref" href="filebeat-input-entity-analytics.html#filebeat-input-entity-analytics-common-options" title="Common options">Common options</a> described later.</p>
 <h4><a id="_provider_2"></a><code class="literal">provider</code><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
-<p>The identity provider. Must be one of: <code class="literal">azure-ad</code>.</p>
+<p>The identity provider. Must be one of: <code class="literal">azure-ad</code> or <code class="literal">okta</code>.</p>
 </div>
 
 <div class="section">
@@ -311,6 +311,137 @@ duration string (e.g., 1m, 3h, 24h). Defaults to <code class="literal">15m</code
 so. Altering this value will also require a change to <code class="literal">login_scopes</code>.</p>
 <h5><a id="_login_scopes"></a><code class="literal">login_scopes</code><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
 <p>Override the default authentication scopes. Only change if directed to do so.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="provider-okta"></a>Okta User Identities (<code class="literal">okta</code>)<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The <code class="literal">okta</code> provider allows the input to retrieve users from the Okta user
+API.</p>
+<h4><a id="_setup_2"></a>Setup<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
+<p>The necessary API permissions need to be granted in Okta in order for the
+provider to function properly. In the administration dashboard for your
+Okta account, navigate to Security&gt;API and in the Tokens tab click the
+"Create token" button to create a new token. Copy the token value and retain
+this to configure the provider. Note that the token will not be presented
+again, so it must be copied now. This value will use given to the provider
+via the <code class="literal">okta_token</code> configuration field.</p>
+<h4><a id="_how_it_works_2"></a>How It Works<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
+<h5><a id="_overview_2"></a>Overview<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>The Okta provider periodically contacts the Okta API, retrieving updates for
+users, updates its internal cache of user metadata, and ships updated user
+metadata to Elasticsearch.</p>
+<p>Fetching and shipping updates occurs in one of two processes: <span class="strong strong"><strong>full
+synchronizations</strong></span> and <span class="strong strong"><strong>incremental updates</strong></span>. Full synchronizations will send the
+entire list of users in state, along with write markers to indicate the start
+and end of the synchronization event. Incremental updates will only send data
+for changed users during that event. Changes on a user can come in many forms,
+whether it be a change to the user&#8217;s metadata, or a user was added or deleted.</p>
+<h5><a id="_api_interactions_2"></a>API Interactions<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>The provider periodically retrieves changes to user metadata from the
+Okta User API. This is done through calls to:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://developer.okta.com/docs/reference/api/users/#list-users" class="ulink" target="_top">/api/v1/users</a>
+</li>
+</ul>
+</div>
+<p>Updates are tracked by the provider by retaining a record of the time of the last
+noted update in the returned user list. During provider updates the Okta provider
+makes use of the Okta API&#8217;s query filtering to only request records updated at or
+since the provider&#8217;s recorded last update.</p>
+<h5><a id="_sending_user_metadata_to_elasticsearch_2"></a>Sending User Metadata to Elasticsearch<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>During a full synchronization, all users stored in state will be sent to the
+output, while incremental updates will only send users which have been updated.
+Full synchronizations will be bounded on either side by write marker documents,
+which will look something like this:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+    "@timestamp": "2022-11-04T09:57:19.786056-05:00",
+    "event": {
+        "action": "started",
+        "start": "2022-11-04T09:57:19.786056-05:00"
+    },
+    "labels": {
+        "identity_source": "okta-1"
+    }
+}</pre>
+</div>
+<p>User documents will show the current state of the user.</p>
+<p>Example user document:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+    "@timestamp": "2023-07-04T09:57:19.786056-05:00",
+    "event": {
+        "action": "user-discovered",
+    },
+    "okta": {
+        "id": "userid",
+        "status": "RECOVERY",
+        "created": "2023-06-02T09:33:00.189752+09:30",
+        "activated": "0001-01-01T00:00:00Z",
+        "statusChanged": "2023-06-02T09:33:00.189752+09:30",
+        "lastLogin": "2023-06-02T09:33:00.189752+09:30",
+        "lastUpdated": "2023-06-02T09:33:00.189753+09:30",
+        "passwordChanged": "2023-06-02T09:33:00.189753+09:30",
+        "type": {
+            "id": "typeid"
+        },
+        "profile": {
+            "login": "name.surname@example.com",
+            "email": "name.surname@example.com",
+            "firstName": "name",
+            "lastName": "surname"
+        },
+        "credentials": {
+            "password": {},
+            "provider": {
+                "type": "OKTA",
+                "name": "OKTA"
+            }
+        },
+        "_links": {
+            "self": {
+                "href": "https://localhost/api/v1/users/userid"
+            }
+        }
+    },
+    "user": {
+        "id": "userid",
+    },
+    "labels": {
+        "identity_source": "okta-1"
+    }
+}</pre>
+</div>
+<h4><a id="_configuration_2"></a>Configuration<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
+<p>Example configuration:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: entity-analytics
+  enabled: true
+  id: okta-1
+  provider: okta
+  sync_interval: "12h"
+  update_interval: "30m"
+  okta_domain: "OKTA_DOMAIN"
+  okta_token: "OKTA_TOKEN"</pre>
+</div>
+<p>The <code class="literal">okta</code> provider supports the following configuration:</p>
+<h5><a id="_okta_domain"></a><code class="literal">okta_domain</code><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>The Okta domain. Field is required.</p>
+<h5><a id="_okta_token"></a><code class="literal">okta_token</code><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>The Okta secret token, used for authentication. Field is required.</p>
+<h5><a id="_sync_interval_2"></a><code class="literal">sync_interval</code><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>The interval in which full synchronizations should occur. The interval must be
+longer than the update interval (<code class="literal">update_interval</code>) Expressed as a duration
+string (e.g., 1m, 3h, 24h). Defaults to <code class="literal">24h</code> (24 hours).</p>
+<h5><a id="_update_interval_2"></a><code class="literal">update_interval</code><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>The interval in which incremental updates should occur. The interval must be
+shorter than the full synchronization interval (<code class="literal">sync_interval</code>). Expressed as a
+duration string (e.g., 1m, 3h, 24h). Defaults to <code class="literal">15m</code> (15 minutes).</p>
 <h4><a id="_metrics_4"></a>Metrics<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
 <p>This input exposes metrics under the <a class="xref" href="http-endpoint.html" title="Configure an HTTP endpoint for metrics">HTTP monitoring endpoint</a>.
 These metrics are exposed under the <code class="literal">/inputs</code> path. They can be used to
