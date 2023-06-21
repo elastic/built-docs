@@ -172,6 +172,10 @@ provider to function properly:</p>
 <td align="left" valign="top"><p>User.Read.All</p></td>
 <td align="left" valign="top"><p>Application</p></td>
 </tr>
+<tr>
+<td align="left" valign="top"><p>Device.Read.All</p></td>
+<td align="left" valign="top"><p>Application</p></td>
+</tr>
 </tbody>
 </table>
 </div>
@@ -180,23 +184,28 @@ granting, and secret configuration, follow this <a href="https://learn.microsoft
 <h4><a id="_how_it_works"></a>How It Works<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
 <h5><a id="_overview"></a>Overview<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
 <p>The Azure AD provider periodically contacts Azure Active Directory, retrieving
-updates for users and groups, updates its internal cache of user metadata and
-group membership information, and ships updated user metadata to Elasticsearch.</p>
+updates for users, devices and groups, updates its internal cache of user and
+device metadata and group membership information, and ships updated user metadata
+to Elasticsearch.</p>
 <p>Fetching and shipping updates occurs in one of two processes: <span class="strong strong"><strong>full
 synchronizations</strong></span> and <span class="strong strong"><strong>incremental updates</strong></span>. Full synchronizations will send the
-entire list of users in state, along with write markers to indicate the start
-and end of the synchronization event. Incremental updates will only send data
-for changed users during that event. Changes on a user can come in many forms,
-whether it be a change to the user&#8217;s metadata, a user was added or deleted, or
-group membership was changed (either direct or transitive).</p>
+entire list of users and devices in state, along with write markers to indicate
+the start and end of the synchronization event. Incremental updates will only
+send data for changed users and devices during that event. Changes on a user or
+device can come in many forms, whether it be a change to the user or device
+metadata, a user/device was added or deleted, or group membership was changed
+(either direct or transitive).</p>
 <h5><a id="_api_interactions"></a>API Interactions<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
-<p>The provider periodically retrieves changes to user and group metadata from the
-Microsoft Graph API for Azure Active Directory. This is done through calls to
-two API endpoints:</p>
+<p>The provider periodically retrieves changes to user, device and group metadata
+from the Microsoft Graph API for Azure Active Directory. This is done through
+calls to three API endpoints:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
 <a href="https://learn.microsoft.com/en-us/graph/api/user-delta?view=graph-rest-1.0&amp;tabs=http" class="ulink" target="_top">/users/delta</a>
+</li>
+<li class="listitem">
+<a href="https://learn.microsoft.com/en-us/graph/api/device-delta?view=graph-rest-1.0&amp;tabs=http" class="ulink" target="_top">/devices/delta</a>
 </li>
 <li class="listitem">
 <a href="https://learn.microsoft.com/en-us/graph/api/group-delta?view=graph-rest-1.0&amp;tabs=http" class="ulink" target="_top">/groups/delta</a>
@@ -205,10 +214,10 @@ two API endpoints:</p>
 </div>
 <p>The <code class="literal">/delta</code> endpoint will provide changes that have occurred since the last
 call, with state being tracked through a delta token. If the /delta endpoint is
-called without a delta token, it will provide a full listing of users or groups,
-similar to the non-delta endpoint. Since many results may be returned, there is
-a paging mechanism that is used. In the response body, there are two fields that
-may appear, <code class="literal">@odata.nextLink</code> and <code class="literal">@odata.deltaLink</code>.</p>
+called without a delta token, it will provide a full listing of users, devices
+or groups, similar to the non-delta endpoint. Since many results may be returned,
+there is a paging mechanism that is used. In the response body, there are two
+fields that may appear, <code class="literal">@odata.nextLink</code> and <code class="literal">@odata.deltaLink</code>.</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
@@ -222,13 +231,14 @@ need to be fetched (the delta token).
 </li>
 </ul>
 </div>
-<p>The group metadata will be used to enrich users with group membership information.
-Direct memberships, along with transitive memberships, will provided on users.</p>
-<h5><a id="_sending_user_metadata_to_elasticsearch"></a>Sending User Metadata to Elasticsearch<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
-<p>During a full synchronization, all users stored in state will be sent to the
-output, while incremental updates will only send users which have been updated.
-Full synchronizations will be bounded on either side by write marker documents,
-which will look something like this:</p>
+<p>The group metadata will be used to enrich users and devices with group membership
+information. Direct memberships, along with transitive memberships, will be provided
+for users and devices.</p>
+<h5><a id="_sending_user_and_device_metadata_to_elasticsearch"></a>Sending User and Device Metadata to Elasticsearch<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>During a full synchronization, all users and devices stored in state will be sent
+to the output, while incremental updates will only send users which have been
+updated. Full synchronizations will be bounded on either side by write marker
+documents, which will look something like this:</p>
 <div class="pre_wrapper lang-json">
 <pre class="programlisting prettyprint lang-json">{
     "@timestamp": "2022-11-04T09:57:19.786056-05:00",
@@ -269,6 +279,46 @@ which will look something like this:</p>
             {
                 "id": "d140978f-d641-4f01-802f-4ecc1acf8935",
                 "name": "group2"
+            }
+        ]
+    },
+    "labels": {
+        "identity_source": "azure-1"
+    }
+}</pre>
+</div>
+<p>Device documents will show the current state of the device.</p>
+<p>Example device document:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+    "@timestamp": "2022-11-04T09:57:19.786056-05:00",
+    "event": {
+        "action": "device-discovered",
+    },
+    "azure_ad": {
+        "accountEnabled": true,
+        "displayName": "DESKTOP-LETW452G",
+        "operatingSystem": "Windows",
+        "operatingSystemVersion": "10.0.19043.1337",
+        "physicalIds": {
+            "extensionAttributes": {
+                "extensionAttribute1": "BYOD-Device"
+            }
+        },
+        "alternativeSecurityIds": [
+            {
+                "type": 2,
+                "identityProvider": null,
+                "key": "DGFSGHSGGTH345A...35DSFH0A"
+            },
+        ]
+    },
+    "device": {
+        "id": "2fbbb8f9-ff67-4a21-b867-a344d18a4198",
+        "group": [
+            {
+                "id": "331676df-b8fd-4492-82ed-02b927f8dd80",
+                "name": "group1"
             }
         ]
     },
@@ -352,7 +402,7 @@ Okta User API. This is done through calls to:</p>
 noted update in the returned user list. During provider updates the Okta provider
 makes use of the Okta API&#8217;s query filtering to only request records updated at or
 since the provider&#8217;s recorded last update.</p>
-<h5><a id="_sending_user_metadata_to_elasticsearch_2"></a>Sending User Metadata to Elasticsearch<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<h5><a id="_sending_user_metadata_to_elasticsearch"></a>Sending User Metadata to Elasticsearch<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
 <p>During a full synchronization, all users stored in state will be sent to the
 output, while incremental updates will only send users which have been updated.
 Full synchronizations will be bounded on either side by write marker documents,
