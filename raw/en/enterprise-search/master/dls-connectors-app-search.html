@@ -6,9 +6,9 @@
 <meta class="elastic" name="content" content="Leverage DLS from connectors in App Search | Enterprise Search documentation [master]">
 
 <link rel="home" href="index.html" title="Enterprise Search documentation [master]"/>
-<link rel="up" href="dls.html" title="Document level security"/>
-<link rel="prev" href="dls-overview.html" title="How DLS works"/>
-<link rel="next" href="dls-e2e-guide.html" title="DLS end-to-end guide"/>
+<link rel="up" href="engines.html" title="Indices, engines, meta engines, and content sources"/>
+<link rel="prev" href="engines-workplace-search-dlp.html" title="Leverage Workplace Search document-level permissions in your search engine"/>
+<link rel="next" href="programming-language-clients.html" title="Programming language clients"/>
 <meta class="elastic" name="product_version" content="master"/>
 <meta class="elastic" name="product_name" content="Enterprise Search"/>
 <meta class="elastic" name="website_area" content="documentation"/>
@@ -48,14 +48,14 @@ Not what you want? See the
 </div>
 </div>
 </span>
-<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="dls.html">Document level security</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="engines.html">Indices, engines, meta engines, and content sources</a></span>
 </div>
 <div class="navheader">
 <span class="prev">
-<a href="dls-overview.html">« How DLS works</a>
+<a href="engines-workplace-search-dlp.html">« Leverage Workplace Search document-level permissions in your search engine</a>
 </span>
 <span class="next">
-<a href="dls-e2e-guide.html">DLS end-to-end guide »</a>
+<a href="programming-language-clients.html">Programming language clients »</a>
 </span>
 </div>
 <div class="chapter">
@@ -63,13 +63,252 @@ Not what you want? See the
 <h2 class="title"><a id="dls-connectors-app-search"></a>Leverage DLS from connectors in App Search<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-connectors-app-search.asciidoc">edit</a></h2>
 </div></div></div>
 
+<p>This guide explains how to use App Search tools to search documents ingested by <a class="xref" href="connectors.html" title="Elastic connectors">Elastic connectors</a> which have <a class="xref" href="dls.html" title="Document level security">document level security (DLS)</a> enabled.
+We&#8217;ll be using <span class="strong strong"><strong>Elasticsearch-index engines</strong></span> in App Search for our example.</p>
+<p>We will go through the following steps:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Configure a connector (SharePoint Online in this example) to sync data and user identities to an Elasticsearch index.
+</li>
+<li class="listitem">
+Create an App Search <a href="/guide/en/app-search/master/elasticsearch-engines.html" class="ulink" target="_blank" rel="noopener">Elasticsearch-index engine</a> based on that index.
+</li>
+<li class="listitem">
+Use <a href="/guide/en/app-search/master/authentication.html#authentication-signed" class="ulink" target="_blank" rel="noopener">App Search signed search keys</a> to allow the user to query their documents via App Search APIs.
+These queries will be scoped and controlled by the associated user identities ingested by the connector.
+</li>
+</ol>
+</div>
+<h3><a id="dls-connectors-app-search-connector-setup"></a>Set up connector to sync data with access control<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-connectors-app-search.asciidoc">edit</a></h3>
+<p>You&#8217;ll need to have an Enterprise Search deployment and to run a self-managed <span class="strong strong"><strong>connectors service</strong></span> instance to ingest data with access control.
+Refer to <a class="xref" href="build-connector.html" title="Connector clients and frameworks"><em>Connector clients and frameworks</em></a> for details on how to set up a connector client and run the connectors service.</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This guide assumes you already have an Elastic deployment, that satisfies the <a class="xref" href="build-connector.html#build-connector-prerequisites" title="Availability and prerequisites">prerequisites</a> for running the connectors service.
+If you don&#8217;t have an Elastic deployment, sign up for a <a href="https://cloud.elastic.co/registration" class="ulink" target="_blank" rel="noopener">free Elastic Cloud trial</a>.</p>
+</div>
+</div>
+<p>In this example, we&#8217;ll configure and sync data from SharePoint Online, using the <a class="xref" href="connectors-sharepoint-online.html" title="Elastic SharePoint Online connector reference">SharePoint Online connector</a>.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>We use the SharePoint Online connector in this concrete example.
+Refer to <a href="/guide/en/enterprise-search/master/build-connector.html" class="ulink" target="_top">Connector clients and frameworks</a> for details about other connectors that support DLS.</p>
+</div>
+</div>
+<h3><a id="dls-connectors-app-search-sharepoint-data-overview"></a>Elasticsearch indices overview<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-connectors-app-search.asciidoc">edit</a></h3>
+<p>The SharePoint Online connector will create two separate Elasticsearch indices:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+A <span class="strong strong"><strong>content</strong></span> index that holds the searchable data in SharePoint Online.
+We&#8217;ll use this index to create our App Search engine.
+</li>
+<li class="listitem">
+An <span class="strong strong"><strong>access control</strong></span> index that includes access control data for each user that has access to SharePoint Online.
+</li>
+</ul>
+</div>
+<h3><a id="dls-connectors-app-search-engine-setup"></a>App Search engine setup<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-connectors-app-search.asciidoc">edit</a></h3>
+<p>We want to use the data ingested by the SharePoint Online connector in an App Search engine.
+To do this, we need to create an Elasticsearch index-based engine.</p>
+<p>Follow these steps:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Navigate to <span class="strong strong"><strong>Enterprise Search &gt; App Search &gt; Engines &gt; Create an engine</strong></span>.
+</li>
+<li class="listitem">
+Select <span class="strong strong"><strong>Elasticsearch index-based</strong></span> engine type.
+</li>
+<li class="listitem">
+Name the engine.
+</li>
+<li class="listitem">
+Select the <a class="xref" href="engines.html#engines-access-content-source-index" title="Access content source index">Elasticsearch index</a> used by the SharePoint Online connector.
+</li>
+<li class="listitem">
+Select <span class="strong strong"><strong>Create search engine</strong></span>.
+</li>
+</ol>
+</div>
+<h3><a id="dls-connectors-app-search-signed-keys-overview"></a>App Search signed search keys<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-connectors-app-search.asciidoc">edit</a></h3>
+<p><a href="/guide/en/app-search/master/authentication.html#authentication-signed" class="ulink" target="_blank" rel="noopener">Signed search keys</a> in Elastic App Search give you more control over a user&#8217;s search experience.
+They enable you to restrict the data users can see and search over.</p>
+<p>App Search has the concept of search keys and private keys:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+A <span class="strong strong"><strong>search</strong></span> key is prefixed with <code class="literal">search-</code> and can only be used to search over engines.
+</li>
+<li class="listitem">
+A <span class="strong strong"><strong>private</strong></span> key is prefixed with <code class="literal">private-</code> and can create, update, and delete documents if the <code class="literal">write</code> flag is enabled.
+It can also perform searches and reads if the <code class="literal">read</code> flag is enabled.
+</li>
+</ul>
+</div>
+<p>App Search also has the concept of <span class="strong strong"><strong>signed search keys</strong></span>, which can only be used to search.
+A signed search key is a JSON Web Token.
+It is signed with an API key, ideally a read-only private key, using the HMAC with SHA-256 (HS256) algorithm.</p>
+<h4><a id="dls-connectors-app-search-signed-keys-create"></a>Create a signed search key<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-connectors-app-search.asciidoc">edit</a></h4>
+<p>A signed API key can contain filters to restrict what a user can search over.
+We will use documents from the access control index created by the SharePoint Online connector to generate signed API keys.</p>
+<p>The access control index will contain documents similar to this example:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET search-acl-filter-sharepoint/_doc/503b224d-9d1f-44ed-9c5d-a6430340c365
+{
+  "_index": "search-acl-filter-sharepoint",
+  "_id": "503b224d-9d1f-44ed-9c5d-a6430340c365",
+  "_version": 1,
+  "_seq_no": 0,
+  "_primary_term": 1,
+  "found": true,
+  "_source": {
+    "email": "john@example.co",
+    "access_control": [
+      "503b224d-9d1f-44ed-9c5d-a6430340c365",
+      "Engineering Members"
+      ],
+    "query": {
+      "template": {
+        "params": {
+          "access_control": [
+            "503b224d-9d1f-44ed-9c5d-a6430340c365",
+            "Engineering Members"
+            ]
+        },
+        "source": """
+        {
+          "bool": {
+            "filter": {
+              "bool": {
+                "should": [
+                  {
+                    "bool": {
+                      "must_not": {
+                        "exists": {
+                          "field": "_allow_access_control"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "terms": {
+                      "_allow_access_control.keyword": {{#toJson}}access_control{{/toJson}}
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+        """
+      }
+    }
+  }
+}</pre>
+</div>
+<p>This document contains the Elasticsearch query that describes which documents the user <code class="literal">john@example.com</code> has access to.
+The access control information is stored in the <code class="literal">access_control</code> field.
+In this case the user has access only to documents that contain <code class="literal">"503b224d-9d1f-44ed-9c5d-a6430340c365"</code> or <code class="literal">"Engineering Members"</code> in the <code class="literal">_allow_access_control</code> field.</p>
+<p>A signed API key has to be signed with a <a href="/guide/en/app-search/master/authentication.html#authentication-search" class="ulink" target="_blank" rel="noopener">search key</a>.
+The key used for signing needs to have read access to the App Search engine.
+<span class="strong strong"><strong>Note</strong></span>: This key should be kept secret.</p>
+<p>To build a signed key, you need the name of the key and its value.
+Find these details in Kibana, by going to <span class="strong strong"><strong>Enterprise Search &gt; App Search &gt; Credentials</strong></span>.</p>
+<p>Starting from the access control document, we can build an equivalent App Search signed key where the payload looks like:</p>
+<pre class="screen">{
+  "filters": {
+    "_allow_access_control": {{access_control}}
+  },
+  "api_key_name": {{name-of-private-key}}
+}</pre>
+<p>In our case, the signed payload looks like this:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+  "filters": {
+    "_allow_permissions": [
+      "503b224d-9d1f-44ed-9c5d-a6430340c365",
+      "Engineering Members"
+    ]
+  },
+  "api_key_name": "search-key"
+}</pre>
+</div>
+<p>The payload will be signed with the value of the public search key.
+There are various tools and libraries to create signed JWT.</p>
+<p>Here is an example using Ruby:</p>
+<div class="pre_wrapper lang-ruby">
+<pre class="programlisting prettyprint lang-ruby">require 'jwt'
+
+key_name = 'search-key'
+permissions = [
+  "503b224d-9d1f-44ed-9c5d-a6430340c365",
+  "Engineering Members"
+]
+
+payload = {
+  'filters' =&gt; {
+    '_allow_permissions' =&gt; permissions
+  },
+  'api_key_name' =&gt; key_name
+}
+
+key_value = 'search-y4bfy8cue3354u894s4vsnnm'
+algorithm = 'HS256'
+
+puts JWT.encode(payload, key_value, algorithm)</pre>
+</div>
+<p>Once created the signed key can be used in the authorization headers of search requests.</p>
+<p>For example:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">curl -X GET 'https://my-deployment.ent.us-west2.gcp.elastic-cloud.com/api/as/v1/engines/sharepoint/search' \
+-H 'Content-Type: application/json' \
+-H 'Authorization: Bearer &lt;API-KEY&gt;' \
+-d '{
+"query": "guidelines"
+}'</pre>
+</div>
+<h4><a id="dls-connectors-app-search-signed-test-search"></a>Test search results<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-connectors-app-search.asciidoc">edit</a></h4>
+<p>Now it&#8217;s time to test that the signed key works as expected.</p>
+<p>Ask the user to issue a search query with the signed API key.
+Validate that the documents returned are limited to what was specified in the filters of the API key.
+The results should match the permissions listed in the <code class="literal">_allow_access_control</code> field of the documents.</p>
+<h3><a id="dls-connectors-app-search-workflow"></a>Workflow guidance<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-connectors-app-search.asciidoc">edit</a></h3>
+<p>We recommend relying on the connector access control sync to automate and keep documents in sync with changes to the original content source&#8217;s user permissions.</p>
+<p>In this workflow you will need to handle the generation of the signed API key in the backend of your application, in response to browser sign ins.</p>
+<p>Once the key is generated, the backend will also need to return that signed key to the client (browser) to be used in subsequent search requests to your Elastic search engine.</p>
+<p>In order to invalidate the signed API keys, you need to invalidate the API key that was used to sign it.</p>
+<p>Additionally, if the user&#8217;s permission changes, you&#8217;ll need to recreate the signed search key.</p>
+<h3><a id="dls-connectors-app-search-learn-more"></a>Learn more<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-connectors-app-search.asciidoc">edit</a></h3>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="connectors.html" title="Elastic connectors">Elastic connectors</a>
+</li>
+<li class="listitem">
+<a class="xref" href="dls.html" title="Document level security">Document level security (DLS)</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/app-search/master/elasticsearch-engines.html" class="ulink" target="_blank" rel="noopener">Elasticsearch-index engines</a> in App Search
+</li>
+<li class="listitem">
+<a href="/guide/en/app-search/master/authentication.html#authentication-signed" class="ulink" target="_blank" rel="noopener">App Search signed search keys</a>
+</li>
+<li class="listitem">
+<a class="xref" href="connectors-sharepoint-online.html" title="Elastic SharePoint Online connector reference">SharePoint Online connector</a>
+</li>
+</ul>
+</div>
 </div>
 <div class="navfooter">
 <span class="prev">
-<a href="dls-overview.html">« How DLS works</a>
+<a href="engines-workplace-search-dlp.html">« Leverage Workplace Search document-level permissions in your search engine</a>
 </span>
 <span class="next">
-<a href="dls-e2e-guide.html">DLS end-to-end guide »</a>
+<a href="programming-language-clients.html">Programming language clients »</a>
 </span>
 </div>
 </div>
