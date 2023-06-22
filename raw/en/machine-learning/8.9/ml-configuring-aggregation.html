@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="keywords" content="ML, Elastic Stack, anomaly detection">
+<title>Aggregating data for faster performance | Machine Learning in the Elastic Stack [8.9] | Elastic</title>
+<meta class="elastic" name="content" content="Aggregating data for faster performance | Machine Learning in the Elastic Stack [8.9]">
+
+<link rel="home" href="index.html" title="Machine Learning in the Elastic Stack [8.9]"/>
+<link rel="up" href="anomaly-how-tos.html" title="How-to guides"/>
+<link rel="prev" href="ml-configuring-alerts.html" title="Generating alerts for anomaly detection jobs"/>
+<link rel="next" href="ml-configuring-transform.html" title="Altering data in your datafeed with runtime fields"/>
+<meta class="elastic" name="product_version" content="8.9"/>
+<meta class="elastic" name="product_name" content="Machine Learning"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elastic Stack/Machine Learning/8.9"/>
+<meta name="DC.subject" content="Machine Learning"/>
+<meta name="DC.identifier" content="8.9"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Machine Learning in the Elastic Stack [8.9]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="ml-ad-overview.html">Anomaly detection</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="anomaly-how-tos.html">How-to guides</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="ml-configuring-alerts.html">« Generating alerts for anomaly detection jobs</a>
+</span>
+<span class="next">
+<a href="ml-configuring-transform.html">Altering data in your datafeed with runtime fields »</a>
+</span>
+</div>
+<div class="section xpack">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="ml-configuring-aggregation"></a>Aggregating data for faster performance<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/ml/anomaly-detection/ml-configuring-aggregations.asciidoc">edit</a></h2>
+</div></div></div>
+<p>When you aggregate data, Elasticsearch automatically distributes the calculations across
+your cluster. Then you can feed this aggregated data into the machine learning features
+instead of raw results. It reduces the volume of data that must be analyzed.</p>
+<h4><a id="aggs-requs-dfeeds"></a>Requirements<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/ml/anomaly-detection/ml-configuring-aggregations.asciidoc">edit</a></h4>
+<p>There are a number of requirements for using aggregations in datafeeds.</p>
+<h5><a id="aggs-aggs"></a>Aggregations<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/ml/anomaly-detection/ml-configuring-aggregations.asciidoc">edit</a></h5>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Your aggregation must include a <code class="literal">date_histogram</code> aggregation or a top level
+<code class="literal">composite</code> aggregation, which in turn must contain a <code class="literal">max</code> aggregation on the
+time field. It ensures that the aggregated data is a time series and the
+timestamp of each bucket is the time of the last record in the bucket.
+</li>
+<li class="listitem">
+The <code class="literal">time_zone</code> parameter in the date histogram aggregation must be set to
+<code class="literal">UTC</code>, which is the default value.
+</li>
+<li class="listitem">
+The name of the aggregation and the name of the field that it operates on need
+to match. For example, if you use a <code class="literal">max</code> aggregation on a time field called
+<code class="literal">responsetime</code>, the name of the aggregation must also be <code class="literal">responsetime</code>.
+</li>
+<li class="listitem">
+For <code class="literal">composite</code> aggregation support, there must be exactly one
+<code class="literal">date_histogram</code> value source. That value source must not be sorted in
+descending order. Additional <code class="literal">composite</code> aggregation value sources are allowed,
+such as <code class="literal">terms</code>.
+</li>
+<li class="listitem">
+The <code class="literal">size</code> parameter of the non-composite aggregations must match the
+cardinality of your data. A greater value of the <code class="literal">size</code> parameter increases the
+memory requirement of the aggregation.
+</li>
+<li class="listitem">
+If you set the <code class="literal">summary_count_field_name</code> property to a non-null value, the
+anomaly detection job expects to receive aggregated input. The property must be set to
+the name of the field that contains the count of raw data points that have been
+aggregated. It applies to all detectors in the job.
+</li>
+<li class="listitem">
+The influencers or the partition fields must be included in the aggregation of
+your datafeed, otherwise they are not included in the job analysis. For more
+information on influencers, refer to <a class="xref" href="ml-ad-run-jobs.html#ml-ad-influencers" title="Influencers">Influencers</a>.
+</li>
+</ul>
+</div>
+<h5><a id="aggs-interval"></a>Intervals<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/ml/anomaly-detection/ml-configuring-aggregations.asciidoc">edit</a></h5>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+The bucket span of your anomaly detection job must be divisible by the value of the
+<code class="literal">calendar_interval</code> or <code class="literal">fixed_interval</code> in your aggregation (with no remainder).
+</li>
+<li class="listitem">
+If you specify a <code class="literal">frequency</code> for your datafeed, it must be divisible by the
+<code class="literal">calendar_interval</code> or the <code class="literal">fixed_interval</code>.
+</li>
+<li class="listitem">
+Anomaly detection jobs cannot use <code class="literal">date_histogram</code> or <code class="literal">composite</code> aggregations
+with an interval measured in months because the length of the month is not
+fixed; they can use weeks or smaller units.
+</li>
+</ul>
+</div>
+<h4><a id="aggs-limits-dfeeds"></a>Limitations<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/ml/anomaly-detection/ml-configuring-aggregations.asciidoc">edit</a></h4>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+If your <a class="xref" href="ml-configuring-aggregation.html#aggs-dfeeds" title="Nested aggregations">datafeed uses aggregations with nested <code class="literal">terms</code> aggs</a> and
+model plot is not enabled for the anomaly detection job, neither the
+<span class="strong strong"><strong>Single Metric Viewer</strong></span> nor the <span class="strong strong"><strong>Anomaly Explorer</strong></span> can plot and display an
+anomaly chart. In these cases, an explanatory message is shown instead of the
+chart.
+</li>
+<li class="listitem">
+Your datafeed can contain multiple aggregations, but only the ones with names
+that match values in the job configuration are fed to the job.
+</li>
+</ul>
+</div>
+<h4><a id="aggs-recommendations-dfeeds"></a>Recommendations<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/ml/anomaly-detection/ml-configuring-aggregations.asciidoc">edit</a></h4>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+When your detectors use <a class="xref" href="ml-metric-functions.html" title="Metric functions">metric</a> or
+<a class="xref" href="ml-sum-functions.html" title="Sum functions">sum</a> analytical functions, it&#8217;s recommended to set the
+<code class="literal">date_histogram</code> or <code class="literal">composite</code> aggregation interval to a tenth of the bucket
+span. This creates finer, more granular time buckets, which are ideal for this
+type of analysis.
+</li>
+<li class="listitem">
+When your detectors use <a class="xref" href="ml-count-functions.html" title="Count functions">count</a> or
+<a class="xref" href="ml-rare-functions.html" title="Rare functions">rare</a> functions, set the interval to the same value as the
+bucket span.
+</li>
+<li class="listitem">
+<p>If you have multiple influencers or partition fields or if your field
+cardinality is more than 1000, use
+<a href="/guide/en/elasticsearch/reference/8.9/search-aggregations-bucket-composite-aggregation.html" class="ulink" target="_top">composite aggregations</a>.</p>
+<p>To determine the cardinality of your data, you can run searches such as:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">GET .../_search
+{
+  "aggs": {
+    "service_cardinality": {
+      "cardinality": {
+        "field": "service"
+      }
+    }
+  }
+}</pre>
+</div>
+</li>
+</ul>
+</div>
+<h4><a id="aggs-using-date-histogram"></a>Including aggregations in anomaly detection jobs<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/ml/anomaly-detection/ml-configuring-aggregations.asciidoc">edit</a></h4>
+<p>When you create or update an anomaly detection job, you can include aggregated fields in
+the analysis configuration. In the datafeed configuration object, you can define
+the aggregations.</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ml/anomaly_detectors/kibana-sample-data-flights
+{
+  "analysis_config": {
+    "bucket_span": "60m",
+    "detectors": [{
+      "function": "mean",
+      "field_name": "responsetime",  <a id="CO1-1"></a><i class="conum" data-value="1"></i>
+      "by_field_name": "airline"  <a id="CO1-2"></a><i class="conum" data-value="1"></i>
+    }],
+    "summary_count_field_name": "doc_count" <a id="CO1-3"></a><i class="conum" data-value="2"></i>
+  },
+  "data_description": {
+    "time_field":"time"  <a id="CO1-4"></a><i class="conum" data-value="1"></i>
+  },
+  "datafeed_config":{
+    "indices": ["kibana-sample-data-flights"],
+    "aggregations": {
+      "buckets": {
+        "date_histogram": {
+          "field": "time",
+          "fixed_interval": "360s",
+          "time_zone": "UTC"
+        },
+        "aggregations": {
+          "time": {  <a id="CO1-5"></a><i class="conum" data-value="3"></i>
+            "max": {"field": "time"}
+          },
+          "airline": {  <a id="CO1-6"></a><i class="conum" data-value="4"></i>
+            "terms": {
+             "field": "airline",
+              "size": 100
+            },
+            "aggregations": {
+              "responsetime": {  <a id="CO1-7"></a><i class="conum" data-value="5"></i>
+                "avg": {
+                  "field": "responsetime"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/5.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO1-1"><i class="conum" data-value="1"></i></a><a href="#CO1-2"></a><a href="#CO1-4"></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">airline</code>, <code class="literal">responsetime</code>, and <code class="literal">time</code> fields are aggregations. Only the
+aggregated fields defined in the <code class="literal">analysis_config</code> object are analyzed by the
+anomaly detection job.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO1-3"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">summary_count_field_name</code> property is set to the <code class="literal">doc_count</code> field that
+is an aggregated field and contains the count of the aggregated data points.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO1-5"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The aggregations have names that match the fields that they operate on. The
+<code class="literal">max</code> aggregation is named <code class="literal">time</code> and its field also needs to be <code class="literal">time</code>.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO1-6"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">term</code> aggregation is named <code class="literal">airline</code> and its field is also named
+<code class="literal">airline</code>.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO1-7"><i class="conum" data-value="5"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">avg</code> aggregation is named <code class="literal">responsetime</code> and its field is also named
+<code class="literal">responsetime</code>.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>Use the following format to define a <code class="literal">date_histogram</code> aggregation to bucket by
+time in your datafeed:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">"aggregations": {
+  ["bucketing_aggregation": {
+    "bucket_agg": {
+      ...
+    },
+    "aggregations": {
+      "data_histogram_aggregation": {
+        "date_histogram": {
+          "field": "time",
+        },
+        "aggregations": {
+          "timestamp": {
+            "max": {
+              "field": "time"
+            }
+          },
+          [,"&lt;first_term&gt;": {
+            "terms":{...
+            }
+            [,"aggregations" : {
+              [&lt;sub_aggregation&gt;]+
+            } ]
+          }]
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<h4><a id="aggs-using-composite"></a>Composite aggregations<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/ml/anomaly-detection/ml-configuring-aggregations.asciidoc">edit</a></h4>
+<p>Composite aggregations are optimized for queries that are either <code class="literal">match_all</code> or
+<code class="literal">range</code> filters. Use composite aggregations in your datafeeds for these cases.
+Other types of queries may cause the <code class="literal">composite</code> aggregation to be inefficient.</p>
+<p>The following is an example of a job with a datafeed that uses a <code class="literal">composite</code>
+aggregation to bucket the metrics based on time and terms:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ml/anomaly_detectors/kibana-sample-data-flights-composite
+{
+  "analysis_config": {
+    "bucket_span": "60m",
+    "detectors": [{
+      "function": "mean",
+      "field_name": "responsetime",
+      "by_field_name": "airline"
+    }],
+    "summary_count_field_name": "doc_count"
+  },
+  "data_description": {
+    "time_field":"time"
+  },
+  "datafeed_config":{
+    "indices": ["kibana-sample-data-flights"],
+    "aggregations": {
+      "buckets": {
+        "composite": {
+          "size": 1000,  <a id="CO2-1"></a><i class="conum" data-value="1"></i>
+          "sources": [
+            {
+              "time_bucket": {  <a id="CO2-2"></a><i class="conum" data-value="2"></i>
+                "date_histogram": {
+                  "field": "time",
+                  "fixed_interval": "360s",
+                  "time_zone": "UTC"
+                }
+              }
+            },
+            {
+              "airline": {  <a id="CO2-3"></a><i class="conum" data-value="3"></i>
+                "terms": {
+                  "field": "airline"
+                }
+              }
+            }
+          ]
+        },
+        "aggregations": {
+          "time": {  <a id="CO2-4"></a><i class="conum" data-value="4"></i>
+            "max": {
+              "field": "time"
+            }
+          },
+          "responsetime": { <a id="CO2-5"></a><i class="conum" data-value="5"></i>
+            "avg": {
+              "field": "responsetime"
+            }
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/6.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO2-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The number of resources to use when aggregating the data. A larger <code class="literal">size</code>
+means a faster datafeed but more cluster resources are used when searching.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO2-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The required <code class="literal">date_histogram</code> composite aggregation source. Make sure it
+is named differently than your desired time field.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO2-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Instead of using a regular <code class="literal">term</code> aggregation, adding a composite
+aggregation <code class="literal">term</code> source with the name <code class="literal">airline</code> works. Note its name
+is the same as the field.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO2-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The required <code class="literal">max</code> aggregation whose name is the time field in the
+job analysis config.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO2-5"><i class="conum" data-value="5"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">avg</code> aggregation is named <code class="literal">responsetime</code> and its field is also named
+<code class="literal">responsetime</code>.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>Use the following format to define a composite aggregation in your datafeed:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">"aggregations": {
+  "composite_agg": {
+    "sources": [
+      {
+        "date_histogram_agg": {
+          "field": "time",
+          ...settings...
+        }
+      },
+      ...other valid sources...
+      ],
+      ...composite agg settings...,
+      "aggregations": {
+        "timestamp": {
+            "max": {
+              "field": "time"
+            }
+          },
+          ...other aggregations...
+          [
+            [,"aggregations" : {
+              [&lt;sub_aggregation&gt;]+
+            } ]
+          }]
+      }
+   }
+}</pre>
+</div>
+<h4><a id="aggs-dfeeds"></a>Nested aggregations<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/ml/anomaly-detection/ml-configuring-aggregations.asciidoc">edit</a></h4>
+<p>You can also use complex nested aggregations in datafeeds.</p>
+<p>The next example uses the
+<a href="/guide/en/elasticsearch/reference/8.9/search-aggregations-pipeline-derivative-aggregation.html" class="ulink" target="_top"><code class="literal">derivative</code> pipeline aggregation</a>
+to find the first order derivative of the counter <code class="literal">system.network.out.bytes</code> for
+each value of the field <code class="literal">beat.name</code>.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><code class="literal">derivative</code> or other pipeline aggregations may not work within
+<code class="literal">composite</code> aggregations. See
+<a href="/guide/en/elasticsearch/reference/8.9/search-aggregations-bucket-composite-aggregation.html#search-aggregations-bucket-composite-aggregation-pipeline-aggregations" class="ulink" target="_top">composite aggregations and pipeline aggregations</a>.</p>
+</div>
+</div>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">"aggregations": {
+  "beat.name": {
+    "terms": {
+      "field": "beat.name"
+    },
+    "aggregations": {
+      "buckets": {
+        "date_histogram": {
+          "field": "@timestamp",
+          "fixed_interval": "5m"
+        },
+        "aggregations": {
+          "@timestamp": {
+            "max": {
+              "field": "@timestamp"
+            }
+          },
+          "bytes_out_average": {
+            "avg": {
+              "field": "system.network.out.bytes"
+            }
+          },
+          "bytes_out_derivative": {
+            "derivative": {
+              "buckets_path": "bytes_out_average"
+            }
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<h4><a id="aggs-single-dfeeds"></a>Single bucket aggregations<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/ml/anomaly-detection/ml-configuring-aggregations.asciidoc">edit</a></h4>
+<p>You can also use single bucket aggregations in datafeeds. The following example
+shows two <code class="literal">filter</code> aggregations, each gathering the number of unique entries for
+the <code class="literal">error</code> field.</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+  "job_id":"servers-unique-errors",
+  "indices": ["logs-*"],
+  "aggregations": {
+    "buckets": {
+      "date_histogram": {
+        "field": "time",
+        "interval": "360s",
+        "time_zone": "UTC"
+      },
+      "aggregations": {
+        "time": {
+          "max": {"field": "time"}
+        }
+        "server1": {
+          "filter": {"term": {"source": "server-name-1"}},
+          "aggregations": {
+            "server1_error_count": {
+              "value_count": {
+                "field": "error"
+              }
+            }
+          }
+        },
+        "server2": {
+          "filter": {"term": {"source": "server-name-2"}},
+          "aggregations": {
+            "server2_error_count": {
+              "value_count": {
+                "field": "error"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<h4><a id="aggs-amd-dfeeds"></a>Using <code class="literal">aggregate_metric_double</code> field type in datafeeds<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/ml/anomaly-detection/ml-configuring-aggregations.asciidoc">edit</a></h4>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>It is not currently possible to use <code class="literal">aggregate_metric_double</code> type fields
+in datafeeds without aggregations.</p>
+</div>
+</div>
+<p>You can use fields with the
+<a href="/guide/en/elasticsearch/reference/8.9/aggregate-metric-double.html" class="ulink" target="_top"><code class="literal">aggregate_metric_double</code></a> field type in a
+datafeed with aggregations. It is required to retrieve the <code class="literal">value_count</code> of the
+<code class="literal">aggregate_metric_double</code> filed in an aggregation and then use it as the
+<code class="literal">summary_count_field_name</code> to provide the correct count that represents the
+aggregation value.</p>
+<p>In the following example, <code class="literal">presum</code> is an <code class="literal">aggregate_metric_double</code> type field
+that has all the possible metrics: <code class="literal">[ min, max, sum, value_count ]</code>. To use an
+<code class="literal">avg</code> aggregation on this field, you need to perform a <code class="literal">value_count</code> aggregation
+on <code class="literal">presum</code> and then set the field that contains the aggregated values
+<code class="literal">my_count</code> as the <code class="literal">summary_count_field_name</code>:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">{
+  "analysis_config": {
+    "bucket_span": "1h",
+    "detectors": [
+      {
+        "function": "avg",
+        "field_name": "my_avg"
+      }
+    ],
+    "summary_count_field_name": "my_count" <a id="CO3-1"></a><i class="conum" data-value="1"></i>
+  },
+  "data_description": {
+    "time_field": "timestamp"
+  },
+  "datafeed_config": {
+    "indices": [
+      "my_index"
+    ],
+    "datafeed_id": "datafeed-id",
+    "aggregations": {
+      "buckets": {
+        "date_histogram": {
+          "field": "time",
+          "fixed_interval": "360s",
+          "time_zone": "UTC"
+        },
+        "aggregations": {
+            "timestamp": {
+                "max": {"field": "timestamp"}
+            },
+            "my_avg": {  <a id="CO3-2"></a><i class="conum" data-value="2"></i>
+                "avg": {
+                    "field": "presum"
+                }
+             },
+             "my_count": { <a id="CO3-3"></a><i class="conum" data-value="3"></i>
+                 "value_count": {
+                     "field": "presum"
+                 }
+             }
+          }
+        }
+     }
+  }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO3-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The field <code class="literal">my_count</code> is set as the <code class="literal">summary_count_field_name</code>. This field
+contains aggregated values from the <code class="literal">presum</code> <code class="literal">aggregate_metric_double</code> type
+field (refer to footnote 3).</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO3-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">avg</code> aggregation to use on the <code class="literal">presum</code> <code class="literal">aggregate_metric_double</code> type
+field.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO3-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">value_count</code> aggregation on the <code class="literal">presum</code> <code class="literal">aggregate_metric_double</code> type
+field. This aggregated field must be set as the <code class="literal">summary_count_field_name</code>
+(refer to footnote 1) to make it possible to use the <code class="literal">aggregate_metric_double</code>
+type field in another aggregation.</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="ml-configuring-alerts.html">« Generating alerts for anomaly detection jobs</a>
+</span>
+<span class="next">
+<a href="ml-configuring-transform.html">Altering data in your datafeed with runtime fields »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

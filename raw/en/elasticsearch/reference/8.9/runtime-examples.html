@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Explore your data with runtime fields | Elasticsearch Guide [8.9] | Elastic</title>
+<meta class="elastic" name="content" content="Explore your data with runtime fields | Elasticsearch Guide [8.9]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.9]"/>
+<link rel="up" href="runtime.html" title="Runtime fields"/>
+<link rel="prev" href="runtime-indexed.html" title="Index a runtime field"/>
+<link rel="next" href="mapping-types.html" title="Field data types"/>
+<meta class="elastic" name="product_version" content="8.9"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.9"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.9"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.9]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="mapping.html">Mapping</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="runtime.html">Runtime fields</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="runtime-indexed.html">« Index a runtime field</a>
+</span>
+<span class="next">
+<a href="mapping-types.html">Field data types »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="runtime-examples"></a>Explore your data with runtime fields<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/mapping/runtime.asciidoc">edit</a></h2>
+</div></div></div>
+<p>Consider a large set of log data that you want to extract fields from.
+Indexing the data is time consuming and uses a lot of disk space, and you just
+want to explore the data structure without committing to a schema up front.</p>
+<p>You know that your log data contains specific fields that you want to extract.
+In this case, we want to focus on the <code class="literal">@timestamp</code> and <code class="literal">message</code> fields. By
+using runtime fields, you can define scripts to calculate values at search
+time for these fields.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="runtime-examples-define-fields"></a>Define indexed fields as a starting point<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/mapping/runtime.asciidoc">edit</a></h3>
+</div></div></div>
+<p>You can start with a simple example by adding the <code class="literal">@timestamp</code> and <code class="literal">message</code>
+fields to the <code class="literal">my-index-000001</code> mapping as indexed fields. To remain flexible, use
+<code class="literal">wildcard</code> as the field type for <code class="literal">message</code>:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.indices.create(
+  index: 'my-index-000001',
+  body: {
+    mappings: {
+      properties: {
+        "@timestamp": {
+          format: 'strict_date_optional_time||epoch_second',
+          type: 'date'
+        },
+        message: {
+          type: 'wildcard'
+        }
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
+<a id="dcee24dba43050e4b01b6e3a3211ce09"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">PUT /my-index-000001/
+{
+  "mappings": {
+    "properties": {
+      "@timestamp": {
+        "format": "strict_date_optional_time||epoch_second",
+        "type": "date"
+      },
+      "message": {
+        "type": "wildcard"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/142.console"></div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="runtime-examples-ingest-data"></a>Ingest some data<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/mapping/runtime.asciidoc">edit</a></h3>
+</div></div></div>
+<p>After mapping the fields you want to retrieve, index a few records from
+your log data into Elasticsearch. The following request uses the <a class="xref" href="docs-bulk.html" title="Bulk API">bulk API</a>
+to index raw log data into <code class="literal">my-index-000001</code>. Instead of indexing all of your log
+data, you can use a small sample to experiment with runtime fields.</p>
+<p>The final document is not a valid Apache log format, but we can account for
+that scenario in our script.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.bulk(
+  index: 'my-index-000001',
+  refresh: true,
+  body: [
+    {
+      index: {}
+    },
+    {
+      timestamp: '2020-04-30T14:30:17-05:00',
+      message: '40.135.0.0 - - [30/Apr/2020:14:30:17 -0500] "GET /images/hm_bg.jpg HTTP/1.0" 200 24736'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: '2020-04-30T14:30:53-05:00',
+      message: '232.0.0.0 - - [30/Apr/2020:14:30:53 -0500] "GET /images/hm_bg.jpg HTTP/1.0" 200 24736'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: '2020-04-30T14:31:12-05:00',
+      message: '26.1.0.0 - - [30/Apr/2020:14:31:12 -0500] "GET /images/hm_bg.jpg HTTP/1.0" 200 24736'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: '2020-04-30T14:31:19-05:00',
+      message: '247.37.0.0 - - [30/Apr/2020:14:31:19 -0500] "GET /french/splash_inet.html HTTP/1.0" 200 3781'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: '2020-04-30T14:31:22-05:00',
+      message: '247.37.0.0 - - [30/Apr/2020:14:31:22 -0500] "GET /images/hm_nbg.jpg HTTP/1.0" 304 0'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: '2020-04-30T14:31:27-05:00',
+      message: '252.0.0.0 - - [30/Apr/2020:14:31:27 -0500] "GET /images/hm_bg.jpg HTTP/1.0" 200 24736'
+    },
+    {
+      index: {}
+    },
+    {
+      timestamp: '2020-04-30T14:31:28-05:00',
+      message: 'not a valid apache log'
+    }
+  ]
+)
+puts response</pre>
+</div>
+<a id="77d0780c5faea4c9ec51a322a6811b3b"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">POST /my-index-000001/_bulk?refresh
+{"index":{}}
+{"timestamp":"2020-04-30T14:30:17-05:00","message":"40.135.0.0 - - [30/Apr/2020:14:30:17 -0500] \"GET /images/hm_bg.jpg HTTP/1.0\" 200 24736"}
+{"index":{}}
+{"timestamp":"2020-04-30T14:30:53-05:00","message":"232.0.0.0 - - [30/Apr/2020:14:30:53 -0500] \"GET /images/hm_bg.jpg HTTP/1.0\" 200 24736"}
+{"index":{}}
+{"timestamp":"2020-04-30T14:31:12-05:00","message":"26.1.0.0 - - [30/Apr/2020:14:31:12 -0500] \"GET /images/hm_bg.jpg HTTP/1.0\" 200 24736"}
+{"index":{}}
+{"timestamp":"2020-04-30T14:31:19-05:00","message":"247.37.0.0 - - [30/Apr/2020:14:31:19 -0500] \"GET /french/splash_inet.html HTTP/1.0\" 200 3781"}
+{"index":{}}
+{"timestamp":"2020-04-30T14:31:22-05:00","message":"247.37.0.0 - - [30/Apr/2020:14:31:22 -0500] \"GET /images/hm_nbg.jpg HTTP/1.0\" 304 0"}
+{"index":{}}
+{"timestamp":"2020-04-30T14:31:27-05:00","message":"252.0.0.0 - - [30/Apr/2020:14:31:27 -0500] \"GET /images/hm_bg.jpg HTTP/1.0\" 200 24736"}
+{"index":{}}
+{"timestamp":"2020-04-30T14:31:28-05:00","message":"not a valid apache log"}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/143.console"></div>
+<p>At this point, you can view how Elasticsearch stores your raw data.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.indices.get(
+  index: 'my-index-000001'
+)
+puts response</pre>
+</div>
+<a id="a6bb306ca250cf651f19cae808b97012"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">GET /my-index-000001</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/144.console"></div>
+<p>The mapping contains two fields: <code class="literal">@timestamp</code> and <code class="literal">message</code>.</p>
+<a id="e87781bb31444bed8096492e0f7f71cd"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "my-index-000001" : {
+    "aliases" : { },
+    "mappings" : {
+      "properties" : {
+        "@timestamp" : {
+          "type" : "date",
+          "format" : "strict_date_optional_time||epoch_second"
+        },
+        "message" : {
+          "type" : "wildcard"
+        },
+        "timestamp" : {
+          "type" : "date"
+        }
+      }
+    },
+    ...
+  }
+}</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="runtime-examples-grok"></a>Define a runtime field with a grok pattern<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/mapping/runtime.asciidoc">edit</a></h3>
+</div></div></div>
+<p>If you want to retrieve results that include <code class="literal">clientip</code>, you can add that
+field as a runtime field in the mapping. The following runtime script defines a
+<a class="xref" href="grok.html" title="Grokking grok">grok pattern</a> that extracts structured fields out of a single text
+field within a document. A grok pattern is like a regular expression that
+supports aliased expressions that you can reuse.</p>
+<p>The script matches on the <code class="literal">%{COMMONAPACHELOG}</code> log pattern, which understands
+the structure of Apache logs. If the pattern matches (<code class="literal">clientip != null</code>),
+the script emits the value of the matching IP address. If the pattern doesn&#8217;t
+match, the script just returns the field value without crashing.</p>
+<a id="0c2ca704a39dda8b3a7c5806ec6c6cf8"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT my-index-000001/_mappings
+{
+  "runtime": {
+    "http.client_ip": {
+      "type": "ip",
+      "script": """
+        String clientip=grok('%{COMMONAPACHELOG}').extract(doc["message"].value)?.clientip;
+        if (clientip != null) emit(clientip); <a id="CO39-1"></a><i class="conum" data-value="1"></i>
+      """
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/145.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO39-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This condition ensures that the script doesn&#8217;t crash even if the pattern of
+the message doesn&#8217;t match.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>Alternatively, you can define the same runtime field but in the context of a
+search request. The runtime definition and the script are exactly the same as
+the one defined previously in the index mapping. Just copy that definition into
+the search request under the <code class="literal">runtime_mappings</code> section and include a query
+that matches on the runtime field. This query returns the same results as if
+you defined a search query for the <code class="literal">http.clientip</code> runtime field in your index
+mappings, but only in the context of this specific search:</p>
+<a id="2c44657adf550b8ade5cf5334106d38b"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET my-index-000001/_search
+{
+  "runtime_mappings": {
+    "http.clientip": {
+      "type": "ip",
+      "script": """
+        String clientip=grok('%{COMMONAPACHELOG}').extract(doc["message"].value)?.clientip;
+        if (clientip != null) emit(clientip);
+      """
+    }
+  },
+  "query": {
+    "match": {
+      "http.clientip": "40.135.0.0"
+    }
+  },
+  "fields" : ["http.clientip"]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/146.console"></div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="runtime-examples-grok-composite"></a>Define a composite runtime field<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/mapping/runtime.asciidoc">edit</a></h3>
+</div></div></div>
+<p>You can also define a <em>composite</em> runtime field to emit multiple fields from a
+single script. You can define a set of typed subfields and emit a map of
+values. At search time, each subfield retrieves the value associated with
+their name in the map. This means that you only need to specify your grok
+pattern one time and can return multiple values:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.indices.put_mapping(
+  index: 'my-index-000001',
+  body: {
+    runtime: {
+      http: {
+        type: 'composite',
+        script: 'emit(grok("%&lt;COMMONAPACHELOG&gt;s").extract(doc["message"].value))',
+        fields: {
+          clientip: {
+            type: 'ip'
+          },
+          verb: {
+            type: 'keyword'
+          },
+          response: {
+            type: 'long'
+          }
+        }
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
+<a id="be9836fe55c5fada404a2adc1663d832"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">PUT my-index-000001/_mappings
+{
+  "runtime": {
+    "http": {
+      "type": "composite",
+      "script": "emit(grok(\"%{COMMONAPACHELOG}\").extract(doc[\"message\"].value))",
+      "fields": {
+        "clientip": {
+          "type": "ip"
+        },
+        "verb": {
+          "type": "keyword"
+        },
+        "response": {
+          "type": "long"
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/147.console"></div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="runtime-examples-grok-ip"></a>Search for a specific IP address<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/mapping/runtime.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Using the <code class="literal">http.clientip</code> runtime field, you can define a simple query to run a
+search for a specific IP address and return all related fields.</p>
+<a id="636ee2066450605247ec1f68d04b8ee4"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET my-index-000001/_search
+{
+  "query": {
+    "match": {
+      "http.clientip": "40.135.0.0"
+    }
+  },
+  "fields" : ["*"]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/148.console"></div>
+<p>The API returns the following result. Because <code class="literal">http</code> is a <code class="literal">composite</code> runtime
+field, the response includes each of the sub-fields under <code class="literal">fields</code>, including
+any associated values that match the query. Without building your data structure
+in advance, you can search and explore your data in meaningful ways to
+experiment and determine which fields to index.</p>
+<a id="2a1cbd321855f88f9e1993ac62001821"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  ...
+  "hits" : {
+    "total" : {
+      "value" : 1,
+      "relation" : "eq"
+    },
+    "max_score" : 1.0,
+    "hits" : [
+      {
+        "_index" : "my-index-000001",
+        "_id" : "sRVHBnwBB-qjgFni7h_O",
+        "_score" : 1.0,
+        "_source" : {
+          "timestamp" : "2020-04-30T14:30:17-05:00",
+          "message" : "40.135.0.0 - - [30/Apr/2020:14:30:17 -0500] \"GET /images/hm_bg.jpg HTTP/1.0\" 200 24736"
+        },
+        "fields" : {
+          "http.verb" : [
+            "GET"
+          ],
+          "http.clientip" : [
+            "40.135.0.0"
+          ],
+          "http.response" : [
+            200
+          ],
+          "message" : [
+            "40.135.0.0 - - [30/Apr/2020:14:30:17 -0500] \"GET /images/hm_bg.jpg HTTP/1.0\" 200 24736"
+          ],
+          "http.client_ip" : [
+            "40.135.0.0"
+          ],
+          "timestamp" : [
+            "2020-04-30T19:30:17.000Z"
+          ]
+        }
+      }
+    ]
+  }
+}</pre>
+</div>
+<p>Also, remember that <code class="literal">if</code> statement in the script?</p>
+<div class="pre_wrapper lang-painless">
+<pre class="programlisting prettyprint lang-painless">if (clientip != null) emit(clientip);</pre>
+</div>
+<p>If the script didn&#8217;t include this condition, the query would fail on any shard
+that doesn&#8217;t match the pattern. By including this condition, the query skips
+data that doesn&#8217;t match the grok pattern.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="runtime-examples-grok-range"></a>Search for documents in a specific range<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/mapping/runtime.asciidoc">edit</a></h4>
+</div></div></div>
+<p>You can also run a <a class="xref" href="query-dsl-range-query.html" title="Range query">range query</a> that operates on the
+<code class="literal">timestamp</code> field. The following query returns any documents where the
+<code class="literal">timestamp</code> is greater than or equal to <code class="literal">2020-04-30T14:31:27-05:00</code>:</p>
+<a id="92fa6608673cec5a2ed568a07e80d36b"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET my-index-000001/_search
+{
+  "query": {
+    "range": {
+      "timestamp": {
+        "gte": "2020-04-30T14:31:27-05:00"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/149.console"></div>
+<p>The response includes the document where the log format doesn&#8217;t match, but the
+timestamp falls within the defined range.</p>
+<a id="039ea67fc8ab51de13b77b0d73b45e68"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  ...
+  "hits" : {
+    "total" : {
+      "value" : 2,
+      "relation" : "eq"
+    },
+    "max_score" : 1.0,
+    "hits" : [
+      {
+        "_index" : "my-index-000001",
+        "_id" : "hdEhyncBRSB6iD-PoBqe",
+        "_score" : 1.0,
+        "_source" : {
+          "timestamp" : "2020-04-30T14:31:27-05:00",
+          "message" : "252.0.0.0 - - [30/Apr/2020:14:31:27 -0500] \"GET /images/hm_bg.jpg HTTP/1.0\" 200 24736"
+        }
+      },
+      {
+        "_index" : "my-index-000001",
+        "_id" : "htEhyncBRSB6iD-PoBqe",
+        "_score" : 1.0,
+        "_source" : {
+          "timestamp" : "2020-04-30T14:31:28-05:00",
+          "message" : "not a valid apache log"
+        }
+      }
+    ]
+  }
+}</pre>
+</div>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="runtime-examples-dissect"></a>Define a runtime field with a dissect pattern<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/mapping/runtime.asciidoc">edit</a></h3>
+</div></div></div>
+<p>If you don&#8217;t need the power of regular expressions, you can use
+<a class="xref" href="dissect-processor.html" title="Dissect processor">dissect patterns</a> instead of grok patterns. Dissect
+patterns match on fixed delimiters but are typically faster than grok.</p>
+<p>You can use dissect to achieve the same results as parsing the Apache logs with
+a <a class="xref" href="runtime-examples.html#runtime-examples-grok" title="Define a runtime field with a grok pattern">grok pattern</a>. Instead of matching on a log
+pattern, you include the parts of the string that you want to discard. Paying
+special attention to the parts of the string you want to discard will help build
+successful dissect patterns.</p>
+<a id="413fdcc7c437775a16bb55b81c2bbe2b"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT my-index-000001/_mappings
+{
+  "runtime": {
+    "http.client.ip": {
+      "type": "ip",
+      "script": """
+        String clientip=dissect('%{clientip} %{ident} %{auth} [%{@timestamp}] "%{verb} %{request} HTTP/%{httpversion}" %{status} %{size}').extract(doc["message"].value)?.clientip;
+        if (clientip != null) emit(clientip);
+      """
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/150.console"></div>
+<p>Similarly, you can define a dissect pattern to extract the <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Status" class="ulink" target="_top">HTTP response code</a>:</p>
+<a id="d3a5b70d493e0bd77b3f2b586341c83c"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT my-index-000001/_mappings
+{
+  "runtime": {
+    "http.responses": {
+      "type": "long",
+      "script": """
+        String response=dissect('%{clientip} %{ident} %{auth} [%{@timestamp}] "%{verb} %{request} HTTP/%{httpversion}" %{response} %{size}').extract(doc["message"].value)?.response;
+        if (response != null) emit(Integer.parseInt(response));
+      """
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/151.console"></div>
+<p>You can then run a query to retrieve a specific HTTP response using the
+<code class="literal">http.responses</code> runtime field. Use the <code class="literal">fields</code> parameter of the <code class="literal">_search</code>
+request to indicate which fields you want to retrieve:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.search(
+  index: 'my-index-000001',
+  body: {
+    query: {
+      match: {
+        "http.responses": '304'
+      }
+    },
+    fields: [
+      'http.client_ip',
+      'timestamp',
+      'http.verb'
+    ]
+  }
+)
+puts response</pre>
+</div>
+<a id="445f8a6ef75fb43da52990b3a9063c78"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">GET my-index-000001/_search
+{
+  "query": {
+    "match": {
+      "http.responses": "304"
+    }
+  },
+  "fields" : ["http.client_ip","timestamp","http.verb"]
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/152.console"></div>
+<p>The response includes a single document where the HTTP response is <code class="literal">304</code>:</p>
+<a id="e61490b6751c2e52a1087c06b037afed"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  ...
+  "hits" : {
+    "total" : {
+      "value" : 1,
+      "relation" : "eq"
+    },
+    "max_score" : 1.0,
+    "hits" : [
+      {
+        "_index" : "my-index-000001",
+        "_id" : "A2qDy3cBWRMvVAuI7F8M",
+        "_score" : 1.0,
+        "_source" : {
+          "timestamp" : "2020-04-30T14:31:22-05:00",
+          "message" : "247.37.0.0 - - [30/Apr/2020:14:31:22 -0500] \"GET /images/hm_nbg.jpg HTTP/1.0\" 304 0"
+        },
+        "fields" : {
+          "http.verb" : [
+            "GET"
+          ],
+          "http.client_ip" : [
+            "247.37.0.0"
+          ],
+          "timestamp" : [
+            "2020-04-30T19:31:22.000Z"
+          ]
+        }
+      }
+    ]
+  }
+}</pre>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="runtime-indexed.html">« Index a runtime field</a>
+</span>
+<span class="next">
+<a href="mapping-types.html">Field data types »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

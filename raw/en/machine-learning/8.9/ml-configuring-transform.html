@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="keywords" content="ML, Elastic Stack, anomaly detection">
+<title>Altering data in your datafeed with runtime fields | Machine Learning in the Elastic Stack [8.9] | Elastic</title>
+<meta class="elastic" name="content" content="Altering data in your datafeed with runtime fields | Machine Learning in the Elastic Stack [8.9]">
+
+<link rel="home" href="index.html" title="Machine Learning in the Elastic Stack [8.9]"/>
+<link rel="up" href="anomaly-how-tos.html" title="How-to guides"/>
+<link rel="prev" href="ml-configuring-aggregation.html" title="Aggregating data for faster performance"/>
+<link rel="next" href="ml-configuring-detector-custom-rules.html" title="Customizing detectors with custom rules"/>
+<meta class="elastic" name="product_version" content="8.9"/>
+<meta class="elastic" name="product_name" content="Machine Learning"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elastic Stack/Machine Learning/8.9"/>
+<meta name="DC.subject" content="Machine Learning"/>
+<meta name="DC.identifier" content="8.9"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Machine Learning in the Elastic Stack [8.9]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="ml-ad-overview.html">Anomaly detection</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="anomaly-how-tos.html">How-to guides</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="ml-configuring-aggregation.html">« Aggregating data for faster performance</a>
+</span>
+<span class="next">
+<a href="ml-configuring-detector-custom-rules.html">Customizing detectors with custom rules »</a>
+</span>
+</div>
+<div class="section xpack">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="ml-configuring-transform"></a>Altering data in your datafeed with runtime fields<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/ml/anomaly-detection/ml-configuring-transform.asciidoc">edit</a></h2>
+</div></div></div>
+<p>If you use datafeeds, you can use runtime fields to alter your data before it
+is analyzed. You can add an optional <code class="literal">runtime_mappings</code> property to your
+datafeeds, where you can specify field types and scripts that evaluate custom
+expressions without affecting the indices that you&#8217;re retrieving the data from.</p>
+<p>If your datafeed defines runtime fields, you can use those fields in your
+anomaly detection job. For example, you can use the runtime fields in the analysis
+functions in one or more detectors. Runtime fields can impact search performance
+based on the computation defined in the runtime script.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Some of these examples use regular expressions. By default, regular
+expressions are disabled because they circumvent the protection that Painless
+provides against long running and memory hungry scripts. For more information,
+see <a href="/guide/en/elasticsearch/reference/8.9/modules-scripting-painless.html" class="ulink" target="_top">Painless scripting language</a>.</p>
+<p>Machine learning analysis is case sensitive. For example, "John" is considered to be
+different than "john". This is one reason you might consider using scripts that
+convert your strings to upper or lowercase letters.</p>
+</div>
+</div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="ml-configuring-transform.html#ml-configuring-transform1" title="Example 1: Adding two numerical fields">Example 1: Adding two numerical fields</a>
+</li>
+<li class="listitem">
+<a class="xref" href="ml-configuring-transform.html#ml-configuring-transform2" title="Example 2: Concatenating strings">Example 2: Concatenating strings</a>
+</li>
+<li class="listitem">
+<a class="xref" href="ml-configuring-transform.html#ml-configuring-transform3" title="Example 3: Trimming strings">Example 3: Trimming strings</a>
+</li>
+<li class="listitem">
+<a class="xref" href="ml-configuring-transform.html#ml-configuring-transform4" title="Example 4: Converting strings to lowercase">Example 4: Converting strings to lowercase</a>
+</li>
+<li class="listitem">
+<a class="xref" href="ml-configuring-transform.html#ml-configuring-transform5" title="Example 5: Converting strings to mixed case formats">Example 5: Converting strings to mixed case formats</a>
+</li>
+<li class="listitem">
+<a class="xref" href="ml-configuring-transform.html#ml-configuring-transform6" title="Example 6: Replacing tokens">Example 6: Replacing tokens</a>
+</li>
+<li class="listitem">
+<a class="xref" href="ml-configuring-transform.html#ml-configuring-transform7" title="Example 7: Regular expression matching and concatenation">Example 7: Regular expression matching and concatenation</a>
+</li>
+<li class="listitem">
+<a class="xref" href="ml-configuring-transform.html#ml-configuring-transform8" title="Example 8: Transforming geopoint data">Example 8: Transforming geopoint data</a>
+</li>
+</ul>
+</div>
+<p>The following index APIs create and add content to an index that is used in
+subsequent examples:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT /my-index-000001
+{
+  "mappings":{
+    "properties": {
+      "@timestamp": { "type": "date" },
+      "aborted_count": { "type": "long" },
+      "another_field": { "type": "keyword" }, <a id="CO4-1"></a><i class="conum" data-value="1"></i>
+      "clientip": { "type": "keyword" },
+      "coords": {
+        "properties": {
+          "lat": { "type": "keyword" },
+          "lon": { "type": "keyword" }
+        }
+      },
+      "error_count": { "type": "long" },
+      "query": { "type": "keyword" },
+      "some_field": { "type": "keyword" },
+      "tokenstring1":{ "type":"keyword" },
+      "tokenstring2":{ "type":"keyword" },
+      "tokenstring3":{ "type":"keyword" }
+    }
+  }
+}
+
+PUT /my-index-000001/_doc/1
+{
+  "@timestamp":"2017-03-23T13:00:00",
+  "error_count":36320,
+  "aborted_count":4156,
+  "some_field":"JOE",
+  "another_field":"SMITH  ",
+  "tokenstring1":"foo-bar-baz",
+  "tokenstring2":"foo bar baz",
+  "tokenstring3":"foo-bar-19",
+  "query":"www.ml.elastic.co",
+  "clientip":"123.456.78.900",
+  "coords": {
+    "lat" : 41.44,
+    "lon":90.5
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/7.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO4-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>In this example, string fields are mapped as <code class="literal">keyword</code> fields to support
+aggregation. If you want both a full text (<code class="literal">text</code>) and a keyword (<code class="literal">keyword</code>)
+version of the same field, use multi-fields. For more information, see
+<a href="/guide/en/elasticsearch/reference/8.9/multi-fields.html" class="ulink" target="_top">fields</a>.</p>
+</td>
+</tr>
+</table>
+</div>
+<p><a id="ml-configuring-transform1"></a><strong>Example 1: Adding two numerical fields.</strong></p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ml/anomaly_detectors/test1
+{
+  "analysis_config":{
+    "bucket_span": "10m",
+    "detectors":[
+      {
+        "function":"mean",
+        "field_name": "total_error_count" <a id="CO5-1"></a><i class="conum" data-value="1"></i>
+      }
+    ]
+  },
+  "data_description": {
+    "time_field":"@timestamp"
+  },
+  "datafeed_config":{
+    "datafeed_id": "datafeed-test1",
+    "indices": ["my-index-000001"],
+    "runtime_mappings": {
+      "total_error_count": { <a id="CO5-2"></a><i class="conum" data-value="2"></i>
+        "type": "long",
+        "script": {
+          "source": "emit(doc['error_count'].value + doc['aborted_count'].value)"
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/8.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO5-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>A runtime field named <code class="literal">total_error_count</code> is referenced in the detector
+within the job.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO5-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The runtime field is defined in the datafeed.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>This <code class="literal">test1</code> anomaly detection job contains a detector that uses a runtime field in a
+mean analysis function. The <code class="literal">datafeed-test1</code> datafeed defines the runtime field.
+It contains a script that adds two fields in the document to produce a "total"
+error count.</p>
+<p>The syntax for the <code class="literal">runtime_mappings</code> property is identical to that used by
+Elasticsearch. For more information, see <a href="/guide/en/elasticsearch/reference/8.9/runtime.html" class="ulink" target="_top">Runtime fields</a>.</p>
+<p>You can preview the contents of the datafeed by using the following API:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _ml/datafeeds/datafeed-test1/_preview</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/9.console"></div>
+<p>In this example, the API returns the following results, which contain a sum of
+the <code class="literal">error_count</code> and <code class="literal">aborted_count</code> values:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">[
+  {
+    "@timestamp": 1490274000000,
+    "total_error_count": 40476
+  }
+]</pre>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This example demonstrates how to use runtime fields, but it contains
+insufficient data to generate meaningful results.</p>
+</div>
+</div>
+<p>You can alternatively use Kibana to create an advanced anomaly detection job that uses
+runtime fields. To add the <code class="literal">runtime_mappings</code> property to your datafeed, you must
+use the <span class="strong strong"><strong>Edit JSON</strong></span> tab. For example:</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/ml-runtimefields.jpg" alt="Using runtime_mappings in datafeed config via Kibana">
+</div>
+</div>
+<p><a id="ml-configuring-transform2"></a><strong>Example 2: Concatenating strings.</strong></p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ml/anomaly_detectors/test2
+{
+  "analysis_config":{
+    "bucket_span": "10m",
+    "detectors":[
+      {
+        "function":"low_info_content",
+        "field_name":"my_runtime_field" <a id="CO6-1"></a><i class="conum" data-value="1"></i>
+      }
+    ]
+  },
+  "data_description": {
+    "time_field":"@timestamp"
+  },
+  "datafeed_config":{
+    "datafeed_id": "datafeed-test2",
+    "indices": ["my-index-000001"],
+    "runtime_mappings": {
+      "my_runtime_field": {
+        "type": "keyword",
+        "script": {
+          "source": "emit(doc['some_field'].value + '_' + doc['another_field'].value)" <a id="CO6-2"></a><i class="conum" data-value="2"></i>
+        }
+      }
+    }
+  }
+}
+
+GET _ml/datafeeds/datafeed-test2/_preview</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/10.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO6-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The runtime field has a generic name in this case, since it is used for
+various tests in the examples.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO6-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The runtime field uses the plus (+) operator to concatenate strings.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The preview datafeed API returns the following results, which show that "JOE"
+and "SMITH  " have been concatenated and an underscore was added:</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">[
+  {
+    "@timestamp": 1490274000000,
+    "my_runtime_field": "JOE_SMITH  "
+  }
+]</pre>
+</div>
+<p><a id="ml-configuring-transform3"></a><strong>Example 3: Trimming strings.</strong></p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ml/datafeeds/datafeed-test2/_update
+{
+  "runtime_mappings": {
+    "my_runtime_field": {
+      "type": "keyword",
+      "script": {
+        "source": "emit(doc['another_field'].value.trim())" <a id="CO7-1"></a><i class="conum" data-value="1"></i>
+      }
+    }
+  }
+}
+
+GET _ml/datafeeds/datafeed-test2/_preview</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/11.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO7-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This runtime field uses the <code class="literal">trim()</code> function to trim extra white space from
+a string.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The preview datafeed API returns the following results, which show that "SMITH  "
+has been trimmed to "SMITH":</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">[
+  {
+    "@timestamp": 1490274000000,
+    "my_script_field": "SMITH"
+  }
+]</pre>
+</div>
+<p><a id="ml-configuring-transform4"></a><strong>Example 4: Converting strings to lowercase.</strong></p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ml/datafeeds/datafeed-test2/_update
+{
+  "runtime_mappings": {
+    "my_runtime_field": {
+      "type": "keyword",
+      "script": {
+        "source": "emit(doc['some_field'].value.toLowerCase())" <a id="CO8-1"></a><i class="conum" data-value="1"></i>
+      }
+    }
+  }
+}
+
+GET _ml/datafeeds/datafeed-test2/_preview</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/12.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO8-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This runtime field uses the <code class="literal">toLowerCase</code> function to convert a string to
+all lowercase letters. Likewise, you can use the <code class="literal">toUpperCase</code> function to
+convert a string to uppercase letters.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The preview datafeed API returns the following results, which show that "JOE"
+has been converted to "joe":</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">[
+  {
+    "@timestamp": 1490274000000,
+    "my_script_field": "joe"
+  }
+]</pre>
+</div>
+<p><a id="ml-configuring-transform5"></a><strong>Example 5: Converting strings to mixed case formats.</strong></p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ml/datafeeds/datafeed-test2/_update
+{
+  "runtime_mappings": {
+    "my_runtime_field": {
+      "type": "keyword",
+      "script": {
+        "source": "emit(doc['some_field'].value.substring(0, 1).toUpperCase() + doc['some_field'].value.substring(1).toLowerCase())" <a id="CO9-1"></a><i class="conum" data-value="1"></i>
+      }
+    }
+  }
+}
+
+GET _ml/datafeeds/datafeed-test2/_preview</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/13.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO9-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This runtime field is a more complicated example of case manipulation. It
+uses the <code class="literal">subString()</code> function to capitalize the first letter of a string and
+converts the remaining characters to lowercase.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The preview datafeed API returns the following results, which show that "JOE" has
+been converted to "Joe":</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">[
+  {
+    "@timestamp": 1490274000000,
+    "my_script_field": "Joe"
+  }
+]</pre>
+</div>
+<p><a id="ml-configuring-transform6"></a><strong>Example 6: Replacing tokens.</strong></p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ml/datafeeds/datafeed-test2/_update
+{
+  "runtime_mappings": {
+    "my_runtime_field": {
+      "type": "keyword",
+      "script": {
+        "source": "emit(/\\s/.matcher(doc['tokenstring2'].value).replaceAll('_'))" <a id="CO10-1"></a><i class="conum" data-value="1"></i>
+      }
+    }
+  }
+}
+
+GET _ml/datafeeds/datafeed-test2/_preview</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/14.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO10-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This script uses regular expressions to replace white space with
+underscores.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The preview datafeed API returns the following results, which show that "foo bar
+baz" has been converted to "foo_bar_baz":</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">[
+  {
+    "@timestamp": 1490274000000,
+    "my_script_field": "foo_bar_baz"
+  }
+]</pre>
+</div>
+<p><a id="ml-configuring-transform7"></a><strong>Example 7: Regular expression matching and concatenation.</strong></p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _ml/datafeeds/datafeed-test2/_update
+{
+  "runtime_mappings": {
+    "my_runtime_field": {
+      "type": "keyword",
+      "script": {
+        "source": "def m = /(.*)-bar-([0-9][0-9])/.matcher(doc['tokenstring3'].value); emit(m.find() ? m.group(1) + '_' + m.group(2) : '');" <a id="CO11-1"></a><i class="conum" data-value="1"></i>
+      }
+    }
+  }
+}
+
+GET _ml/datafeeds/datafeed-test2/_preview</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/15.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO11-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This script looks for a specific regular expression pattern and emits the
+matched groups as a concatenated string. If no match is found, it emits an empty
+string.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The preview datafeed API returns the following results, which show that
+"foo-bar-19" has been converted to "foo_19":</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">[
+  {
+    "@timestamp": 1490274000000,
+    "my_script_field": "foo_19"
+  }
+]</pre>
+</div>
+<p><a id="ml-configuring-transform8"></a><strong>Example 8: Transforming geopoint data.</strong></p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ml/anomaly_detectors/test3
+{
+  "analysis_config":{
+    "bucket_span": "10m",
+    "detectors":[
+      {
+        "function":"lat_long",
+        "field_name": "my_coordinates"
+      }
+    ]
+  },
+  "data_description": {
+    "time_field":"@timestamp"
+  },
+  "datafeed_config":{
+    "datafeed_id": "datafeed-test3",
+    "indices": ["my-index-000001"],
+    "runtime_mappings": {
+      "my_coordinates": {
+        "type": "keyword",
+        "script": {
+          "source": "emit(doc['coords.lat'].value + ',' + doc['coords.lon'].value)"
+        }
+      }
+    }
+  }
+}
+
+GET _ml/datafeeds/datafeed-test3/_preview</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/16.console"></div>
+<p>In Elasticsearch, location data can be stored in <code class="literal">geo_point</code> fields but this data type is
+not supported natively in machine learning analytics. This example of a runtime field
+transforms the data into an appropriate format. For more information,
+see <a class="xref" href="ml-geo-functions.html" title="Geographic functions">Appendix K, <em>Geographic functions</em></a>.</p>
+<p>The preview datafeed API returns the following results, which show that
+<code class="literal">41.44</code> and <code class="literal">90.5</code> have been combined into "41.44,90.5":</p>
+<div class="pre_wrapper lang-js">
+<pre class="programlisting prettyprint lang-js">[
+  {
+    "@timestamp": 1490274000000,
+    "my_coordinates": "41.44,90.5"
+  }
+]</pre>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="ml-configuring-aggregation.html">« Aggregating data for faster performance</a>
+</span>
+<span class="next">
+<a href="ml-configuring-detector-custom-rules.html">Customizing detectors with custom rules »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

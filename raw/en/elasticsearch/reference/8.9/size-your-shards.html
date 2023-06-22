@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Size your shards | Elasticsearch Guide [8.9] | Elastic</title>
+<meta class="elastic" name="content" content="Size your shards | Elasticsearch Guide [8.9]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.9]"/>
+<link rel="up" href="how-to.html" title="How to"/>
+<link rel="prev" href="tune-for-disk-usage.html" title="Tune for disk usage"/>
+<link rel="next" href="use-elasticsearch-for-time-series-data.html" title="Use Elasticsearch for time series data"/>
+<meta class="elastic" name="product_version" content="8.9"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.9"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.9"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.9]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="how-to.html">How to</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="tune-for-disk-usage.html">« Tune for disk usage</a>
+</span>
+<span class="next">
+<a href="use-elasticsearch-for-time-series-data.html">Use Elasticsearch for time series data »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="size-your-shards"></a>Size your shards<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h2>
+</div></div></div>
+<p>Each index in Elasticsearch is divided into one or more shards, each of which may be
+replicated across multiple nodes to protect against hardware failures. If you
+are using <a class="xref" href="data-streams.html" title="Data streams"><em>Data streams</em></a> then each data stream is backed by a sequence of
+indices. There is a limit to the amount of data you can store on a single node
+so you can increase the capacity of your cluster by adding nodes and increasing
+the number of indices and shards to match. However, each index and shard has
+some overhead and if you divide your data across too many shards then the
+overhead can become overwhelming. A cluster with too many indices or shards is
+said to suffer from <em>oversharding</em>. An oversharded cluster will be less
+efficient at responding to searches and in extreme cases it may even become
+unstable.</p>
+<h3><a id="create-a-sharding-strategy"></a>Create a sharding strategy<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h3>
+<p>The best way to prevent oversharding and other shard-related issues is to
+create a sharding strategy. A sharding strategy helps you determine and
+maintain the optimal number of shards for your cluster while limiting the size
+of those shards.</p>
+<p>Unfortunately, there is no one-size-fits-all sharding strategy. A strategy that
+works in one environment may not scale in another. A good sharding strategy
+must account for your infrastructure, use case, and performance expectations.</p>
+<p>The best way to create a sharding strategy is to benchmark your production data
+on production hardware using the same queries and indexing loads you&#8217;d see in
+production. For our recommended methodology, watch the
+<a href="/elasticon/conf/2016/sf/quantitative-cluster-sizing" class="ulink" target="_top">quantitative
+cluster sizing video</a>. As you test different shard configurations, use Kibana&#8217;s
+<a href="/guide/en/kibana/8.9/elasticsearch-metrics.html" class="ulink" target="_top">Elasticsearch monitoring tools</a> to track your
+cluster&#8217;s stability and performance.</p>
+<p>The following sections provide some reminders and guidelines you should
+consider when designing your sharding strategy. If your cluster is already
+oversharded, see <a class="xref" href="size-your-shards.html#reduce-cluster-shard-count" title="Reduce a cluster&#8217;s shard count">Reduce a cluster&#8217;s shard count</a>.</p>
+<h3><a id="shard-sizing-considerations"></a>Sizing considerations<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h3>
+<p>Keep the following things in mind when building your sharding strategy.</p>
+<h4><a id="single-thread-per-shard"></a>Searches run on a single thread per shard<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>Most searches hit multiple shards. Each shard runs the search on a single
+CPU thread. While a shard can run multiple concurrent searches, searches across a
+large number of shards can deplete a node&#8217;s <a class="xref" href="modules-threadpool.html" title="Thread pools">search
+thread pool</a>. This can result in low throughput and slow search speeds.</p>
+<h4><a id="each-shard-has-overhead"></a>Each index, shard, segment and field has overhead<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>Every index and every shard requires some memory and CPU resources. In most
+cases, a small set of large shards uses fewer resources than many small shards.</p>
+<p>Segments play a big role in a shard&#8217;s resource usage. Most shards contain
+several segments, which store its index data. Elasticsearch keeps some segment metadata
+in heap memory so it can be quickly retrieved for searches. As a shard grows,
+its segments are <a class="xref" href="index-modules-merge.html" title="Merge">merged</a> into fewer, larger segments.
+This decreases the number of segments, which means less metadata is kept in
+heap memory.</p>
+<p>Every mapped field also carries some overhead in terms of memory usage and disk
+space. By default Elasticsearch will automatically create a mapping for every field in
+every document it indexes, but you can switch off this behaviour to
+<a class="xref" href="explicit-mapping.html" title="Explicit mapping">take control of your mappings</a>.</p>
+<p>Moreover every segment requires a small amount of heap memory for each mapped
+field. This per-segment-per-field heap overhead includes a copy of the field
+name, encoded using ISO-8859-1 if applicable or UTF-16 otherwise. Usually this
+is not noticeable, but you may need to account for this overhead if your shards
+have high segment counts and the corresponding mappings contain high field
+counts and/or very long field names.</p>
+<h4><a id="shard-auto-balance"></a>Elasticsearch automatically balances shards within a data tier<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>A cluster&#8217;s nodes are grouped into <a class="xref" href="data-tiers.html" title="Data tiers">data tiers</a>. Within each tier,
+Elasticsearch attempts to spread an index&#8217;s shards across as many nodes as possible. When
+you add a new node or a node fails, Elasticsearch automatically rebalances the index&#8217;s
+shards across the tier&#8217;s remaining nodes.</p>
+<h3><a id="shard-size-best-practices"></a>Best practices<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h3>
+<p>Where applicable, use the following best practices as starting points for your
+sharding strategy.</p>
+<h4><a id="delete-indices-not-documents"></a>Delete indices, not documents<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>Deleted documents aren&#8217;t immediately removed from Elasticsearch&#8217;s file system.
+Instead, Elasticsearch marks the document as deleted on each related shard. The marked
+document will continue to use resources until it&#8217;s removed during a periodic
+<a class="xref" href="index-modules-merge.html" title="Merge">segment merge</a>.</p>
+<p>When possible, delete entire indices instead. Elasticsearch can immediately remove
+deleted indices directly from the file system and free up resources.</p>
+<h4><a id="use-ds-ilm-for-time-series"></a>Use data streams and ILM for time series data<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p><a class="xref" href="data-streams.html" title="Data streams">Data streams</a> let you store time series data across multiple,
+time-based backing indices. You can use <a class="xref" href="index-lifecycle-management.html" title="ILM: Manage the index lifecycle">index lifecycle management
+(ILM)</a> to automatically manage these backing indices.</p>
+<p>One advantage of this setup is
+<a class="xref" href="getting-started-index-lifecycle-management.html" title="Tutorial: Automate rollover with ILM">automatic rollover</a>, which creates
+a new write index when the current one meets a defined <code class="literal">max_primary_shard_size</code>,
+<code class="literal">max_age</code>, <code class="literal">max_docs</code>, or <code class="literal">max_size</code> threshold. When an index is no longer
+needed, you can use ILM to automatically delete it and free up resources.</p>
+<p>ILM also makes it easy to change your sharding strategy over time:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong>Want to decrease the shard count for new indices?</strong></span><br>
+Change the <a class="xref" href="index-modules.html#index-number-of-shards"><code class="literal">index.number_of_shards</code></a> setting in the
+data stream&#8217;s <a class="xref" href="modify-data-streams.html#data-streams-change-mappings-and-settings" title="Change mappings and settings for a data stream">matching index
+template</a>.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Want larger shards or fewer backing indices?</strong></span><br>
+Increase your ILM policy&#8217;s <a class="xref" href="ilm-rollover.html" title="Rollover">rollover threshold</a>.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Need indices that span shorter intervals?</strong></span><br>
+Offset the increased shard count by deleting older indices sooner. You can do
+this by lowering the <code class="literal">min_age</code> threshold for your policy&#8217;s
+<a class="xref" href="ilm-index-lifecycle.html" title="Index lifecycle">delete phase</a>.
+</li>
+</ul>
+</div>
+<p>Every new backing index is an opportunity to further tune your strategy.</p>
+<h4><a id="shard-size-recommendation"></a>Aim for shard sizes between 10GB and 50GB<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>Larger shards take longer to recover after a failure. When a node fails, Elasticsearch
+rebalances the node&#8217;s shards across the data tier&#8217;s remaining nodes. This
+recovery process typically involves copying the shard contents across the
+network, so a 100GB shard will take twice as long to recover than a 50GB shard.
+In contrast, small shards carry proportionally more overhead and are less
+efficient to search. Searching fifty 1GB shards will take substantially more
+resources than searching a single 50GB shard containing the same data.</p>
+<p>There are no hard limits on shard size, but experience shows that shards
+between 10GB and 50GB typically work well for logs and time series data. You
+may be able to use larger shards depending on your network and use case.
+Smaller shards may be appropriate for
+<a href="/guide/en/enterprise-search/8.9/index.html" class="ulink" target="_top">Enterprise Search</a> and similar use cases.</p>
+<p>If you use ILM, set the <a class="xref" href="ilm-rollover.html" title="Rollover">rollover action</a>'s
+<code class="literal">max_primary_shard_size</code> threshold to <code class="literal">50gb</code> to avoid shards larger than 50GB.</p>
+<p>To see the current size of your shards, use the <a class="xref" href="cat-shards.html" title="cat shards API">cat shards API</a>.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.cat.shards(
+  v: true,
+  h: 'index,prirep,shard,store',
+  s: 'prirep,store',
+  bytes: 'gb'
+)
+puts response</pre>
+</div>
+<a id="fd738a9af7b5d21da31a7722f03aade8"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">GET _cat/shards?v=true&amp;h=index,prirep,shard,store&amp;s=prirep,store&amp;bytes=gb</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1879.console"></div>
+<p>The <code class="literal">pri.store.size</code> value shows the combined size of all primary shards for
+the index.</p>
+<div class="pre_wrapper lang-txt">
+<pre class="programlisting prettyprint lang-txt">index                                 prirep shard store
+.ds-my-data-stream-2099.05.06-000001  p      0      50gb
+...</pre>
+</div>
+<h4><a id="shard-count-recommendation"></a>Master-eligible nodes should have at least 1GB of heap per 3000 indices<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>The number of indices a master node can manage is proportional to its heap
+size. The exact amount of heap memory needed for each index depends on various
+factors such as the size of the mapping and the number of shards per index.</p>
+<p>As a general rule of thumb, you should have fewer than 3000 indices per GB of
+heap on master nodes. For example, if your cluster has dedicated master nodes
+with 4GB of heap each then you should have fewer than 12000 indices. If your
+master nodes are not dedicated master nodes then the same sizing guidance
+applies: you should reserve at least 1GB of heap on each master-eligible node
+for every 3000 indices in your cluster.</p>
+<p>Note that this rule defines the absolute maximum number of indices that a
+master node can manage, but does not guarantee the performance of searches or
+indexing involving this many indices. You must also ensure that your data nodes
+have adequate resources for your workload and that your overall sharding
+strategy meets all your performance requirements. See also
+<a class="xref" href="size-your-shards.html#single-thread-per-shard" title="Searches run on a single thread per shard">Searches run on a single thread per shard</a> and <a class="xref" href="size-your-shards.html#each-shard-has-overhead" title="Each index, shard, segment and field has overhead">Each index, shard, segment and field has overhead</a>.</p>
+<p>To check the configured size of each node&#8217;s heap, use the <a class="xref" href="cat-nodes.html" title="cat nodes API">cat nodes
+API</a>.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.cat.nodes(
+  v: true,
+  h: 'heap.max'
+)
+puts response</pre>
+</div>
+<a id="df04e2e9af66d5e30b1bfdbd458cab13"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">GET _cat/nodes?v=true&amp;h=heap.max</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1880.console"></div>
+<p>You can use the <a class="xref" href="cat-shards.html" title="cat shards API">cat shards API</a> to check the number of shards per
+node.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.cat.shards(
+  v: true
+)
+puts response</pre>
+</div>
+<a id="a1070cf2f5969d42d71cda057223f152"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">GET _cat/shards?v=true</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1881.console"></div>
+<h4><a id="field-count-recommendation"></a>Allow enough heap for field mappers and overheads<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>Mapped fields consume some heap memory on each node, and require extra
+heap on data nodes.
+Ensure each node has enough heap for mappings, and also allow
+extra space for overheads associated with its workload. The following sections
+show how to determine these heap requirements.</p>
+<h5><a id="_mapping_metadata_in_the_cluster_state"></a>Mapping metadata in the cluster state<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h5>
+<p>Each node in the cluster has a copy of the <a class="xref" href="cluster-state.html#cluster-state-api-desc" title="Description">cluster state</a>.
+The cluster state includes information about the field mappings for
+each index. This information has heap overhead. You can use the
+<a class="xref" href="cluster-stats.html" title="Cluster stats API">Cluster stats API</a> to get the heap overhead of the total size of
+all mappings after deduplication and compression.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.cluster.stats(
+  human: true,
+  filter_path: 'indices.mappings.total_deduplicated_mapping_size*'
+)
+puts response</pre>
+</div>
+<a id="40bd86e400d27e68b8f0ae580c29d32d"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">GET _cluster/stats?human&amp;filter_path=indices.mappings.total_deduplicated_mapping_size*</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1882.console"></div>
+<p>This will show you information like in this example output:</p>
+<a id="2b659fb2c410c929b83ab1798eac57e8"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "indices": {
+    "mappings": {
+      "total_deduplicated_mapping_size": "1gb",
+      "total_deduplicated_mapping_size_in_bytes": 1073741824
+    }
+  }
+}</pre>
+</div>
+<h5><a id="_retrieving_heap_size_and_field_mapper_overheads"></a>Retrieving heap size and field mapper overheads<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h5>
+<p>You can use the <a class="xref" href="cluster-nodes-stats.html" title="Nodes stats API">Nodes stats API</a> to get two relevant metrics
+for each node:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+The size of the heap on each node.
+</li>
+<li class="listitem">
+Any additional estimated heap overhead for the fields per node. This is specific to
+data nodes, where apart from the cluster state field information mentioned above,
+there is additional heap overhead for each mapped field of an index held by the data
+node. For nodes which are not data nodes, this field may be zero.
+</li>
+</ul>
+</div>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.nodes.stats(
+  human: true,
+  filter_path: 'nodes.*.name,nodes.*.indices.mappings.total_estimated_overhead*,nodes.*.jvm.mem.heap_max*'
+)
+puts response</pre>
+</div>
+<a id="40f97f70e8e743c6a6296c81b920aeb0"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">GET _nodes/stats?human&amp;filter_path=nodes.*.name,nodes.*.indices.mappings.total_estimated_overhead*,nodes.*.jvm.mem.heap_max*</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1883.console"></div>
+<p>For each node, this will show you information like in this example output:</p>
+<a id="930e12c4dd93aabdda5944af7f6f16b7"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  "nodes": {
+    "USpTGYaBSIKbgSUJR2Z9lg": {
+      "name": "node-0",
+      "indices": {
+        "mappings": {
+          "total_estimated_overhead": "1gb",
+          "total_estimated_overhead_in_bytes": 1073741824
+        }
+      },
+      "jvm": {
+        "mem": {
+          "heap_max": "4gb",
+          "heap_max_in_bytes": 4294967296
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<h5><a id="_consider_additional_heap_overheads"></a>Consider additional heap overheads<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h5>
+<p>Apart from the two field overhead metrics above, you must additionally allow
+enough heap for Elasticsearch&#8217;s baseline usage as well as your workload such as indexing,
+searches and aggregations. 0.5GB of extra heap will suffice for many reasonable
+workloads, and you may need even less if your workload is very light while heavy
+workloads may require more.</p>
+<h5><a id="_example_11"></a>Example<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h5>
+<p>As an example, consider the outputs above for a data node. The heap of the node
+will need at least:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+1 GB for the cluster state field information.
+</li>
+<li class="listitem">
+1 GB for the additional estimated heap overhead for the fields of the data node.
+</li>
+<li class="listitem">
+0.5 GB of extra heap for other overheads.
+</li>
+</ul>
+</div>
+<p>Since the node has a 4GB heap max size in the example, it is thus sufficient
+for the total required heap of 2.5GB.</p>
+<p>If the heap max size for a node is not sufficient, consider
+<a class="xref" href="size-your-shards.html#avoid-unnecessary-fields" title="Avoid unnecessary mapped fields">avoiding unnecessary fields</a>,
+or scaling up the cluster, or redistributing index shards.</p>
+<p>Note that the above rules do not necessarily guarantee the performance of
+searches or indexing involving a very high number of indices. You must also
+ensure that your data nodes have adequate resources for your workload and
+that your overall sharding strategy meets all your performance requirements.
+See also <a class="xref" href="size-your-shards.html#single-thread-per-shard" title="Searches run on a single thread per shard">Searches run on a single thread per shard</a> and <a class="xref" href="size-your-shards.html#each-shard-has-overhead" title="Each index, shard, segment and field has overhead">Each index, shard, segment and field has overhead</a>.</p>
+<h4><a id="avoid-node-hotspots"></a>Avoid node hotspots<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>If too many shards are allocated to a specific node, the node can become a
+hotspot. For example, if a single node contains too many shards for an index
+with a high indexing volume, the node is likely to have issues.</p>
+<p>To prevent hotspots, use the
+<a class="xref" href="allocation-total-shards.html#total-shards-per-node"><code class="literal">index.routing.allocation.total_shards_per_node</code></a> index
+setting to explicitly limit the number of shards on a single node. You can
+configure <code class="literal">index.routing.allocation.total_shards_per_node</code> using the
+<a class="xref" href="indices-update-settings.html" title="Update index settings API">update index settings API</a>.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.indices.put_settings(
+  index: 'my-index-000001',
+  body: {
+    index: {
+      "routing.allocation.total_shards_per_node": 5
+    }
+  }
+)
+puts response</pre>
+</div>
+<a id="cf23f18761df33f08bc6f6d1875496fd"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">PUT my-index-000001/_settings
+{
+  "index" : {
+    "routing.allocation.total_shards_per_node" : 5
+  }
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1884.console"></div>
+<h4><a id="avoid-unnecessary-fields"></a>Avoid unnecessary mapped fields<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>By default Elasticsearch <a class="xref" href="dynamic-mapping.html" title="Dynamic mapping">automatically creates a mapping</a> for every
+field in every document it indexes. Every mapped field corresponds to some data
+structures on disk which are needed for efficient search, retrieval, and
+aggregations on this field. Details about each mapped field are also held in
+memory. In many cases this overhead is unnecessary because a field is not used
+in any searches or aggregations. Use <a class="xref" href="explicit-mapping.html" title="Explicit mapping"><em>Explicit mapping</em></a> instead of dynamic
+mapping to avoid creating fields that are never used. If a collection of fields
+are typically used together, consider using <a class="xref" href="copy-to.html" title="copy_to"><code class="literal">copy_to</code></a> to consolidate them at
+index time. If a field is only rarely used, it may be better to make it a
+<a class="xref" href="runtime.html" title="Runtime fields">Runtime field</a> instead.</p>
+<p>You can get information about which fields are being used with the
+<a class="xref" href="field-usage-stats.html" title="Field usage stats API">Field usage stats</a> API, and you can analyze the disk usage of mapped fields
+using the <a class="xref" href="indices-disk-usage.html" title="Analyze index disk usage API">Analyze index disk usage</a> API. Note however that unnecessary mapped
+fields also carry some memory overhead as well as their disk usage.</p>
+<h3><a id="reduce-cluster-shard-count"></a>Reduce a cluster&#8217;s shard count<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h3>
+<p>If your cluster is already oversharded, you can use one or more of the following
+methods to reduce its shard count.</p>
+<h4><a id="create-indices-that-cover-longer-time-periods"></a>Create indices that cover longer time periods<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>If you use ILM and your retention policy allows it, avoid using a
+<code class="literal">max_age</code> threshold for the rollover action. Instead, use
+<code class="literal">max_primary_shard_size</code> to avoid creating empty indices or many small shards.</p>
+<p>If your retention policy requires a <code class="literal">max_age</code> threshold, increase it to create
+indices that cover longer time intervals. For example, instead of creating daily
+indices, you can create indices on a weekly or monthly basis.</p>
+<h4><a id="delete-empty-indices"></a>Delete empty or unneeded indices<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>If you&#8217;re using ILM and roll over indices based on a <code class="literal">max_age</code> threshold,
+you can inadvertently create indices with no documents. These empty indices
+provide no benefit but still consume resources.</p>
+<p>You can find these empty indices using the <a class="xref" href="cat-count.html" title="cat count API">cat count API</a>.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.cat.count(
+  index: 'my-index-000001',
+  v: true
+)
+puts response</pre>
+</div>
+<a id="f3fb52680482925c202c2e2f8af6f044"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">GET _cat/count/my-index-000001?v=true</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1885.console"></div>
+<p>Once you have a list of empty indices, you can delete them using the
+<a class="xref" href="indices-delete-index.html" title="Delete index API">delete index API</a>. You can also delete any other
+unneeded indices.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.indices.delete(
+  index: 'my-index-000001'
+)
+puts response</pre>
+</div>
+<a id="f6566395f85d3afe917228643d7318d6"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">DELETE my-index-000001</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1886.console"></div>
+<h4><a id="force-merge-during-off-peak-hours"></a>Force merge during off-peak hours<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>If you no longer write to an index, you can use the <a class="xref" href="indices-forcemerge.html" title="Force merge API">force
+merge API</a> to <a class="xref" href="index-modules-merge.html" title="Merge">merge</a> smaller segments into larger ones.
+This can reduce shard overhead and improve search speeds. However, force merges
+are resource-intensive. If possible, run the force merge during off-peak hours.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.indices.forcemerge(
+  index: 'my-index-000001'
+)
+puts response</pre>
+</div>
+<a id="2f98924c3d593ea2b60edb9cef5bee22"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">POST my-index-000001/_forcemerge</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1887.console"></div>
+<h4><a id="shrink-existing-index-to-fewer-shards"></a>Shrink an existing index to fewer shards<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>If you no longer write to an index, you can use the
+<a class="xref" href="indices-shrink-index.html" title="Shrink index API">shrink index API</a> to reduce its shard count.</p>
+<p>ILM also has a <a class="xref" href="ilm-shrink.html" title="Shrink">shrink action</a> for indices in the
+warm phase.</p>
+<h4><a id="combine-smaller-indices"></a>Combine smaller indices<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>You can also use the <a class="xref" href="docs-reindex.html" title="Reindex API">reindex API</a> to combine indices
+with similar mappings into a single large index. For time series data, you could
+reindex indices for short time periods into a new index covering a
+longer period. For example, you could reindex daily indices from October with a
+shared index pattern, such as <code class="literal">my-index-2099.10.11</code>, into a monthly
+<code class="literal">my-index-2099.10</code> index. After the reindex, delete the smaller indices.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.reindex(
+  body: {
+    source: {
+      index: 'my-index-2099.10.*'
+    },
+    dest: {
+      index: 'my-index-2099.10'
+    }
+  }
+)
+puts response</pre>
+</div>
+<a id="a999b5661bebb802bbbfe04faacf1971"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">POST _reindex
+{
+  "source": {
+    "index": "my-index-2099.10.*"
+  },
+  "dest": {
+    "index": "my-index-2099.10"
+  }
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1888.console"></div>
+<h3><a id="troubleshoot-shard-related-errors"></a>Troubleshoot shard-related errors<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h3>
+<p>Here’s how to resolve common shard-related errors.</p>
+<h4><a id="_this_action_would_add_x_total_shards_but_this_cluster_currently_has_yz_maximum_shards_open"></a>this action would add [x] total shards, but this cluster currently has [y]/[z] maximum shards open;<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/size-your-shards.asciidoc">edit</a></h4>
+<p>The <a class="xref" href="misc-cluster-settings.html#cluster-max-shards-per-node"><code class="literal">cluster.max_shards_per_node</code></a> cluster
+setting limits the maximum number of open shards for a cluster. This error
+indicates an action would exceed this limit.</p>
+<p>If you&#8217;re confident your changes won&#8217;t destabilize the cluster, you can
+temporarily increase the limit using the <a class="xref" href="cluster-update-settings.html" title="Cluster update settings API">cluster
+update settings API</a> and retry the action.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.cluster.put_settings(
+  body: {
+    persistent: {
+      "cluster.max_shards_per_node": 1200
+    }
+  }
+)
+puts response</pre>
+</div>
+<a id="96b9289c3c4c6b135ab3386562c4ee8d"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">PUT _cluster/settings
+{
+  "persistent" : {
+    "cluster.max_shards_per_node": 1200
+  }
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1889.console"></div>
+<p>This increase should only be temporary. As a long-term solution, we recommend
+you add nodes to the oversharded data tier or
+<a class="xref" href="size-your-shards.html#reduce-cluster-shard-count" title="Reduce a cluster&#8217;s shard count">reduce your cluster&#8217;s shard count</a>. To get a
+cluster&#8217;s current shard count after making changes, use the
+<a class="xref" href="cluster-stats.html" title="Cluster stats API">cluster stats API</a>.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.cluster.stats(
+  filter_path: 'indices.shards.total'
+)
+puts response</pre>
+</div>
+<a id="37c73410bf13429279cbc61a413957d8"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">GET _cluster/stats?filter_path=indices.shards.total</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1890.console"></div>
+<p>When a long-term solution is in place, we recommend you reset the
+<code class="literal">cluster.max_shards_per_node</code> limit.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.cluster.put_settings(
+  body: {
+    persistent: {
+      "cluster.max_shards_per_node": nil
+    }
+  }
+)
+puts response</pre>
+</div>
+<a id="3af10fde8138d9d95df127d39d9a0ed2"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">PUT _cluster/settings
+{
+  "persistent" : {
+    "cluster.max_shards_per_node": null
+  }
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1891.console"></div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="tune-for-disk-usage.html">« Tune for disk usage</a>
+</span>
+<span class="next">
+<a href="use-elasticsearch-for-time-series-data.html">Use Elasticsearch for time series data »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

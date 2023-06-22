@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Override field values at query time | Elasticsearch Guide [8.9] | Elastic</title>
+<meta class="elastic" name="content" content="Override field values at query time | Elasticsearch Guide [8.9]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.9]"/>
+<link rel="up" href="runtime.html" title="Runtime fields"/>
+<link rel="prev" href="runtime-search-request.html" title="Define runtime fields in a search request"/>
+<link rel="next" href="runtime-retrieving-fields.html" title="Retrieve a runtime field"/>
+<meta class="elastic" name="product_version" content="8.9"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.9"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.9"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.9]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="mapping.html">Mapping</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="runtime.html">Runtime fields</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="runtime-search-request.html">« Define runtime fields in a search request</a>
+</span>
+<span class="next">
+<a href="runtime-retrieving-fields.html">Retrieve a runtime field »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="runtime-override-values"></a>Override field values at query time<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/mapping/runtime.asciidoc">edit</a></h2>
+</div></div></div>
+<p>If you create a runtime field with the same name as a field that
+already exists in the mapping, the runtime field shadows the mapped field. At
+query time, Elasticsearch evaluates the runtime field, calculates a value based on the
+script, and returns the value as part of the query. Because the runtime field
+shadows the mapped field, you can override the value returned in search without
+modifying the mapped field.</p>
+<p>For example, let&#8217;s say you indexed the following documents into <code class="literal">my-index-000001</code>:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.bulk(
+  index: 'my-index-000001',
+  refresh: true,
+  body: [
+    {
+      index: {}
+    },
+    {
+      "@timestamp": 1_516_729_294_000,
+      model_number: 'QVKC92Q',
+      measures: {
+        voltage: 5.2
+      }
+    },
+    {
+      index: {}
+    },
+    {
+      "@timestamp": 1_516_642_894_000,
+      model_number: 'QVKC92Q',
+      measures: {
+        voltage: 5.8
+      }
+    },
+    {
+      index: {}
+    },
+    {
+      "@timestamp": 1_516_556_494_000,
+      model_number: 'QVKC92Q',
+      measures: {
+        voltage: 5.1
+      }
+    },
+    {
+      index: {}
+    },
+    {
+      "@timestamp": 1_516_470_094_000,
+      model_number: 'QVKC92Q',
+      measures: {
+        voltage: 5.6
+      }
+    },
+    {
+      index: {}
+    },
+    {
+      "@timestamp": 1_516_383_694_000,
+      model_number: 'HG537PU',
+      measures: {
+        voltage: 4.2
+      }
+    },
+    {
+      index: {}
+    },
+    {
+      "@timestamp": 1_516_297_294_000,
+      model_number: 'HG537PU',
+      measures: {
+        voltage: 4
+      }
+    }
+  ]
+)
+puts response</pre>
+</div>
+<a id="0fb472645116d58ddef89ca976d15a01"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">POST my-index-000001/_bulk?refresh=true
+{"index":{}}
+{"@timestamp":1516729294000,"model_number":"QVKC92Q","measures":{"voltage":5.2}}
+{"index":{}}
+{"@timestamp":1516642894000,"model_number":"QVKC92Q","measures":{"voltage":5.8}}
+{"index":{}}
+{"@timestamp":1516556494000,"model_number":"QVKC92Q","measures":{"voltage":5.1}}
+{"index":{}}
+{"@timestamp":1516470094000,"model_number":"QVKC92Q","measures":{"voltage":5.6}}
+{"index":{}}
+{"@timestamp":1516383694000,"model_number":"HG537PU","measures":{"voltage":4.2}}
+{"index":{}}
+{"@timestamp":1516297294000,"model_number":"HG537PU","measures":{"voltage":4.0}}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/126.console"></div>
+<p>You later realize that the <code class="literal">HG537PU</code> sensors aren&#8217;t reporting their true
+voltage. The indexed values are supposed to be 1.7 times higher than
+the reported values! Instead of reindexing your data, you can define a script in
+the <code class="literal">runtime_mappings</code> section of the <code class="literal">_search</code> request to shadow the <code class="literal">voltage</code>
+field and calculate a new value at query time.</p>
+<p>If you search for documents where the model number matches <code class="literal">HG537PU</code>:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.search(
+  index: 'my-index-000001',
+  body: {
+    query: {
+      match: {
+        model_number: 'HG537PU'
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
+<a id="36fae9dfc0b815546b45745bac054b67"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">GET my-index-000001/_search
+{
+  "query": {
+    "match": {
+      "model_number": "HG537PU"
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/127.console"></div>
+<p>The response includes indexed values for documents matching model number
+<code class="literal">HG537PU</code>:</p>
+<a id="2cef0810a1b0e7c8adf9e73833426f43"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  ...
+  "hits" : {
+    "total" : {
+      "value" : 2,
+      "relation" : "eq"
+    },
+    "max_score" : 1.0296195,
+    "hits" : [
+      {
+        "_index" : "my-index-000001",
+        "_id" : "F1BeSXYBg_szTodcYCmk",
+        "_score" : 1.0296195,
+        "_source" : {
+          "@timestamp" : 1516383694000,
+          "model_number" : "HG537PU",
+          "measures" : {
+            "voltage" : 4.2
+          }
+        }
+      },
+      {
+        "_index" : "my-index-000001",
+        "_id" : "l02aSXYBkpNf6QRDO62Q",
+        "_score" : 1.0296195,
+        "_source" : {
+          "@timestamp" : 1516297294000,
+          "model_number" : "HG537PU",
+          "measures" : {
+            "voltage" : 4.0
+          }
+        }
+      }
+    ]
+  }
+}</pre>
+</div>
+<p>The following request defines a runtime field where the script evaluates the
+<code class="literal">model_number</code> field where the value is <code class="literal">HG537PU</code>. For each match, the script
+multiplies the value for the <code class="literal">voltage</code> field by <code class="literal">1.7</code>.</p>
+<p>Using the <a class="xref" href="search-fields.html" title="Retrieve selected fields from a search"><code class="literal">fields</code></a> parameter on the <code class="literal">_search</code> API, you can
+retrieve the value that the script calculates for the <code class="literal">measures.voltage</code> field
+for documents matching the search request:</p>
+<a id="850bfd0a00d32475a54ac7f87fb4cc4d"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST my-index-000001/_search
+{
+  "runtime_mappings": {
+    "measures.voltage": {
+      "type": "double",
+      "script": {
+        "source":
+        """if (doc['model_number.keyword'].value.equals('HG537PU'))
+        {emit(1.7 * params._source['measures']['voltage']);}
+        else{emit(params._source['measures']['voltage']);}"""
+      }
+    }
+  },
+  "query": {
+    "match": {
+      "model_number": "HG537PU"
+    }
+  },
+  "fields": ["measures.voltage"]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/128.console"></div>
+<p>Looking at the response, the calculated values for <code class="literal">measures.voltage</code> on each
+result are <code class="literal">7.14</code> and <code class="literal">6.8</code>. That&#8217;s more like it! The runtime field calculated
+this value as part of the search request without modifying the mapped value,
+which still returns in the response:</p>
+<a id="8687c765a2e949a2535a234cce837013"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+  ...
+  "hits" : {
+    "total" : {
+      "value" : 2,
+      "relation" : "eq"
+    },
+    "max_score" : 1.0296195,
+    "hits" : [
+      {
+        "_index" : "my-index-000001",
+        "_id" : "F1BeSXYBg_szTodcYCmk",
+        "_score" : 1.0296195,
+        "_source" : {
+          "@timestamp" : 1516383694000,
+          "model_number" : "HG537PU",
+          "measures" : {
+            "voltage" : 4.2
+          }
+        },
+        "fields" : {
+          "measures.voltage" : [
+            7.14
+          ]
+        }
+      },
+      {
+        "_index" : "my-index-000001",
+        "_id" : "l02aSXYBkpNf6QRDO62Q",
+        "_score" : 1.0296195,
+        "_source" : {
+          "@timestamp" : 1516297294000,
+          "model_number" : "HG537PU",
+          "measures" : {
+            "voltage" : 4.0
+          }
+        },
+        "fields" : {
+          "measures.voltage" : [
+            6.8
+          ]
+        }
+      }
+    ]
+  }
+}</pre>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="runtime-search-request.html">« Define runtime fields in a search request</a>
+</span>
+<span class="next">
+<a href="runtime-retrieving-fields.html">Retrieve a runtime field »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

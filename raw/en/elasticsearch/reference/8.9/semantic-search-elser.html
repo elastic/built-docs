@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Tutorial: semantic search with ELSER | Elasticsearch Guide [8.9] | Elastic</title>
+<meta class="elastic" name="content" content="Tutorial: semantic search with ELSER | Elasticsearch Guide [8.9]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.9]"/>
+<link rel="up" href="search-your-data.html" title="Search your data"/>
+<link rel="prev" href="knn-search.html" title="k-nearest neighbor (kNN) search"/>
+<link rel="next" href="query-dsl.html" title="Query DSL"/>
+<meta class="elastic" name="product_version" content="8.9"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.9"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.9"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.9]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="search-your-data.html">Search your data</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="knn-search.html">« k-nearest neighbor (kNN) search</a>
+</span>
+<span class="next">
+<a href="query-dsl.html">Query DSL »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="semantic-search-elser"></a>Tutorial: semantic search with ELSER<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/search/search-your-data/semantic-search-elser.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>Elastic Learned Sparse EncodeR - or ELSER - is an NLP model trained by Elastic
+that enables you to perform semantic search by using sparse vector
+representation. Instead of literal matching on search terms, semantic search
+retrieves results based on the intent and the contextual meaning of a search
+query.</p>
+<p>The instructions in this tutorial shows you how to use ELSER to perform semantic
+search on your data.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Only the first 512 extracted tokens per field are considered during
+semantic search with ELSER v1. Refer to
+<a href="/guide/en/machine-learning/8.9/ml-nlp-limitations.html#ml-nlp-elser-v1-limit-512" class="ulink" target="_top">this page</a> for more
+information.</p>
+</div>
+</div>
+<h3><a id="requirements"></a>Requirements<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/search/search-your-data/semantic-search-elser.asciidoc">edit</a></h3>
+<p>To perform semantic search by using ELSER, you must have the NLP model deployed
+in your cluster. Refer to the
+<a href="/guide/en/machine-learning/8.9/ml-nlp-elser.html" class="ulink" target="_top">ELSER documentation</a> to learn how to download and
+deploy the model.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The minimum dedicated ML node size for deploying and using the ELSER model
+is 4 GB. This is a minimum and better performance can be achieved by using
+bigger ML nodes.</p>
+</div>
+</div>
+<h3><a id="elser-mappings"></a>Create the index mapping<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/search/search-your-data/semantic-search-elser.asciidoc">edit</a></h3>
+<p>First, the mapping of the destination index - the index that contains the tokens
+that the model created based on your text - must be created.  The destination
+index must have a field with the <a class="xref" href="rank-features.html" title="Rank features field type"><code class="literal">rank_features</code></a> field type
+to index the ELSER output.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>ELSER output must be ingested into a field with the <code class="literal">rank_features</code> field
+type. Otherwise, Elasticsearch interprets the token-weight pairs as a massive amount of
+fields in a document. If you get an error similar to this <code class="literal">"Limit of total fields [1000] has been exceeded while adding
+new fields"</code> then the ELSER output field is not mapped properly and it has a
+field type different than <code class="literal">rank_features</code>.</p>
+</div>
+</div>
+<a id="88bda4e1fca325d267d76223e64e41d8"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT my-index
+{
+  "mappings": {
+    "properties": {
+      "ml.tokens": {
+        "type": "rank_features" <a id="CO207-1"></a><i class="conum" data-value="1"></i>
+      },
+      "text": { <a id="CO207-2"></a><i class="conum" data-value="2"></i>
+        "type": "text" <a id="CO207-3"></a><i class="conum" data-value="3"></i>
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/937.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO207-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The field that contains the prediction is a <code class="literal">rank_features</code> field.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO207-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The name of the field from which to create the sparse vector representation.
+In this example, the name of the field is <code class="literal">text</code>.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO207-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The field type which is text in this example.</p>
+</td>
+</tr>
+</table>
+</div>
+<h3><a id="inference-ingest-pipeline"></a>Create an ingest pipeline with an inference processor<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/search/search-your-data/semantic-search-elser.asciidoc">edit</a></h3>
+<p>Create an <a class="xref" href="ingest.html" title="Ingest pipelines">ingest pipeline</a> with an
+<a class="xref" href="inference-processor.html" title="Inference processor">inference processor</a> to use ELSER to infer against the data
+that is being ingested in the pipeline.</p>
+<a id="0d221f025f6941796bf17a836f539541"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/elser-v1-test
+{
+  "processors": [
+    {
+      "inference": {
+        "model_id": ".elser_model_1",
+        "target_field": "ml",
+        "field_map": { <a id="CO208-1"></a><i class="conum" data-value="1"></i>
+          "text": "text_field"
+        },
+        "inference_config": {
+          "text_expansion": { <a id="CO208-2"></a><i class="conum" data-value="2"></i>
+            "results_field": "tokens"
+          }
+        }
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/938.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO208-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">field_map</code> object maps the input document field name (which is <code class="literal">text</code>
+in this example) to the name of the field that the model expects (which is
+always <code class="literal">text_field</code>).</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO208-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">text_expansion</code> inference type needs to be used in the inference ingest
+processor.</p>
+</td>
+</tr>
+</table>
+</div>
+<h3><a id="load-data"></a>Load data<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/search/search-your-data/semantic-search-elser.asciidoc">edit</a></h3>
+<p>In this step, you load the data that you later use in the inference ingest
+pipeline to extract tokens from it.</p>
+<p>Use the <code class="literal">msmarco-passagetest2019-top1000</code> data set, which is a subset of the MS
+MACRO Passage Ranking data set. It consists of 200 queries, each accompanied by
+a list of relevant text passages. All unique passages, along with their IDs,
+have been extracted from that data set and compiled into a
+<a href="https://github.com/elastic/stack-docs/blob/main/docs/en/stack/ml/nlp/data/msmarco-passagetest2019-unique.tsv" class="ulink" target="_top">tsv file</a>.</p>
+<p>Download the file and upload it to your cluster using the
+<a href="/guide/en/kibana/8.9/connect-to-elasticsearch.html#upload-data-kibana" class="ulink" target="_top">Data Visualizer</a>
+in the Machine Learning UI. Assign the name <code class="literal">id</code> to the first column and <code class="literal">text</code> to the
+second column. The index name is <code class="literal">test-data</code>. Once the upload is complete, you
+can see an index named <code class="literal">test-data</code> with 182469 documents.</p>
+<h3><a id="reindexing-data-elser"></a>Ingest the data through the inference ingest pipeline<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/search/search-your-data/semantic-search-elser.asciidoc">edit</a></h3>
+<p>Create the tokens from the text by reindexing the data throught the inference
+pipeline that uses ELSER as the inference model.</p>
+<a id="33494d09cd855ffbe67523cbe75ebc45"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST _reindex?wait_for_completion=false
+{
+  "source": {
+    "index": "test-data",
+    "size": 50 <a id="CO209-1"></a><i class="conum" data-value="1"></i>
+  },
+  "dest": {
+    "index": "my-index",
+    "pipeline": "elser-v1-test"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/939.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO209-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The default batch size for reindexing is 1000. Reducing <code class="literal">size</code> to a smaller
+number makes the update of the reindexing process quicker which enables you to
+follow the progress closely and detect errors early.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The call returns a task ID to monitor the progress:</p>
+<a id="8a1b6eae4893c5dd27b3d81fd8d70f5b"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET _tasks/&lt;task_id&gt;</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/940.console"></div>
+<p>You can also open the Trained Models UI, select the Pipelines tab under ELSER to
+follow the progress. It may take a couple of minutes to complete the process.</p>
+<h3><a id="text-expansion-query"></a>Semantic search by using the <code class="literal">text_expansion</code> query<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/search/search-your-data/semantic-search-elser.asciidoc">edit</a></h3>
+<p>To perform semantic search, use the <code class="literal">text_expansion</code> query,
+and provide the query text and the ELSER model ID. The example below uses
+the query text "How to avoid muscle soreness after running?":</p>
+<a id="a4709da258a667cae4199ec3a1e84b3b"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET my-index/_search
+{
+   "query":{
+      "text_expansion":{
+         "ml.tokens":{
+            "model_id":".elser_model_1",
+            "model_text":"How to avoid muscle soreness after running?"
+         }
+      }
+   }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/941.console"></div>
+<p>The result is the top 10 documents that are closest in meaning to your query
+text from the <code class="literal">my-index</code> index sorted by their relevancy. The result also
+contains the extracted tokens for each of the relevant search results with their
+weights.</p>
+<div class="pre_wrapper lang-consol-result">
+<pre class="programlisting prettyprint lang-consol-result">"hits":[
+   {
+      "_index":"my-index",
+      "_id":"978UAYgBKCQMet06sLEy",
+      "_score":18.612831,
+      "_ignored":[
+         "text.keyword"
+      ],
+      "_source":{
+         "id":7361587,
+         "text":"For example, if you go for a run, you will mostly use the muscles in your lower body. Give yourself 2 days to rest those muscles so they have a chance to heal before you exercise them again. Not giving your muscles enough time to rest can cause muscle damage, rather than muscle development.",
+         "ml":{
+            "tokens":{
+               "muscular":0.075696334,
+               "mostly":0.52380747,
+               "practice":0.23430172,
+               "rehab":0.3673556,
+               "cycling":0.13947526,
+               "your":0.35725075,
+               "years":0.69484913,
+               "soon":0.005317828,
+               "leg":0.41748235,
+               "fatigue":0.3157955,
+               "rehabilitation":0.13636169,
+               "muscles":1.302141,
+               "exercises":0.36694175,
+               (...)
+            },
+            "model_id":".elser_model_1"
+         }
+      }
+   },
+   (...)
+]</pre>
+</div>
+<h3><a id="text-expansion-compound-query"></a>Combining semantic search with other queries<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/search/search-your-data/semantic-search-elser.asciidoc">edit</a></h3>
+<p>You can combine <code class="literal">text_expansion</code> with other queries in a
+<a class="xref" href="compound-queries.html" title="Compound queries">compound query</a>. For example using a filter clause in a
+<a class="xref" href="query-dsl-bool-query.html" title="Boolean query">Boolean</a> or a full text query which may or may not use the same
+query text as the <code class="literal">text_expansion</code> query. This enables you to combine the search
+results from both queries.</p>
+<p>The search hits from the <code class="literal">text_expansion</code> query tend to score higher than other
+Elasticsearch queries. Those scores can be regularized by increasing or decreasing the
+relevance scores of each query by using the <code class="literal">boost</code> parameter. Recall on the
+<code class="literal">text_expansion</code> query can be high where there is a long tail of less relevant
+results. Use the <code class="literal">min_score</code> parameter to prune those less relevant documents.</p>
+<a id="997cdeac9795ea1c07c5dbb352f9c5f1"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET my-index/_search
+{
+  "query": {
+    "bool": { <a id="CO210-1"></a><i class="conum" data-value="1"></i>
+      "should": [
+        {
+          "text_expansion": {
+            "ml.tokens": {
+              "model_text": "How to avoid muscle soreness after running?",
+              "model_id": ".elser_model_1",
+              "boost": 1 <a id="CO210-2"></a><i class="conum" data-value="2"></i>
+            }
+          }
+        },
+        {
+          "query_string": {
+            "query": "toxins",
+            "boost": 4 <a id="CO210-3"></a><i class="conum" data-value="3"></i>
+          }
+        }
+      ]
+    }
+  },
+  "min_score": 10 <a id="CO210-4"></a><i class="conum" data-value="4"></i>
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/942.console"></div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO210-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Both the <code class="literal">text_expansion</code> and the <code class="literal">query_string</code> queries are in a <code class="literal">should</code>
+clause of a <code class="literal">bool</code> query.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO210-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">boost</code> value is <code class="literal">1</code> for the <code class="literal">text_expansion</code> query which is the default
+value. This means that the relevance score of the results of this query are not
+boosted.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO210-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">boost</code> value is <code class="literal">4</code> for the <code class="literal">query_string</code> query. The relevance score
+of the results of this query is increased causing them to rank higher in the
+search results.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO210-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Only the results with a score equal to or higher than <code class="literal">10</code> are displayed.</p>
+</td>
+</tr>
+</table>
+</div>
+<h3><a id="further-reading"></a>Further reading<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/search/search-your-data/semantic-search-elser.asciidoc">edit</a></h3>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="/guide/en/machine-learning/8.9/ml-nlp-elser.html" class="ulink" target="_top">How to download and deploy ELSER</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/machine-learning/8.9/ml-nlp-limitations.html#ml-nlp-elser-v1-limit-512" class="ulink" target="_top">ELSER v1 limitation</a>
+</li>
+</ul>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="knn-search.html">« k-nearest neighbor (kNN) search</a>
+</span>
+<span class="next">
+<a href="query-dsl.html">Query DSL »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

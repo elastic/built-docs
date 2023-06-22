@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Tune approximate kNN search | Elasticsearch Guide [8.9] | Elastic</title>
+<meta class="elastic" name="content" content="Tune approximate kNN search | Elasticsearch Guide [8.9]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.9]"/>
+<link rel="up" href="how-to.html" title="How to"/>
+<link rel="prev" href="tune-for-search-speed.html" title="Tune for search speed"/>
+<link rel="next" href="tune-for-disk-usage.html" title="Tune for disk usage"/>
+<meta class="elastic" name="product_version" content="8.9"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.9"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.9"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.9]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="how-to.html">How to</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="tune-for-search-speed.html">« Tune for search speed</a>
+</span>
+<span class="next">
+<a href="tune-for-disk-usage.html">Tune for disk usage »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="tune-knn-search"></a>Tune approximate kNN search<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/knn-search.asciidoc">edit</a></h2>
+</div></div></div>
+<p>Elasticsearch supports <a class="xref" href="knn-search.html#approximate-knn" title="Approximate kNN">approximate k-nearest neighbor search</a> for
+efficiently finding the <em>k</em> nearest vectors to a query vector. Since
+approximate kNN search works differently from other queries, there are special
+considerations around its performance.</p>
+<p>Many of these recommendations help improve search speed. With approximate kNN,
+the indexing algorithm runs searches under the hood to create the vector index
+structures. So these same recommendations also help with indexing speed.</p>
+<h3><a id="_prefer_dot_product_over_cosine"></a>Prefer <code class="literal">dot_product</code> over <code class="literal">cosine</code><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/knn-search.asciidoc">edit</a></h3>
+<p>When indexing vectors for approximate kNN search, you need to specify the
+<a class="xref" href="dense-vector.html#dense-vector-similarity"><code class="literal">similarity</code> function</a> for comparing the vectors.
+If you&#8217;d like to compare vectors through cosine similarity, there are two
+options.</p>
+<p>The <code class="literal">cosine</code> option accepts any float vector and computes the cosine
+similarity. While this is convenient for testing, it&#8217;s not the most efficient
+approach. Instead, we recommend using the <code class="literal">dot_product</code> option to compute the
+similarity. To use <code class="literal">dot_product</code>, all vectors need to be normalized in advance
+to have length 1. The <code class="literal">dot_product</code> option is significantly faster, since it
+avoids performing extra vector length computations during the search.</p>
+<h3><a id="_ensure_data_nodes_have_enough_memory"></a>Ensure data nodes have enough memory<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/knn-search.asciidoc">edit</a></h3>
+<p>Elasticsearch uses the <a href="https://arxiv.org/abs/1603.09320" class="ulink" target="_top">HNSW</a> algorithm for approximate
+kNN search. HNSW is a graph-based algorithm which only works efficiently when
+most vector data is held in memory. You should ensure that data nodes have at
+least enough RAM to hold the vector data and index structures. To check the
+size of the vector data, you can use the <a class="xref" href="indices-disk-usage.html" title="Analyze index disk usage API">Analyze index disk usage</a> API. As a
+loose rule of thumb, and assuming the default HNSW options, the bytes used will
+be <code class="literal">num_vectors * 4 * (num_dimensions + 12)</code>. When using the <code class="literal">byte</code> <a class="xref" href="dense-vector.html#dense-vector-element-type"><code class="literal">element_type</code></a>
+the space required will be closer to  <code class="literal">num_vectors * (num_dimensions + 12)</code>. Note that
+the required RAM is for the filesystem cache, which is separate from the Java
+heap.</p>
+<p>The data nodes should also leave a buffer for other ways that RAM is needed.
+For example your index might also include text fields and numerics, which also
+benefit from using filesystem cache. It&#8217;s recommended to run benchmarks with
+your specific dataset to ensure there&#8217;s a sufficient amount of memory to give
+good search performance.
+You can find <a href="https://elasticsearch-benchmarks.elastic.co/#tracks/so_vector" class="ulink" target="_top">here</a>
+and <a href="https://elasticsearch-benchmarks.elastic.co/#tracks/dense_vector" class="ulink" target="_top">here</a> some examples
+of datasets and configurations that we use for our nightly benchmarks.</p>
+<h3><a id="_warm_up_the_filesystem_cache_2"></a>Warm up the filesystem cache<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p>If the machine running Elasticsearch is restarted, the filesystem cache will be
+empty, so it will take some time before the operating system loads hot regions
+of the index into memory so that search operations are fast. You can explicitly
+tell the operating system which files should be loaded into memory eagerly
+depending on the file extension using the
+<a class="xref" href="preload-data-to-file-system-cache.html" title="Preloading data into the file system cache"><code class="literal">index.store.preload</code></a> setting.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Loading data into the filesystem cache eagerly on too many indices or
+too many files will make search <em>slower</em> if the filesystem cache is not large
+enough to hold all the data. Use with caution.</p>
+</div>
+</div>
+<p>The following file extensions are used for the approximate kNN search:
+"vec" (for vector values), "vex" (for HNSW graph), "vem" (for metadata).</p>
+<h3><a id="_reduce_vector_dimensionality"></a>Reduce vector dimensionality<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/knn-search.asciidoc">edit</a></h3>
+<p>The speed of kNN search scales linearly with the number of vector dimensions,
+because each similarity computation considers each element in the two vectors.
+Whenever possible, it&#8217;s better to use vectors with a lower dimension. Some
+embedding models come in different "sizes", with both lower and higher
+dimensional options available. You could also experiment with dimensionality
+reduction techniques like PCA. When experimenting with different approaches,
+it&#8217;s important to measure the impact on relevance to ensure the search
+quality is still acceptable.</p>
+<h3><a id="_exclude_vector_fields_from_source"></a>Exclude vector fields from <code class="literal">_source</code><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/knn-search.asciidoc">edit</a></h3>
+<p>Elasticsearch stores the original JSON document that was passed at index time in the
+<a class="xref" href="mapping-source-field.html" title="_source field"><code class="literal">_source</code> field</a>. By default, each hit in the search
+results contains the full document <code class="literal">_source</code>. When the documents contain
+high-dimensional <code class="literal">dense_vector</code> fields, the <code class="literal">_source</code> can be quite large and
+expensive to load. This could significantly slow down the speed of kNN search.</p>
+<p>You can disable storing <code class="literal">dense_vector</code> fields in the <code class="literal">_source</code> through the
+<a class="xref" href="mapping-source-field.html#include-exclude" title="Including / Excluding fields from _source"><code class="literal">excludes</code></a> mapping parameter. This prevents loading and
+returning large vectors during search, and also cuts down on the index size.
+Vectors that have been omitted from <code class="literal">_source</code> can still be used in kNN search,
+since it relies on separate data structures to perform the search. Before
+using the <a class="xref" href="mapping-source-field.html#include-exclude" title="Including / Excluding fields from _source"><code class="literal">excludes</code></a> parameter, make sure to review the
+downsides of omitting fields from <code class="literal">_source</code>.</p>
+<h3><a id="_reduce_the_number_of_index_segments"></a>Reduce the number of index segments<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/knn-search.asciidoc">edit</a></h3>
+<p>Elasticsearch shards are composed of segments, which are internal storage elements in
+the index. For approximate kNN search, Elasticsearch stores the dense vector values of
+each segment as an HNSW graph. kNN search must check each segment, searching
+through one HNSW graph after another. This means kNN search can be
+significantly faster if there are fewer segments. By default, Elasticsearch periodically
+merges smaller segments into larger ones through a background
+<a class="xref" href="index-modules-merge.html" title="Merge">merge process</a>. If this isn&#8217;t sufficient, you can take
+explicit steps to reduce the number of index segments.</p>
+<h4><a id="_force_merge_to_one_segment"></a>Force merge to one segment<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/knn-search.asciidoc">edit</a></h4>
+<p>The <a class="xref" href="indices-forcemerge.html" title="Force merge API">force merge</a> operation forces an index merge. If you
+force merge to one segment, the kNN search only need to check a single,
+all-inclusive HNSW graph. Force merging <code class="literal">dense_vector</code> fields is an expensive
+operation that can take significant time to complete.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><span class="strong strong"><strong>We recommend only force merging a read-only index (meaning the index
+is no longer receiving writes).</strong></span>  When documents are updated or deleted, the
+old version is not immediately removed, but instead soft-deleted and marked
+with a "tombstone". These soft-deleted documents are automatically cleaned up
+during regular segment merges. But force merge can cause very large (&gt; 5GB)
+segments to be produced, which are not eligible for regular merges. So the
+number of soft-deleted documents can then grow rapidly, resulting in higher
+disk usage and worse search performance. If you regularly force merge an index
+receiving writes, this can also make snapshots more expensive, since the new
+documents can&#8217;t be backed up incrementally.</p>
+</div>
+</div>
+<h4><a id="_create_large_segments_during_bulk_indexing"></a>Create large segments during bulk indexing<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/knn-search.asciidoc">edit</a></h4>
+<p>A common pattern is to first perform an initial bulk upload, then make an
+index available for searches. Instead of force merging, you can adjust the
+index settings to encourage Elasticsearch to create larger initial segments:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Ensure there are no searches during the bulk upload and disable
+<a class="xref" href="index-modules.html#index-refresh-interval-setting"><code class="literal">index.refresh_interval</code></a> by setting it to
+<code class="literal">-1</code>. This prevents refresh operations and avoids creating extra segments.
+</li>
+<li class="listitem">
+Give Elasticsearch a large indexing buffer so it can accept more documents before
+flushing. By default, the <a class="xref" href="indexing-buffer.html" title="Indexing buffer settings"><code class="literal">indices.memory.index_buffer_size</code></a>
+is set to 10% of the heap size. With a substantial heap size like 32GB, this
+is often enough. To allow the full indexing buffer to be used, you should also
+increase the limit <a class="xref" href="index-modules-translog.html" title="Translog"><code class="literal">index.translog.flush_threshold_size</code></a>.
+</li>
+</ul>
+</div>
+<h3><a id="_avoid_heavy_indexing_during_searches"></a>Avoid heavy indexing during searches<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/knn-search.asciidoc">edit</a></h3>
+<p>Actively indexing documents can have a negative impact on approximate kNN
+search performance, since indexing threads steal compute resources from
+search. When indexing and searching at the same time, Elasticsearch also refreshes
+frequently, which creates several small segments. This also hurts search
+performance, since approximate kNN search is slower when there are more
+segments.</p>
+<p>When possible, it&#8217;s best to avoid heavy indexing during approximate kNN
+search. If you need to reindex all the data, perhaps because the vector
+embedding model changed, then it&#8217;s better to reindex the new documents into a
+separate index rather than update them in-place. This helps avoid the slowdown
+mentioned above, and prevents expensive merge operations due to frequent
+document updates.</p>
+<h3><a id="_avoid_page_cache_thrashing_by_using_modest_readahead_values_on_linux_2"></a>Avoid page cache thrashing by using modest readahead values on Linux<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/search-speed.asciidoc">edit</a></h3>
+<p>Search can cause a lot of randomized read I/O. When the underlying block
+device has a high readahead value, there may be a lot of unnecessary
+read I/O done, especially when files are accessed using memory mapping
+(see <a class="xref" href="index-modules-store.html#file-system" title="File system storage types">storage types</a>).</p>
+<p>Most Linux distributions use a sensible readahead value of <code class="literal">128KiB</code> for a
+single plain device, however, when using software raid, LVM or dm-crypt the
+resulting block device (backing Elasticsearch <a class="xref" href="important-settings.html#path-settings" title="Path settings">path.data</a>)
+may end up having a very large readahead value (in the range of several MiB).
+This usually results in severe page (filesystem) cache thrashing adversely
+affecting search (or <a class="xref" href="docs.html" title="Document APIs">update</a>) performance.</p>
+<p>You can check the current value in <code class="literal">KiB</code> using
+<code class="literal">lsblk -o NAME,RA,MOUNTPOINT,TYPE,SIZE</code>.
+Consult the documentation of your distribution on how to alter this value
+(for example with a <code class="literal">udev</code> rule to persist across reboots, or via
+<a href="https://man7.org/linux/man-pages/man8/blockdev.8.html" class="ulink" target="_top">blockdev --setra</a>
+as a transient setting). We recommend a value of <code class="literal">128KiB</code> for readahead.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><code class="literal">blockdev</code> expects values in 512 byte sectors whereas <code class="literal">lsblk</code> reports
+values in <code class="literal">KiB</code>. As an example, to temporarily set readahead to <code class="literal">128KiB</code>
+for <code class="literal">/dev/nvme0n1</code>, specify <code class="literal">blockdev --setra 256 /dev/nvme0n1</code>.</p>
+</div>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="tune-for-search-speed.html">« Tune for search speed</a>
+</span>
+<span class="next">
+<a href="tune-for-disk-usage.html">Tune for disk usage »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

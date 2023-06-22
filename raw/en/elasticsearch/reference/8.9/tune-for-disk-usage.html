@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Tune for disk usage | Elasticsearch Guide [8.9] | Elastic</title>
+<meta class="elastic" name="content" content="Tune for disk usage | Elasticsearch Guide [8.9]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.9]"/>
+<link rel="up" href="how-to.html" title="How to"/>
+<link rel="prev" href="tune-knn-search.html" title="Tune approximate kNN search"/>
+<link rel="next" href="size-your-shards.html" title="Size your shards"/>
+<meta class="elastic" name="product_version" content="8.9"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.9"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.9"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.9]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="how-to.html">How to</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="tune-knn-search.html">« Tune approximate kNN search</a>
+</span>
+<span class="next">
+<a href="size-your-shards.html">Size your shards »</a>
+</span>
+</div>
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="tune-for-disk-usage"></a>Tune for disk usage<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/disk-usage.asciidoc">edit</a></h2>
+</div></div></div>
+<h3><a id="_disable_the_features_you_do_not_need"></a>Disable the features you do not need<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/disk-usage.asciidoc">edit</a></h3>
+<p>By default, Elasticsearch indexes and adds doc values to most fields so that they
+can be searched and aggregated out of the box. For instance, if you have a numeric
+field called <code class="literal">foo</code> that you need to run histograms on but that you never need to
+filter on, you can safely disable indexing on this field in your
+<a class="xref" href="indices-create-index.html#mappings" title="Mappings">mappings</a>:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.indices.create(
+  index: 'index',
+  body: {
+    mappings: {
+      properties: {
+        foo: {
+          type: 'integer',
+          index: false
+        }
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
+<a id="e273060a675c959fd5f3cde27c8aff07"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">PUT index
+{
+  "mappings": {
+    "properties": {
+      "foo": {
+        "type": "integer",
+        "index": false
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1877.console"></div>
+<p><a class="xref" href="text.html" title="Text type family"><code class="literal">text</code></a> fields store normalization factors in the index to facilitate
+document scoring. If you only need matching capabilities on a <code class="literal">text</code>
+field but do not care about the produced scores, you can use the
+<a class="xref" href="text.html#match-only-text-field-type" title="Match-only text field type"><code class="literal">match_only_text</code></a> type instead. This field type
+saves significant space by dropping scoring and positional information.</p>
+<h3><a id="default-dynamic-string-mapping"></a>Don&#8217;t use default dynamic string mappings<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/disk-usage.asciidoc">edit</a></h3>
+<p>The default <a class="xref" href="dynamic-mapping.html" title="Dynamic mapping">dynamic string mappings</a> will index string fields
+both as <a class="xref" href="text.html" title="Text type family"><code class="literal">text</code></a> and <a class="xref" href="keyword.html" title="Keyword type family"><code class="literal">keyword</code></a>. This is wasteful if you only
+need one of them. Typically an <code class="literal">id</code> field will only need to be indexed as a
+<code class="literal">keyword</code> while a <code class="literal">body</code> field will only need to be indexed as a <code class="literal">text</code> field.</p>
+<p>This can be disabled by either configuring explicit mappings on string fields
+or setting up dynamic templates that will map string fields as either <code class="literal">text</code>
+or <code class="literal">keyword</code>.</p>
+<p>For instance, here is a template that can be used in order to only map string
+fields as <code class="literal">keyword</code>:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.indices.create(
+  index: 'index',
+  body: {
+    mappings: {
+      dynamic_templates: [
+        {
+          strings: {
+            match_mapping_type: 'string',
+            mapping: {
+              type: 'keyword'
+            }
+          }
+        }
+      ]
+    }
+  }
+)
+puts response</pre>
+</div>
+<a id="597d456edfcb3d410954a3e9b5babf9a"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">PUT index
+{
+  "mappings": {
+    "dynamic_templates": [
+      {
+        "strings": {
+          "match_mapping_type": "string",
+          "mapping": {
+            "type": "keyword"
+          }
+        }
+      }
+    ]
+  }
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1878.console"></div>
+<h3><a id="_watch_your_shard_size"></a>Watch your shard size<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/disk-usage.asciidoc">edit</a></h3>
+<p>Larger shards are going to be more efficient at storing data. To increase the size of your shards, you can decrease the number of primary shards in an index by <a class="xref" href="indices-create-index.html" title="Create index API">creating indices</a> with fewer primary shards, creating fewer indices (e.g. by leveraging the <a class="xref" href="indices-rollover-index.html" title="Rollover API">Rollover API</a>), or modifying an existing index using the <a class="xref" href="indices-shrink-index.html" title="Shrink index API">Shrink API</a>.</p>
+<p>Keep in mind that large shard sizes come with drawbacks, such as long full recovery times.</p>
+<h3><a id="disable-source"></a>Disable <code class="literal">_source</code><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/disk-usage.asciidoc">edit</a></h3>
+<p>The <a class="xref" href="mapping-source-field.html" title="_source field"><code class="literal">_source</code></a> field stores the original JSON body of the document. If you don’t need access to it you can disable it. However, APIs that needs access to <code class="literal">_source</code> such as update, highlight and reindex won’t work.</p>
+<h3><a id="best-compression"></a>Use <code class="literal">best_compression</code><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/disk-usage.asciidoc">edit</a></h3>
+<p>The <code class="literal">_source</code> and stored fields can easily take a non negligible amount of disk
+space. They can be compressed more aggressively by using the <code class="literal">best_compression</code>
+<a class="xref" href="index-modules.html#index-codec">codec</a>.</p>
+<h3><a id="_force_merge"></a>Force merge<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/disk-usage.asciidoc">edit</a></h3>
+<p>Indices in Elasticsearch are stored in one or more shards. Each shard is a Lucene index and made up of one or more segments - the actual files on disk. Larger segments are more efficient for storing data.</p>
+<p>The <a class="xref" href="indices-forcemerge.html" title="Force merge API">force merge API</a> can be used to reduce the number of segments per shard. In many cases, the number of segments can be reduced to one per shard by setting <code class="literal">max_num_segments=1</code>.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><span class="strong strong"><strong>We recommend only force merging a read-only index (meaning the index
+is no longer receiving writes).</strong></span>  When documents are updated or deleted, the
+old version is not immediately removed, but instead soft-deleted and marked
+with a "tombstone". These soft-deleted documents are automatically cleaned up
+during regular segment merges. But force merge can cause very large (&gt; 5GB)
+segments to be produced, which are not eligible for regular merges. So the
+number of soft-deleted documents can then grow rapidly, resulting in higher
+disk usage and worse search performance. If you regularly force merge an index
+receiving writes, this can also make snapshots more expensive, since the new
+documents can&#8217;t be backed up incrementally.</p>
+</div>
+</div>
+<h3><a id="_shrink_index"></a>Shrink index<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/disk-usage.asciidoc">edit</a></h3>
+<p>The <a class="xref" href="indices-shrink-index.html" title="Shrink index API">shrink API</a> allows you to reduce the number of shards in an index. Together with the force merge API above, this can significantly reduce the number of shards and segments of an index.</p>
+<h3><a id="_use_the_smallest_numeric_type_that_is_sufficient"></a>Use the smallest numeric type that is sufficient<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/disk-usage.asciidoc">edit</a></h3>
+<p>The type that you pick for <a class="xref" href="number.html" title="Numeric field types">numeric data</a> can have a significant impact
+on disk usage. In particular, integers should be stored using an integer type
+(<code class="literal">byte</code>, <code class="literal">short</code>, <code class="literal">integer</code> or <code class="literal">long</code>) and floating points should either be
+stored in a <code class="literal">scaled_float</code> if appropriate or in the smallest type that fits the
+use-case: using <code class="literal">float</code> over <code class="literal">double</code>, or <code class="literal">half_float</code> over <code class="literal">float</code> will help
+save storage.</p>
+<h3><a id="_use_index_sorting_to_colocate_similar_documents"></a>Use index sorting to colocate similar documents<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/disk-usage.asciidoc">edit</a></h3>
+<p>When Elasticsearch stores <code class="literal">_source</code>, it compresses multiple documents at once
+in order to improve the overall compression ratio. For instance it is very
+common that documents share the same field names, and quite common that they
+share some field values, especially on fields that have a low cardinality or
+a <a href="https://en.wikipedia.org/wiki/Zipf%27s_law" class="ulink" target="_top">zipfian</a> distribution.</p>
+<p>By default documents are compressed together in the order that they are added
+to the index. If you enabled <a class="xref" href="index-modules-index-sorting.html" title="Index Sorting">index sorting</a>
+then instead they are compressed in sorted order. Sorting documents with similar
+structure, fields, and values together should improve the compression ratio.</p>
+<h3><a id="_put_fields_in_the_same_order_in_documents"></a>Put fields in the same order in documents<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/disk-usage.asciidoc">edit</a></h3>
+<p>Due to the fact that multiple documents are compressed together into blocks,
+it is more likely to find longer duplicate strings in those <code class="literal">_source</code> documents
+if fields always occur in the same order.</p>
+<h3><a id="roll-up-historical-data"></a>Roll up historical data<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.9/docs/reference/how-to/disk-usage.asciidoc">edit</a></h3>
+<p>Keeping older data can be useful for later analysis but is often avoided due to
+storage costs. You can use data rollups to summarize and store historical data
+at a fraction of the raw data&#8217;s storage cost. See <a class="xref" href="xpack-rollup.html" title="Rolling up historical data"><em>Rolling up historical data</em></a>.</p>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="tune-knn-search.html">« Tune approximate kNN search</a>
+</span>
+<span class="next">
+<a href="size-your-shards.html">Size your shards »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
