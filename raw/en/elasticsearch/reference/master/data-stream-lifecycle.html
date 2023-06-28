@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Data stream lifecycle | Elasticsearch Guide [master] | Elastic</title>
+<meta class="elastic" name="content" content="Data stream lifecycle | Elasticsearch Guide [master]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [master]"/>
+<link rel="up" href="data-streams.html" title="Data streams"/>
+<link rel="prev" href="downsampling-ilm.html" title="Run downsampling with ILM"/>
+<link rel="next" href="tutorial-manage-new-data-stream.html" title="Tutorial: Create a data stream with a lifecycle"/>
+<meta class="elastic" name="product_version" content="master"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/master"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="master"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [master]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="data-streams.html">Data streams</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="downsampling-ilm.html">« Run downsampling with ILM</a>
+</span>
+<span class="next">
+<a href="tutorial-manage-new-data-stream.html">Tutorial: Create a data stream with a lifecycle »</a>
+</span>
+</div>
+<div class="chapter xpack">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="data-stream-lifecycle"></a>Data stream lifecycle<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/data-streams/lifecycle/index.asciidoc">edit</a></h2>
+</div></div></div>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This functionality is in technical preview and may be changed or removed in a future release. Elastic will apply best effort to fix any issues, but features in technical preview are not subject to the support SLA of official GA features.</p>
+</div>
+</div>
+<p>A data stream lifecycle is the built-in mechanism data streams use to manage their lifecycle. It enables you to easily
+automate the management of your data streams according to your retention requirements. For example, you could configure
+the lifecycle to:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Ensure that data indexed in the data stream will be kept at least for the retention time you defined.
+</li>
+<li class="listitem">
+Ensure that data older than the retention period will be deleted automatically by Elasticsearch at a later time.
+</li>
+</ul>
+</div>
+<p>To achieve that, it supports:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Automatic <a class="xref" href="index-rollover.html" title="Rollover">rollover</a>, which chunks your incoming data in smaller pieces to facilitate better performance
+and backwards incompatible mapping changes.
+</li>
+<li class="listitem">
+Configurable retention, which allows you to configure the time period for which your data is guaranteed to be stored.
+Elasticsearch is allowed at a later time to delete data older than this time period.
+</li>
+</ul>
+</div>
+<h3><a id="data-streams-lifecycle-how-it-works"></a>How does it work?<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/data-streams/lifecycle/index.asciidoc">edit</a></h3>
+<p>In intervals configured by <a class="xref" href="data-stream-lifecycle-settings.html#data-streams-lifecycle-poll-interval"><code class="literal">data_streams.lifecycle.poll_interval</code></a>, Elasticsearch goes over
+each data stream and performs the following steps:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Checks if the data stream has a data lifecycle configured, skipping any indices not part of a managed data stream.
+</li>
+<li class="listitem">
+Rolls over the write index of the data stream, if it fulfills the conditions defined by
+<a class="xref" href="data-stream-lifecycle-settings.html#cluster-lifecycle-default-rollover"><code class="literal">cluster.lifecycle.default.rollover</code></a>.
+</li>
+<li class="listitem">
+Applies retention to the remaining backing indices. This means deleting the backing indices whose
+<code class="literal">generation_time</code> is longer than the configured retention period. The <code class="literal">generation_time</code> is only applicable to rolled over backing
+indices and it is either the time since the backing index got rolled over, or the time optionally configured in the
+<a class="xref" href="data-stream-lifecycle-settings.html#index-data-stream-lifecycle-origination-date"><code class="literal">index.lifecycle.origination_date</code></a> setting.
+</li>
+</ol>
+</div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>We use the <code class="literal">generation_time</code> instead of the creation time because this ensures that all data in the backing
+index have passed the retention period. As a result, the retention period is not the exact time data gets deleted, but
+the minimum time data will be stored.</p>
+</div>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The steps <code class="literal">2</code> and <code class="literal">3</code> apply only to backing indices that are not already managed by ILM, meaning that these indices either do
+not have an ILM policy defined, or if they do, they have <a class="xref" href="data-stream-lifecycle-settings.html#index-lifecycle-prefer-ilm"><code class="literal">index.lifecycle.prefer_ilm</code></a>
+set to <code class="literal">false</code>.</p>
+</div>
+</div>
+<h3><a id="data-stream-lifecycle-configuration"></a>Configuring data stream lifecycle<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/data-streams/lifecycle/index.asciidoc">edit</a></h3>
+<p>Since the lifecycle is configured on the data stream level, the process to configure a lifecycle on a new data stream and
+on an existing one differ.</p>
+<p>In the following sections, we will go through the following tutorials:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+To create a new data stream with a lifecycle, you need to add the data lifecycle as part of the index template
+that matches the name of your data stream (see <a class="xref" href="tutorial-manage-new-data-stream.html" title="Tutorial: Create a data stream with a lifecycle">Tutorial: Create a data stream with a lifecycle</a>). When a write operation
+with the name of your data stream reaches Elasticsearch then the data stream will be created with the respective data lifecycle.
+</li>
+<li class="listitem">
+To update the lifecycle of an existing data stream you need to use the <a class="xref" href="data-stream-apis.html#data-stream-lifecycle-api">data stream lifecycle APIs</a>
+to edit the lifecycle on the data stream itself (see <a class="xref" href="tutorial-manage-existing-data-stream.html" title="Tutorial: Update existing data stream">Tutorial: Update existing data stream</a>).
+</li>
+</ul>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Updating the data lifecycle of an existing data stream is different from updating the settings or the mapping,
+because it is applied on the data stream level and not on the individual backing indices.</p>
+</div>
+</div>
+
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="downsampling-ilm.html">« Run downsampling with ILM</a>
+</span>
+<span class="next">
+<a href="tutorial-manage-new-data-stream.html">Tutorial: Create a data stream with a lifecycle »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
