@@ -3,8 +3,8 @@
   <head>
     
 <meta charset="UTF-8">
-<title>DLS end-to-end guide | Enterprise Search documentation [master] | Elastic</title>
-<meta class="elastic" name="content" content="DLS end-to-end guide | Enterprise Search documentation [master]">
+<title>Leverage document-level security from connectors in Search Applications | Enterprise Search documentation [master] | Elastic</title>
+<meta class="elastic" name="content" content="Leverage document-level security from connectors in Search Applications | Enterprise Search documentation [master]">
 
 <link rel="home" href="index.html" title="Enterprise Search documentation [master]"/>
 <link rel="up" href="dls.html" title="Document level security"/>
@@ -144,9 +144,290 @@ Not what you want? See the
 </div>
 <div class="chapter">
 <div class="titlepage"><div><div>
-<h2 class="title"><a id="dls-e2e-guide"></a>DLS end-to-end guide<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-e2e-guide.asciidoc">edit</a></h2>
+<h2 class="title"><a id="dls-e2e-guide"></a>Leverage document-level security from connectors in Search Applications<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-e2e-guide.asciidoc">edit</a></h2>
 </div></div></div>
 
+<p>This guide explains how to ensure document-level security (DLS) for documents ingested by <a class="xref" href="connectors.html" title="Elastic connectors">Elastic connectors</a>, when building a search application.</p>
+<p>In this example we will:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Set up the <a class="xref" href="connectors-sharepoint-online.html" title="Elastic SharePoint Online connector reference">SharePoint Online connector</a> to ingest data from SharePoint Online
+</li>
+<li class="listitem">
+Set up a <span class="strong strong"><strong>Search Application</strong></span> using the Elasticsearch index created by the SharePoint Online connector
+</li>
+<li class="listitem">
+Create Elasticsearch <span class="strong strong"><strong>API keys</strong></span> with DLS and workflow restrictions to query your Search Application
+</li>
+<li class="listitem">
+Build a search experience where authenticated users can search over the data ingested by connectors
+</li>
+</ul>
+</div>
+<h3><a id="dls-e2e-guide-connector-setup"></a>Set up connector to sync data with access control<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-e2e-guide.asciidoc">edit</a></h3>
+<p>You can run SharePoint Online connector in Elastic Cloud (native) or on a self-managed deployment (connector client).
+Refer to <a class="xref" href="connectors-sharepoint-online.html" title="Elastic SharePoint Online connector reference">SharePoint Online connector</a> to learn how to set up the SharePoint Online connector and enable DLS.</p>
+<p>To run the connector client, you&#8217;ll need to run the <span class="strong strong"><strong>connectors service</strong></span> in addition to your Elastic deployment.
+Refer to <a class="xref" href="build-connector.html" title="Connector clients and frameworks"><em>Connector clients and frameworks</em></a> for details on how to set up a connector client and run the <a class="xref" href="build-connector.html#build-connector-service" title="Connector service">connectors service</a> separately.</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This guide assumes you already have an Elastic deployment, that satisfies the <a class="xref" href="build-connector.html#build-connector-prerequisites" title="Availability and prerequisites">prerequisites</a> for running the connectors service.
+If you don&#8217;t have an Elastic deployment, sign up for a <a href="https://cloud.elastic.co/registration" class="ulink" target="_blank" rel="noopener">free Elastic Cloud trial</a>.</p>
+</div>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>We use the SharePoint Online connector in this concrete example.
+Refer to <a href="/guide/en/enterprise-search/master/build-connector.html" class="ulink" target="_top">Connector clients and frameworks</a> for details about other connectors that support DLS.</p>
+</div>
+</div>
+<h3><a id="dls-e2e-guide-sharepoint-data-overview"></a>Elasticsearch indices overview<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-e2e-guide.asciidoc">edit</a></h3>
+<p>When the SharePoint Online connector is set up and you&#8217;ve started syncing content, the connector will create two separate Elasticsearch indices:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+A <span class="strong strong"><strong>content</strong></span> index that holds the searchable data in SharePoint Online.
+We&#8217;ll use this index to create our search application.
+</li>
+<li class="listitem">
+An <span class="strong strong"><strong>access control</strong></span> index that includes access control data for each user that has access to SharePoint Online.
+It will be named <code class="literal">search-acl-filter-sharepoint</code>.
+We&#8217;ll use this index to create Elasticsearch API keys that control access to the content index.
+</li>
+</ul>
+</div>
+<h3><a id="dls-e2e-guide-search-application-create"></a>Create a Search Application<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-e2e-guide.asciidoc">edit</a></h3>
+<p>To build our search experience for our SharePoint Online data, we need to create a Search Application.</p>
+<p>Follow these steps to create a Search Application in the Kibana UI:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Navigate to <span class="strong strong"><strong>Enterprise Search &gt; Search Applications</strong></span>.
+</li>
+<li class="listitem">
+Select <span class="strong strong"><strong>Create</strong></span>.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Name</strong></span> the Search Application.
+</li>
+<li class="listitem">
+Select the <span class="strong strong"><strong>index</strong></span> used by the SharePoint Online connector.
+</li>
+<li class="listitem">
+Select <span class="strong strong"><strong>Create</strong></span>.
+</li>
+</ol>
+</div>
+<p>Alternatively, you can use the <a href="/guide/en/elasticsearch/reference/master/put-search-application.html" class="ulink" target="_top">Put Search Application</a> API.</p>
+<h3><a id="dls-e2e-guide-elasticsearch-api-keys-setup"></a>Create Elasticsearch API keys<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-e2e-guide.asciidoc">edit</a></h3>
+<p>Next we need to create Elasticsearch API keys to restrict queries to the search application.
+These restrictions will ensure that users can only query documents they have access to.
+To create this API key, we will leverage information in the access control index created by the connector.</p>
+<p>The access control index will contain documents similar to this example:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+  "_index": "search-acl-filter-sharepoint",
+  "_id": "503b224d-9d1f-44ed-9c5d-a6430340c365",
+  "_version": 1,
+  "_seq_no": 0,
+  "_primary_term": 1,
+  "found": true,
+  "_source": {
+    "email": "john@example.co",
+    "access_control": [
+      "503b224d-9d1f-44ed-9c5d-a6430340c365",
+      "Engineering Members"
+      ],
+    "query": {
+      "template": {
+        "params": {
+          "access_control": [
+            "503b224d-9d1f-44ed-9c5d-a6430340c365",
+            "Engineering Members"
+            ]
+        },
+        "source": """
+        {
+          "bool": {
+            "filter": {
+              "bool": {
+                "should": [
+                  {
+                    "bool": {
+                      "must_not": {
+                        "exists": {
+                          "field": "_allow_access_control"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "terms": {
+                      "_allow_access_control.keyword": {{#toJson}}access_control{{/toJson}}
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+        """
+      }
+    }
+  }
+}</pre>
+</div>
+<p>This document contains the Elasticsearch query that describes which documents the user <code class="literal">john@example.com</code> has access to.
+The access control information is stored in the <code class="literal">access_control</code> field.
+In this case the user has access only to documents that contain <code class="literal">"503b224d-9d1f-44ed-9c5d-a6430340c365"</code> or <code class="literal">"Engineering Members"</code> in the <code class="literal">_allow_access_control</code> field.</p>
+<p>The <code class="literal">query</code> field contains the DLS query we will use to create an Elasticsearch API key.
+That key will ensure queries are restricted to the documents <code class="literal">john@example.com</code> has access to.</p>
+<p>To create the API key, we will use the <a href="/guide/en/elasticsearch/reference/master/security-api-create-api-key.html" class="ulink" target="_top">Create API Key</a> API.
+The API call will look like this:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/api_key
+{
+  "name": "john-api-key",
+  "expiration": "1d",
+  "role_descriptors": {
+    "sharepoint-online-role": {
+      "cluster": [
+        "all"
+        ],
+      "index": [
+        {
+          "names": [
+            "sharepoint-search-application"
+          ],
+          "privileges": [
+            "read"
+          ],
+          "query": {
+            "template": {
+              "params": {
+                "access_control": [
+                  "503b224d-9d1f-44ed-9c5d-a6430340c365",
+                  "Engineering Members"
+                  ]
+              },
+              "source": """
+              {
+                "bool": {
+                  "filter": {
+                    "bool": {
+                      "should": [
+                        {
+                          "bool": {
+                            "must_not": {
+                              "exists": {
+                                "field": "_allow_access_control"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "terms": {
+                            "_allow_access_control.keyword": {{#toJson}}access_control{{/toJson}}
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+              """
+            }
+          }
+        }
+      ],
+      "restriction": {
+        "workflows": [
+          "search_application_query"
+        ]
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1.console"></div>
+<p>The response will look like this:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+  "id": "0rCD3i-MjKsw4g9BpRIBa",
+  "name": "john-api-key",
+  "expiration": 1687881715555,
+  "api_key": "zTxre9L6TcmRIgd2NgLCRg",
+  "encoded": "Qk05dy1JZ0JhRDNyNGpLQ3MwUmk6elRzdGU5QjZUY21SSWdkMldnQ1RMZw=="
+}</pre>
+</div>
+<p>The <code class="literal">api_key</code> field contains the API key that can be used to query the Search Application with the appropriate DLS restrictions.</p>
+<h3><a id="dls-e2e-guide-elasticsearch-api-keys-frontend-implementation"></a>Implementation in your frontend application<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-e2e-guide.asciidoc">edit</a></h3>
+<p>If you&#8217;re building a frontend application, use the <code class="literal">encoded</code> field to pass the API key to the frontend.
+Your app can then use the API key to query the search application.
+The workflow will look something like this:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+User signs in to your application.
+</li>
+<li class="listitem">
+Your application generates an Elasticsearch API key using the <a href="/guide/en/elasticsearch/reference/master/security-api-create-api-key.html" class="ulink" target="_top">Create API Key</a> API.
+</li>
+<li class="listitem">
+The <code class="literal">encoded</code> field is returned to the frontend application.
+</li>
+<li class="listitem">
+<p>When the user searches for documents, the frontend application passes the <code class="literal">encoded</code> field to your search application&#8217;s <a href="/guide/en/elasticsearch/reference/master/search-application-search.html" class="ulink" target="_top"><code class="literal">_search</code> endpoint</a>.
+For example, you might use the <a href="https://github.com/elastic/search-application-client" class="ulink" target="_blank" rel="noopener">Search Application client</a> to make the actual queries using the API key:</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">const client = SearchApplicationClient(applicationName, endpoint, apiKey, params);</pre>
+</div>
+</li>
+</ol>
+</div>
+<p>Here&#8217;s what this workflow looks like in a sequence diagram:</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/dls-api-key-workflow.png" alt="DLS API key and search application client workflow">
+</div>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>When creating an Elasticsearch API key for query Search Applications, we recommend including the <code class="literal">search_application_query</code> restriction. This will ensure the API key can only access the Search Application Search API.</p>
+</div>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>We recommend always setting an <code class="literal">expiration</code> time when creating an Elasticsearch API key. When <code class="literal">expiration</code> is not set, the Elasticsearch API will never expire.</p>
+</div>
+</div>
+<h3><a id="dls-e2e-guide-workflow-guidance"></a>Workflow guidance<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-e2e-guide.asciidoc">edit</a></h3>
+<p>We recommend relying on the connector access control sync to automate and keep documents in sync with changes to the original content source&#8217;s user permissions.</p>
+<p>In this workflow you will need to handle the generation of the Elasticsearch API key in the backend of your application, in response to browser sign ins.</p>
+<p>Once the key is generated, the backend will also need to return that key to the client (browser) to be used in subsequent search requests to your search application.</p>
+<p>The API key can be invalidated using the <a href="/guide/en/elasticsearch/reference/master/security-api-invalidate-api-key.html" class="ulink" target="_top">Invalidate API Key API</a>.
+Additionally, if the user&#8217;s permission changes, you&#8217;ll need to update or recreate the Elasticsearch API key.</p>
+<h3><a id="dls-e2e-guide-next-steps"></a>Next steps<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-e2e-guide.asciidoc">edit</a></h3>
+<p>Refer to <a class="xref" href="search-applications-search.html" title="Setting up and searching search applications">this guide</a> to learn how to use the Search Application client to query your Search Application.</p>
+<h3><a id="dls-e2e-guide-learn-more"></a>Learn more<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/dls-e2e-guide.asciidoc">edit</a></h3>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="connectors.html" title="Elastic connectors">Elastic connectors</a>
+</li>
+<li class="listitem">
+<a class="xref" href="dls.html" title="Document level security">Document level security (DLS)</a>
+</li>
+<li class="listitem">
+<a class="xref" href="search-applications.html" title="Elastic Search Applications">Search Applications</a>
+</li>
+</ul>
+</div>
 </div>
 <div class="navfooter">
 <span class="prev">
