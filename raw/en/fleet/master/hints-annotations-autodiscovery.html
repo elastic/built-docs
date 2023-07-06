@@ -97,7 +97,7 @@ metadata:
 and avoid placing passwords in plain text.</p>
 <h6><a id="_co_elastic_hintsstream"></a><code class="literal">co.elastic.hints/stream</code><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/elastic-agent/configuration/autodiscovery/kubernetes-hints-autodiscover.asciidoc">edit</a></h6>
 <p>The stream to use for logs collection, for example, stdout/stderr.</p>
-<p>If the specified package has no logs support, a generic container&#8217;s logs input will be used as a fallback.</p>
+<p>If the specified package has no logs support, a generic container&#8217;s logs input will be used as a fallback. See the <code class="literal">Hints autodiscovery for kubernetes log collection</code> example below.</p>
 <h5><a id="_available_packages_that_support_hints_autodiscovery"></a>Available packages that support hints autodiscovery<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/elastic-agent/configuration/autodiscovery/kubernetes-hints-autodiscover.asciidoc">edit</a></h5>
 <p>The available packages that are supported through hints can be found
 <a href="https://github.com/elastic/elastic-agent/tree/main/deploy/kubernetes/elastic-agent-standalone/templates.d" class="ulink" target="_top">here</a>.</p>
@@ -141,7 +141,8 @@ The init container is already defined, so uncomment the respective section:</p>
 <p>The Elastic Agent can load multiple configuration files from <code class="literal">{path.config}/inputs.d</code>  and finally produce a unified one (refer to <a class="xref" href="elastic-agent-configuration.html" title="Configure standalone Elastic Agents"><em>Configure standalone Elastic Agents</em></a>). Users have the ability to manually mount their own templates under <code class="literal">/etc/elastic-agent/inputs.d</code> if they want to skip enabling initContainers section.</p>
 </div>
 </div>
-<h5><a id="_example_hints_autodiscovery"></a>Example: Hints autodiscovery<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/elastic-agent/configuration/autodiscovery/kubernetes-hints-autodiscover.asciidoc">edit</a></h5>
+<h5><a id="_examples"></a>Examples:<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/elastic-agent/configuration/autodiscovery/kubernetes-hints-autodiscover.asciidoc">edit</a></h5>
+<h6><a id="_hints_autodiscovery_for_redis"></a>Hints autodiscovery for redis<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/elastic-agent/configuration/autodiscovery/kubernetes-hints-autodiscover.asciidoc">edit</a></h6>
 <p>Enabling hints allows users deploying Pods on the cluster to automatically turn on Elastic
 monitoring at Pod deployment time.
 For example, to deploy a Redis Pod on the cluster and automatically enable Elastic monitoring, add the proper hints as annotations on the Pod manifest file:</p>
@@ -167,6 +168,111 @@ metadata:
 <div class="admon_content">
 <p>All assets (dashboards, ingest pipelines, and so on) related to the Redis integration are not installed. You need to explicitly <a class="xref" href="install-uninstall-integration-assets.html" title="Install and uninstall Elastic Agent integration assets">install them through Kibana</a>.</p>
 </div>
+</div>
+<h6><a id="_hints_autodiscovery_for_kubernetes_log_collection"></a>Hints autodiscovery for kubernetes log collection<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/elastic-agent/configuration/autodiscovery/kubernetes-hints-autodiscover.asciidoc">edit</a></h6>
+<p>The log collection for Kubernetes autodiscovered pods can be supported by using  <a href="https://github.com/elastic/elastic-agent/tree/main/deploy/kubernetes/elastic-agent-standalone/templates.d/container_logs.yml" class="ulink" target="_top">container_logs.yml template</a>. Elastic Agent needs to emit a container_logs mapping so as to start collecting logs for all the discovered containers <span class="strong strong"><strong>even if no annotations are present in the containers</strong></span>.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Follow steps described above to enable Hints Autodiscover
+</li>
+<li class="listitem">
+Make sure that relevant <code class="literal">container_logs.yml</code> template will be mounted under /etc/elastic-agent/inputs.d/ folder of Elastic Agent
+</li>
+<li class="listitem">
+Deploy Elastic Agent Manifest
+</li>
+<li class="listitem">
+Elastic Agent should be able to discover all containers inside kuernetes cluster and to collect available logs.
+</li>
+</ol>
+</div>
+<p>The previous default behaviour can be disabled with <code class="literal">hints.default_container_logs: false</code>.
+So this will disable the automatic logs collection from all discovered pods. Users need specifically to annotate their pod with following annotations:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">annotations:
+  co.elastic.hints/package: "container_logs"</pre>
+</div>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">providers.kubernetes:
+  node: ${NODE_NAME}
+  scope: node
+  hints:
+    enabled: true
+    default_container_logs: false
+...</pre>
+</div>
+<p>In the following sample nginx manifest, we will additionally provide specific stream annotation, in order to configure the filestream input to read only stderr stream:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: nginx
+  name: nginx
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+      annotations:
+        co.elastic.hints/package: "container_logs"
+        co.elastic.hints/stream: "stderr"
+    spec:
+      containers:
+      - image: nginx
+        name: nginx
+...</pre>
+</div>
+<p>Users can monitor the final rendered Elastic Agent configuration:</p>
+<div class="pre_wrapper lang-bash">
+<pre class="programlisting prettyprint lang-bash">kubectl exec -ti -n kube-system elastic-agent-7fkzm -- bash
+
+
+/usr/share/elastic-agent# /elastic-agent inspect -v --variables --variables-wait 2s
+
+inputs:
+- data_stream.namespace: default
+  id: hints-container-logs-3f69573a1af05c475857c1d0f98fc55aa01b5650f146d61e9653a966cd50bd9c-kubernetes-1780aca0-3741-4c8c-aced-b9776ba3fa81.nginx
+  name: filestream-generic
+  original_id: hints-container-logs-3f69573a1af05c475857c1d0f98fc55aa01b5650f146d61e9653a966cd50bd9c
+  [output truncated ....]
+  streams:
+  - data_stream:
+      dataset: kubernetes.container_logs
+      type: logs
+    exclude_files: []
+    exclude_lines: []
+    parsers:
+    - container:
+        format: auto
+        stream: stderr
+    paths:
+    - /var/log/containers/*3f69573a1af05c475857c1d0f98fc55aa01b5650f146d61e9653a966cd50bd9c.log
+    prospector:
+      scanner:
+        symlinks: true
+    tags: []
+  type: filestream
+  use_output: default
+outputs:
+  default:
+    hosts:
+    - https://elasticsearch:9200
+    password: changeme
+    type: elasticsearch
+    username: elastic
+providers:
+  kubernetes:
+    hints:
+      default_container_logs: false
+      enabled: true
+    node: control-plane
+    scope: node</pre>
 </div>
 <h5><a id="_troubleshooting"></a>Troubleshooting<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/elastic-agent/configuration/autodiscovery/kubernetes-hints-autodiscover.asciidoc">edit</a></h5>
 <p>When things do not work as expected, you may need to troubleshoot your setup. Here we provide some directions to speed up your investigation:</p>
