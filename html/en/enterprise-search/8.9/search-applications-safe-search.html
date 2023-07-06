@@ -3,8 +3,8 @@
   <head>
     
 <meta charset="UTF-8">
-<title>Safe Search endpoint | Enterprise Search documentation [8.9] | Elastic</title>
-<meta class="elastic" name="content" content="Safe Search endpoint | Enterprise Search documentation [8.9]">
+<title>Using search applications with untrusted clients | Enterprise Search documentation [8.9] | Elastic</title>
+<meta class="elastic" name="content" content="Using search applications with untrusted clients | Enterprise Search documentation [8.9]">
 
 <link rel="home" href="index.html" title="Enterprise Search documentation [8.9]"/>
 <link rel="up" href="search-applications.html" title="Elastic Search Applications"/>
@@ -144,9 +144,265 @@ Not what you want? See the
 </div>
 <div class="chapter">
 <div class="titlepage"><div><div>
-<h2 class="title"><a id="search-applications-safe-search"></a>Safe Search endpoint<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.9/enterprise-search-docs/search-applications-safe-search.asciidoc">edit</a></h2>
+<h2 class="title"><a id="search-applications-safe-search"></a>Using search applications with untrusted clients<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.9/enterprise-search-docs/search-applications-safe-search.asciidoc">edit</a></h2>
 </div></div></div>
-
+<p>When building a frontend application for search use cases, there are two main approaches to returning search results:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+The client (user&#8217;s browser) makes API requests to the application backend, which in turn makes a request to Elasticsearch.
+The Elasticsearch cluster is not exposed to the end user.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>The client (user&#8217;s browser) makes API requests directly to the search service - in this case the Elasticsearch cluster is reachable to the client.</strong></span>
+</li>
+</ol>
+</div>
+<p>This guide describes best practices when taking the second approach.
+Specifically, we will explain how to use search applications with frontend apps that make direct requests to the <a href="/guide/en/elasticsearch/reference/8.9/search-application-search.html" class="ulink" target="_blank" rel="noopener">Search Application Search API</a>.</p>
+<p>This approach has a few advantages:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+No need to maintain a passthrough query system between frontend applications and Elasticsearch
+</li>
+<li class="listitem">
+Direct requests to Elasticsearch result in faster response times
+</li>
+<li class="listitem">
+Query configuration is managed in one place: your search application configuration in Elasticsearch
+</li>
+</ul>
+</div>
+<p>We will cover:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="search-applications-safe-search.html#search-applications-safe-search-key-restrictions" title="Using Elasticsearch API keys with role restrictions">Using Elasticsearch API keys with role restrictions</a>
+</li>
+<li class="listitem">
+<a class="xref" href="search-applications-safe-search.html#search-applications-safe-search-parameter-validation" title="Parameter validation with search applications">Parameter validation in the Search Application Search API</a>
+</li>
+<li class="listitem">
+<a class="xref" href="search-applications-safe-search.html#search-applications-safe-search-cors" title="Working with CORS">Working with CORS</a>
+</li>
+</ul>
+</div>
+<h3><a id="search-applications-safe-search-key-restrictions"></a>Using Elasticsearch API keys with role restrictions<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.9/enterprise-search-docs/search-applications-safe-search.asciidoc">edit</a></h3>
+<p>When frontend applications can make direct API requests to Elasticsearch, it&#8217;s important to limit the operations they can perform.
+In our case, frontend applications should only be able to call the Search Application <span class="strong strong"><strong>Search API</strong></span>.
+To ensure this, we will create Elasticsearch API keys with <a href="/guide/en/elasticsearch/reference/8.9/role-restriction.html" class="ulink" target="_blank" rel="noopener">role restrictions</a>.
+A role restriction is used to specify under what conditions a role should be effective.</p>
+<p>The following Elasticsearch API key has access to the <code class="literal">website-product-search</code> search application, only through the Search Application Search API:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST /_security/api_key
+{
+  "name": "my-restricted-api-key",
+  "expiration": "7d",
+  "role_descriptors": {
+    "my-restricted-role-descriptor": {
+      "indices": [
+        {
+          "names": ["website-product-search"],
+          "privileges": ["read"]
+        }
+      ],
+      "restriction":  {
+        "workflows": ["search_application_query"]
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/39.console"></div>
+<p>The response will look like this:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+  "id": "v1CCJYkBvb5Pg9T-_JgO",
+  "name": "my-restricted-api-key",
+  "expiration": 1689156288526,
+  "api_key": "ztVI-1Q4RjS8qFDxAVet5w",
+  "encoded": "djFDQ0pZa0J2YjVQZzlULV9KZ086enRWSS0xUTRSalM4cUZEeEFWZXQ1dw"
+}</pre>
+</div>
+<p>The encoded value can then be directly used in the Authorization header.
+Here&#8217;s an example using cURL:</p>
+<div class="pre_wrapper lang-shell">
+<pre class="programlisting prettyprint lang-shell">curl -XPOST "http://localhost:9200/_application/search_application/website-product-search/_search" \
+ -H "Content-Type: application/json" \
+ -H "Authorization: ApiKey djFDQ0pZa0J2YjVQZzlULV9KZ086enRWSS0xUTRSalM4cUZEeEFWZXQ1dw" \
+ -d '{
+  "params": {
+    "field_name": "color",
+    "field_value": "red",
+    "agg_size": 5
+  }
+}'</pre>
+</div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>It is crucial to specify the workflow restriction.
+Without this the Elasticsearch API key can directly call <code class="literal">_search</code> and issue arbitrary Elasticsearch queries.
+This is insecure when dealing with untrusted clients.</p>
+</div>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If <code class="literal">expiration</code> is not present, by default Elasticsearch API keys never expire.
+The API key can be invalidated using the <a href="/guide/en/elasticsearch/reference/8.9/security-api-invalidate-api-key.html" class="ulink" target="_top">Invalidate API Key API</a>.</p>
+</div>
+</div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Elasticsearch API keys with role restrictions can also use field and document level security.
+This further limits how frontend applications query a search application.</p>
+</div>
+</div>
+<h3><a id="search-applications-safe-search-parameter-validation"></a>Parameter validation with search applications<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.9/enterprise-search-docs/search-applications-safe-search.asciidoc">edit</a></h3>
+<p>Your search applications use <a class="xref" href="search-applications-templates.html" title="Working with search templates">search templates</a> to render queries.
+The template parameters are passed to the Search Application Search API.
+In the case of APIs used by frontend applications or untrusted clients, we need to have strict parameter validation.
+Search applications define a JSON schema that describes which parameters the Search Application Search API allows.</p>
+<p>The following example defines a search application with strict parameter validation:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT _application/search_application/website-product-search
+{
+  "indices": [
+    "website-products"
+  ],
+  "template": {
+    "script": {
+      "source": {
+        "query": {
+          "term": {
+            "{{field_name}}": "{{field_value}}"
+          }
+        },
+        "aggs": {
+          "color_facet": {
+            "terms": {
+              "field": "color",
+              "size": "{{agg_size}}"
+            }
+          }
+        }
+      },
+      "params": {
+        "field_name": "product_name",
+        "field_value": "hello world",
+        "agg_size": 5
+      }
+    },
+    "dictionary": {
+      "properties": {
+        "field_name": {
+          "type": "string",
+          "enum": ["name", "color", "description"]
+        },
+        "field_value": {
+          "type": "string"
+        },
+        "agg_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        }
+      },
+      "required": [
+        "field_name"
+      ],
+      "additionalProperties": false
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/40.console"></div>
+<p>Using that definition, the Search Application Search API performs the following parameter validation:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+It only accepts the <code class="literal">field_name</code>, <code class="literal">field_value</code> and <code class="literal">aggs_size</code> parameters
+</li>
+<li class="listitem">
+<code class="literal">field_name</code> is restricted to only take the values "name", "color" and "description"
+</li>
+<li class="listitem">
+<code class="literal">agg_size</code> defines the size of the term aggregation and it can only take values between <code class="literal">1</code> and <code class="literal">10</code>
+</li>
+</ul>
+</div>
+<h3><a id="search-applications-safe-search-cors"></a>Working with CORS<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.9/enterprise-search-docs/search-applications-safe-search.asciidoc">edit</a></h3>
+<p>Using this approach means that your user&#8217;s browser will make requests to the Elasticsearch API directly.
+Elasticsearch supports <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS" class="ulink" target="_blank" rel="noopener">Cross-Origin Resource Sharing (CORS)</a>, but this feature is disabled by default.
+Therefore the browser will block these requests.</p>
+<p>There are two workarounds for this:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="search-applications-safe-search.html#search-applications-safe-search-cors-elasticsearch" title="Enable CORS on Elasticsearch">Enable CORS on Elasticsearch</a>
+</li>
+<li class="listitem">
+<a class="xref" href="search-applications-safe-search.html#search-applications-safe-search-cors-proxy-request" title="Proxy the request through a server that supports CORS">Proxy the request through a server that supports CORS</a>
+</li>
+</ul>
+</div>
+<h4><a id="search-applications-safe-search-cors-elasticsearch"></a>Enable CORS on Elasticsearch<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.9/enterprise-search-docs/search-applications-safe-search.asciidoc">edit</a></h4>
+<p>This is the simplest option.
+Enable CORS on Elasticsearch by adding the following to your <code class="literal">elasticsearch.yml</code> file:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">http.cors.allow-origin: "*" # Only use unrestricted value for local development
+# Use a specific origin value in production, like `http.cors.allow-origin: "https://&lt;my-website-domain.example&gt;"`
+http.cors.enabled: true
+http.cors.allow-credentials: true
+http.cors.allow-methods: OPTIONS, POST
+http.cors.allow-headers: X-Requested-With, X-Auth-Token, Content-Type, Content-Length, Authorization, Access-Control-Allow-Headers, Accept</pre>
+</div>
+<p>On Elastic Cloud, you can do this by <a href="/guide/en/cloud/current/ec-add-user-settings.html#ec-add-user-settings" class="ulink" target="_top">editing your Elasticsearch user settings</a>.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+From your deployment menu, go to the <span class="strong strong"><strong>Edit</strong></span> page.
+</li>
+<li class="listitem">
+In the <span class="strong strong"><strong>Elasticsearch</strong></span> section, select <span class="strong strong"><strong>Manage user settings and extensions</strong></span>.
+</li>
+<li class="listitem">
+Update the user settings with the configuration above.
+</li>
+<li class="listitem">
+Select <span class="strong strong"><strong>Save changes</strong></span>.
+</li>
+</ol>
+</div>
+<h4><a id="search-applications-safe-search-cors-proxy-request"></a>Proxy the request through a server that supports CORS<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.9/enterprise-search-docs/search-applications-safe-search.asciidoc">edit</a></h4>
+<p>If you are unable to enable CORS on Elasticsearch, you can proxy the request through a server that supports CORS.
+This is more complicated, but is a viable option.</p>
+<h3><a id="search-applications-safe-search-learn-more"></a>Learn more<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.9/enterprise-search-docs/search-applications-safe-search.asciidoc">edit</a></h3>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="/guide/en/elasticsearch/reference/8.9/role-restriction.html" class="ulink" target="_blank" rel="noopener">Role restrictions</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/elasticsearch/reference/8.9/document-level-security.html" class="ulink" target="_blank" rel="noopener">Document level security</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/elasticsearch/reference/8.9/field-level-security.html" class="ulink" target="_blank" rel="noopener">Field level security</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/elasticsearch/reference/8.9/put-search-application.html" class="ulink" target="_blank" rel="noopener">PUT Search Application API</a>
+</li>
+<li class="listitem">
+<a href="/guide/en/elasticsearch/reference/8.9/search-application-search.html" class="ulink" target="_top">Guide to Search Application client</a>
+</li>
+<li class="listitem">
+<a class="xref" href="search-applications-templates.html" title="Working with search templates">Working with search templates</a>
+</li>
+</ul>
+</div>
 </div>
 <div class="navfooter">
 <span class="prev">
