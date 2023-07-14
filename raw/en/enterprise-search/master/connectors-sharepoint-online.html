@@ -432,6 +432,95 @@ For more information read <a class="xref" href="sync-rules.html#sync-rules-types
 }</pre>
 </div>
 <p>This rule will not extract content of any drive items (files in document libraries) that haven&#8217;t been modified for 60 days or more.</p>
+<h5><a id="connectors-sharepoint-online-sync-rules-limitations"></a>Limitations of sync rules with incremental syncs<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/connectors-sharepoint-online.asciidoc">edit</a></h5>
+<p>Changing sync rules after Sharepoint Online content has already been indexed can bring unexpected results, when using <a class="xref" href="connectors-sync-types.html#connectors-sync-types-incremental" title="Incremental syncs">incremental syncs</a>.</p>
+<p>Incremental syncs ensure <em>updates</em> from 3rd-party system, but do not modify existing documents in the index.</p>
+<p><span class="strong strong"><strong>To avoid these issues, run a full sync after changing sync rules (basic or advanced).</strong></span></p>
+<p>Let&#8217;s take a look at several examples where incremental syncs might lead to inconsistent data on your index.</p>
+<h6><a id="connectors-sharepoint-online-sync-rules-limitations-restrictive-added"></a>Example: Restrictive basic sync rule added after a full sync<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/connectors-sharepoint-online.asciidoc">edit</a></h6>
+<p>Imagine your Sharepoint Online drive contains the following drive items:</p>
+<div class="pre_wrapper lang-txt">
+<pre class="programlisting prettyprint lang-txt">/Documents/Report.doc
+/Documents/Spreadsheet.xls
+/Presentations/Q4-2020-Report.pdf
+/Presentations/Q4-2020-Report-Data.xls
+/Personal/Documents/Sales.xls</pre>
+</div>
+<p>After a sync, all these drive items will be stored on your Elasticsearch index.
+Let&#8217;s add a basic sync rule, filtering files by their path:</p>
+<div class="pre_wrapper lang-txt">
+<pre class="programlisting prettyprint lang-txt">Exclude WHERE path CONTAINS "Documents"</pre>
+</div>
+<p>These filtering rules will exclude all files with "Documents" in their path, leaving only files in <code class="literal">/Presentations</code> directory:</p>
+<div class="pre_wrapper lang-txt">
+<pre class="programlisting prettyprint lang-txt">/Presentations/Q4-2020-Report.pdf
+/Presentations/Q4-2020-Report-Data.xls</pre>
+</div>
+<p>If no files were changed, incremental sync will not receive information about changes from Sharepoint Online and won&#8217;t be able to delete any files, leaving the index in the same state it was before the sync.</p>
+<p>After a <span class="strong strong"><strong>full sync</strong></span>, the index will be updated and files that are excluded by sync rules will be removed.</p>
+<h6><a id="connectors-sharepoint-online-sync-rules-limitations-restrictive-removed"></a>Example: Restrictive basic sync rules removed after a full sync<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/connectors-sharepoint-online.asciidoc">edit</a></h6>
+<p>Imagine that Sharepoint Online drive has the following drive items:</p>
+<div class="pre_wrapper lang-txt">
+<pre class="programlisting prettyprint lang-txt">/Documents/Report.doc
+/Documents/Spreadsheet.xls
+/Presentations/Q4-2020-Report.pdf
+/Presentations/Q4-2020-Report-Data.xls
+/Personal/Documents/Sales.xls</pre>
+</div>
+<p>Before doing a sync, we add a restrictive basic filtering rule:</p>
+<div class="pre_wrapper lang-txt">
+<pre class="programlisting prettyprint lang-txt">Exclude WHERE path CONTAINS "Documents"</pre>
+</div>
+<p>After a full sync, the index will contain only files in the <code class="literal">/Presentations</code> directory:</p>
+<div class="pre_wrapper lang-txt">
+<pre class="programlisting prettyprint lang-txt">/Presentations/Q4-2020-Report.pdf
+/Presentations/Q4-2020-Report-Data.xls</pre>
+</div>
+<p>Afterwards, we can remove the filtering rule and run an incremental sync. If no changes happened to the files, incremental sync will not mirror these changes in the Elasticsearch index, because Sharepoint Online will not report any changes to the items.
+Only a <span class="strong strong"><strong>full sync</strong></span> will include the items previously ignored by the sync rule.</p>
+<h6><a id="connectors-sharepoint-online-sync-rules-limitations-restrictive-changed"></a>Example: Advanced sync rules edge case<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/connectors-sharepoint-online.asciidoc">edit</a></h6>
+<p>Advanced sync rules can be applied to limit which documents will have content extracted.
+For example, it&#8217;s possible to set a rule so that documents older than 180 days won&#8217;t have content extracted.</p>
+<p>However, there is an edge case.
+Imagine a document that is 179 days old and its content is extracted and indexed into Elasticsearch.
+After 2 days, this document will be 181 days old.
+Since this document was already ingested it will not be modified.
+Therefore, the content will not be removed from the index, following an incremental sync.</p>
+<p>In this situation, if you want older documents to be removed, you will need to clean the index up manually.
+For example, you can manually run an Elasticsearch query that removes drive item content older than 180 days:</p>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST &lt;INDEX_NAME&gt;/_update_by_query?conflicts=proceed
+{
+  "query": {
+    "bool": {
+      "filter": [
+        {
+          "match": {
+            "object_type": "drive_item"
+          }
+        },
+        {
+          "exists": {
+            "field": "file"
+          }
+        },
+        {
+          "range": {
+            "lastModifiedDateTime": {
+              "lte": "now-180d"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "script": {
+    "source": "ctx._source.body = ''",
+    "lang": "painless"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/11.console"></div>
 <h3><a id="connectors-sharepoint-online-dls"></a>Document-level security<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/main/enterprise-search-docs/connectors-sharepoint-online.asciidoc">edit</a></h3>
 <p>Document-level security (DLS) enables you to restrict access to documents based on a user&#8217;s permissions.
 This feature is available by default for the SharePoint Online connector.</p>
