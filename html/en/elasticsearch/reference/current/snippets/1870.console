@@ -1,35 +1,49 @@
-# Creates a component template for mappings
-PUT _component_template/my-mappings
+PUT _watcher/watch/log_event_watch
 {
-  "template": {
-    "mappings": {
-      "properties": {
-        "@timestamp": {
-          "type": "date",
-          "format": "date_optional_time||epoch_millis"
-        },
-        "message": {
-          "type": "wildcard"
+  "trigger" : {
+    "schedule" : { "interval" : "5m" }
+  },
+  "input" : {
+    "search" : {
+      "request" : {
+        "indices" : "log-events",
+        "body" : {
+          "size" : 0,
+          "query" : { "match" : { "status" : "error" } }
         }
       }
     }
   },
-  "_meta": {
-    "description": "Mappings for @timestamp and message fields",
-    "my-custom-meta-field": "More arbitrary metadata"
-  }
-}
-
-# Creates a component template for index settings
-PUT _component_template/my-settings
-{
-  "template": {
-    "settings": {
-      "index.lifecycle.name": "my-lifecycle-policy"
-    }
+  "condition" : {
+    "compare" : { "ctx.payload.hits.total" : { "gt" : 0 } }
   },
-  "_meta": {
-    "description": "Settings for ILM",
-    "my-custom-meta-field": "More arbitrary metadata"
+  "actions" : {
+    "email_administrator" : {
+      "email" : {
+        "to" : "sys.admino@host.domain",
+        "subject" : "Encountered {{ctx.payload.hits.total}} errors",
+        "body" : "Too many error in the system, see attached data",
+        "attachments" : {
+          "attached_data" : {
+            "data" : {
+              "format" : "json"
+            }
+          }
+        },
+        "priority" : "high"
+      }
+    },
+    "notify_pager" : {
+      "condition": {
+        "compare" : { "ctx.payload.hits.total" : { "gt" : 5 } }
+      },
+      "webhook" : {
+        "method" : "POST",
+        "host" : "pager.service.domain",
+        "port" : 1234,
+        "path" : "/{{watch_id}}",
+        "body" : "Encountered {{ctx.payload.hits.total}} errors"
+      }
+    }
   }
 }
