@@ -346,7 +346,7 @@ The API call will look like this:</p>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/1.console"></div>
+<div class="console_widget" data-snippet="snippets/2.console"></div>
 <p>The response will look like this:</p>
 <div class="pre_wrapper lang-json">
 <pre class="programlisting prettyprint lang-json">{
@@ -358,6 +358,160 @@ The API call will look like this:</p>
 }</pre>
 </div>
 <p>The <code class="literal">api_key</code> field contains the API key that can be used to query the Search Application with the appropriate DLS restrictions.</p>
+<h4><a id="dls-e2e-guide-elasticsearch-querying-multiple-indices"></a>Querying multiple indices<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.9/enterprise-search-docs/dls-e2e-guide.asciidoc">edit</a></h4>
+<p>This section describes how to generate an API key to query a search application that contains multiple indices with documents ingested by connectors with DLS.</p>
+<p>A user might have multiple identities that define which documents they are allowed to read.
+In this case we want to create a single Elasticsearch API key that can be used to query only the documents this user has access to.</p>
+<p>Let&#8217;s assume we want to create an API key that combines the following user identities:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET .search-acl-filter-source1
+{
+  "_id": "example.user@example.com",
+  "identity": {
+      "username": "example username",
+      "email": "example.user@example.com"
+   },
+   "query": {
+        "template": {
+            "params": {
+                "access_control": [
+                    "example.user@example.com",
+                    "source1-user-group"]
+            }
+        },
+        "source": "..."
+    }
+}</pre>
+</div>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">GET .search-acl-filter-source2
+{
+  "_id": "example.user@example.com",
+  "identity": {
+      "username": "example username",
+      "email": "example.user@example.com"
+   },
+   "query": {
+        "template": {
+            "params": {
+                "access_control": [
+                    "example.user@example.com",
+                    "source2-user-group"]
+            }
+        },
+        "source": "..."
+    }
+}</pre>
+</div>
+<p><code class="literal">.search-acl-filter-source1</code> and <code class="literal">.search-acl-filter-source2</code> define the access control identities for <code class="literal">search-source1</code> and <code class="literal">search-source2</code>.</p>
+<p>The following script exemplifies how to generate the Elasticsearch API key that combines multiple user identities:</p>
+<div class="pre_wrapper lang-javascript">
+<pre class="programlisting prettyprint lang-javascript">require("dotenv").config();
+const axios = require("axios");
+
+// Elasticsearch URL and creds retrieved from environment variables
+const ELASTICSEARCH_URL = process.env.ELASTICSEARCH_URL;
+const ELASTICSEARCH_USER = process.env.ELASTICSEARCH_USER;
+const ELASTICSEARCH_PASSWORD = process.env.ELASTICSEARCH_PASSWORD;
+
+const config = {
+  auth: {
+    username: ELASTICSEARCH_USER,
+    password: ELASTICSEARCH_PASSWORD,
+  },
+  headers: {
+    "Content-Type": "application/json",
+  },
+};
+
+async function createApiKey({
+  searchApplication,
+  userId,
+  indices = "",
+  metadata,
+  expiration = "1d"
+}) {
+  try {
+    const indices = indices.split(",");
+
+    let combinedQuery = { bool: { should: [] } };
+
+    for (const index of indices) {
+      const aclsIndex = `.search-acl-filter-${index.replace("search-", "")}`;
+      const response = await axios.get(
+        `${ELASTICSEARCH_URL}/${aclsIndex}/_doc/${userId}`,
+        config
+      );
+      combinedQuery.bool.should.push({
+        bool: {
+          must: [
+            {
+              term: {
+                "_index": index,
+              },
+            },
+            response.data._source.query.source,
+          ],
+        },
+      });
+    }
+
+    if (!metadata || Object.keys(metadata).length === 0) {
+      metadata = { created_by: "create-api-key" };
+    }
+
+    const apiKeyBody = {
+      name: userId,
+      expiration,
+      role_descriptors: {
+        [`${searchApplication}-role`]: {
+          index: [
+            {
+              names: [searchApplication],
+              privileges: ["read"],
+              query: combinedQuery,
+            },
+          ],
+          restriction: {
+            workflows: ["search_application_query"],
+          },
+        },
+      },
+      metadata,
+    };
+
+    const apiKeyResponse = await axios.post(
+      `${ELASTICSEARCH_URL}/_security/api_key`,
+      apiKeyBody,
+      config
+    );
+
+    console.log(apiKeyResponse.data);
+    return apiKeyResponse.data.encoded;
+  } catch (error) {
+    console.log(error)
+  }
+}
+
+// example usage:
+createApiKey({
+  searchApplication: "my-search-app",
+  userId: "example.user@example.com",
+  indices: "search-source1,search-source2",
+  expiration: "1d",
+  metadata: {
+    application: "my-search-app",
+    namespace: "dev",
+    foo: "bar",
+  },
+}).then((encodedKey) =&gt; console.log(encodedKey));</pre>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The example combines multiple identities into a single role descriptor. This is because an Elasticsearch API key can use role restrictions only if it has a <span class="strong strong"><strong>single role descriptor</strong></span>.</p>
+</div>
+</div>
 <h3><a id="dls-e2e-guide-elasticsearch-api-keys-frontend-implementation"></a>Implementation in your frontend application<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/enterprise-search-pubs/edit/8.9/enterprise-search-docs/dls-e2e-guide.asciidoc">edit</a></h3>
 <p>If you&#8217;re building a frontend application, use the <code class="literal">encoded</code> field to pass the API key to the frontend.
 Your app can then use the API key to query the search application.
