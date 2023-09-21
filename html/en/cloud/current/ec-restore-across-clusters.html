@@ -3,13 +3,13 @@
   <head>
     
 <meta charset="UTF-8">
-<title>Share a repository across clusters | Elasticsearch Service Documentation | Elastic</title>
-<meta class="elastic" name="content" content="Share a repository across clusters | Elasticsearch Service Documentation">
+<title>Restore across clusters | Elasticsearch Service Documentation | Elastic</title>
+<meta class="elastic" name="content" content="Restore across clusters | Elasticsearch Service Documentation">
 
 <link rel="home" href="index.html" title="Elasticsearch Service Documentation"/>
 <link rel="up" href="ec-snapshot-restore.html" title="Snapshot and restore"/>
-<link rel="prev" href="ec-snapshot-restore.html" title="Snapshot and restore"/>
-<link rel="next" href="ec-custom-repository.html" title="Snapshot and restore with custom repositories"/>
+<link rel="prev" href="ec-restore-snapshot.html" title="Restore a snapshot"/>
+<link rel="next" href="ec-restore-snapshots-into-new-deployment.html" title="Restore snapshot into a new deployment"/>
 <meta class="elastic" name="product_version" content="latest"/>
 <meta class="elastic" name="product_name" content="Elastic Cloud"/>
 <meta class="elastic" name="website_area" content="documentation"/>
@@ -109,83 +109,103 @@
 </div>
 <div class="navheader">
 <span class="prev">
-<a href="ec-snapshot-restore.html">« Snapshot and restore</a>
+<a href="ec-restore-snapshot.html">« Restore a snapshot</a>
 </span>
 <span class="next">
-<a href="ec-custom-repository.html">Snapshot and restore with custom repositories »</a>
+<a href="ec-restore-snapshots-into-new-deployment.html">Restore snapshot into a new deployment »</a>
 </span>
 </div>
 <div class="chapter">
 <div class="titlepage"><div><div>
-<h2 class="title"><a id="ec_share_a_repository_across_clusters"></a>Share a repository across clusters<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/cloud/edit/ms-95/docs/saas/snapshot-restore.asciidoc">edit</a></h2>
+<h2 class="title"><a id="ec-restore-across-clusters"></a>Restore across clusters<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/cloud/edit/ms-97/docs/shared/ec-ce-working-with-snapshots.asciidoc">edit</a></h2>
 </div></div></div>
-<p><a id="ec-share-repository"></a>Create a custom repository that references another cluster&#8217;s repository.</p>
-<div class="important admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p>To restore a snapshot from one cluster to another cluster, both clusters must be in the same region.</p>
-</div>
-</div>
-<p>If you do a <code class="literal">GET /_snapshot/found-snapshots</code> request, you can find the name of your bucket. Here&#8217;s an example:</p>
-<div class="pre_wrapper lang-json">
-<pre class="programlisting prettyprint lang-json">On S3
-{
-  "found-snapshots" : {
-    "type" : "s3",
-    "settings" : {
-      "bucket" : "[RANDOM_STRING]",
-      "base_path" : "snapshots/[cluster-id]",
-      "server_side_encryption" : "true",
-      "compress" : "true"
-    }
-  }
-}
-
-On Azure
-{
-  "found-snapshots": {
-    "type": "azure",
-    "uuid": "rZOzI7s7RPiGZlv9OdcRhQ",
-    "settings": {
-      "container": "c8dc7246645e54394993b2d20b25d50",
-      "client": "elastic-internal-9a8415",
-      "base_path": "snapshots/9a8415caf32b4c1aa243b61c355ca2e2",
-      "container_name": "c8dc7246645e54394993b2d20b25d50",
-      "use_for_peer_recovery": "true"
-    }
-  }
- }</pre>
-</div>
-<p>The random string bucket name is the same for all your clusters in that region. All nodes in your clusters in that region are configured with credentials that have access to that bucket. The only thing that differs is the <code class="literal">base_path</code>.</p>
-<p>You can create a reference to the repository associated with another cluster by creating a second repository. For example, to copy indices from a production cluster to a dev cluster, you can run <code class="literal">PUT /_snapshot/production</code> on the dev cluster with the following body to create a second repository. Ensure to use <code class="literal">readonly</code> when you register the same repository with multiple clusters as only one cluster (in this case, production) should have write access to the repository while all other connected clusters (in this case, dev)  have <code class="literal">readonly</code> access. For example:</p>
-<div class="pre_wrapper lang-json">
-<pre class="programlisting prettyprint lang-json">{
-  "type": "s3",
-  "settings" : {
-    "bucket": "[RANDOM_STRING]",
-    "base_path": "snapshots/[production-cluster-id]",
-    "server_side_encryption": "true",
-    "compress": "true",
-    "readonly": "true",
-    "aws_account": "[my-operations-account]",
-    "client": "[dev-client]"
-  }
-}</pre>
-</div>
-<p>You should get snapshots on the dev cluster from the production cluster with <code class="literal">GET _snapshot/production/_all</code>. Then you can restore indices from the production cluster to the dev cluster by, for example, running <code class="literal">POST /_snapshot/production/[my-snapshot]/_restore</code> on the dev cluster.</p>
+<p>Snapshots can be restored to either the same Elasticsearch cluster or to another cluster. If you are restoring all indices to another cluster, you can <em>clone</em> a cluster.</p>
 <div class="note admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>When you use the same repository across clusters, you are responsible for not writing to the same location at the same time.</p>
+<p>Users created using the X-Pack security features or using Shield are not included when you restore across clusters, only data from Elasticsearch indices is restored. If you do want to create a cloned cluster with the same users as your old cluster, you need to recreate the users manually on the new cluster.</p>
 </div>
 </div>
+<p>Restoring to another cluster is useful for scenarios where isolating activities on a separate cluster is beneficial, such as:</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+Performing ad hoc analytics
+</span>
+</dt>
+<dd>
+For most logging and metrics use cases, it is cost prohibitive to have all the data in memory, even if it would provide the best performance for aggregations. Cloning the relevant data to an ad hoc analytics cluster that can be discarded after use is a cost effective way to experiment with your data, without risk to existing clusters used for production.
+</dd>
+<dt>
+<span class="term">
+Enabling your developers
+</span>
+</dt>
+<dd>
+Realistic test data is crucial for uncovering unexpected errors early in the development cycle. What can be more realistic than actual data from a production cluster? Giving your developers access to real production data is a great way to break down silos.
+</dd>
+<dt>
+<span class="term">
+Testing mapping changes
+</span>
+</dt>
+<dd>
+Mapping changes almost always require reindexing. Unless your data volume is trivial, reindexing requires time and tweaking the parameters to achieve the best reindexing performance usually takes a little trial and error. While this use case could also be handled by running the scan and scroll query directly against the source cluster, a long lived scroll has the side effect of blocking merges even if the scan query is very light weight.
+</dd>
+<dt>
+<span class="term">
+Integration testing
+</span>
+</dt>
+<dd>
+Test your application against a real live Elasticsearch cluster with actual data. If you automate this, you could also aggregate performance metrics from the tests and use those metrics to detect if a change in your application has introduced a performance degradation.
+</dd>
+</dl>
+</div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>A cluster is eligible as a destination for a snapshot restore, if it meets these criteria:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+The cluster is in the same region. For example, a snapshot made in <code class="literal">eu-west-1</code> cannot be restored to <code class="literal">us-east-1</code> at this point. If you need to restore snapshots across regions, use a <a class="xref" href="ec-custom-repository.html" title="Snapshot and restore with custom repositories">custom repository</a>.
+</li>
+<li class="listitem">
+The destination cluster is able to read the indices. You can generally restore to your Elasticsearch cluster snapshots of indices created back to the previous major version, but see the <a href="/guide/en/elasticsearch/reference/8.10/snapshot-restore.html#snapshot-restore-version-compatibility" class="ulink" target="_top">version matrix</a> for all the details.
+</li>
+</ul>
+</div>
+</div>
+</div>
+<p>To restore snapshots across clusters, there are two options:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="ec-restore-snapshots-into-new-deployment.html" title="Restore snapshot into a new deployment">Restore snapshot into a new deployment</a>
+</li>
+<li class="listitem">
+<a class="xref" href="ec-restore-snapshots-into-existing-deployment.html" title="Restore snapshot into an existing deployment">Restore snapshot into an existing deployment</a>
+</li>
+</ul>
+</div>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>When restoring from a deployment that&#8217;s using searchable snapshots, refer to <a class="xref" href="ec-restore-snapshots-containing-searchable-snapshots-indices-across-clusters.html" title="Restore snapshots containing searchable snapshots indices across clusters">Restore snapshots containing searchable snapshots indices across clusters</a></p>
+</div>
+</div>
+
+
+
 </div>
 <div class="navfooter">
 <span class="prev">
-<a href="ec-snapshot-restore.html">« Snapshot and restore</a>
+<a href="ec-restore-snapshot.html">« Restore a snapshot</a>
 </span>
 <span class="next">
-<a href="ec-custom-repository.html">Snapshot and restore with custom repositories »</a>
+<a href="ec-restore-snapshots-into-new-deployment.html">Restore snapshot into a new deployment »</a>
 </span>
 </div>
 </div>
