@@ -137,7 +137,7 @@ search on your data.</p>
 <div class="icon"></div>
 <div class="admon_content">
 <p>Only the first 512 extracted tokens per field are considered during
-semantic search with ELSER v1. Refer to
+semantic search with ELSER. Refer to
 <a href="/guide/en/machine-learning/master/ml-nlp-limitations.html#ml-nlp-elser-v1-limit-512" class="ulink" target="_top">this page</a> for more
 information.</p>
 </div>
@@ -163,27 +163,28 @@ you must provide suitably sized nodes yourself.</p>
 <h4><a id="elser-mappings"></a>Create the index mapping<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/semantic-search-elser.asciidoc">edit</a></h4>
 <p>First, the mapping of the destination index - the index that contains the tokens
 that the model created based on your text - must be created.  The destination
-index must have a field with the <a class="xref" href="rank-features.html" title="Rank features field type"><code class="literal">rank_features</code></a> field type
-to index the ELSER output.</p>
+index must have a field with the
+<a class="xref" href="rank-features.html" title="Rank features field type"><code class="literal">sparse_vector</code> or <code class="literal">rank_features</code></a> field type to index the
+ELSER output.</p>
 <div class="note admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>ELSER output must be ingested into a field with the <code class="literal">rank_features</code> field
-type. Otherwise, Elasticsearch interprets the token-weight pairs as a massive amount of
-fields in a document. If you get an error similar to this
+<p>ELSER output must be ingested into a field with the <code class="literal">sparse_vector</code> or
+<code class="literal">rank_features</code> field type. Otherwise, Elasticsearch interprets the token-weight pairs as
+a massive amount of fields in a document. If you get an error similar to this
 <code class="literal">"Limit of total fields [1000] has been exceeded while adding new fields"</code> then
 the ELSER output field is not mapped properly and it has a field type different
-than <code class="literal">rank_features</code>.</p>
+than <code class="literal">sparse_vector</code> or <code class="literal">rank_features</code>.</p>
 </div>
 </div>
-<a id="bcb95acf9c4f11ec952c5f2af85919cb"></a>
+<a id="7b74d99eec1db8ef9e7451e7bbf1f27f"></a>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">PUT my-index
 {
   "mappings": {
     "properties": {
       "ml.tokens": { <a id="CO234-1"></a><i class="conum" data-value="1"></i>
-        "type": "rank_features" <a id="CO234-2"></a><i class="conum" data-value="2"></i>
+        "type": "sparse_vector" <a id="CO234-2"></a><i class="conum" data-value="2"></i>
       },
       "text": { <a id="CO234-3"></a><i class="conum" data-value="3"></i>
         "type": "text" <a id="CO234-4"></a><i class="conum" data-value="4"></i>
@@ -208,7 +209,7 @@ than <code class="literal">rank_features</code>.</p>
 <p><a href="#CO234-2"><i class="conum" data-value="2"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>The field to contain the tokens is a <code class="literal">rank_features</code> field.</p>
+<p>The field to contain the tokens is a <code class="literal">sparse_vector</code> field.</p>
 </td>
 </tr>
 <tr>
@@ -235,14 +236,14 @@ In this example, the name of the field is <code class="literal">text</code>.</p>
 <p>Create an <a class="xref" href="ingest.html" title="Ingest pipelines">ingest pipeline</a> with an
 <a class="xref" href="inference-processor.html" title="Inference processor">inference processor</a> to use ELSER to infer against the data
 that is being ingested in the pipeline.</p>
-<a id="0d221f025f6941796bf17a836f539541"></a>
+<a id="d445dc1faee48b73ac3f48a0136e39c0"></a>
 <div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/elser-v1-test
+<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/elser-v2-test
 {
   "processors": [
     {
       "inference": {
-        "model_id": ".elser_model_1",
+        "model_id": ".elser_model_2",
         "target_field": "ml",
         "field_map": { <a id="CO235-1"></a><i class="conum" data-value="1"></i>
           "text": "text_field"
@@ -297,7 +298,7 @@ can see an index named <code class="literal">test-data</code> with 182469 docume
 <h4><a id="reindexing-data-elser"></a>Ingest the data through the inference ingest pipeline<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/semantic-search-elser.asciidoc">edit</a></h4>
 <p>Create the tokens from the text by reindexing the data throught the inference
 pipeline that uses ELSER as the inference model.</p>
-<a id="33494d09cd855ffbe67523cbe75ebc45"></a>
+<a id="bf17440ac178d2ef5f5be643d033920b"></a>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">POST _reindex?wait_for_completion=false
 {
@@ -307,7 +308,7 @@ pipeline that uses ELSER as the inference model.</p>
   },
   "dest": {
     "index": "my-index",
-    "pipeline": "elser-v1-test"
+    "pipeline": "elser-v2-test"
   }
 }</pre>
 </div>
@@ -339,37 +340,21 @@ follow the progress.</p>
 query text and the ELSER model ID. The example below uses the query text "How to
 avoid muscle soreness after running?", the <code class="literal">ml.tokens</code> field contains the
 generated ELSER output:</p>
-<div class="pre_wrapper lang-ruby alternative">
-<pre class="programlisting prettyprint lang-ruby alternative">response = client.search(
-  index: 'my-index',
-  body: {
-    query: {
-      text_expansion: {
-        'ml.tokens' =&gt; {
-          model_id: '.elser_model_1',
-          model_text: 'How to avoid muscle soreness after running?'
-        }
-      }
-    }
-  }
-)
-puts response</pre>
-</div>
-<a id="a4709da258a667cae4199ec3a1e84b3b"></a>
-<div class="pre_wrapper lang-console default has-ruby">
-<pre class="programlisting prettyprint lang-console default has-ruby">GET my-index/_search
+<a id="b3b9bd7c5f75e650f7af7479b02aeeca"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">GET my-index/_search
 {
    "query":{
       "text_expansion":{
          "ml.tokens":{
-            "model_id":".elser_model_1",
+            "model_id":".elser_model_2",
             "model_text":"How to avoid muscle soreness after running?"
          }
       }
    }
 }</pre>
 </div>
-<div class="console_widget has-ruby" data-snippet="snippets/982.console"></div>
+<div class="console_widget" data-snippet="snippets/982.console"></div>
 <p>The result is the top 10 documents that are closest in meaning to your query
 text from the <code class="literal">my-index</code> index sorted by their relevancy. The result also
 contains the extracted tokens for each of the relevant search results with their
@@ -403,7 +388,7 @@ weights.</p>
                "exercises":0.36694175,
                (...)
             },
-            "model_id":".elser_model_1"
+            "model_id":".elser_model_2"
          }
       }
    },
@@ -423,7 +408,7 @@ Elasticsearch queries. Those scores can be regularized by increasing or decreasi
 relevance scores of each query by using the <code class="literal">boost</code> parameter. Recall on the
 <code class="literal">text_expansion</code> query can be high where there is a long tail of less relevant
 results. Use the <code class="literal">min_score</code> parameter to prune those less relevant documents.</p>
-<a id="997cdeac9795ea1c07c5dbb352f9c5f1"></a>
+<a id="bc4f5d9c92cb7fae56f907655ddd0ec7"></a>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">GET my-index/_search
 {
@@ -434,7 +419,7 @@ results. Use the <code class="literal">min_score</code> parameter to prune those
           "text_expansion": {
             "ml.tokens": {
               "model_text": "How to avoid muscle soreness after running?",
-              "model_id": ".elser_model_1",
+              "model_id": ".elser_model_2",
               "boost": 1 <a id="CO237-2"></a><i class="conum" data-value="2"></i>
             }
           }
@@ -514,7 +499,7 @@ source aligns with your specific requirements and use case.</p>
 </div>
 <p>The mapping that excludes <code class="literal">ml.tokens</code> from the  <code class="literal">_source</code> field can be created
 by the following API call:</p>
-<a id="2c525772fb07b89945aa7f7bd04be613"></a>
+<a id="2c898fc3494827d779aaafb67632ea53"></a>
 <div class="pre_wrapper lang-console">
 <pre class="programlisting prettyprint lang-console">PUT my-index
 {
@@ -526,7 +511,7 @@ by the following API call:</p>
     },
     "properties": {
       "ml.tokens": {
-        "type": "rank_features"
+        "type": "sparse_vector"
       },
       "text": {
         "type": "text"
@@ -543,7 +528,7 @@ by the following API call:</p>
 <a href="/guide/en/machine-learning/master/ml-nlp-elser.html" class="ulink" target="_top">How to download and deploy ELSER</a>
 </li>
 <li class="listitem">
-<a href="/guide/en/machine-learning/master/ml-nlp-limitations.html#ml-nlp-elser-v1-limit-512" class="ulink" target="_top">ELSER v1 limitation</a>
+<a href="/guide/en/machine-learning/master/ml-nlp-limitations.html#ml-nlp-elser-v1-limit-512" class="ulink" target="_top">ELSER limitation</a>
 </li>
 <li class="listitem">
 <a href="/blog/may-2023-launch-information-retrieval-elasticsearch-ai-model" class="ulink" target="_top">Improving information retrieval in the Elastic Stack: Introducing Elastic Learned Sparse Encoder, our new retrieval model</a>
