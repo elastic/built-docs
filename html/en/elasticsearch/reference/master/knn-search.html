@@ -892,6 +892,350 @@ puts response</pre>
 <p>In our data set, the only document with the file type of <code class="literal">png</code> has a vector of <code class="literal">[42, 8, -15]</code>. The <code class="literal">l2_norm</code> distance
 between <code class="literal">[42, 8, -15]</code> and <code class="literal">[1, 5, -20]</code> is <code class="literal">41.412</code>, which is greater than the configured similarity of <code class="literal">36</code>. Meaning,
 this search will return no hits.</p>
+<h4><a id="nested-knn-search"></a>Nested kNN Search<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></h4>
+<p>It is common for text to exceed a particular model&#8217;s token limit and requires chunking before building the embeddings
+for individual chunks. When using <a class="xref" href="nested.html" title="Nested field type"><code class="literal">nested</code></a> with <a class="xref" href="dense-vector.html" title="Dense vector field type"><code class="literal">dense_vector</code></a>, you can achieve nearest
+passage retrieval without copying top-level document metadata.</p>
+<p>Here is a simple passage vectors index that stores vectors and some top-level metadata for filtering.</p>
+<a id="e00586875916a9915e06476e32834d99"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">PUT passage_vectors
+{
+    "mappings": {
+        "properties": {
+            "full_text": {
+                "type": "text"
+            },
+            "creation_time": {
+                "type": "date"
+            },
+            "paragraph": {
+                "type": "nested",
+                "properties": {
+                    "vector": {
+                        "type": "dense_vector",
+                        "dims": 2,
+                        "index": true,
+                        "similarity": "cosine"
+                    },
+                    "text": {
+                        "type": "text",
+                        "index": false
+                    }
+                }
+            }
+        }
+    }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/966.console"></div>
+<p>With the above mapping, we can index multiple passage vectors along with storing the individual passage text.</p>
+<a id="2009f2d1ba0780a799a0fdce889c9739"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST passage_vectors/_bulk?refresh=true
+{ "index": { "_id": "1" } }
+{ "full_text": "first paragraph another paragraph", "creation_time": "2019-05-04", "paragraph": [ { "vector": [ 0.45, 45 ], "text": "first paragraph", "paragraph_id": "1" }, { "vector": [ 0.8, 0.6 ], "text": "another paragraph", "paragraph_id": "2" } ] }
+{ "index": { "_id": "2" } }
+{ "full_text": "number one paragraph number two paragraph", "creation_time": "2020-05-04", "paragraph": [ { "vector": [ 1.2, 4.5 ], "text": "number one paragraph", "paragraph_id": "1" }, { "vector": [ -1, 42 ], "text": "number two paragraph", "paragraph_id": "2" } ] }</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/967.console"></div>
+<p>The query will seem very similar to a typical kNN search:</p>
+<a id="1d746272a7511bf91302a15b5c58ca0e"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST passage_vectors/_search
+{
+    "fields": ["full_text", "creation_time"],
+    "_source": false,
+    "knn": {
+        "query_vector": [
+            0.45,
+            45
+        ],
+        "field": "paragraph.vector",
+        "k": 2,
+        "num_candidates": 2
+    }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/968.console"></div>
+<p>Note below that even though we have 4 total vectors, we still return two documents. kNN search over nested dense_vectors
+will always diversify the top results over the top-level document. Meaning, <code class="literal">"k"</code> top-level documents will be returned,
+scored by their nearest passage vector (e.g. <code class="literal">"paragraph.vector"</code>).</p>
+<a id="bc2c4a47c4c8927d0cdeb925b2fdb767"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+    "took": 4,
+    "timed_out": false,
+    "_shards": {
+        "total": 1,
+        "successful": 1,
+        "skipped": 0,
+        "failed": 0
+    },
+    "hits": {
+        "total": {
+            "value": 2,
+            "relation": "eq"
+        },
+        "max_score": 1.0,
+        "hits": [
+            {
+                "_index": "passage_vectors",
+                "_id": "1",
+                "_score": 1.0,
+                "fields": {
+                    "creation_time": [
+                        "2019-05-04T00:00:00.000Z"
+                    ],
+                    "full_text": [
+                        "first paragraph another paragraph"
+                    ]
+                }
+            },
+            {
+                "_index": "passage_vectors",
+                "_id": "2",
+                "_score": 0.9997144,
+                "fields": {
+                    "creation_time": [
+                        "2020-05-04T00:00:00.000Z"
+                    ],
+                    "full_text": [
+                        "number one paragraph number two paragraph"
+                    ]
+                }
+            }
+        ]
+    }
+}</pre>
+</div>
+<p>What if you wanted to filter by some top-level document metadata? You can do this by adding <code class="literal">filter</code> to your
+<code class="literal">knn</code> clause.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><code class="literal">filter</code> will always be over the top-level document metadata. This means you cannot filter based on <code class="literal">nested</code>
+      field metadata.</p>
+</div>
+</div>
+<a id="20407c847adb8393ce41dc656384afc4"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST passage_vectors/_search
+{
+    "fields": [
+        "creation_time",
+        "full_text"
+    ],
+    "_source": false,
+    "knn": {
+        "query_vector": [
+            0.45,
+            45
+        ],
+        "field": "paragraph.vector",
+        "k": 2,
+        "num_candidates": 2,
+        "filter": {
+            "bool": {
+                "filter": [
+                    {
+                        "range": {
+                            "creation_time": {
+                                "gte": "2019-05-01",
+                                "lte": "2019-05-05"
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/969.console"></div>
+<p>Now we have filtered based on the top level <code class="literal">"creation_time"</code> and only one document falls within that range.</p>
+<a id="86d36759a598029396658a8408cb4290"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+    "took": 4,
+    "timed_out": false,
+    "_shards": {
+        "total": 1,
+        "successful": 1,
+        "skipped": 0,
+        "failed": 0
+    },
+    "hits": {
+        "total": {
+            "value": 1,
+            "relation": "eq"
+        },
+        "max_score": 1.0,
+        "hits": [
+            {
+                "_index": "passage_vectors",
+                "_id": "1",
+                "_score": 1.0,
+                "fields": {
+                    "creation_time": [
+                        "2019-05-04T00:00:00.000Z"
+                    ],
+                    "full_text": [
+                        "first paragraph another paragraph"
+                    ]
+                }
+            }
+        ]
+    }
+}</pre>
+</div>
+<p>Additionally, if you wanted to extract the nearest passage for a matched document, you can supply <a class="xref" href="inner-hits.html" title="Retrieve inner hits">inner_hits</a>
+to the <code class="literal">knn</code> clause.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><code class="literal">inner_hits</code> for kNN will only ever return a single hit, the nearest passage vector.
+Setting <code class="literal">"size"</code> to any value greater than <code class="literal">1</code> will have no effect on the results.</p>
+</div>
+</div>
+<a id="e80dab3e0314b7dad1bbd75b0956d9fc"></a>
+<div class="pre_wrapper lang-console">
+<pre class="programlisting prettyprint lang-console">POST passage_vectors/_search
+{
+    "fields": [
+        "creation_time",
+        "full_text"
+    ],
+    "_source": false,
+    "knn": {
+        "query_vector": [
+            0.45,
+            45
+        ],
+        "field": "paragraph.vector",
+        "k": 2,
+        "num_candidates": 2,
+        "inner_hits": {
+            "_source": false,
+            "fields": [
+                "paragraph.text"
+            ]
+        }
+    }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/970.console"></div>
+<p>Now the result will contain the nearest found paragraph when searching.</p>
+<a id="de7b0c6c9040a0ccec50d76aa7b2a581"></a>
+<div class="pre_wrapper lang-console-result">
+<pre class="programlisting prettyprint lang-console-result">{
+    "took": 4,
+    "timed_out": false,
+    "_shards": {
+        "total": 1,
+        "successful": 1,
+        "skipped": 0,
+        "failed": 0
+    },
+    "hits": {
+        "total": {
+            "value": 2,
+            "relation": "eq"
+        },
+        "max_score": 1.0,
+        "hits": [
+            {
+                "_index": "passage_vectors",
+                "_id": "1",
+                "_score": 1.0,
+                "fields": {
+                    "creation_time": [
+                        "2019-05-04T00:00:00.000Z"
+                    ],
+                    "full_text": [
+                        "first paragraph another paragraph"
+                    ]
+                },
+                "inner_hits": {
+                    "paragraph": {
+                        "hits": {
+                            "total": {
+                                "value": 1,
+                                "relation": "eq"
+                            },
+                            "max_score": 1.0,
+                            "hits": [
+                                {
+                                    "_index": "passage_vectors",
+                                    "_id": "1",
+                                    "_nested": {
+                                        "field": "paragraph",
+                                        "offset": 0
+                                    },
+                                    "_score": 1.0,
+                                    "fields": {
+                                        "paragraph": [
+                                            {
+                                                "text": [
+                                                    "first paragraph"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            {
+                "_index": "passage_vectors",
+                "_id": "2",
+                "_score": 0.9997144,
+                "fields": {
+                    "creation_time": [
+                        "2020-05-04T00:00:00.000Z"
+                    ],
+                    "full_text": [
+                        "number one paragraph number two paragraph"
+                    ]
+                },
+                "inner_hits": {
+                    "paragraph": {
+                        "hits": {
+                            "total": {
+                                "value": 1,
+                                "relation": "eq"
+                            },
+                            "max_score": 0.9997144,
+                            "hits": [
+                                {
+                                    "_index": "passage_vectors",
+                                    "_id": "2",
+                                    "_nested": {
+                                        "field": "paragraph",
+                                        "offset": 1
+                                    },
+                                    "_score": 0.9997144,
+                                    "fields": {
+                                        "paragraph": [
+                                            {
+                                                "text": [
+                                                    "number two paragraph"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        ]
+    }
+}</pre>
+</div>
 <h4><a id="knn-indexing-considerations"></a>Indexing considerations<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></h4>
 <p>For approximate kNN search, Elasticsearch stores the dense vector values of each
 segment as an <a href="https://arxiv.org/abs/1603.09320" class="ulink" target="_top">HNSW graph</a>. Indexing vectors for
@@ -949,14 +1293,10 @@ puts response</pre>
   }
 }</pre>
 </div>
-<div class="console_widget has-ruby" data-snippet="snippets/966.console"></div>
+<div class="console_widget has-ruby" data-snippet="snippets/971.console"></div>
 <h4><a id="approximate-knn-limitations"></a>Limitations for approximate kNN search<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></h4>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
-<li class="listitem">
-You can&#8217;t run an approximate kNN search on a <code class="literal">dense_vector</code> field within a
-<a class="xref" href="nested.html" title="Nested field type"><code class="literal">nested</code></a> mapping.
-</li>
 <li class="listitem">
 When using kNN search in <a class="xref" href="modules-cross-cluster-search.html" title="Search across clusters">cross-cluster search</a>, the <a class="xref" href="modules-cross-cluster-search.html#ccs-min-roundtrips" title="Considerations for choosing whether to minimize roundtrips in a cross-cluster search"><code class="literal">ccs_minimize_roundtrips</code></a>
 option is not supported.
@@ -1025,7 +1365,7 @@ puts response</pre>
   }
 }</pre>
 </div>
-<div class="console_widget has-ruby" data-snippet="snippets/967.console"></div>
+<div class="console_widget has-ruby" data-snippet="snippets/972.console"></div>
 </li>
 <li class="listitem">
 <p>Index your data.</p>
@@ -1040,7 +1380,7 @@ puts response</pre>
 { "product-vector": [0.5, 111.3, -13.0, 14.8, -156.0], "price": 1099 }
 ...</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/968.console"></div>
+<div class="console_widget" data-snippet="snippets/973.console"></div>
 </li>
 <li class="listitem">
 <p>Use the <a class="xref" href="search-search.html" title="Search API">search API</a> to run a <code class="literal">script_score</code> query containing
@@ -1117,7 +1457,7 @@ puts response</pre>
   }
 }</pre>
 </div>
-<div class="console_widget has-ruby" data-snippet="snippets/969.console"></div>
+<div class="console_widget has-ruby" data-snippet="snippets/974.console"></div>
 </li>
 </ol>
 </div>
