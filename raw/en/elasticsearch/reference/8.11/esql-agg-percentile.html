@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>PERCENTILE | Elasticsearch Guide [8.11] | Elastic</title>
+<meta class="elastic" name="content" content="PERCENTILE | Elasticsearch Guide [8.11]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.11]"/>
+<link rel="up" href="esql-agg-functions.html" title="ES|QL aggregation functions"/>
+<link rel="prev" href="esql-agg-min.html" title="MIN"/>
+<link rel="next" href="esql-agg-sum.html" title="SUM"/>
+<meta class="elastic" name="product_version" content="8.11"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.11"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.11"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.11]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="esql.html">ES|QL</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="esql-agg-functions.html">ES|QL aggregation functions</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="esql-agg-min.html">« <code class="literal">MIN</code></a>
+</span>
+<span class="next">
+<a href="esql-agg-sum.html"><code class="literal">SUM</code> »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="esql-agg-percentile"></a><code class="literal">PERCENTILE</code><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.11/docs/reference/esql/aggregation-functions/percentile.asciidoc">edit</a></h2>
+</div></div></div>
+<p>The value at which a certain percentage of observed values occur. For example,
+the 95th percentile is the value which is greater than 95% of the observed values and
+the 50th percentile is the <a class="xref" href="esql-agg-median.html" title="MEDIAN"><code class="literal">MEDIAN</code></a>.</p>
+<div class="pre_wrapper lang-esql merge styled">
+<pre class="programlisting prettyprint lang-esql merge styled">FROM employees
+| STATS p0 = PERCENTILE(salary,  0)
+     , p50 = PERCENTILE(salary, 50)
+     , p99 = PERCENTILE(salary, 99)</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">p0:double</th>
+<th align="left" valign="top">p50:double</th>
+<th align="left" valign="top">p99:double</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>25324</p></td>
+<td align="left" valign="top"><p>47003</p></td>
+<td align="left" valign="top"><p>74970.29</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="esql-agg-percentile-approximate"></a><code class="literal">PERCENTILE</code> is (usually) approximate<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.11/docs/reference/esql/aggregation-functions/percentile.asciidoc">edit</a></h3>
+</div></div></div>
+<p>There are many different algorithms to calculate percentiles. The naive
+implementation simply stores all the values in a sorted array. To find the 50th
+percentile, you simply find the value that is at <code class="literal">my_array[count(my_array) * 0.5]</code>.</p>
+<p>Clearly, the naive implementation does not scale&#8201;&#8212;&#8201;the sorted array grows
+linearly with the number of values in your dataset. To calculate percentiles
+across potentially billions of values in an Elasticsearch cluster, <em>approximate</em>
+percentiles are calculated.</p>
+<p>The algorithm used by the <code class="literal">percentile</code> metric is called TDigest (introduced by
+Ted Dunning in
+<a href="https://github.com/tdunning/t-digest/blob/master/docs/t-digest-paper/histo.pdf" class="ulink" target="_top">Computing Accurate Quantiles using T-Digests</a>).</p>
+<p>When using this metric, there are a few guidelines to keep in mind:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Accuracy is proportional to <code class="literal">q(1-q)</code>. This means that extreme percentiles (e.g. 99%)
+are more accurate than less extreme percentiles, such as the median
+</li>
+<li class="listitem">
+For small sets of values, percentiles are highly accurate (and potentially
+100% accurate if the data is small enough).
+</li>
+<li class="listitem">
+As the quantity of values in a bucket grows, the algorithm begins to approximate
+the percentiles. It is effectively trading accuracy for memory savings. The
+exact level of inaccuracy is difficult to generalize, since it depends on your
+data distribution and volume of data being aggregated
+</li>
+</ul>
+</div>
+<p>The following chart shows the relative error on a uniform distribution depending
+on the number of collected values and the requested percentile:</p>
+<p><span class="image"><img src="images/percentiles_error.png" alt="percentiles error"></span></p>
+<p>It shows how precision is better for extreme percentiles. The reason why error diminishes
+for large number of values is that the law of large numbers makes the distribution of
+values more and more uniform and the t-digest tree can do a better job at summarizing
+it. It would not be the case on more skewed distributions.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><code class="literal">PERCENTILE</code> is also <a href="https://en.wikipedia.org/wiki/Nondeterministic_algorithm" class="ulink" target="_top">non-deterministic</a>.
+This means you can get slightly different results using the same data.</p>
+</div>
+</div>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="esql-agg-min.html">« <code class="literal">MIN</code></a>
+</span>
+<span class="next">
+<a href="esql-agg-sum.html"><code class="literal">SUM</code> »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
