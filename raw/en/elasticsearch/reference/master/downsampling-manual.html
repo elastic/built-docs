@@ -100,9 +100,163 @@ representations that are used during downsampling.</p>
 <a class="xref" href="tsds.html#time-series-dimension" title="Dimensions">time series dimensions</a>: <code class="literal">host</code>, <code class="literal">namespace</code>,
 <code class="literal">node</code>, and <code class="literal">pod</code>. The time series dimensions are not changed by the
 downsampling process.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.indices.put_index_template(
+  name: 'my-data-stream-template',
+  body: {
+    index_patterns: [
+      'my-data-stream*'
+    ],
+    data_stream: {},
+    template: {
+      settings: {
+        index: {
+          mode: 'time_series',
+          routing_path: [
+            'kubernetes.namespace',
+            'kubernetes.host',
+            'kubernetes.node',
+            'kubernetes.pod'
+          ],
+          number_of_replicas: 0,
+          number_of_shards: 2
+        }
+      },
+      mappings: {
+        properties: {
+          "@timestamp": {
+            type: 'date'
+          },
+          kubernetes: {
+            properties: {
+              container: {
+                properties: {
+                  cpu: {
+                    properties: {
+                      usage: {
+                        properties: {
+                          core: {
+                            properties: {
+                              ns: {
+                                type: 'long'
+                              }
+                            }
+                          },
+                          limit: {
+                            properties: {
+                              pct: {
+                                type: 'float'
+                              }
+                            }
+                          },
+                          nanocores: {
+                            type: 'long',
+                            time_series_metric: 'gauge'
+                          },
+                          node: {
+                            properties: {
+                              pct: {
+                                type: 'float'
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  memory: {
+                    properties: {
+                      available: {
+                        properties: {
+                          bytes: {
+                            type: 'long',
+                            time_series_metric: 'gauge'
+                          }
+                        }
+                      },
+                      majorpagefaults: {
+                        type: 'long'
+                      },
+                      pagefaults: {
+                        type: 'long',
+                        time_series_metric: 'gauge'
+                      },
+                      rss: {
+                        properties: {
+                          bytes: {
+                            type: 'long',
+                            time_series_metric: 'gauge'
+                          }
+                        }
+                      },
+                      usage: {
+                        properties: {
+                          bytes: {
+                            type: 'long',
+                            time_series_metric: 'gauge'
+                          },
+                          limit: {
+                            properties: {
+                              pct: {
+                                type: 'float'
+                              }
+                            }
+                          },
+                          node: {
+                            properties: {
+                              pct: {
+                                type: 'float'
+                              }
+                            }
+                          }
+                        }
+                      },
+                      workingset: {
+                        properties: {
+                          bytes: {
+                            type: 'long',
+                            time_series_metric: 'gauge'
+                          }
+                        }
+                      }
+                    }
+                  },
+                  name: {
+                    type: 'keyword'
+                  },
+                  start_time: {
+                    type: 'date'
+                  }
+                }
+              },
+              host: {
+                type: 'keyword',
+                time_series_dimension: true
+              },
+              namespace: {
+                type: 'keyword',
+                time_series_dimension: true
+              },
+              node: {
+                type: 'keyword',
+                time_series_dimension: true
+              },
+              pod: {
+                type: 'keyword',
+                time_series_dimension: true
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
 <a id="2e3d1b293da93f2a9ecfc26786ec28d6"></a>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">PUT _index_template/my-data-stream-template
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">PUT _index_template/my-data-stream-template
 {
   "index_patterns": [
     "my-data-stream*"
@@ -252,16 +406,39 @@ downsampling process.</p>
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/680.console"></div>
+<div class="console_widget has-ruby" data-snippet="snippets/680.console"></div>
 <h4><a id="downsampling-manual-ingest-data"></a>Ingest time series data<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/data-streams/downsampling-manual.asciidoc">edit</a></h4>
 <p>Because time series data streams have been designed to
 <a class="xref" href="tsds.html#tsds-accepted-time-range" title="Accepted time range for adding data">only accept recent data</a>, in this example, you&#8217;ll
 use an ingest pipeline to time-shift the data as it gets indexed. As a result,
 the indexed data will have an <code class="literal">@timestamp</code> from the last 15 minutes.</p>
 <p>Create the pipeline with this request:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.ingest.put_pipeline(
+  id: 'my-timestamp-pipeline',
+  body: {
+    description: 'Shifts the @timestamp to the last 15 minutes',
+    processors: [
+      {
+        set: {
+          field: 'ingest_time',
+          value: '{{_ingest.timestamp}}'
+        }
+      },
+      {
+        script: {
+          lang: 'painless',
+          source: "\n          def delta = ChronoUnit.SECONDS.between(\n            ZonedDateTime.parse(\"2022-06-21T15:49:00Z\"),\n            ZonedDateTime.parse(ctx[\"ingest_time\"])\n          );\n          ctx[\"@timestamp\"] = ZonedDateTime.parse(ctx[\"@timestamp\"]).plus(delta,ChronoUnit.SECONDS).toString();\n        "
+        }
+      }
+    ]
+  }
+)
+puts response</pre>
+</div>
 <a id="cbc2b5595890f87165aab1a741b1d22c"></a>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">PUT _ingest/pipeline/my-timestamp-pipeline
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">PUT _ingest/pipeline/my-timestamp-pipeline
 {
   "description": "Shifts the @timestamp to the last 15 minutes",
   "processors": [
@@ -286,12 +463,542 @@ the indexed data will have an <code class="literal">@timestamp</code> from the l
   ]
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/681.console"></div>
+<div class="console_widget has-ruby" data-snippet="snippets/681.console"></div>
 <p>Next, use a bulk API request to automatically create your TSDS and index a set
 of ten documents:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.bulk(
+  index: 'my-data-stream',
+  refresh: true,
+  pipeline: 'my-timestamp-pipeline',
+  body: [
+    {
+      create: {}
+    },
+    {
+      "@timestamp": '2022-06-21T15:49:00Z',
+      kubernetes: {
+        host: 'gke-apps-0',
+        node: 'gke-apps-0-0',
+        pod: 'gke-apps-0-0-0',
+        container: {
+          cpu: {
+            usage: {
+              nanocores: 91_153,
+              core: {
+                ns: 12_828_317_850
+              },
+              node: {
+                pct: 2.77905e-05
+              },
+              limit: {
+                pct: 2.77905e-05
+              }
+            }
+          },
+          memory: {
+            available: {
+              bytes: 463_314_616
+            },
+            usage: {
+              bytes: 307_007_078,
+              node: {
+                pct: 0.01770037710617187
+              },
+              limit: {
+                pct: 9.923134671484496e-05
+              }
+            },
+            workingset: {
+              bytes: 585_236
+            },
+            rss: {
+              bytes: 102_728
+            },
+            pagefaults: 120_901,
+            majorpagefaults: 0
+          },
+          start_time: '2021-03-30T07:59:06Z',
+          name: 'container-name-44'
+        },
+        namespace: 'namespace26'
+      }
+    },
+    {
+      create: {}
+    },
+    {
+      "@timestamp": '2022-06-21T15:45:50Z',
+      kubernetes: {
+        host: 'gke-apps-0',
+        node: 'gke-apps-0-0',
+        pod: 'gke-apps-0-0-0',
+        container: {
+          cpu: {
+            usage: {
+              nanocores: 124_501,
+              core: {
+                ns: 12_828_317_850
+              },
+              node: {
+                pct: 2.77905e-05
+              },
+              limit: {
+                pct: 2.77905e-05
+              }
+            }
+          },
+          memory: {
+            available: {
+              bytes: 982_546_514
+            },
+            usage: {
+              bytes: 360_035_574,
+              node: {
+                pct: 0.01770037710617187
+              },
+              limit: {
+                pct: 9.923134671484496e-05
+              }
+            },
+            workingset: {
+              bytes: 1_339_884
+            },
+            rss: {
+              bytes: 381_174
+            },
+            pagefaults: 178_473,
+            majorpagefaults: 0
+          },
+          start_time: '2021-03-30T07:59:06Z',
+          name: 'container-name-44'
+        },
+        namespace: 'namespace26'
+      }
+    },
+    {
+      create: {}
+    },
+    {
+      "@timestamp": '2022-06-21T15:44:50Z',
+      kubernetes: {
+        host: 'gke-apps-0',
+        node: 'gke-apps-0-0',
+        pod: 'gke-apps-0-0-0',
+        container: {
+          cpu: {
+            usage: {
+              nanocores: 38_907,
+              core: {
+                ns: 12_828_317_850
+              },
+              node: {
+                pct: 2.77905e-05
+              },
+              limit: {
+                pct: 2.77905e-05
+              }
+            }
+          },
+          memory: {
+            available: {
+              bytes: 862_723_768
+            },
+            usage: {
+              bytes: 379_572_388,
+              node: {
+                pct: 0.01770037710617187
+              },
+              limit: {
+                pct: 9.923134671484496e-05
+              }
+            },
+            workingset: {
+              bytes: 431_227
+            },
+            rss: {
+              bytes: 386_580
+            },
+            pagefaults: 233_166,
+            majorpagefaults: 0
+          },
+          start_time: '2021-03-30T07:59:06Z',
+          name: 'container-name-44'
+        },
+        namespace: 'namespace26'
+      }
+    },
+    {
+      create: {}
+    },
+    {
+      "@timestamp": '2022-06-21T15:44:40Z',
+      kubernetes: {
+        host: 'gke-apps-0',
+        node: 'gke-apps-0-0',
+        pod: 'gke-apps-0-0-0',
+        container: {
+          cpu: {
+            usage: {
+              nanocores: 86_706,
+              core: {
+                ns: 12_828_317_850
+              },
+              node: {
+                pct: 2.77905e-05
+              },
+              limit: {
+                pct: 2.77905e-05
+              }
+            }
+          },
+          memory: {
+            available: {
+              bytes: 567_160_996
+            },
+            usage: {
+              bytes: 103_266_017,
+              node: {
+                pct: 0.01770037710617187
+              },
+              limit: {
+                pct: 9.923134671484496e-05
+              }
+            },
+            workingset: {
+              bytes: 1_724_908
+            },
+            rss: {
+              bytes: 105_431
+            },
+            pagefaults: 233_166,
+            majorpagefaults: 0
+          },
+          start_time: '2021-03-30T07:59:06Z',
+          name: 'container-name-44'
+        },
+        namespace: 'namespace26'
+      }
+    },
+    {
+      create: {}
+    },
+    {
+      "@timestamp": '2022-06-21T15:44:00Z',
+      kubernetes: {
+        host: 'gke-apps-0',
+        node: 'gke-apps-0-0',
+        pod: 'gke-apps-0-0-0',
+        container: {
+          cpu: {
+            usage: {
+              nanocores: 150_069,
+              core: {
+                ns: 12_828_317_850
+              },
+              node: {
+                pct: 2.77905e-05
+              },
+              limit: {
+                pct: 2.77905e-05
+              }
+            }
+          },
+          memory: {
+            available: {
+              bytes: 639_054_643
+            },
+            usage: {
+              bytes: 265_142_477,
+              node: {
+                pct: 0.01770037710617187
+              },
+              limit: {
+                pct: 9.923134671484496e-05
+              }
+            },
+            workingset: {
+              bytes: 1_786_511
+            },
+            rss: {
+              bytes: 189_235
+            },
+            pagefaults: 138_172,
+            majorpagefaults: 0
+          },
+          start_time: '2021-03-30T07:59:06Z',
+          name: 'container-name-44'
+        },
+        namespace: 'namespace26'
+      }
+    },
+    {
+      create: {}
+    },
+    {
+      "@timestamp": '2022-06-21T15:42:40Z',
+      kubernetes: {
+        host: 'gke-apps-0',
+        node: 'gke-apps-0-0',
+        pod: 'gke-apps-0-0-0',
+        container: {
+          cpu: {
+            usage: {
+              nanocores: 82_260,
+              core: {
+                ns: 12_828_317_850
+              },
+              node: {
+                pct: 2.77905e-05
+              },
+              limit: {
+                pct: 2.77905e-05
+              }
+            }
+          },
+          memory: {
+            available: {
+              bytes: 854_735_585
+            },
+            usage: {
+              bytes: 309_798_052,
+              node: {
+                pct: 0.01770037710617187
+              },
+              limit: {
+                pct: 9.923134671484496e-05
+              }
+            },
+            workingset: {
+              bytes: 924_058
+            },
+            rss: {
+              bytes: 110_838
+            },
+            pagefaults: 259_073,
+            majorpagefaults: 0
+          },
+          start_time: '2021-03-30T07:59:06Z',
+          name: 'container-name-44'
+        },
+        namespace: 'namespace26'
+      }
+    },
+    {
+      create: {}
+    },
+    {
+      "@timestamp": '2022-06-21T15:42:10Z',
+      kubernetes: {
+        host: 'gke-apps-0',
+        node: 'gke-apps-0-0',
+        pod: 'gke-apps-0-0-0',
+        container: {
+          cpu: {
+            usage: {
+              nanocores: 153_404,
+              core: {
+                ns: 12_828_317_850
+              },
+              node: {
+                pct: 2.77905e-05
+              },
+              limit: {
+                pct: 2.77905e-05
+              }
+            }
+          },
+          memory: {
+            available: {
+              bytes: 279_586_406
+            },
+            usage: {
+              bytes: 214_904_955,
+              node: {
+                pct: 0.01770037710617187
+              },
+              limit: {
+                pct: 9.923134671484496e-05
+              }
+            },
+            workingset: {
+              bytes: 1_047_265
+            },
+            rss: {
+              bytes: 91_914
+            },
+            pagefaults: 302_252,
+            majorpagefaults: 0
+          },
+          start_time: '2021-03-30T07:59:06Z',
+          name: 'container-name-44'
+        },
+        namespace: 'namespace26'
+      }
+    },
+    {
+      create: {}
+    },
+    {
+      "@timestamp": '2022-06-21T15:40:20Z',
+      kubernetes: {
+        host: 'gke-apps-0',
+        node: 'gke-apps-0-0',
+        pod: 'gke-apps-0-0-0',
+        container: {
+          cpu: {
+            usage: {
+              nanocores: 125_613,
+              core: {
+                ns: 12_828_317_850
+              },
+              node: {
+                pct: 2.77905e-05
+              },
+              limit: {
+                pct: 2.77905e-05
+              }
+            }
+          },
+          memory: {
+            available: {
+              bytes: 822_782_853
+            },
+            usage: {
+              bytes: 100_475_044,
+              node: {
+                pct: 0.01770037710617187
+              },
+              limit: {
+                pct: 9.923134671484496e-05
+              }
+            },
+            workingset: {
+              bytes: 2_109_932
+            },
+            rss: {
+              bytes: 278_446
+            },
+            pagefaults: 74_843,
+            majorpagefaults: 0
+          },
+          start_time: '2021-03-30T07:59:06Z',
+          name: 'container-name-44'
+        },
+        namespace: 'namespace26'
+      }
+    },
+    {
+      create: {}
+    },
+    {
+      "@timestamp": '2022-06-21T15:40:10Z',
+      kubernetes: {
+        host: 'gke-apps-0',
+        node: 'gke-apps-0-0',
+        pod: 'gke-apps-0-0-0',
+        container: {
+          cpu: {
+            usage: {
+              nanocores: 100_046,
+              core: {
+                ns: 12_828_317_850
+              },
+              node: {
+                pct: 2.77905e-05
+              },
+              limit: {
+                pct: 2.77905e-05
+              }
+            }
+          },
+          memory: {
+            available: {
+              bytes: 567_160_996
+            },
+            usage: {
+              bytes: 362_826_547,
+              node: {
+                pct: 0.01770037710617187
+              },
+              limit: {
+                pct: 9.923134671484496e-05
+              }
+            },
+            workingset: {
+              bytes: 1_986_724
+            },
+            rss: {
+              bytes: 402_801
+            },
+            pagefaults: 296_495,
+            majorpagefaults: 0
+          },
+          start_time: '2021-03-30T07:59:06Z',
+          name: 'container-name-44'
+        },
+        namespace: 'namespace26'
+      }
+    },
+    {
+      create: {}
+    },
+    {
+      "@timestamp": '2022-06-21T15:38:30Z',
+      kubernetes: {
+        host: 'gke-apps-0',
+        node: 'gke-apps-0-0',
+        pod: 'gke-apps-0-0-0',
+        container: {
+          cpu: {
+            usage: {
+              nanocores: 40_018,
+              core: {
+                ns: 12_828_317_850
+              },
+              node: {
+                pct: 2.77905e-05
+              },
+              limit: {
+                pct: 2.77905e-05
+              }
+            }
+          },
+          memory: {
+            available: {
+              bytes: 1_062_428_344
+            },
+            usage: {
+              bytes: 265_142_477,
+              node: {
+                pct: 0.01770037710617187
+              },
+              limit: {
+                pct: 9.923134671484496e-05
+              }
+            },
+            workingset: {
+              bytes: 2_294_743
+            },
+            rss: {
+              bytes: 340_623
+            },
+            pagefaults: 224_530,
+            majorpagefaults: 0
+          },
+          start_time: '2021-03-30T07:59:06Z',
+          name: 'container-name-44'
+        },
+        namespace: 'namespace26'
+      }
+    }
+  ]
+)
+puts response</pre>
+</div>
 <a id="645433e8e479e5d71c100f66dd2de5d0"></a>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">PUT /my-data-stream/_bulk?refresh&amp;pipeline=my-timestamp-pipeline
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">PUT /my-data-stream/_bulk?refresh&amp;pipeline=my-timestamp-pipeline
 {"create": {}}
 {"@timestamp":"2022-06-21T15:49:00Z","kubernetes":{"host":"gke-apps-0","node":"gke-apps-0-0","pod":"gke-apps-0-0-0","container":{"cpu":{"usage":{"nanocores":91153,"core":{"ns":12828317850},"node":{"pct":2.77905e-05},"limit":{"pct":2.77905e-05}}},"memory":{"available":{"bytes":463314616},"usage":{"bytes":307007078,"node":{"pct":0.01770037710617187},"limit":{"pct":9.923134671484496e-05}},"workingset":{"bytes":585236},"rss":{"bytes":102728},"pagefaults":120901,"majorpagefaults":0},"start_time":"2021-03-30T07:59:06Z","name":"container-name-44"},"namespace":"namespace26"}}
 {"create": {}}
@@ -313,19 +1020,66 @@ of ten documents:</p>
 {"create": {}}
 {"@timestamp":"2022-06-21T15:38:30Z","kubernetes":{"host":"gke-apps-0","node":"gke-apps-0-0","pod":"gke-apps-0-0-0","container":{"cpu":{"usage":{"nanocores":40018,"core":{"ns":12828317850},"node":{"pct":2.77905e-05},"limit":{"pct":2.77905e-05}}},"memory":{"available":{"bytes":1062428344},"usage":{"bytes":265142477,"node":{"pct":0.01770037710617187},"limit":{"pct":9.923134671484496e-05}},"workingset":{"bytes":2294743},"rss":{"bytes":340623},"pagefaults":224530,"majorpagefaults":0},"start_time":"2021-03-30T07:59:06Z","name":"container-name-44"},"namespace":"namespace26"}}</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/682.console"></div>
+<div class="console_widget has-ruby" data-snippet="snippets/682.console"></div>
 <p>You can use the search API to check if the documents have been indexed
 correctly:</p>
-<a id="02b6aa3e5652839f03de3a655854b897"></a>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET /my-data-stream/_search</pre>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.search(
+  index: 'my-data-stream'
+)
+puts response</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/683.console"></div>
+<a id="02b6aa3e5652839f03de3a655854b897"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">GET /my-data-stream/_search</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/683.console"></div>
 <p>Run the following aggregation on the data to calculate some interesting
 statistics:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.search(
+  index: 'my-data-stream',
+  body: {
+    size: 0,
+    aggregations: {
+      tsid: {
+        terms: {
+          field: '_tsid'
+        },
+        aggregations: {
+          over_time: {
+            date_histogram: {
+              field: '@timestamp',
+              fixed_interval: '1d'
+            },
+            aggregations: {
+              min: {
+                min: {
+                  field: 'kubernetes.container.memory.usage.bytes'
+                }
+              },
+              max: {
+                max: {
+                  field: 'kubernetes.container.memory.usage.bytes'
+                }
+              },
+              avg: {
+                avg: {
+                  field: 'kubernetes.container.memory.usage.bytes'
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
 <a id="afa11ebb493ebbfd77acbbe50d2ce6db"></a>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET /my-data-stream/_search
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">GET /my-data-stream/_search
 {
     "size": 0,
     "aggs": {
@@ -362,7 +1116,7 @@ statistics:</p>
     }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/684.console"></div>
+<div class="console_widget has-ruby" data-snippet="snippets/684.console"></div>
 <h4><a id="downsampling-manual-run"></a>Downsample the TSDS<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/data-streams/downsampling-manual.asciidoc">edit</a></h4>
 <p>A TSDS can&#8217;t be downsampled directly. You need to downsample its backing indices
 instead. You can see the backing index for your data stream by running:</p>
@@ -445,21 +1199,38 @@ puts response</pre>
 <p>Copy the name of the <code class="literal">old_index</code> from the response. In the following steps,
 replace the index name with that of your <code class="literal">old_index</code>.</p>
 <p>The old index needs to be set to read-only mode. Run the following request:</p>
-<a id="2c3207c0c985d253b2ecccc14e69e25a"></a>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">PUT /.ds-my-data-stream-2023.07.26-000001/_block/write</pre>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.indices.add_block(
+  index: '.ds-my-data-stream-2023.07.26-000001',
+  block: 'write'
+)
+puts response</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/687.console"></div>
+<a id="2c3207c0c985d253b2ecccc14e69e25a"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">PUT /.ds-my-data-stream-2023.07.26-000001/_block/write</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/687.console"></div>
 <p>Next, use the <a class="xref" href="indices-downsample-data-stream.html" title="Downsample index API">downsample API</a> to downsample
 the index, setting the time series interval to one hour:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.indices.downsample(
+  index: '.ds-my-data-stream-2023.07.26-000001',
+  target_index: '.ds-my-data-stream-2023.07.26-000001-downsample',
+  body: {
+    fixed_interval: '1h'
+  }
+)
+puts response</pre>
+</div>
 <a id="28543836b62b5622a402e6f7731d68f0"></a>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">POST /.ds-my-data-stream-2023.07.26-000001/_downsample/.ds-my-data-stream-2023.07.26-000001-downsample
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">POST /.ds-my-data-stream-2023.07.26-000001/_downsample/.ds-my-data-stream-2023.07.26-000001-downsample
 {
   "fixed_interval": "1h"
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/688.console"></div>
+<div class="console_widget has-ruby" data-snippet="snippets/688.console"></div>
 <p>Now you can <a class="xref" href="modify-data-streams-api.html" title="Modify data streams API">modify the data stream</a>, and replace the
 original index with the downsampled one:</p>
 <a id="8634c9993485d622fb12d24f4f242264"></a>
@@ -489,11 +1260,17 @@ future.</p>
 <h4><a id="downsampling-manual-view-results"></a>View the results<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/data-streams/downsampling-manual.asciidoc">edit</a></h4>
 <p>Re-run the earlier search query (note that when querying downsampled indices
 there are <a class="xref" href="downsampling.html#querying-downsampled-indices-notes" title="Notes on downsample queries">a few nuances to be aware of</a>):</p>
-<a id="02b6aa3e5652839f03de3a655854b897"></a>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET /my-data-stream/_search</pre>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.search(
+  index: 'my-data-stream'
+)
+puts response</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/690.console"></div>
+<a id="02b6aa3e5652839f03de3a655854b897"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">GET /my-data-stream/_search</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/690.console"></div>
 <p>The TSDS with the new downsampled backing index contains just one document. For
 counters, this document would only have the last value. For gauges, the field
 type is now <code class="literal">aggregate_metric_double</code>. You see the <code class="literal">min</code>, <code class="literal">max</code>, <code class="literal">sum</code>, and
@@ -609,9 +1386,50 @@ type is now <code class="literal">aggregate_metric_double</code>. You see the <c
 <p>Re-run the earlier aggregation. Even though the aggregation runs on the
 downsampled TSDS that only contains 1 document, it returns the same results as
 the earlier aggregation on the original TSDS.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.search(
+  index: 'my-data-stream',
+  body: {
+    size: 0,
+    aggregations: {
+      tsid: {
+        terms: {
+          field: '_tsid'
+        },
+        aggregations: {
+          over_time: {
+            date_histogram: {
+              field: '@timestamp',
+              fixed_interval: '1d'
+            },
+            aggregations: {
+              min: {
+                min: {
+                  field: 'kubernetes.container.memory.usage.bytes'
+                }
+              },
+              max: {
+                max: {
+                  field: 'kubernetes.container.memory.usage.bytes'
+                }
+              },
+              avg: {
+                avg: {
+                  field: 'kubernetes.container.memory.usage.bytes'
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
 <a id="afa11ebb493ebbfd77acbbe50d2ce6db"></a>
-<div class="pre_wrapper lang-console">
-<pre class="programlisting prettyprint lang-console">GET /my-data-stream/_search
+<div class="pre_wrapper lang-console default has-ruby">
+<pre class="programlisting prettyprint lang-console default has-ruby">GET /my-data-stream/_search
 {
     "size": 0,
     "aggs": {
@@ -648,7 +1466,7 @@ the earlier aggregation on the original TSDS.</p>
     }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/691.console"></div>
+<div class="console_widget has-ruby" data-snippet="snippets/691.console"></div>
 <p>This example demonstrates how downsampling can dramatically reduce the number of
 documents stored for time series data, within whatever time boundaries you
 choose. It&#8217;s also possible to perform downsampling on already downsampled data,
