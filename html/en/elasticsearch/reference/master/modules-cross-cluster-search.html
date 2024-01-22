@@ -153,6 +153,9 @@ on clusters in different data centers.</p>
 <a href="/guide/en/elasticsearch/painless/master/painless-execute-api.html" class="ulink" target="_top">Painless execute API</a>
 </li>
 <li class="listitem">
+<a class="xref" href="indices-resolve-index-api.html" title="Resolve index API">Resolve Index API</a>
+</li>
+<li class="listitem">
 <span class="Admonishment Admonishment--preview">
 [<span class="Admonishment-title u-mono">preview</span>]
 <span class="Admonishment-detail">
@@ -776,10 +779,10 @@ puts response</pre>
 <td align="left" valign="top">
 <p>When <code class="literal">ccs_minimize_roundtrips</code> = <code class="literal">true</code> and searches on the remote clusters
 are still running, this section indicates the number of shards in scope for the
-local cluster only. This will be updated to include the total number of shards
-across all clusters only when the search is completed. When
-<code class="literal">ccs_minimize_roundtrips</code>= <code class="literal">false</code>, the total shard count is known up front and
-will be correct.</p>
+local cluster only and any clusters that have finished their search so far.
+This will be updated to include the total number of shards across all clusters only
+when the search is completed. When <code class="literal">ccs_minimize_roundtrips</code>= <code class="literal">false</code>, the total shard
+count across all clusters is known up front and will be correct.</p>
 </td>
 </tr>
 <tr>
@@ -795,7 +798,14 @@ and all are currently in the "running" state.</p>
 </div>
 <p>If you query the <a class="xref" href="async-search.html#get-async-search" title="Get async search">get async search</a> endpoint while the query is
 still running, you will see an update in the <code class="literal">_clusters</code> and <code class="literal">_shards</code> section of
-the response when the local search has finished.</p>
+the response as each cluster finishes its search.</p>
+<p>If you set <code class="literal">ccs_minimize_roundtrips=false</code>, then you will also see partial aggregation
+results from shards (from any cluster) that have finished, but no results are shown in
+"hits" section until the search has completed.</p>
+<p>If you set <code class="literal">ccs_minimize_roundtrips=true</code>, then you will also see partial results
+in the "hits" and "aggregations" section of the response from all clusters that have
+completed so far. (Note: you can also see partial aggregation results from the local cluster
+even before it finishes.) The example below shows the <code class="literal">ccs_minimize_roundtrips=true</code> case.</p>
 <div class="pre_wrapper lang-ruby alternative">
 <pre class="programlisting prettyprint lang-ruby alternative">response = client.async_search.get(
   id: 'FklQYndoTDJ2VEFlMEVBTzFJMGhJVFEaLVlKYndBWWZSMUdicUc4WVlEaFl4ZzoxNTU='
@@ -808,7 +818,7 @@ puts response</pre>
 </div>
 <div class="console_widget has-ruby" data-snippet="snippets/1039.console"></div>
 <p>Response:</p>
-<a id="cb1b0d43e4a7f095070c97e538ed8901"></a>
+<a id="a2ea4a8a99f99fb771bc88efdd6ecf72"></a>
 <div class="pre_wrapper lang-console-result">
 <pre class="programlisting prettyprint lang-console-result">{
   "id": "FklQYndoTDJ2VEFlMEVBTzFJMGhJVFEaLVlKYndBWWZSMUdicUc4WVlEaFl4ZzoxNTU=",
@@ -821,16 +831,16 @@ puts response</pre>
     "timed_out": false,
     "terminated_early": false,
     "_shards": {
-      "total": 10,
-      "successful": 10,  <a id="CO243-1"></a><i class="conum" data-value="1"></i>
+      "total": 22,
+      "successful": 22,  <a id="CO243-1"></a><i class="conum" data-value="1"></i>
       "skipped": 0,
       "failed": 0
     },
     "_clusters": {
       "total": 3,
-      "successful": 1,  <a id="CO243-2"></a><i class="conum" data-value="2"></i>
+      "successful": 2,  <a id="CO243-2"></a><i class="conum" data-value="2"></i>
       "skipped": 0,
-      "running": 2,
+      "running": 1,
       "partial": 0,
       "failed": 0,
       "details": {
@@ -847,9 +857,16 @@ puts response</pre>
           }
         },
         "cluster_one": {
-          "status": "running",
+          "status": "successful",
           "indices": "my-index-000001",
-          "timed_out": false
+          "took": 9039,
+          "timed_out": false,
+          "_shards": {
+            "total": 12,
+            "successful": 12,
+            "skipped": 0,
+            "failed": 0
+          }
         },
         "cluster_two": {
           "status": "running",
@@ -860,11 +877,11 @@ puts response</pre>
     },
     "hits": {
       "total": {
-        "value": 167,  <a id="CO243-3"></a><i class="conum" data-value="3"></i>
+        "value": 542,  <a id="CO243-3"></a><i class="conum" data-value="3"></i>
         "relation": "eq"
       },
-      "max_score": null,
-      "hits": []
+      "max_score": 1.7232,
+      "hits": [...list of hits here...] <a id="CO243-4"></a><i class="conum" data-value="4"></i>
     }
   }
 }</pre>
@@ -876,7 +893,7 @@ puts response</pre>
 <p><a href="#CO243-1"><i class="conum" data-value="1"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>All the local cluster shards have completed.</p>
+<p>Searches on all shards of the local cluster and remote <code class="literal">cluster_one</code> cluster have completed.</p>
 </td>
 </tr>
 <tr>
@@ -884,9 +901,9 @@ puts response</pre>
 <p><a href="#CO243-2"><i class="conum" data-value="2"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>The local cluster search has completed, so the "successful" clusters entry
-is set to 1 and "running" clusters entry reduced to 2. The <code class="literal">_clusters</code> response metadata will be updated as each cluster
-finishes.</p>
+<p>Since two clusters have completed the search, the "successful" clusters entry
+is set to 2 and "running" clusters entry is reduced to 1. The <code class="literal">_clusters</code> response metadata
+will be updated as each cluster finishes.</p>
 </td>
 </tr>
 <tr>
@@ -894,8 +911,9 @@ finishes.</p>
 <p><a href="#CO243-3"><i class="conum" data-value="3"></i></a></p>
 </td>
 <td align="left" valign="top">
-<p>Number of hits from the local cluster search. Final hits are not
-shown until searches on all clusters have been completed and merged.</p>
+<p>Number of hits from the completed searches so far. Final hits are not shown
+until searches on all clusters have been completed and merged. Thus, the "hits"
+section can change as you call this endpoint until the search is completely done.</p>
 </td>
 </tr>
 </table>
@@ -916,7 +934,7 @@ puts response</pre>
 </div>
 <div class="console_widget has-ruby" data-snippet="snippets/1040.console"></div>
 <p>Response:</p>
-<a id="6cd7d7def4f8a1a821ba3d42519bf972"></a>
+<a id="1cd8c7574adc4e8cff813d79835aa869"></a>
 <div class="pre_wrapper lang-console-result">
 <pre class="programlisting prettyprint lang-console-result">{
   "id": "FklQYndoTDJ2VEFlMEVBTzFJMGhJVFEaLVlKYndBWWZSMUdicUc4WVlEaFl4ZzoxNTU=",
@@ -946,7 +964,7 @@ puts response</pre>
         "(local)": {
           "status": "successful",
           "indices": "my-index-000001",
-          "took": 14382,
+          "took": 2034,
           "timed_out": false,
           "_shards": {
             "total": 10,
@@ -958,7 +976,7 @@ puts response</pre>
         "cluster_one": {
           "status": "successful",
           "indices": "my-index-000001",
-          "took": 22193,
+          "took": 9039,
           "timed_out": false,
           "_shards": {
             "total": 12,
@@ -1447,8 +1465,9 @@ of shards is gathered from all clusters before the search starts.
 </li>
 <li class="listitem">
 The <code class="literal">_shards</code> section will be incrementally updated as searches on individual
-shards complete, so you will get a more accurate accounting of progress during a
-long-running search compared to when minimize roundtrips is used.
+shards complete, whereas when minimizing roundtrips, the shards section will be
+updated as searches on shards complete on the local cluster and then as each
+remote cluster reports back its full search results.
 </li>
 <li class="listitem">
 The <code class="literal">_cluster</code> section starts off listing all of its shard counts, since
@@ -1681,12 +1700,27 @@ network roundtrips, and sets the parameter <code class="literal">ccs_minimize_ro
 </div>
 </div>
 <h4><a id="ccs-min-roundtrips"></a>Considerations for choosing whether to minimize roundtrips in a cross-cluster search<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/search-across-clusters.asciidoc">edit</a></h4>
-<p>For cross-cluster searches that query a large number of shards, the minimize roundtrips
+<p>Advantages of minimizing roundtrips:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+For cross-cluster searches that query a large number of shards, the minimize roundtrips
 option typically provides much better performance. This is especially true if the clusters
-being searched have high network latency (e.g., distant geographic regions).</p>
-<p>However, not minimizing roundtrips allows you to get back incremental results of
-any aggregations in your query when using async-search while the search is still
-running.</p>
+being searched have high network latency (e.g., distant geographic regions).
+</li>
+<li class="listitem">
+When doing an async cross-cluster search, the <code class="literal">GET _async_search/&lt;search_id&gt;</code> endpoint will provide both
+top hits and aggregations from all clusters that have reported back results even while the search
+is still running on other clusters. In other words, it provides "incremental" partial results as
+the search progresses. Note that if the local cluster is included in the search, it has special
+handling in that it can show partial aggregations (but not partial top hits) while the search
+on the local cluster is still running.
+</li>
+</ol>
+</div>
+<p>Not minimizing roundtrips when using async-search allows you to get back incremental results of
+any aggregations in your query as individual shards complete (rather than whole clusters) while
+the search is still running, but top hits are not shown until the search has completed on all clusters.</p>
 <p>By default, synchronous searches minimize roundtrips, while asynchronous searches
 do not. You can override the default by using the <code class="literal">ccs_minimize_roundtrips</code> parameter,
 setting it to either <code class="literal">true</code> or <code class="literal">false</code>, as shown in several examples earlier in this
