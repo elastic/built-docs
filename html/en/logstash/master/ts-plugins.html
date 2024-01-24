@@ -291,6 +291,104 @@ logger.kafka.level = debug</pre>
 <p>Logging entries for Kerberos are NOT sent through Log4j but go directly to the console.</p>
 </div>
 </div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="ts-azure"></a>Azure Event Hub issues and solutions<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/main/docs/static/troubleshoot/ts-azure.asciidoc">edit</a></h3>
+</div></div></div>
+<h5><a id="ts-azure-http"></a>Event Hub plugin can&#8217;t connect to Storage blob (input)<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/main/docs/static/troubleshoot/ts-azure.asciidoc">edit</a></h5>
+<p><span class="strong strong"><strong>Symptoms</strong></span></p>
+<p>Azure EventHub can&#8217;t connect to blob storage:</p>
+<pre class="screen">[2024-01-01T13:13:13,123][ERROR][com.microsoft.azure.eventprocessorhost.AzureStorageCheckpointLeaseManager][azure_eventhub_pipeline][eh_input_plugin] host logstash-a0a00a00-0aa0-0000-aaaa-0a00a0a0aaaa: Failure while creating lease store
+com.microsoft.azure.storage.StorageException: The client could not finish the operation within specified maximum execution timeout.</pre>
+<p>Plugin can&#8217;t complete registration phase because it can&#8217;t connect to Azure Blob Storage configured
+in the plugin <code class="literal">storage_connection</code> setting.</p>
+<p><span class="strong strong"><strong>Background</strong></span></p>
+<p>Azure Event Hub plugin can share the offset position of a consumer group with
+other consumers only if Blob Storage connection settings are configured.
+EventHub uses the AMQP protocol to transfer data, but Blob storage uses a
+library which leverages the JDK&#8217;s http client, <code class="literal">HttpURLConnection</code>.
+To troubleshoot HTTP connection problems, which may be related to proxy settings, the
+logging level for this part of the JDK has to be increased. The problem is that
+JDK uses Java Util Logging for its internal logging needs, which is not configurable
+with the standard <code class="literal">log4j2.properties</code> shipped with Logstash.</p>
+<p><span class="strong strong"><strong>Possible solutions</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Configure Logstash settings to enable the JDK logging.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Details</strong></span></p>
+<p>Steps to enable JDK logging on Logstash:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Create a properties file with the logging definitions for Java Util Logging (JUL).
+</li>
+<li class="listitem">
+Configure a JVM property to inform JUL to use such definitions file.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>JUL definitions</strong></span></p>
+<p>Create a file that you can use to define logging levels, handlers and loggers.
+For example, <code class="literal">&lt;LS_HOME&gt;/conf/jul.properties</code>.</p>
+<div class="pre_wrapper lang-txt">
+<pre class="programlisting prettyprint lang-txt">handlers= java.util.logging.ConsoleHandler,java.util.logging.FileHandler
+.level= ALL
+java.util.logging.FileHandler.pattern = &lt;USER's LOGS FOLDER&gt;/logs/jul_http%u.log <a id="CO49-1"></a><i class="conum" data-value="1"></i>
+java.util.logging.FileHandler.limit = 50000
+java.util.logging.FileHandler.count = 1
+java.util.logging.FileHandler.level=ALL
+java.util.logging.FileHandler.maxLocks = 100
+java.util.logging.FileHandler.formatter = java.util.logging.SimpleFormatter
+
+java.util.logging.ConsoleHandler.level = INFO # or put FINE
+java.util.logging.ConsoleHandler.formatter = java.util.logging.SimpleFormatter
+
+# defines the logger we are interested in
+sun.net.www.protocol.http.HttpURLConnection.level = ALL <a id="CO49-2"></a><i class="conum" data-value="2"></i> <a id="CO49-3"></a><i class="conum" data-value="3"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO49-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The log file will be created in a path defined by the user (<code class="literal">&lt;USER's LOGS FOLDER&gt;/logs/</code>)</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO49-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This configuration enables the <code class="literal">sun.net.www.protocol.http.HttpURLConnection</code> logger, and</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO49-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>sets the logging level to <code class="literal">ALL</code>. It will log all messages directed to it, from highest to lowest priority.</p>
+</td>
+</tr>
+</table>
+</div>
+<p><span class="strong strong"><strong>JVM property</strong></span></p>
+<p>To inform the JUL framework of the selected definitions file a property (<code class="literal">java.util.logging.config.file</code>) has to be
+evaluated, this is where Logstash&#8217;s <code class="literal">config/jvm.properties</code> come in handy.
+Edit the file adding the property, pointing to the path where the JUL definitions file was created:</p>
+<div class="pre_wrapper lang-txt">
+<pre class="programlisting prettyprint lang-txt">-Djava.util.logging.config.file=&lt;LS_HOME&gt;/conf/jul.properties</pre>
+</div>
+<p>The logs could contain sensible information, such credentials, and could be verbose but should give
+hits on the connection problem at HTTP level with the Azure Blob Storage.</p>
 <h2><a id="ts-other"></a>Other issues<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/main/docs/static/troubleshoot/ts-other-issues.asciidoc">edit</a></h2>
 <p>Coming soon, and you can help! If you have something to add, please:</p>
 <div class="ulist itemizedlist">
