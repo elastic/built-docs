@@ -454,7 +454,7 @@ The functions are divided into the following categories:</p>
 </span>
 </dt>
 <dd>
-Numeric expression. If <code class="literal">null</code>, the function returns <code class="literal">null</code>.
+Numeric expression.
 </dd>
 </dl>
 </div>
@@ -462,7 +462,7 @@ Numeric expression. If <code class="literal">null</code>, the function returns <
 <p>The average of a numeric expression.</p>
 <p><span class="strong strong"><strong>Supported types</strong></span></p>
 <p>The result is always a <code class="literal">double</code> no matter the input type.</p>
-<p><span class="strong strong"><strong>Example</strong></span></p>
+<p><span class="strong strong"><strong>Examples</strong></span></p>
 <div class="pre_wrapper lang-esql merge styled">
 <pre class="programlisting prettyprint lang-esql merge styled">FROM employees
 | STATS AVG(height)</pre>
@@ -484,22 +484,46 @@ Numeric expression. If <code class="literal">null</code>, the function returns <
 </tbody>
 </table>
 </div>
+<p>The expression can use inline functions. For example, to calculate the average
+over a multivalued column, first use <code class="literal">MV_AVG</code> to average the multiple values per
+row, and use the result with the <code class="literal">AVG</code> function:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<pre class="programlisting prettyprint lang-esql merge styled">FROM employees
+| STATS avg_salary_change = AVG(MV_AVG(salary_change))</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">avg_salary_change:double</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>1.3904535864978902</p></td>
+</tr>
+</tbody>
+</table>
+</div>
 <h3><a id="esql-agg-count"></a><code class="literal">COUNT</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/esql/functions/count.asciidoc">edit</a></h3>
 <p><span class="strong strong"><strong>Syntax</strong></span></p>
 <div class="pre_wrapper lang-esql">
-<pre class="programlisting prettyprint lang-esql">COUNT([input])</pre>
+<pre class="programlisting prettyprint lang-esql">COUNT([expression])</pre>
 </div>
 <p><span class="strong strong"><strong>Parameters</strong></span></p>
 <div class="variablelist">
 <dl class="variablelist">
 <dt>
 <span class="term">
-<code class="literal">input</code>
+<code class="literal">expression</code>
 </span>
 </dt>
 <dd>
-Column or literal for which to count the number of values. If omitted, returns a
-count all (the number of rows).
+Expression that outputs values to be counted.
+If omitted, equivalent to <code class="literal">COUNT(*)</code> (the number of rows).
 </dd>
 </dl>
 </div>
@@ -575,21 +599,44 @@ count all (the number of rows).
 </tbody>
 </table>
 </div>
+<p>The expression can use inline functions. This example splits a string into
+multiple values using the <code class="literal">SPLIT</code> function and counts the values:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<pre class="programlisting prettyprint lang-esql merge styled">ROW words="foo;bar;baz;qux;quux;foo"
+| STATS word_count = COUNT(SPLIT(words, ";"))</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">word_count:long</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>6</p></td>
+</tr>
+</tbody>
+</table>
+</div>
 <h3><a id="esql-agg-count-distinct"></a><code class="literal">COUNT_DISTINCT</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/esql/functions/count-distinct.asciidoc">edit</a></h3>
 <p><span class="strong strong"><strong>Syntax</strong></span></p>
 <div class="pre_wrapper lang-esql">
-<pre class="programlisting prettyprint lang-esql">COUNT_DISTINCT(column[, precision_threshold])</pre>
+<pre class="programlisting prettyprint lang-esql">COUNT_DISTINCT(expression[, precision_threshold])</pre>
 </div>
 <p><span class="strong strong"><strong>Parameters</strong></span></p>
 <div class="variablelist">
 <dl class="variablelist">
 <dt>
 <span class="term">
-<code class="literal">column</code>
+<code class="literal">expression</code>
 </span>
 </dt>
 <dd>
-Column for which to count the number of distinct values.
+Expression that outputs the values on which to perform a distinct count.
 </dd>
 <dt>
 <span class="term">
@@ -605,47 +652,6 @@ same effect as a threshold of 40000. The default value is 3000.
 </div>
 <p><span class="strong strong"><strong>Description</strong></span></p>
 <p>Returns the approximate number of distinct values.</p>
-<h4><a id="esql-agg-count-distinct-approximate"></a>Counts are approximate<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/esql/functions/count-distinct.asciidoc">edit</a></h4>
-<p>Computing exact counts requires loading values into a set and returning its
-size. This doesn&#8217;t scale when working on high-cardinality sets and/or large
-values as the required memory usage and the need to communicate those
-per-shard sets between nodes would utilize too many resources of the cluster.</p>
-<p>This <code class="literal">COUNT_DISTINCT</code> function is based on the
-<a href="https://static.googleusercontent.com/media/research.google.com/fr//pubs/archive/40671.pdf" class="ulink" target="_top">HyperLogLog++</a>
-algorithm, which counts based on the hashes of the values with some interesting
-properties:</p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-configurable precision, which decides on how to trade memory for accuracy,
-</li>
-<li class="listitem">
-excellent accuracy on low-cardinality sets,
-</li>
-<li class="listitem">
-fixed memory usage: no matter if there are tens or billions of unique values,
-memory usage only depends on the configured precision.
-</li>
-</ul>
-</div>
-<p>For a precision threshold of <code class="literal">c</code>, the implementation that we are using requires
-about <code class="literal">c * 8</code> bytes.</p>
-<p>The following chart shows how the error varies before and after the threshold:</p>
-<p><span class="image"><img src="images/cardinality_error.png" alt="cardinality error"></span></p>
-<p>For all 3 thresholds, counts have been accurate up to the configured threshold.
-Although not guaranteed, this is likely to be the case. Accuracy in practice depends
-on the dataset in question. In general, most datasets show consistently good
-accuracy. Also note that even with a threshold as low as 100, the error
-remains very low (1-6% as seen in the above graph) even when counting millions of items.</p>
-<p>The HyperLogLog++ algorithm depends on the leading zeros of hashed
-values, the exact distributions of hashes in a dataset can affect the
-accuracy of the cardinality.</p>
-<p>The <code class="literal">COUNT_DISTINCT</code> function takes an optional second parameter to configure
-the precision threshold. The precision_threshold options allows to trade memory
-for accuracy, and defines a unique count below which counts are expected to be
-close to accurate. Above this value, counts might become a bit more fuzzy. The
-maximum supported value is 40000, thresholds above this number will have the
-same effect as a threshold of 40000. The default value is <code class="literal">3000</code>.</p>
 <p><span class="strong strong"><strong>Supported types</strong></span></p>
 <p>Can take any field type as input.</p>
 <p><span class="strong strong"><strong>Examples</strong></span></p>
@@ -698,26 +704,90 @@ same effect as a threshold of 40000. The default value is <code class="literal">
 </tbody>
 </table>
 </div>
+<p>The expression can use inline functions. This example splits a string into
+multiple values using the <code class="literal">SPLIT</code> function and counts the unique values:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<pre class="programlisting prettyprint lang-esql merge styled">ROW words="foo;bar;baz;qux;quux;foo"
+| STATS distinct_word_count = COUNT_DISTINCT(SPLIT(words, ";"))</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">distinct_word_count:long</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>5</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h4><a id="esql-agg-count-distinct-approximate"></a>Counts are approximate<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/esql/functions/count-distinct.asciidoc">edit</a></h4>
+<p>Computing exact counts requires loading values into a set and returning its
+size. This doesn&#8217;t scale when working on high-cardinality sets and/or large
+values as the required memory usage and the need to communicate those
+per-shard sets between nodes would utilize too many resources of the cluster.</p>
+<p>This <code class="literal">COUNT_DISTINCT</code> function is based on the
+<a href="https://static.googleusercontent.com/media/research.google.com/fr//pubs/archive/40671.pdf" class="ulink" target="_top">HyperLogLog++</a>
+algorithm, which counts based on the hashes of the values with some interesting
+properties:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+configurable precision, which decides on how to trade memory for accuracy,
+</li>
+<li class="listitem">
+excellent accuracy on low-cardinality sets,
+</li>
+<li class="listitem">
+fixed memory usage: no matter if there are tens or billions of unique values,
+memory usage only depends on the configured precision.
+</li>
+</ul>
+</div>
+<p>For a precision threshold of <code class="literal">c</code>, the implementation that we are using requires
+about <code class="literal">c * 8</code> bytes.</p>
+<p>The following chart shows how the error varies before and after the threshold:</p>
+<p><span class="image"><img src="images/cardinality_error.png" alt="cardinality error"></span></p>
+<p>For all 3 thresholds, counts have been accurate up to the configured threshold.
+Although not guaranteed, this is likely to be the case. Accuracy in practice depends
+on the dataset in question. In general, most datasets show consistently good
+accuracy. Also note that even with a threshold as low as 100, the error
+remains very low (1-6% as seen in the above graph) even when counting millions of items.</p>
+<p>The HyperLogLog++ algorithm depends on the leading zeros of hashed
+values, the exact distributions of hashes in a dataset can affect the
+accuracy of the cardinality.</p>
+<p>The <code class="literal">COUNT_DISTINCT</code> function takes an optional second parameter to configure
+the precision threshold. The precision_threshold options allows to trade memory
+for accuracy, and defines a unique count below which counts are expected to be
+close to accurate. Above this value, counts might become a bit more fuzzy. The
+maximum supported value is 40000, thresholds above this number will have the
+same effect as a threshold of 40000. The default value is <code class="literal">3000</code>.</p>
 <h3><a id="esql-agg-max"></a><code class="literal">MAX</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/esql/functions/max.asciidoc">edit</a></h3>
 <p><span class="strong strong"><strong>Syntax</strong></span></p>
 <div class="pre_wrapper lang-esql">
-<pre class="programlisting prettyprint lang-esql">MAX(column)</pre>
+<pre class="programlisting prettyprint lang-esql">MAX(expression)</pre>
 </div>
 <p><span class="strong strong"><strong>Parameters</strong></span></p>
 <div class="variablelist">
 <dl class="variablelist">
 <dt>
 <span class="term">
-<code class="literal">column</code>
+<code class="literal">expression</code>
 </span>
 </dt>
 <dd>
-Column from which to return the maximum value.
+Expression from which to return the maximum value.
 </dd>
 </dl>
 </div>
 <p><span class="strong strong"><strong>Description</strong></span></p>
-<p>Returns the maximum value of a numeric column.</p>
+<p>Returns the maximum value of a numeric expression.</p>
 <p><span class="strong strong"><strong>Example</strong></span></p>
 <div class="pre_wrapper lang-esql merge styled">
 <pre class="programlisting prettyprint lang-esql merge styled">FROM employees
@@ -740,21 +810,45 @@ Column from which to return the maximum value.
 </tbody>
 </table>
 </div>
+<p>The expression can use inline functions. For example, to calculate the maximum
+over an average of a multivalued column, use <code class="literal">MV_AVG</code> to first average the
+multiple values per row, and use the result with the <code class="literal">MAX</code> function:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<pre class="programlisting prettyprint lang-esql merge styled">FROM employees
+| STATS max_avg_salary_change = MAX(MV_AVG(salary_change))</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">max_avg_salary_change:double</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>13.75</p></td>
+</tr>
+</tbody>
+</table>
+</div>
 <h3><a id="esql-agg-median"></a><code class="literal">MEDIAN</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/esql/functions/median.asciidoc">edit</a></h3>
 <p><span class="strong strong"><strong>Syntax</strong></span></p>
 <div class="pre_wrapper lang-esql">
-<pre class="programlisting prettyprint lang-esql">MEDIAN(column)</pre>
+<pre class="programlisting prettyprint lang-esql">MEDIAN(expression)</pre>
 </div>
 <p><span class="strong strong"><strong>Parameters</strong></span></p>
 <div class="variablelist">
 <dl class="variablelist">
 <dt>
 <span class="term">
-<code class="literal">column</code>
+<code class="literal">expression</code>
 </span>
 </dt>
 <dd>
-Column from which to return the median value.
+Expression from which to return the median value.
 </dd>
 </dl>
 </div>
@@ -799,21 +893,45 @@ This means you can get slightly different results using the same data.</p>
 </tbody>
 </table>
 </div>
+<p>The expression can use inline functions. For example, to calculate the median of
+the maximum values of a multivalued column, first use <code class="literal">MV_MAX</code> to get the
+maximum value per row, and use the result with the <code class="literal">MEDIAN</code> function:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<pre class="programlisting prettyprint lang-esql merge styled">FROM employees
+| STATS median_max_salary_change = MEDIAN(MV_MAX(salary_change))</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">median_max_salary_change:double</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>7.69</p></td>
+</tr>
+</tbody>
+</table>
+</div>
 <h3><a id="esql-agg-median-absolute-deviation"></a><code class="literal">MEDIAN_ABSOLUTE_DEVIATION</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/esql/functions/median-absolute-deviation.asciidoc">edit</a></h3>
 <p><span class="strong strong"><strong>Syntax</strong></span></p>
 <div class="pre_wrapper lang-esql">
-<pre class="programlisting prettyprint lang-esql">MEDIAN_ABSOLUTE_DEVIATION(column)</pre>
+<pre class="programlisting prettyprint lang-esql">MEDIAN_ABSOLUTE_DEVIATION(expression)</pre>
 </div>
 <p><span class="strong strong"><strong>Parameters</strong></span></p>
 <div class="variablelist">
 <dl class="variablelist">
 <dt>
 <span class="term">
-<code class="literal">column</code>
+<code class="literal">expression</code>
 </span>
 </dt>
 <dd>
-Column from which to return the median absolute deviation.
+Expression from which to return the median absolute deviation.
 </dd>
 </dl>
 </div>
@@ -864,26 +982,51 @@ This means you can get slightly different results using the same data.</p>
 </tbody>
 </table>
 </div>
+<p>The expression can use inline functions. For example, to calculate the the
+median absolute deviation of the maximum values of a multivalued column, first
+use <code class="literal">MV_MAX</code> to get the maximum value per row, and use the result with the
+<code class="literal">MEDIAN_ABSOLUTE_DEVIATION</code> function:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<pre class="programlisting prettyprint lang-esql merge styled">FROM employees
+| STATS m_a_d_max_salary_change = MEDIAN_ABSOLUTE_DEVIATION(MV_MAX(salary_change))</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">m_a_d_max_salary_change:double</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>5.69</p></td>
+</tr>
+</tbody>
+</table>
+</div>
 <h3><a id="esql-agg-min"></a><code class="literal">MIN</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/esql/functions/min.asciidoc">edit</a></h3>
 <p><span class="strong strong"><strong>Syntax</strong></span></p>
 <div class="pre_wrapper lang-esql">
-<pre class="programlisting prettyprint lang-esql">MIN(column)</pre>
+<pre class="programlisting prettyprint lang-esql">MIN(expression)</pre>
 </div>
 <p><span class="strong strong"><strong>Parameters</strong></span></p>
 <div class="variablelist">
 <dl class="variablelist">
 <dt>
 <span class="term">
-<code class="literal">column</code>
+<code class="literal">expression</code>
 </span>
 </dt>
 <dd>
-Column from which to return the minimum value.
+Expression from which to return the minimum value.
 </dd>
 </dl>
 </div>
 <p><span class="strong strong"><strong>Description</strong></span></p>
-<p>Returns the minimum value of a numeric column.</p>
+<p>Returns the minimum value of a numeric expression.</p>
 <p><span class="strong strong"><strong>Example</strong></span></p>
 <div class="pre_wrapper lang-esql merge styled">
 <pre class="programlisting prettyprint lang-esql merge styled">FROM employees
@@ -906,21 +1049,45 @@ Column from which to return the minimum value.
 </tbody>
 </table>
 </div>
+<p>The expression can use inline functions. For example, to calculate the minimum
+over an average of a multivalued column, use <code class="literal">MV_AVG</code> to first average the
+multiple values per row, and use the result with the <code class="literal">MIN</code> function:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<pre class="programlisting prettyprint lang-esql merge styled">FROM employees
+| STATS min_avg_salary_change = MIN(MV_AVG(salary_change))</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">min_avg_salary_change:double</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>-8.46</p></td>
+</tr>
+</tbody>
+</table>
+</div>
 <h3><a id="esql-agg-percentile"></a><code class="literal">PERCENTILE</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/esql/functions/percentile.asciidoc">edit</a></h3>
 <p><span class="strong strong"><strong>Syntax</strong></span></p>
 <div class="pre_wrapper lang-esql">
-<pre class="programlisting prettyprint lang-esql">PERCENTILE(column, percentile)</pre>
+<pre class="programlisting prettyprint lang-esql">PERCENTILE(expression, percentile)</pre>
 </div>
 <p><span class="strong strong"><strong>Parameters</strong></span></p>
 <div class="variablelist">
 <dl class="variablelist">
 <dt>
 <span class="term">
-<code class="literal">column</code>
+<code class="literal">expression</code>
 </span>
 </dt>
 <dd>
-Column to convert from multiple values to single value.
+Expression from which to return a percentile.
 </dd>
 <dt>
 <span class="term">
@@ -936,6 +1103,60 @@ A constant numeric expression.
 <p>Returns the value at which a certain percentage of observed values occur. For
 example, the 95th percentile is the value which is greater than 95% of the
 observed values and the 50th percentile is the <a class="xref" href="esql-functions-operators.html#esql-agg-median" title="MEDIAN"><code class="literal">MEDIAN</code></a>.</p>
+<p><span class="strong strong"><strong>Example</strong></span></p>
+<div class="pre_wrapper lang-esql merge styled">
+<pre class="programlisting prettyprint lang-esql merge styled">FROM employees
+| STATS p0 = PERCENTILE(salary,  0)
+     , p50 = PERCENTILE(salary, 50)
+     , p99 = PERCENTILE(salary, 99)</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">p0:double</th>
+<th align="left" valign="top">p50:double</th>
+<th align="left" valign="top">p99:double</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>25324</p></td>
+<td align="left" valign="top"><p>47003</p></td>
+<td align="left" valign="top"><p>74970.29</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The expression can use inline functions. For example, to calculate a percentile
+of the maximum values of a multivalued column, first use <code class="literal">MV_MAX</code> to get the
+maximum value per row, and use the result with the <code class="literal">PERCENTILE</code> function:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<pre class="programlisting prettyprint lang-esql merge styled">FROM employees
+| STATS p80_max_salary_change = PERCENTILE(MV_MAX(salary_change), 80)</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">p80_max_salary_change:double</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>12.132</p></td>
+</tr>
+</tbody>
+</table>
+</div>
 <h4><a id="esql-agg-percentile-approximate"></a><code class="literal">PERCENTILE</code> is (usually) approximate<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/esql/functions/percentile.asciidoc">edit</a></h4>
 <p>There are many different algorithms to calculate percentiles. The naive
 implementation simply stores all the values in a sorted array. To find the 50th
@@ -979,36 +1200,6 @@ it. It would not be the case on more skewed distributions.</p>
 <p><code class="literal">PERCENTILE</code> is also <a href="https://en.wikipedia.org/wiki/Nondeterministic_algorithm" class="ulink" target="_top">non-deterministic</a>.
 This means you can get slightly different results using the same data.</p>
 </div>
-</div>
-<p><span class="strong strong"><strong>Example</strong></span></p>
-<div class="pre_wrapper lang-esql merge styled">
-<pre class="programlisting prettyprint lang-esql merge styled">FROM employees
-| STATS p0 = PERCENTILE(salary,  0)
-     , p50 = PERCENTILE(salary, 50)
-     , p99 = PERCENTILE(salary, 99)</pre>
-</div>
-<div class="informaltable">
-<table border="1" cellpadding="4px" class="monospaced styled">
-<colgroup>
-<col class="col_1"/>
-<col class="col_2"/>
-<col class="col_3"/>
-</colgroup>
-<thead>
-<tr>
-<th align="left" valign="top">p0:double</th>
-<th align="left" valign="top">p50:double</th>
-<th align="left" valign="top">p99:double</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left" valign="top"><p>25324</p></td>
-<td align="left" valign="top"><p>47003</p></td>
-<td align="left" valign="top"><p>74970.29</p></td>
-</tr>
-</tbody>
-</table>
 </div>
 <h3><a id="esql-agg-st-centroid"></a><code class="literal">ST_CENTROID</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/esql/functions/st_centroid.asciidoc">edit</a></h3>
 <p>Calculate the spatial centroid over a field with spatial point geometry type.</p>
@@ -1061,22 +1252,22 @@ This means you can get slightly different results using the same data.</p>
 <h3><a id="esql-agg-sum"></a><code class="literal">SUM</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/esql/functions/sum.asciidoc">edit</a></h3>
 <p><span class="strong strong"><strong>Syntax</strong></span></p>
 <div class="pre_wrapper lang-esql">
-<pre class="programlisting prettyprint lang-esql">SUM(column)</pre>
+<pre class="programlisting prettyprint lang-esql">SUM(expression)</pre>
 </div>
 <div class="variablelist">
 <dl class="variablelist">
 <dt>
 <span class="term">
-<code class="literal">column</code>
+<code class="literal">expression</code>
 </span>
 </dt>
 <dd>
-Numeric column.
+Numeric expression.
 </dd>
 </dl>
 </div>
 <p><span class="strong strong"><strong>Description</strong></span></p>
-<p>Returns the sum of a numeric column.</p>
+<p>Returns the sum of a numeric expression.</p>
 <p><span class="strong strong"><strong>Example</strong></span></p>
 <div class="pre_wrapper lang-esql merge styled">
 <pre class="programlisting prettyprint lang-esql merge styled">FROM employees
@@ -1095,6 +1286,30 @@ Numeric column.
 <tbody>
 <tr>
 <td align="left" valign="top"><p>281</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The expression can use inline functions. For example, to calculate
+the sum of each employee&#8217;s maximum salary changes, apply the
+<code class="literal">MV_MAX</code> function to each row and then sum the results:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<pre class="programlisting prettyprint lang-esql merge styled">FROM employees
+| STATS total_salary_changes = SUM(MV_MAX(salary_change))</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">total_salary_changes:double</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>446.75</p></td>
 </tr>
 </tbody>
 </table>

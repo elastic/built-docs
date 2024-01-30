@@ -1366,7 +1366,8 @@ sort order, <code class="literal">null</code> values are sorted first. You can c
 <h3><a id="esql-stats-by"></a><code class="literal">STATS ... BY</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/esql/processing-commands/stats.asciidoc">edit</a></h3>
 <p><span class="strong strong"><strong>Syntax</strong></span></p>
 <div class="pre_wrapper lang-esql">
-<pre class="programlisting prettyprint lang-esql">STATS [column1 =] expression1[, ..., [columnN =] expressionN] [BY grouping_column1[, ..., grouping_columnN]]</pre>
+<pre class="programlisting prettyprint lang-esql">STATS [column1 =] expression1[, ..., [columnN =] expressionN]
+[BY grouping_expression1[, ..., grouping_expressionN]]</pre>
 </div>
 <p><span class="strong strong"><strong>Parameters</strong></span></p>
 <div class="variablelist">
@@ -1390,20 +1391,26 @@ An expression that computes an aggregated value.
 </dd>
 <dt>
 <span class="term">
-<code class="literal">grouping_columnX</code>
+<code class="literal">grouping_expressionX</code>
 </span>
 </dt>
 <dd>
-The column containing the values to group by.
+An expression that outputs the values to group by.
 </dd>
 </dl>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Individual <code class="literal">null</code> values are skipped when computing aggregations.</p>
+</div>
 </div>
 <p><span class="strong strong"><strong>Description</strong></span></p>
 <p>The <code class="literal">STATS ... BY</code> processing command groups rows according to a common value
 and calculate one or more aggregated values over the grouped rows. If <code class="literal">BY</code> is
 omitted, the output table contains exactly one row with the aggregations applied
 over the entire dataset.</p>
-<p>The following aggregation functions are supported:</p>
+<p>The following <a class="xref" href="esql-functions-operators.html#esql-agg-functions" title="ES|QL aggregate functions">aggregation functions</a> are supported:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
@@ -1447,8 +1454,8 @@ over the entire dataset.</p>
 <div class="note admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>Grouping on a single column is currently much more optimized than grouping
-      on many columns. In some tests we have seen grouping on a single <code class="literal">keyword</code>
+<p>Grouping on a single expression is currently much more optimized than grouping
+      on many expressions. In some tests we have seen grouping on a single <code class="literal">keyword</code>
       column to be five times faster than grouping on two <code class="literal">keyword</code> columns. Do
       not try to work around this by combining the two columns together with
       something like <a class="xref" href="esql-functions-operators.html#esql-concat" title="CONCAT"><code class="literal">CONCAT</code></a> and then grouping - that is not going to be
@@ -1526,9 +1533,29 @@ dataset:</p>
 </table>
 </div>
 <p>It&#8217;s possible to calculate multiple values:</p>
-<div class="pre_wrapper lang-esql">
-<pre class="programlisting prettyprint lang-esql">FROM employees
+<div class="pre_wrapper lang-esql merge styled">
+<pre class="programlisting prettyprint lang-esql merge styled">FROM employees
 | STATS avg_lang = AVG(languages), max_lang = MAX(languages)</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">avg_lang:double</th>
+<th align="left" valign="top">max_lang:integer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>3.1222222222222222</p></td>
+<td align="left" valign="top"><p>5</p></td>
+</tr>
+</tbody>
+</table>
 </div>
 <p>It&#8217;s also possible to group by multiple values (only supported for long and
 keyword family fields):</p>
@@ -1538,6 +1565,135 @@ keyword family fields):</p>
 | STATS avg_salary = AVG(salary) BY hired, languages.long
 | EVAL avg_salary = ROUND(avg_salary)
 | SORT hired, languages.long</pre>
+</div>
+<p>Both the aggregating functions and the grouping expressions accept other
+functions. This is useful for using <code class="literal">STATS...BY</code> on multivalue columns.
+For example, to calculate the average salary change, you can use <code class="literal">MV_AVG</code> to
+first average the multiple values per employee, and use the result with the
+<code class="literal">AVG</code> function:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<pre class="programlisting prettyprint lang-esql merge styled">FROM employees
+| STATS avg_salary_change = AVG(MV_AVG(salary_change))</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">avg_salary_change:double</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>1.3904535864978902</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>An example of grouping by an expression is grouping employees on the first
+letter of their last name:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<pre class="programlisting prettyprint lang-esql merge styled">FROM employees
+| STATS my_count = COUNT() BY LEFT(last_name, 1)
+| SORT `LEFT(last_name, 1)`</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">my_count:long</th>
+<th align="left" valign="top">LEFT(last_name, 1):keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>2</p></td>
+<td align="left" valign="top"><p>A</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>11</p></td>
+<td align="left" valign="top"><p>B</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>5</p></td>
+<td align="left" valign="top"><p>C</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>5</p></td>
+<td align="left" valign="top"><p>D</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>2</p></td>
+<td align="left" valign="top"><p>E</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>4</p></td>
+<td align="left" valign="top"><p>F</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>4</p></td>
+<td align="left" valign="top"><p>G</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>6</p></td>
+<td align="left" valign="top"><p>H</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>2</p></td>
+<td align="left" valign="top"><p>J</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>3</p></td>
+<td align="left" valign="top"><p>K</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>5</p></td>
+<td align="left" valign="top"><p>L</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>12</p></td>
+<td align="left" valign="top"><p>M</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>4</p></td>
+<td align="left" valign="top"><p>N</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>1</p></td>
+<td align="left" valign="top"><p>O</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>7</p></td>
+<td align="left" valign="top"><p>P</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>5</p></td>
+<td align="left" valign="top"><p>R</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>13</p></td>
+<td align="left" valign="top"><p>S</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>4</p></td>
+<td align="left" valign="top"><p>T</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>2</p></td>
+<td align="left" valign="top"><p>W</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>3</p></td>
+<td align="left" valign="top"><p>Z</p></td>
+</tr>
+</tbody>
+</table>
 </div>
 <p>Specifying the output column name is optional. If not specified, the new column
 name is equal to the expression. The following query returns a column named
