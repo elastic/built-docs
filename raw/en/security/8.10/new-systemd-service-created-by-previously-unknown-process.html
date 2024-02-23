@@ -110,78 +110,232 @@ Elastic
 <div class="titlepage"><div><div>
 <h3 class="title"><a id="_investigation_guide_296"></a>Investigation guide<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.10/docs/detections/prebuilt-rules/rule-details/new-systemd-service-created-by-previously-unknown-process.asciidoc">edit</a></h3>
 </div></div></div>
-<div class="pre_wrapper lang-markdown">
-<pre class="programlisting prettyprint lang-markdown">## Triage and analysis
+<p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
+<p><span class="strong strong"><strong>Investigating New Systemd Service Created by Previously Unknown Process</strong></span></p>
+<p>Systemd service files are configuration files in Linux systems used to define and manage system services.</p>
+<p>Malicious actors can leverage systemd service files to achieve persistence by creating or modifying service files to execute malicious commands or payloads during system startup. This allows them to maintain unauthorized access, execute additional malicious activities, or evade detection.</p>
+<p>This rule monitors the creation of new systemd service files, potentially indicating the creation of a persistence mechanism.</p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Note</strong></span>:
+This investigation guide uses the <a href="/guide/en/security/master/invest-guide-run-osquery.html" class="ulink" target="_top">Osquery Markdown Plugin</a> introduced in Elastic Stack version 8.5.0. Older Elastic Stack versions will display unrendered Markdown in this guide.
+This investigation guide uses <a href="/guide/en/security/current/osquery-placeholder-fields.html" class="ulink" target="_top">placeholder fields</a> to dynamically pass alert data into Osquery queries. Placeholder fields were introduced in Elastic Stack version 8.7.0. If you&#8217;re using Elastic Stack version 8.6.0 or earlier, you&#8217;ll need to manually adjust this investigation guide&#8217;s queries to ensure they properly run.</p>
+</blockquote>
+</div>
+<p><span class="strong strong"><strong>Possible Investigation Steps</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Investigate the systemd service file that was created or modified.
+</li>
+<li class="listitem">
+!{osquery{"label":"Osquery - Retrieve File Information","query":"SELECT * FROM file WHERE path = {{file.path}}"}}
+</li>
+<li class="listitem">
+Investigate the currently enabled systemd services through the following command <code class="literal">sudo systemctl list-unit-files</code>.
+</li>
+<li class="listitem">
+Investigate whether any other files in any of the available systemd directories have been altered through OSQuery.
+</li>
+<li class="listitem">
+!{osquery{"label":"Osquery - Retrieve File Listing Information","query":"SELECT * FROM file WHERE (\npath LIKE <em>/etc/systemd/system/%</em> OR \npath LIKE <em>/usr/local/lib/systemd/system/%</em> OR \npath LIKE <em>/lib/systemd/system/%</em> OR\npath LIKE <em>/usr/lib/systemd/system/%</em> OR\npath LIKE <em>/home/user/.config/systemd/user/%</em>\n)\n"}}
+</li>
+<li class="listitem">
+!{osquery{"label":"Osquery - Retrieve Additional File Listing Information","query":"SELECT\n  f.path,\n  u.username AS file_owner,\n  g.groupname AS group_owner,\n  datetime(f.atime, <em>unixepoch</em>) AS file_last_access_time,\n  datetime(f.mtime, <em>unixepoch</em>) AS file_last_modified_time,\n  datetime(f.ctime, <em>unixepoch</em>) AS file_last_status_change_time,\n  datetime(f.btime, <em>unixepoch</em>) AS file_created_time,\n  f.size AS size_bytes\nFROM\n  file f\n  LEFT JOIN users u ON f.uid = u.uid\n  LEFT JOIN groups g ON f.gid = g.gid\nWHERE (\npath LIKE <em>/etc/systemd/system/%</em> OR \npath LIKE <em>/usr/local/lib/systemd/system/%</em> OR \npath LIKE <em>/lib/systemd/system/%</em> OR\npath LIKE <em>/usr/lib/systemd/system/%</em> OR\npath LIKE <em>/home/{{user.name}}/.config/systemd/user/%</em>\n)\n"}}
+</li>
+<li class="listitem">
+Investigate the script execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence and whether they are located in expected locations.
+</li>
+<li class="listitem">
+!{osquery{"label":"Osquery - Retrieve Running Processes by User","query":"SELECT pid, username, name FROM processes p JOIN users u ON u.uid = p.uid ORDER BY username"}}
+</li>
+<li class="listitem">
+Investigate other alerts associated with the user/host during the past 48 hours.
+</li>
+<li class="listitem">
+Validate the activity is not related to planned patches, updates, network administrator activity, or legitimate software installations.
+</li>
+<li class="listitem">
+Investigate whether the altered scripts call other malicious scripts elsewhere on the file system.
+</li>
+<li class="listitem">
+If scripts or executables were dropped, retrieve the files and determine if they are malicious:
+</li>
+<li class="listitem">
+Use a private sandboxed malware analysis system to perform analysis.
+</li>
+<li class="listitem">
+Observe and collect information about the following activities:
+</li>
+<li class="listitem">
+Attempts to contact external domains and addresses.
+</li>
+<li class="listitem">
+Check if the domain is newly registered or unexpected.
+</li>
+<li class="listitem">
+Check the reputation of the domain or IP address.
+</li>
+<li class="listitem">
+File access, modification, and creation activities.
+</li>
+<li class="listitem">
+Cron jobs, services and other persistence mechanisms.
+</li>
+<li class="listitem">
+!{osquery{"label":"Osquery - Retrieve Crontab Information","query":"SELECT * FROM crontab"}}
+</li>
+<li class="listitem">
+Investigate abnormal behaviors by the subject process/user such as network connections, file modifications, and any other spawned child processes.
+</li>
+<li class="listitem">
+Investigate listening ports and open sockets to look for potential command and control traffic or data exfiltration.
+</li>
+<li class="listitem">
+!{osquery{"label":"Osquery - Retrieve Listening Ports","query":"SELECT pid, address, port, socket, protocol, path FROM listening_ports"}}
+</li>
+<li class="listitem">
+!{osquery{"label":"Osquery - Retrieve Open Sockets","query":"SELECT pid, family, remote_address, remote_port, socket, state FROM process_open_sockets"}}
+</li>
+<li class="listitem">
+Identify the user account that performed the action, analyze it, and check whether it should perform this kind of action.
+</li>
+<li class="listitem">
+!{osquery{"label":"Osquery - Retrieve Information for a Specific User","query":"SELECT * FROM users WHERE username = {{user.name}}"}}
+</li>
+<li class="listitem">
+Investigate whether the user is currently logged in and active.
+</li>
+<li class="listitem">
+!{osquery{"label":"Osquery - Investigate the Account Authentication Status","query":"SELECT * FROM logged_in_users WHERE user = {{user.name}}"}}
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>False Positive Analysis</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+If this activity is related to new benign software installation activity, consider adding exceptions — preferably with a combination of user and command line conditions.
+</li>
+<li class="listitem">
+If this activity is related to a system administrator who uses systemd services for administrative purposes, consider adding exceptions for this specific administrator user account.
+</li>
+<li class="listitem">
+Try to understand the context of the execution by thinking about the user, machine, or business purpose. A small number of endpoints, such as servers with unique software, might appear unusual but satisfy a specific business need.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Related Rules</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Potential Persistence Through Run Control Detected - 0f4d35e4-925e-4959-ab24-911be207ee6f
+</li>
+<li class="listitem">
+Potential Persistence Through init.d Detected - 474fd20e-14cc-49c5-8160-d9ab4ba16c8b
+</li>
+<li class="listitem">
+New Systemd Timer Created - 7fb500fa-8e24-4bd1-9480-2a819352602c
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Response and remediation</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Initiate the incident response process based on the outcome of the triage.
+</li>
+<li class="listitem">
+Isolate the involved host to prevent further post-compromise behavior.
+</li>
+<li class="listitem">
+If the triage identified malware, search the environment for additional compromised hosts.
+</li>
+<li class="listitem">
+Implement temporary network rules, procedures, and segmentation to contain the malware.
+</li>
+<li class="listitem">
+Stop suspicious processes.
+</li>
+<li class="listitem">
+Immediately block the identified indicators of compromise (IoCs).
+</li>
+<li class="listitem">
+Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
+</li>
+<li class="listitem">
+Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
+</li>
+<li class="listitem">
+Delete the service/timer or restore its original configuration.
+</li>
+<li class="listitem">
+Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
+</li>
+<li class="listitem">
+Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
+</li>
+<li class="listitem">
+Leverage the incident response data and logging to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+</li>
+</ul>
+</div>
+</div>
 
-### Investigating New Systemd Service Created by Previously Unknown Process
-
-Systemd service files are configuration files in Linux systems used to define and manage system services.
-
-Malicious actors can leverage systemd service files to achieve persistence by creating or modifying service files to execute malicious commands or payloads during system startup. This allows them to maintain unauthorized access, execute additional malicious activities, or evade detection.
-
-This rule monitors the creation of new systemd service files, potentially indicating the creation of a persistence mechanism.
-
-&gt; **Note**:
-&gt; This investigation guide uses the {security-guide}/security/master/invest-guide-run-osquery.html[Osquery Markdown Plugin] introduced in Elastic Stack version 8.5.0. Older Elastic Stack versions will display unrendered Markdown in this guide.
-&gt; This investigation guide uses {security-guide}/security/current/osquery-placeholder-fields.html[placeholder fields] to dynamically pass alert data into Osquery queries. Placeholder fields were introduced in Elastic Stack version 8.7.0. If you're using Elastic Stack version 8.6.0 or earlier, you'll need to manually adjust this investigation guide's queries to ensure they properly run.
-
-#### Possible Investigation Steps
-
-- Investigate the systemd service file that was created or modified.
-  - !{osquery{"label":"Osquery - Retrieve File Information","query":"SELECT * FROM file WHERE path = {{file.path}}"}}
-- Investigate the currently enabled systemd services through the following command `sudo systemctl list-unit-files`.
-- Investigate whether any other files in any of the available systemd directories have been altered through OSQuery.
-  - !{osquery{"label":"Osquery - Retrieve File Listing Information","query":"SELECT * FROM file WHERE (\npath LIKE '/etc/systemd/system/%' OR \npath LIKE '/usr/local/lib/systemd/system/%' OR \npath LIKE '/lib/systemd/system/%' OR\npath LIKE '/usr/lib/systemd/system/%' OR\npath LIKE '/home/user/.config/systemd/user/%'\n)\n"}}
-  - !{osquery{"label":"Osquery - Retrieve Additional File Listing Information","query":"SELECT\n  f.path,\n  u.username AS file_owner,\n  g.groupname AS group_owner,\n  datetime(f.atime, 'unixepoch') AS file_last_access_time,\n  datetime(f.mtime, 'unixepoch') AS file_last_modified_time,\n  datetime(f.ctime, 'unixepoch') AS file_last_status_change_time,\n  datetime(f.btime, 'unixepoch') AS file_created_time,\n  f.size AS size_bytes\nFROM\n  file f\n  LEFT JOIN users u ON f.uid = u.uid\n  LEFT JOIN groups g ON f.gid = g.gid\nWHERE (\npath LIKE '/etc/systemd/system/%' OR \npath LIKE '/usr/local/lib/systemd/system/%' OR \npath LIKE '/lib/systemd/system/%' OR\npath LIKE '/usr/lib/systemd/system/%' OR\npath LIKE '/home/{{user.name}}/.config/systemd/user/%'\n)\n"}}
-- Investigate the script execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence and whether they are located in expected locations.
-  - !{osquery{"label":"Osquery - Retrieve Running Processes by User","query":"SELECT pid, username, name FROM processes p JOIN users u ON u.uid = p.uid ORDER BY username"}}
-- Investigate other alerts associated with the user/host during the past 48 hours.
-- Validate the activity is not related to planned patches, updates, network administrator activity, or legitimate software installations.
-- Investigate whether the altered scripts call other malicious scripts elsewhere on the file system.
-  - If scripts or executables were dropped, retrieve the files and determine if they are malicious:
-    - Use a private sandboxed malware analysis system to perform analysis.
-      - Observe and collect information about the following activities:
-        - Attempts to contact external domains and addresses.
-          - Check if the domain is newly registered or unexpected.
-          - Check the reputation of the domain or IP address.
-        - File access, modification, and creation activities.
-        - Cron jobs, services and other persistence mechanisms.
-            - !{osquery{"label":"Osquery - Retrieve Crontab Information","query":"SELECT * FROM crontab"}}
-- Investigate abnormal behaviors by the subject process/user such as network connections, file modifications, and any other spawned child processes.
-  - Investigate listening ports and open sockets to look for potential command and control traffic or data exfiltration.
-    - !{osquery{"label":"Osquery - Retrieve Listening Ports","query":"SELECT pid, address, port, socket, protocol, path FROM listening_ports"}}
-    - !{osquery{"label":"Osquery - Retrieve Open Sockets","query":"SELECT pid, family, remote_address, remote_port, socket, state FROM process_open_sockets"}}
-  - Identify the user account that performed the action, analyze it, and check whether it should perform this kind of action.
-    - !{osquery{"label":"Osquery - Retrieve Information for a Specific User","query":"SELECT * FROM users WHERE username = {{user.name}}"}}
-- Investigate whether the user is currently logged in and active.
-    - !{osquery{"label":"Osquery - Investigate the Account Authentication Status","query":"SELECT * FROM logged_in_users WHERE user = {{user.name}}"}}
-
-### False Positive Analysis
-
-- If this activity is related to new benign software installation activity, consider adding exceptions — preferably with a combination of user and command line conditions.
-- If this activity is related to a system administrator who uses systemd services for administrative purposes, consider adding exceptions for this specific administrator user account.
-- Try to understand the context of the execution by thinking about the user, machine, or business purpose. A small number of endpoints, such as servers with unique software, might appear unusual but satisfy a specific business need.
-
-### Related Rules
-
-- Potential Persistence Through Run Control Detected - 0f4d35e4-925e-4959-ab24-911be207ee6f
-- Potential Persistence Through init.d Detected - 474fd20e-14cc-49c5-8160-d9ab4ba16c8b
-- New Systemd Timer Created - 7fb500fa-8e24-4bd1-9480-2a819352602c
-
-### Response and remediation
-
-- Initiate the incident response process based on the outcome of the triage.
-- Isolate the involved host to prevent further post-compromise behavior.
-- If the triage identified malware, search the environment for additional compromised hosts.
-  - Implement temporary network rules, procedures, and segmentation to contain the malware.
-  - Stop suspicious processes.
-  - Immediately block the identified indicators of compromise (IoCs).
-  - Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
-- Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
-- Delete the service/timer or restore its original configuration.
-- Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-- Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-- Leverage the incident response data and logging to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).</pre>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_setup_359"></a>Setup<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.10/docs/detections/prebuilt-rules/rule-details/new-systemd-service-created-by-previously-unknown-process.asciidoc">edit</a></h3>
+</div></div></div>
+<p>This rule requires data coming in from Elastic Defend.</p>
+<p><span class="strong strong"><strong>Elastic Defend Integration Setup</strong></span></p>
+<p>Elastic Defend is integrated into the Elastic Agent using Fleet. Upon configuration, the integration allows the Elastic Agent to monitor events on your host and send data to the Elastic Security app.</p>
+<p><span class="strong strong"><strong>Prerequisite Requirements:</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Fleet is required for Elastic Defend.
+</li>
+<li class="listitem">
+To configure Fleet Server refer to the <a href="/guide/en/fleet/current/fleet-server.html" class="ulink" target="_top">documentation</a>.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>The following steps should be executed in order to add the Elastic Defend integration on a Linux System:</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Go to the Kibana home page and click "Add integrations".
+</li>
+<li class="listitem">
+In the query bar, search for "Elastic Defend" and select the integration to see more details about it.
+</li>
+<li class="listitem">
+Click "Add Elastic Defend".
+</li>
+<li class="listitem">
+Configure the integration name and optionally add a description.
+</li>
+<li class="listitem">
+Select the type of environment you want to protect, either "Traditional Endpoints" or "Cloud Workloads".
+</li>
+<li class="listitem">
+Select a configuration preset. Each preset comes with different default settings for Elastic Agent, you can further customize these later by configuring the Elastic Defend integration policy. <a href="/guide/en/security/current/configure-endpoint-integration-policy.html" class="ulink" target="_top">Helper guide</a>.
+</li>
+<li class="listitem">
+We suggest selecting "Complete EDR (Endpoint Detection and Response)" as a configuration setting, that provides "All events; all preventions"
+</li>
+<li class="listitem">
+Enter a name for the agent policy in "New agent policy name". If other agent policies already exist, you can click the "Existing hosts" tab and select an existing policy instead.
+For more details on Elastic Agent configuration settings, refer to the <a href="/guide/en/fleet/8.10/agent-policy.html" class="ulink" target="_top">helper guide</a>.
+</li>
+<li class="listitem">
+Click "Save and Continue".
+</li>
+<li class="listitem">
+To complete the integration, select "Add Elastic Agent to your hosts" and continue to the next section to install the Elastic Agent on your hosts.
+For more details on Elastic Defend refer to the <a href="/guide/en/security/current/install-endpoint.html" class="ulink" target="_top">helper guide</a>.
+</li>
+</ul>
 </div>
 </div>
 
