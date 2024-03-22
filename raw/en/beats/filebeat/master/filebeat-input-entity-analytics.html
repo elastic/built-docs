@@ -54,6 +54,9 @@ external identity providers.</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
+<a class="xref" href="filebeat-input-entity-analytics.html#provider-activedirectory" title="Active Directory (activedirectory)">Active Directory (<code class="literal">activedirectory</code>)</a>
+</li>
+<li class="listitem">
 <a class="xref" href="filebeat-input-entity-analytics.html#provider-azure-ad" title="Azure Active Directory (azure-ad)">Azure Active Directory (<code class="literal">azure-ad</code>)</a>
 </li>
 <li class="listitem">
@@ -68,7 +71,7 @@ external identity providers.</p>
 <p>The <code class="literal">entity-analytics</code> input supports the following configuration options plus
 the <a class="xref" href="filebeat-input-entity-analytics.html#filebeat-input-entity-analytics-common-options" title="Common options">Common options</a> described later.</p>
 <h4><a id="_provider_2"></a><code class="literal">provider</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
-<p>The identity provider. Must be one of: <code class="literal">azure-ad</code> or <code class="literal">okta</code>.</p>
+<p>The identity provider. Must be one of: <code class="literal">activedirectory</code>, <code class="literal">azure-ad</code> or <code class="literal">okta</code>.</p>
 </div>
 
 <div class="section">
@@ -147,11 +150,143 @@ disable the addition of this field to all events. The default value is <code cla
 
 <div class="section">
 <div class="titlepage"><div><div>
+<h3 class="title"><a id="provider-activedirectory"></a>Active Directory (<code class="literal">activedirectory</code>)<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The <code class="literal">activedirectory</code> provider allows the input to retrieve users, with group
+memberships, from Active Directory.</p>
+<h4><a id="_setup"></a>Setup<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
+<p>A user with appropriate permissions must be set up in the Active Directory
+Server Manager in order for the provider to function properly.</p>
+<h4><a id="_how_it_works"></a>How It Works<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
+<h5><a id="_overview"></a>Overview<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>The Active Directory provider periodically queries the Active Directory server,
+retrieving updates for users and groups, updates its internal cache of user and
+group metadata and group membership information, and ships updated user metadata
+to Elasticsearch.</p>
+<p>Fetching and shipping updates occurs in one of two processes: <span class="strong strong"><strong>full
+synchronizations</strong></span> and <span class="strong strong"><strong>incremental updates</strong></span>. Full synchronizations will send the
+entire list of users and group membership in state, along with write markers to indicate
+the start and end of the synchronization event. Incremental updates will only
+send data for changed users during that event. Changes on a user can come in many
+forms, whether it be a change to the user metadata, a user was added or modified,
+or group membership was changed.</p>
+<h5><a id="_sending_user_and_device_metadata_to_elasticsearch"></a>Sending User and Device Metadata to Elasticsearch<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>During a full synchronization, all users and groups stored in state will be sent
+to the output, while incremental updates will only send users and group that have been
+updated. Full synchronizations will be bounded on either side by write marker
+documents, which will look something like this:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+    "@timestamp": "2022-11-04T09:57:19.786056-05:00",
+    "event": {
+        "action": "started",
+        "start": "2022-11-04T09:57:19.786056-05:00"
+    },
+    "labels": {
+        "identity_source": "activedirectory-1"
+    }
+}</pre>
+</div>
+<p>User documents will show the current state of the user.</p>
+<p>Example user document:</p>
+<div class="pre_wrapper lang-json">
+<pre class="programlisting prettyprint lang-json">{
+    "@timestamp": "2024-02-05T06:37:40.876026-05:00",
+    "event": {
+        "action": "user-discovered",
+    },
+    "activedirectory": {
+        "id": "CN=Guest,CN=Users,DC=testserver,DC=local",
+        "user": {
+            "accountExpires": "2185-07-21T23:34:33.709551516Z",
+            "badPasswordTime": "0",
+            "badPwdCount": "0",
+            "cn": "Guest",
+            "codePage": "0",
+            "countryCode": "0",
+            "dSCorePropagationData": [
+                "2024-01-22T06:37:40Z",
+                "1601-01-01T00:00:01Z"
+            ],
+            "description": "Built-in account for guest access to the computer/domain",
+            "distinguishedName": "CN=Guest,CN=Users,DC=testserver,DC=local",
+            "instanceType": "4",
+            "isCriticalSystemObject": true,
+            "lastLogoff": "0",
+            "lastLogon": "2185-07-21T23:34:33.709551616Z",
+            "logonCount": "0",
+            "memberOf": "CN=Guests,CN=Builtin,DC=testserver,DC=local",
+            "name": "Guest",
+            "objectCategory": "CN=Person,CN=Schema,CN=Configuration,DC=testserver,DC=local",
+            "objectClass": [
+                "top",
+                "person",
+                "organizationalPerson",
+                "user"
+            ],
+            "objectGUID": "hSt/40XJQU6cf+J2XoYMHw==",
+            "objectSid": "AQUAAAAAAAUVAAAA0JU2Fq1k30YZ7UPx9QEAAA==",
+            "primaryGroupID": "514",
+            "pwdLastSet": "2185-07-21T23:34:33.709551616Z",
+            "sAMAccountName": "Guest",
+            "sAMAccountType": "805306368",
+            "uSNChanged": "8197",
+            "uSNCreated": "8197",
+            "userAccountControl": "66082",
+            "whenChanged": "2024-01-22T06:36:59Z",
+            "whenCreated": "2024-01-22T06:36:59Z"
+        },
+        "whenChanged": "2024-01-22T06:36:59Z"
+    },
+    "user": {
+        "id": "CN=Guest,CN=Users,DC=testserver,DC=local"
+    },
+    "labels": {
+        "identity_source": "activedirectory-1"
+    }
+}</pre>
+</div>
+<h4><a id="_configuration"></a>Configuration<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
+<p>Example configuration:</p>
+<div class="pre_wrapper lang-yaml">
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: entity-analytics
+  enabled: true
+  id: activedirectory-1
+  provider: activedirectory
+  sync_interval: "12h"
+  update_interval: "30m"
+  ad_url: "ldaps://host.domain.tld"
+  ad_base_dn: "CN=Users,DC=SERVER,DC=DOMAIN"
+  ad_user: "USERNAME"
+  ad_password: "PASSWORD"</pre>
+</div>
+<p>The <code class="literal">azure-ad</code> provider supports the following configuration:</p>
+<h5><a id="_ad_url"></a><code class="literal">ad_url</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>The Active Directory server URL. Field is required.</p>
+<h5><a id="_ad_base_dn"></a><code class="literal">ad_base_dn</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>The Active Directory Base Distinguished Name. Field is required.</p>
+<h5><a id="_ad_user"></a><code class="literal">ad_user</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>The client user name. Used for authentication. The user must have Active Directory read access. Field is required.</p>
+<h5><a id="_ad_password"></a><code class="literal">ad_password</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>The client&#8217;s password, used for authentication. Field is required.</p>
+<h5><a id="_sync_interval"></a><code class="literal">sync_interval</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>The interval in which full synchronizations should occur. The interval must be
+longer than the update interval (<code class="literal">update_interval</code>) Expressed as a duration
+string (e.g., 1m, 3h, 24h). Defaults to <code class="literal">24h</code> (24 hours).</p>
+<h5><a id="_update_interval"></a><code class="literal">update_interval</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<p>The interval in which incremental updates should occur. The interval must be
+shorter than the full synchronization interval (<code class="literal">sync_interval</code>). Expressed as a
+duration string (e.g., 1m, 3h, 24h). Defaults to <code class="literal">15m</code> (15 minutes).</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
 <h3 class="title"><a id="provider-azure-ad"></a>Azure Active Directory (<code class="literal">azure-ad</code>)<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h3>
 </div></div></div>
 <p>The <code class="literal">azure-ad</code> provider allows the input to retrieve users, with group
 memberships, from Azure Active Directory (AD).</p>
-<h4><a id="_setup"></a>Setup<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
+<h4><a id="_setup_2"></a>Setup<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
 <p>The necessary API permissions need to be granted in Azure in order for the
 provider to function properly:</p>
 <div class="informaltable">
@@ -184,8 +319,8 @@ provider to function properly:</p>
 </div>
 <p>For a full guide on how to set up the necessary App Registration, permission
 granting, and secret configuration, follow this <a href="https://learn.microsoft.com/en-us/graph/auth-v2-service" class="ulink" target="_top">guide</a>.</p>
-<h4><a id="_how_it_works"></a>How It Works<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
-<h5><a id="_overview"></a>Overview<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<h4><a id="_how_it_works_2"></a>How It Works<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
+<h5><a id="_overview_2"></a>Overview<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
 <p>The Azure AD provider periodically contacts Azure Active Directory, retrieving
 updates for users, devices and groups, updates its internal cache of user and
 device metadata and group membership information, and ships updated user metadata
@@ -237,7 +372,7 @@ need to be fetched (the delta token).
 <p>The group metadata will be used to enrich users and devices with group membership
 information. Direct memberships, along with transitive memberships, will be provided
 for users and devices.</p>
-<h5><a id="_sending_user_and_device_metadata_to_elasticsearch"></a>Sending User and Device Metadata to Elasticsearch<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<h5><a id="_sending_user_and_device_metadata_to_elasticsearch_2"></a>Sending User and Device Metadata to Elasticsearch<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
 <p>During a full synchronization, all users and devices stored in state will be sent
 to the output, while incremental updates will only send users which have been
 updated. Full synchronizations will be bounded on either side by write marker
@@ -357,7 +492,7 @@ documents, which will look something like this:</p>
     }
 }</pre>
 </div>
-<h4><a id="_configuration"></a>Configuration<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
+<h4><a id="_configuration_2"></a>Configuration<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
 <p>Example configuration:</p>
 <div class="pre_wrapper lang-yaml">
 <pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
@@ -384,11 +519,11 @@ documents, which will look something like this:</p>
 or may be left empty for the default behavior which is to collect all entities.
 When the <code class="literal">dataset</code> is set to "devices", some user entity data is collected in order
 to populate the registered users and registered owner fields for each device.</p>
-<h5><a id="_sync_interval"></a><code class="literal">sync_interval</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<h5><a id="_sync_interval_2"></a><code class="literal">sync_interval</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
 <p>The interval in which full synchronizations should occur. The interval must be
 longer than the update interval (<code class="literal">update_interval</code>) Expressed as a duration
 string (e.g., 1m, 3h, 24h). Defaults to <code class="literal">24h</code> (24 hours).</p>
-<h5><a id="_update_interval"></a><code class="literal">update_interval</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<h5><a id="_update_interval_2"></a><code class="literal">update_interval</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
 <p>The interval in which incremental updates should occur. The interval must be
 shorter than the full synchronization interval (<code class="literal">sync_interval</code>). Expressed as a
 duration string (e.g., 1m, 3h, 24h). Defaults to <code class="literal">15m</code> (15 minutes).</p>
@@ -418,7 +553,7 @@ This is a list of optional query parameters. The default is <code class="literal
 </div></div></div>
 <p>The <code class="literal">okta</code> provider allows the input to retrieve users and devices from the
 Okta user API.</p>
-<h4><a id="_setup_2"></a>Setup<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
+<h4><a id="_setup_3"></a>Setup<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
 <p>The necessary API permissions need to be granted in Okta in order for the
 provider to function properly. In the administration dashboard for your
 Okta account, navigate to Security&gt;API and in the Tokens tab click the
@@ -427,8 +562,8 @@ this to configure the provider. Note that the token will not be presented
 again, so it must be copied now. This value will use given to the provider
 via the <code class="literal">okta_token</code> configuration field.</p>
 <p>Devices API access needs to be activated by Okta support.</p>
-<h4><a id="_how_it_works_2"></a>How It Works<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
-<h5><a id="_overview_2"></a>Overview<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<h4><a id="_how_it_works_3"></a>How It Works<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
+<h5><a id="_overview_3"></a>Overview<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
 <p>The Okta provider periodically contacts the Okta API, retrieving updates for
 users and devices, updates its internal cache of user metadata, and ships
 updated user/device metadata to Elasticsearch.</p>
@@ -620,7 +755,7 @@ associated users.</p>
     }
 }</pre>
 </div>
-<h4><a id="_configuration_2"></a>Configuration<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
+<h4><a id="_configuration_3"></a>Configuration<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h4>
 <p>Example configuration:</p>
 <div class="pre_wrapper lang-yaml">
 <pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
@@ -648,11 +783,11 @@ this option.</p>
 or may be left empty for the default behavior which is to collect all entities.
 When the <code class="literal">dataset</code> is set to "devices", some user entity data is collected in order
 to populate the registered users and registered owner fields for each device.</p>
-<h5><a id="_sync_interval_2"></a><code class="literal">sync_interval</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<h5><a id="_sync_interval_3"></a><code class="literal">sync_interval</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
 <p>The interval in which full synchronizations should occur. The interval must be
 longer than the update interval (<code class="literal">update_interval</code>) Expressed as a duration
 string (e.g., 1m, 3h, 24h). Defaults to <code class="literal">24h</code> (24 hours).</p>
-<h5><a id="_update_interval_2"></a><code class="literal">update_interval</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
+<h5><a id="_update_interval_3"></a><code class="literal">update_interval</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-entity-analytics.asciidoc">edit</a></h5>
 <p>The interval in which incremental updates should occur. The interval must be
 shorter than the full synchronization interval (<code class="literal">sync_interval</code>). Expressed as a
 duration string (e.g., 1m, 3h, 24h). Defaults to <code class="literal">15m</code> (15 minutes).</p>
