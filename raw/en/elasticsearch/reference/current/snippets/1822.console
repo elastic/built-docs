@@ -1,21 +1,43 @@
-### On cluster A ###
-PUT /_ccr/auto_follow/logs-generic-default
+POST _transform/_preview
 {
-  "remote_cluster": "clusterB",
-  "leader_index_patterns": [
-    ".ds-logs-generic-default-20*"
-  ],
-  "leader_index_exclusion_patterns":"*-replicated_from_clustera",
-  "follow_index_pattern": "{{leader_index}}-replicated_from_clusterb"
-}
-
-### On cluster B ###
-PUT /_ccr/auto_follow/logs-generic-default
-{
-  "remote_cluster": "clusterA",
-  "leader_index_patterns": [
-    ".ds-logs-generic-default-20*"
-  ],
-  "leader_index_exclusion_patterns":"*-replicated_from_clusterb",
-  "follow_index_pattern": "{{leader_index}}-replicated_from_clustera"
+  "id" : "index_compare",
+  "source" : {
+    "index" : [
+      "index1",
+      "index2"
+    ],
+    "query" : {
+      "match_all" : { }
+    }
+  },
+  "dest" : {
+    "index" : "compare"
+  },
+  "pivot" : {
+    "group_by" : {
+      "unique-id" : {
+        "terms" : {
+          "field" : "<unique-id-field>"
+        }
+      }
+    },
+    "aggregations" : {
+      "compare" : {
+        "scripted_metric" : {
+          "map_script" : "state.doc = new HashMap(params['_source'])",
+          "combine_script" : "return state",
+          "reduce_script" : """
+            if (states.size() != 2) {
+              return "count_mismatch"
+            }
+            if (states.get(0).equals(states.get(1))) {
+              return "match"
+            } else {
+              return "mismatch"
+            }
+            """
+        }
+      }
+    }
+  }
 }
