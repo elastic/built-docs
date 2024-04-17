@@ -36,6 +36,133 @@
 <h2 class="title"><a id="apm-known-issues"></a>Known issues<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/8.13/docs/en/observability/apm/known-issues.asciidoc">edit</a></h2>
 </div></div></div>
 <p>APM has the following known issues:</p>
+<p><a id="broken-apm-anomaly-rule"></a><span class="strong strong"><strong>Upgrading to v8.13 breaks APM anomaly rules</strong></span><br>
+<em>Elastic Stack versions: 8.13.0, 8.13.1, 8.13.2</em><br>
+<em>Fixed in Elastic Stack version 8.14.0</em></p>
+<p>This issue occurs when upgrading the Elastic Stack to version 8.13.0, 8.13.1, or 8.13.2.
+This issue may go unnoticed unless you actively monitor your Kibana logs.
+The following log indicates the presence of this issue:</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">"params invalid: [anomalyDetectorTypes]: expected value of type [array] but got [undefined]"</pre>
+</div>
+<p>This issue occurs because a non-optional parameter, <code class="literal">anomalyDetectorTypes</code> was added in 8.13.0 without
+the presence of an automation migration script. This breaks pre-existing rules as they do not have this parameter
+and will fail validation. This issue is fixed in v8.14.0.</p>
+<p>It is possible to fix this error without upgrading. Follow these steps:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Find broken rules</p>
+<div class="exampleblock">
+<div class="content">
+<p>To identify rules in this exact state, you can use the <a href="/guide/en/kibana/8.13/find-rules-api.html" class="ulink" target="_top">find rules endpoint</a> and search for the APM anomaly rule type as well as this exact error message indicating that the rule is in the broken state. We will also use the <code class="literal">fields</code> parameter to specify only the fields required when making the update request later.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">search_fields=alertTypeId</code>
+</li>
+<li class="listitem">
+<code class="literal">search=apm.anomaly</code>
+</li>
+<li class="listitem">
+<code class="literal">filter=alert.attributes.executionStatus.error.message:"params invalid: [anomalyDetectorTypes]: expected value of type [array] but got [undefined]"</code>
+</li>
+<li class="listitem">
+<code class="literal">fields=[id, name, actions, tags, schedule, notify_when, throttle, params]</code>
+</li>
+</ul>
+</div>
+<p>The encoded request might look something like this:</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">curl -u "$KIBANA_USER":"$KIBANA_PASSWORD" "$KIBANA_URL/api/alerting/rules/_find?search_fields=alertTypeId&amp;search=apm.anomaly&amp;filter=alert.attributes.executionStatus.error.message%3A%22params%20invalid%3A%20%5BanomalyDetectorTypes%5D%3A%20expected%20value%20of%20type%20%5Barray%5D%20but%20got%20%5Bundefined%5D%22&amp;fields=id&amp;fields=name&amp;fields=actions&amp;fields=tags&amp;fields=schedule&amp;fields=notify_when&amp;fields=throttle&amp;fields=params"</pre>
+</div>
+<details>
+<summary class="title">Example result:</summary>
+<div class="content">
+<div class="pre_wrapper lang-json">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-json">{
+  "page": 1,
+  "total": 1,
+  "per_page": 10,
+  "data": [
+    {
+      "id": "d85e54de-f96a-49b5-99d4-63956f90a6eb",
+      "name": "APM Anomaly Jason Test FAILING [2]",
+      "tags": [
+        "test",
+        "jasonrhodes"
+      ],
+      "throttle": null,
+      "schedule": {
+        "interval": "1m"
+      },
+      "params": {
+        "windowSize": 30,
+        "windowUnit": "m",
+        "anomalySeverityType": "warning",
+        "environment": "ENVIRONMENT_ALL"
+      },
+      "notify_when": null,
+      "actions": []
+    }
+  ]
+}</pre>
+</div>
+</div>
+</details>
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Prepare the update JSON doc(s)</p>
+<div class="exampleblock">
+<div class="content">
+<p>For each broken rule found, create a JSON rule document with what was returned from the API in the previous step. You will need to make two changes to each document:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Remove the <code class="literal">id</code> key but keep the value connected to this document (e.g. rename the file to <code class="literal">{id}.json</code>). <span class="strong strong"><strong>The <code class="literal">id</code> cannot be sent as part of the request body for the PUT request, but you will need it for the URL path.</strong></span>
+</li>
+<li class="listitem">
+<p>Add the <code class="literal">"anomalyDetectorTypes"</code> to the <code class="literal">"params"</code> block, using the default value as seen below to mimic the pre-8.13 behavior:</p>
+<div class="pre_wrapper lang-json">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-json">{
+  "params": {
+    // ... other existing params should stay here,
+    // with the required one added to this object
+    "anomalyDetectorTypes": [
+      "txLatency",
+      "txThroughput",
+      "txFailureRate"
+    ]
+  }
+}</pre>
+</div>
+</li>
+</ol>
+</div>
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Update each rule using the <code class="literal">PUT /api/alerting/rule/{id}</code> API</p>
+<div class="exampleblock">
+<div class="content">
+<p>For each rule, submit a PUT request to the <a href="/guide/en/kibana/8.13/update-rule-api.html" class="ulink" target="_top">update rule endpoint</a> using that rule&#8217;s ID and its stored update document from the previous step. For example, assuming the first broken rule&#8217;s ID is <code class="literal">046c0d4f</code>:</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">curl -u "$KIBANA_USER":"$KIBANA_PASSWORD" -XPUT "$KIBANA_URL/api/alerting/rule/046c0d4f" -H 'Content-Type: application/json' -d @046c0d4f.json</pre>
+</div>
+<p>Once the PUT request executes successfully, the rule will no longer be broken.</p>
+</div>
+</div>
+</li>
+</ol>
+</div>
 <p><a id="apm-empty-metricset-values"></a><span class="strong strong"><strong>Upgrading APM Server to 8.11+ might break event intake from older APM Java agents</strong></span><br>
 <em>APM Server versions: &gt;=8.11.0</em><br>
 <em>Elastic APM Java agent versions: &lt; 1.43.0</em></p>
