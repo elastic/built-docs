@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Using ES|QL across clusters | Elasticsearch Guide [8.14] | Elastic</title>
+<meta class="elastic" name="content" content="Using ES|QL across clusters | Elasticsearch Guide [8.14]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.14]"/>
+<link rel="up" href="esql-using.html" title="Using ES|QL"/>
+<link rel="prev" href="esql-elastic-security.html" title="Using ES|QL in Elastic Security"/>
+<link rel="next" href="esql-task-management.html" title="ES|QL task management"/>
+<meta class="elastic" name="product_version" content="8.14"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.14"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.14"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.14]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="esql.html">ES|QL</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="esql-using.html">Using ES|QL</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="esql-elastic-security.html">« Using ES|QL in Elastic Security</a>
+</span>
+<span class="next">
+<a href="esql-task-management.html">ES|QL task management »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="esql-cross-clusters"></a>Using ES|QL across clusters<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.14/docs/reference/esql/esql-across-clusters.asciidoc">edit</a></h2>
+</div></div></div>
+
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Cross-cluster search for ES|QL is in technical preview and may be changed or removed in a future release. Elastic will work to fix any issues, but features in technical preview are not subject to the support SLA of official GA features.</p>
+</div>
+</div>
+<p>With ES|QL, you can execute a single query across multiple clusters.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_prerequisites_2"></a>Prerequisites<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.14/docs/reference/esql/esql-across-clusters.asciidoc">edit</a></h3>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>Cross-cluster search requires remote clusters. To set up remote clusters on Elasticsearch Service,
+see <a href="/guide/en/cloud/current/ec-enable-ccs.html" class="ulink" target="_top">configure remote clusters on Elasticsearch Service</a>. If you
+run Elasticsearch on your own hardware, see <a class="xref" href="remote-clusters.html" title="Remote clusters"><em>Remote clusters</em></a>.</p>
+<p>To ensure your remote cluster configuration supports cross-cluster search, see
+<a class="xref" href="modules-cross-cluster-search.html#ccs-supported-configurations" title="Supported cross-cluster search configurations">Supported cross-cluster search configurations</a>.</p>
+</li>
+<li class="listitem">
+For full cross-cluster search capabilities, the local and remote cluster must be on the same
+<a href="/subscriptions" class="ulink" target="_top">subscription level</a>.
+</li>
+<li class="listitem">
+The local coordinating node must have the
+<a class="xref" href="modules-node.html#remote-node" title="Remote-eligible node"><code class="literal">remote_cluster_client</code></a> node role.
+</li>
+<li class="listitem">
+<p>If you use <a class="xref" href="remote-clusters.html#sniff-mode">sniff mode</a>, the local coordinating node
+must be able to connect to seed and gateway nodes on the remote cluster.</p>
+<p>We recommend using gateway nodes capable of serving as coordinating nodes.
+The seed nodes can be a subset of these gateway nodes.</p>
+</li>
+<li class="listitem">
+If you use <a class="xref" href="remote-clusters.html#proxy-mode">proxy mode</a>, the local coordinating node must be able
+to connect to the configured <code class="literal">proxy_address</code>. The proxy at this address must be
+able to route connections to gateway and coordinating nodes on the remote
+cluster.
+</li>
+<li class="listitem">
+Cross-cluster search requires different security privileges on the local cluster and
+remote cluster. See <a class="xref" href="remote-clusters-cert.html#remote-clusters-privileges-ccs" title="Configure privileges for cross-cluster search">Configure privileges for cross-cluster search</a> and
+<a class="xref" href="remote-clusters.html" title="Remote clusters"><em>Remote clusters</em></a>.
+</li>
+</ul>
+</div>
+<h4><a id="ccq-remote-cluster-setup"></a>Remote cluster setup<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.14/docs/reference/esql/esql-across-clusters.asciidoc">edit</a></h4>
+<p>The following <a class="xref" href="cluster-update-settings.html" title="Cluster update settings API">cluster update settings</a> API request
+adds three remote clusters: <code class="literal">cluster_one</code>, <code class="literal">cluster_two</code>, and <code class="literal">cluster_three</code>.</p>
+<div class="pre_wrapper lang-ruby alternative">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.cluster.put_settings(
+  body: {
+    persistent: {
+      cluster: {
+        remote: {
+          cluster_one: {
+            seeds: [
+              '35.238.149.1:9300'
+            ],
+            skip_unavailable: true
+          },
+          cluster_two: {
+            seeds: [
+              '35.238.149.2:9300'
+            ],
+            skip_unavailable: false
+          },
+          cluster_three: {
+            seeds: [
+              '35.238.149.3:9300'
+            ]
+          }
+        }
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
+<a id="72a3668ddc95d9aec47cc679d1e7afc5"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console default has-ruby">PUT _cluster/settings
+{
+  "persistent": {
+    "cluster": {
+      "remote": {
+        "cluster_one": {
+          "seeds": [
+            "35.238.149.1:9300"
+          ],
+          "skip_unavailable": true
+        },
+        "cluster_two": {
+          "seeds": [
+            "35.238.149.2:9300"
+          ],
+          "skip_unavailable": false
+        },
+        "cluster_three": {  <a id="CO428-1"></a><i class="conum" data-value="1"></i>
+          "seeds": [
+            "35.238.149.3:9300"
+          ]
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/1672.console"></div>
+<div class="calloutlist default has-ruby lang-console">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO428-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Since <code class="literal">skip_unavailable</code> was not set on <code class="literal">cluster_three</code>, it uses
+the default of <code class="literal">false</code>. See the <a class="xref" href="esql-cross-clusters.html#ccq-skip-unavailable-clusters" title="Optional remote clusters">Optional remote clusters</a>
+section for details.</p>
+</td>
+</tr>
+</table>
+</div>
+<h4><a id="ccq-from"></a>Query across multiple clusters<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.14/docs/reference/esql/esql-across-clusters.asciidoc">edit</a></h4>
+<p>In the <code class="literal">FROM</code> command, specify data streams and indices on remote clusters
+using the format <code class="literal">&lt;remote_cluster_name&gt;:&lt;target&gt;</code>. For instance, the following
+ES|QL request queries the <code class="literal">my-index-000001</code> index on a single remote cluster
+named <code class="literal">cluster_one</code>:</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM cluster_one:my-index-000001
+| LIMIT 10</pre>
+</div>
+<p>Similarly, this ES|QL request queries the <code class="literal">my-index-000001</code> index from
+three clusters:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+The local ("querying") cluster
+</li>
+<li class="listitem">
+Two remote clusters, <code class="literal">cluster_one</code> and <code class="literal">cluster_two</code>
+</li>
+</ul>
+</div>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM my-index-000001,cluster_one:my-index-000001,cluster_two:my-index-000001
+| LIMIT 10</pre>
+</div>
+<p>Likewise, this ES|QL request queries the <code class="literal">my-index-000001</code> index from all
+remote clusters (<code class="literal">cluster_one</code>, <code class="literal">cluster_two</code>, and <code class="literal">cluster_three</code>):</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM *:my-index-000001
+| LIMIT 10</pre>
+</div>
+<h4><a id="ccq-enrich"></a>Enrich across clusters<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.14/docs/reference/esql/esql-across-clusters.asciidoc">edit</a></h4>
+<p>Enrich in ES|QL across clusters operates similarly to <a class="xref" href="esql-commands.html#esql-enrich" title="ENRICH">local enrich</a>.
+If the enrich policy and its enrich indices are consistent across all clusters, simply
+write the enrich command as you would without remote clusters. In this default mode,
+ES|QL can execute the enrich command on either the querying cluster or the fulfilling
+clusters, aiming to minimize computation or inter-cluster data transfer. Ensuring that
+the policy exists with consistent data on both the querying cluster and the fulfilling
+clusters is critical for ES|QL to produce a consistent query result.</p>
+<p>In the following example, the enrich with <code class="literal">hosts</code> policy can be executed on
+either the querying cluster or the remote cluster <code class="literal">cluster_one</code>.</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM my-index-000001,cluster_one:my-index-000001
+| ENRICH hosts ON ip
+| LIMIT 10</pre>
+</div>
+<p>Enrich with an ES|QL query against remote clusters only can also happen on
+the querying cluster. This means the below query requires the <code class="literal">hosts</code> enrich
+policy to exist on the querying cluster as well.</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM cluster_one:my-index-000001,cluster_two:my-index-000001
+| LIMIT 10
+| ENRICH hosts ON ip</pre>
+</div>
+<h4><a id="esql-enrich-coordinator"></a>Enrich with coordinator mode<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.14/docs/reference/esql/esql-across-clusters.asciidoc">edit</a></h4>
+<p>ES|QL provides the enrich <code class="literal">_coordinator</code> mode to force ES|QL to execute the enrich
+command on the querying cluster. This mode should be used when the enrich policy is
+not available on the remote clusters or maintaining consistency of enrich indices
+across clusters is challenging.</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM my-index-000001,cluster_one:my-index-000001
+| ENRICH _coordinator:hosts ON ip
+| SORT host_name
+| LIMIT 10</pre>
+</div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Enrich with the <code class="literal">_coordinator</code> mode usually increases inter-cluster data transfer and
+workload on the querying cluster.</p>
+</div>
+</div>
+<h4><a id="esql-enrich-remote"></a>Enrich with remote mode<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.14/docs/reference/esql/esql-across-clusters.asciidoc">edit</a></h4>
+<p>ES|QL also provides the enrich <code class="literal">_remote</code> mode to force ES|QL to execute the enrich
+command independently on each fulfilling cluster where the target indices reside.
+This mode is useful for managing different enrich data on each cluster, such as detailed
+information of hosts for each region where the target (main) indices contain
+log events from these hosts.</p>
+<p>In the below example, the <code class="literal">hosts</code> enrich policy is required to exist on all
+fulfilling clusters: the <code class="literal">querying</code> cluster (as local indices are included),
+the remote cluster <code class="literal">cluster_one</code>, and <code class="literal">cluster_two</code>.</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM my-index-000001,cluster_one:my-index-000001,cluster_two:my-index-000001
+| ENRICH _remote:hosts ON ip
+| SORT host_name
+| LIMIT 10</pre>
+</div>
+<p>A <code class="literal">_remote</code> enrich cannot be executed after a <a class="xref" href="esql-commands.html#esql-stats-by" title="STATS ... BY">stats</a>
+command. The following example would result in an error:</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM my-index-000001,cluster_one:my-index-000001,cluster_two:my-index-000001
+| STATS COUNT(*) BY ip
+| ENRICH _remote:hosts ON ip
+| SORT host_name
+| LIMIT 10</pre>
+</div>
+<h4><a id="esql-multi-enrich"></a>Multiple enrich commands<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.14/docs/reference/esql/esql-across-clusters.asciidoc">edit</a></h4>
+<p>You can include multiple enrich commands in the same query with different
+modes. ES|QL will attempt to execute them accordingly. For example, this
+query performs two enriches, first with the <code class="literal">hosts</code> policy on any cluster
+and then with the <code class="literal">vendors</code> policy on the querying cluster.</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM my-index-000001,cluster_one:my-index-000001,cluster_two:my-index-000001
+| ENRICH hosts ON ip
+| ENRICH _coordinator:vendors ON os
+| LIMIT 10</pre>
+</div>
+<p>A <code class="literal">_remote</code> enrich command can&#8217;t be executed after a <code class="literal">_coordinator</code> enrich
+command. The following example would result in an error.</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM my-index-000001,cluster_one:my-index-000001,cluster_two:my-index-000001
+| ENRICH _coordinator:hosts ON ip
+| ENRICH _remote:vendors ON os
+| LIMIT 10</pre>
+</div>
+<h4><a id="ccq-exclude"></a>Excluding clusters or indices from ES|QL query<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.14/docs/reference/esql/esql-across-clusters.asciidoc">edit</a></h4>
+<p>To exclude an entire cluster, prefix the cluster alias with a minus sign in
+the <code class="literal">FROM</code> command, for example: <code class="literal">-my_cluster:*</code>:</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM my-index-000001,cluster*:my-index-000001,-cluster_three:*
+| LIMIT 10</pre>
+</div>
+<p>To exclude a specific remote index, prefix the index with a minus sign in
+the <code class="literal">FROM</code> command, such as <code class="literal">my_cluster:-my_index</code>:</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM my-index-000001,cluster*:my-index-*,cluster_three:-my-index-000001
+| LIMIT 10</pre>
+</div>
+<h4><a id="ccq-skip-unavailable-clusters"></a>Optional remote clusters<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.14/docs/reference/esql/esql-across-clusters.asciidoc">edit</a></h4>
+<p>Cross-cluster search for ES|QL currently does not respect the <code class="literal">skip_unavailable</code>
+setting. As a result, if a remote cluster specified in the request is
+unavailable or failed, cross-cluster search for ES|QL queries will fail regardless of the setting.</p>
+<p>We are actively working to align the behavior of cross-cluster search for ES|QL with other
+cross-cluster search APIs. This includes providing detailed execution information for each cluster
+in the response, such as execution time, selected target indices, and shards.</p>
+<h4><a id="ccq-during-upgrade"></a>Query across clusters during an upgrade<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.14/docs/reference/esql/esql-across-clusters.asciidoc">edit</a></h4>
+<p>You can still search a remote cluster while performing a
+rolling upgrade on the local cluster. However, the local
+coordinating node&#8217;s "upgrade from" and "upgrade to" version must be compatible
+with the remote cluster&#8217;s gateway node.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Running multiple versions of Elasticsearch in the same cluster beyond the
+duration of an upgrade is not supported.</p>
+</div>
+</div>
+<p>For more information about upgrades, see
+<a href="/guide/en/elastic-stack/8.14/upgrading-elasticsearch.html" class="ulink" target="_top">Upgrading Elasticsearch</a>.</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="esql-elastic-security.html">« Using ES|QL in Elastic Security</a>
+</span>
+<span class="next">
+<a href="esql-task-management.html">ES|QL task management »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
