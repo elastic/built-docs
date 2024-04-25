@@ -213,7 +213,7 @@ Defaults to the <code class="literal">size</code> parameter.</p>
 </dl>
 </div>
 <p>An example request using RRF:</p>
-<a id="e740e23dcb5f5550d0376c2123930756"></a>
+<a id="ee223e604bb695cad2517d28ae63ac34"></a>
 <div class="pre_wrapper lang-console">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-console">GET example-index/_search
@@ -239,7 +239,7 @@ Defaults to the <code class="literal">size</code> parameter.</p>
                     }
                 }
             ],
-            "window_size": 50,
+            "rank_window_size": 50,
             "rank_constant": 20
         }
     }
@@ -281,8 +281,8 @@ the <code class="literal">rrf</code> retriever to get the combined top documents
 </tr>
 </table>
 </div>
-<p>Note that if <code class="literal">k</code> from a knn search is larger than <code class="literal">window_size</code>, the results are
-truncated to <code class="literal">window_size</code>. If <code class="literal">k</code> is smaller than <code class="literal">window_size</code>, the results are
+<p>Note that if <code class="literal">k</code> from a knn search is larger than <code class="literal">rank_window_size</code>, the results are
+truncated to <code class="literal">rank_window_size</code>. If <code class="literal">k</code> is smaller than <code class="literal">rank_window_size</code>, the results are
 <code class="literal">k</code> size.</p>
 </div>
 
@@ -346,7 +346,7 @@ in an exception.</p>
 from a traditional BM25 query and an <a class="xref" href="semantic-search-elser.html" title="Tutorial: semantic search with ELSER">ELSER</a>
 query to achieve improved relevance.</p>
 <p>An example request using RRF with multiple standard retrievers:</p>
-<a id="83adaad89679c2a9e6d71d675dc766ae"></a>
+<a id="3a8f0b2acea946d4fc9a86d4c0092d43"></a>
 <div class="pre_wrapper lang-console">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-console">GET example-index/_search
@@ -376,7 +376,7 @@ query to achieve improved relevance.</p>
                     }
                 }
             ],
-            "window_size": 50,
+            "rank_window_size": 50,
             "rank_constant": 20
         }
     }
@@ -504,7 +504,7 @@ POST example-index/_refresh</pre>
 <p>We now execute a search using an <code class="literal">rrf</code> retriever with a <code class="literal">standard</code> retriever
 specifying a BM25 query, a <code class="literal">knn</code> retriever specifying a kNN search, and
 a terms aggregation.</p>
-<a id="318adcdaae78e3dfcf5f08009f379367"></a>
+<a id="7e74d1a54e816e8f40cfdaa01b070788"></a>
 <div class="pre_wrapper lang-console">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-console">GET example-index/_search
@@ -530,7 +530,7 @@ a terms aggregation.</p>
                     }
                 }
             ],
-            "window_size": 5,
+            "rank_window_size": 5,
             "rank_constant": 1
         }
     },
@@ -803,11 +803,102 @@ _id: 3 = 1.0/(1+2) + 1.0/(1+1) = 0.8333
 _id: 4 = 1.0/(1+1)             = 0.5000
 _id: 5 =             1.0/(1+4) = 0.2000</pre>
 </div>
-<p>We rank the documents based on the RRF formula with a <code class="literal">window_size</code> of <code class="literal">5</code>
+<p>We rank the documents based on the RRF formula with a <code class="literal">rank_window_size</code> of <code class="literal">5</code>
 truncating the bottom <code class="literal">2</code> docs in our RRF result set with a <code class="literal">size</code> of <code class="literal">3</code>.
 We end with <code class="literal">_id: 3</code> as <code class="literal">_rank: 1</code>, <code class="literal">_id: 2</code> as <code class="literal">_rank: 2</code>, and
 <code class="literal">_id: 4</code> as <code class="literal">_rank: 3</code>. This ranking matches the result set from the
 original RRF search as expected.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_pagination_in_rrf"></a>Pagination in RRF<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/rrf.asciidoc">edit</a></h3>
+</div></div></div>
+<p>When using <code class="literal">rrf</code> you can paginate through the results using the <code class="literal">from</code> parameter.
+As the final ranking is solely dependent on the original query ranks, to ensure
+consistency when paginating, we have to make sure that while <code class="literal">from</code> changes, the order
+of what we have already seen remains intact. To that end, we&#8217;re using a fixed <code class="literal">rank_window_size</code>
+as the whole available result set upon which we can paginate.
+This essentially means that if:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">from + size</code> &le; <code class="literal">rank_window_size</code> : we could get  <code class="literal">results[from: from+size]</code> documents back from
+the final <code class="literal">rrf</code> ranked result set
+</li>
+<li class="listitem">
+<code class="literal">from + size</code> &gt; <code class="literal">rank_window_size</code> : we would get 0 results back, as the request would fall outside the
+available <code class="literal">rank_window_size</code>-sized result set.
+</li>
+</ul>
+</div>
+<p>An important thing to note here is that since <code class="literal">rank_window_size</code> is all the results that we&#8217;ll get to see
+from the individual query components, pagination guarantees consistency,  i.e. no documents are skipped
+or duplicated in multiple pages, iff <code class="literal">rank_window_size</code> remains the same. If <code class="literal">rank_window_size</code> changes, then the order
+of the results might change as well, even for the same ranks.</p>
+<p>To illustrate all of the above, let&#8217;s consider the following simplified example where we have
+two queries, <code class="literal">queryA</code> and <code class="literal">queryB</code> and their ranked documents:</p>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python">     |  queryA   |  queryB    |
+_id: |  1        |  5         |
+_id: |  2        |  4         |
+_id: |  3        |  3         |
+_id: |  4        |  1         |
+_id: |           |  2         |</pre>
+</div>
+<p>For <code class="literal">rank_window_size=5</code> we would get to see all documents from both <code class="literal">queryA</code> and <code class="literal">queryB</code>.
+Assuming a <code class="literal">rank_constant=1</code>, the <code class="literal">rrf</code> scores would be:</p>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python"># doc   | queryA     | queryB       | score
+_id: 1 =  1.0/(1+1)  + 1.0/(1+4)      = 0.7
+_id: 2 =  1.0/(1+2)  + 1.0/(1+5)      = 0.5
+_id: 3 =  1.0/(1+3)  + 1.0/(1+3)      = 0.5
+_id: 4 =  1.0/(1+4)  + 1.0/(1+2)      = 0.533
+_id: 5 =    0        + 1.0/(1+1)      = 0.5</pre>
+</div>
+<p>So the final ranked result set would be [<code class="literal">1</code>, <code class="literal">4</code>, <code class="literal">2</code>, <code class="literal">3</code>, <code class="literal">5</code>] and we would paginate over that, since
+<code class="literal">rank_window_size == len(results)</code>. In this scenario, we would have:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">from=0, size=2</code> would return documents [<code class="literal">1</code>, <code class="literal">4</code>] with ranks <code class="literal">[1, 2]</code>
+</li>
+<li class="listitem">
+<code class="literal">from=2, size=2</code> would return documents [<code class="literal">2</code>, <code class="literal">3</code>] with ranks <code class="literal">[3, 4]</code>
+</li>
+<li class="listitem">
+<code class="literal">from=4, size=2</code> would return document [<code class="literal">5</code>] with rank <code class="literal">[5]</code>
+</li>
+<li class="listitem">
+<code class="literal">from=6, size=2</code> would return an empty result set as it there are no more results to iterate over
+</li>
+</ul>
+</div>
+<p>Now, if we had a <code class="literal">rank_window_size=2</code>, we would only get to see <code class="literal">[1, 2]</code> and <code class="literal">[5, 4]</code> documents
+for queries <code class="literal">queryA</code> and <code class="literal">queryB</code> respectively. Working out the math, we would see that the results would now
+be slightly different, because we would have no knowledge of the documents in positions <code class="literal">[3: end]</code> for either query.</p>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python"># doc   | queryA     | queryB         | score
+_id: 1 =  1.0/(1+1)  + 0              = 0.5
+_id: 2 =  1.0/(1+2)  + 0              = 0.33
+_id: 4 =    0        + 1.0/(1+2)      = 0.33
+_id: 5 =    0        + 1.0/(1+1)      = 0.5</pre>
+</div>
+<p>The final ranked result set would be [<code class="literal">1</code>, <code class="literal">5</code>, <code class="literal">2</code>, <code class="literal">4</code>], and we would be able to paginate
+on the top <code class="literal">rank_window_size</code> results, i.e. [<code class="literal">1</code>, <code class="literal">5</code>]. So for the same params as above, we would now have:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">from=0, size=2</code> would return [<code class="literal">1</code>, <code class="literal">5</code>] with ranks <code class="literal">[1, 2]</code>
+</li>
+<li class="listitem">
+<code class="literal">from=2, size=2</code> would return an empty result set as it would fall outside the available <code class="literal">rank_window_size</code> results.
+</li>
+</ul>
+</div>
 </div>
 
 </div>
