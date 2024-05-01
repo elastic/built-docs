@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Migrating from Rollup to downsampling | Elasticsearch Guide [8.12] | Elastic</title>
+<meta class="elastic" name="content" content="Migrating from Rollup to downsampling | Elasticsearch Guide [8.12]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.12]"/>
+<link rel="up" href="xpack-rollup.html" title="Rolling up historical data"/>
+<link rel="prev" href="rollup-search-limitations.html" title="Rollup search limitations"/>
+<link rel="next" href="transforms.html" title="Transforming data"/>
+<meta class="elastic" name="product_version" content="8.12"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.12"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.12"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+<strong>IMPORTANT</strong>: No additional bug fixes or documentation updates
+will be released for this version. For the latest information, see the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.12]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="data-rollup-transform.html">Roll up or transform your data</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="xpack-rollup.html">Rolling up historical data</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="rollup-search-limitations.html">« Rollup search limitations</a>
+</span>
+<span class="next">
+<a href="transforms.html">Transforming data »</a>
+</span>
+</div>
+<div class="section xpack">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="rollup-migrating-to-downsampling"></a>Migrating from Rollup to downsampling<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.12/docs/reference/rollup/migrating-to-downsampling.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>Rollup and downsampling are two different features that allow historical metrics to be rolled up.
+From a high level rollup is more flexible compared to downsampling, but downsampling is a more robust and
+easier feature to downsample metrics.</p>
+<p>The following aspects of downsampling are easier or more robust:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+No need to schedule jobs. Downsampling is integrated with Index Lifecycle Management (ILM) and Data Stream Lifecycle (DSL).
+</li>
+<li class="listitem">
+No separate search API. Downsampled indices can be accessed via the search api and es|ql.
+</li>
+<li class="listitem">
+No separate rollup configuration. Downsampling uses the time series dimension and metric configuration from the mapping.
+</li>
+</ul>
+</div>
+<p>It isn&#8217;t possible to migrate all rollup usages to downsampling. The main requirement
+is that the data should be stored in Elasticsearch as <a class="xref" href="tsds.html" title="Time series data stream (TSDS)">time series data stream (TSDS)</a>.
+Rollup usages that basically roll the data up by time and all dimensions can migrate to downsampling.</p>
+<p>An example rollup usage that can be migrated to downsampling:</p>
+<a id="a2bab367f0e598ae27a2f4ec82e778e9"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT _rollup/job/sensor
+{
+  "index_pattern": "sensor-*",
+  "rollup_index": "sensor_rollup",
+  "cron": "0 0 * * * *", <a id="CO565-1"></a><i class="conum" data-value="1"></i>
+  "page_size": 1000,
+  "groups": { <a id="CO565-2"></a><i class="conum" data-value="2"></i>
+    "date_histogram": {
+      "field": "timestamp",
+      "fixed_interval": "60m" <a id="CO565-3"></a><i class="conum" data-value="3"></i>
+    },
+    "terms": {
+      "fields": [ "node" ]
+    }
+  },
+  "metrics": [
+    {
+      "field": "temperature",
+      "metrics": [ "min", "max", "sum" ] <a id="CO565-4"></a><i class="conum" data-value="4"></i>
+    },
+    {
+      "field": "voltage",
+      "metrics": [ "avg" ] <a id="CO565-5"></a><i class="conum" data-value="4"></i>
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1785.console"></div>
+<p>The equivalent <a class="xref" href="tsds.html" title="Time series data stream (TSDS)">time series data stream (TSDS)</a> setup that uses downsampling via DSL:</p>
+<a id="fe208d94ec93eabf3bd06139fa70701e"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT _index_template/sensor-template
+{
+  "index_patterns": ["sensor-*"],
+  "data_stream": { },
+  "template": {
+    "lifecycle": {
+        "downsampling": [
+            {
+                "after": "1d", <a id="CO565-6"></a><i class="conum" data-value="1"></i>
+                "fixed_interval": "1h" <a id="CO565-7"></a><i class="conum" data-value="3"></i>
+            }
+        ]
+    },
+    "settings": {
+      "index.mode": "time_series"
+    },
+    "mappings": {
+      "properties": {
+        "node": {
+          "type": "keyword",
+          "time_series_dimension": true <a id="CO565-8"></a><i class="conum" data-value="2"></i>
+        },
+        "temperature": {
+          "type": "half_float",
+          "time_series_metric": "gauge" <a id="CO565-9"></a><i class="conum" data-value="4"></i>
+        },
+        "voltage": {
+          "type": "half_float",
+          "time_series_metric": "gauge" <a id="CO565-10"></a><i class="conum" data-value="4"></i>
+        },
+        "@timestamp": { <a id="CO565-11"></a><i class="conum" data-value="2"></i>
+          "type": "date"
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/1786.console"></div>
+<p>The downsample configuration is included in the above template for a <a class="xref" href="tsds.html" title="Time series data stream (TSDS)">time series data stream (TSDS)</a>.
+Only the <code class="literal">downsampling</code> part is necessary to enable downsampling, which indicates when to downsample to what fixed interval.</p>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO565-1"><i class="conum" data-value="1"></i></a><a href="#CO565-6"></a></p>
+</td>
+<td align="left" valign="top">
+<p>In the rollup job, the <code class="literal">cron</code> field determines when the rollup documents. In the index template,
+the <code class="literal">after</code> field determines when downsampling will rollup documents (note that this the time after a rollover has been performed).</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO565-2"><i class="conum" data-value="2"></i></a><a href="#CO565-8"></a><a href="#CO565-11"></a></p>
+</td>
+<td align="left" valign="top">
+<p>In the rollup job, the <code class="literal">groups</code> field determines all dimensions of the group documents are rolled up to. In the index template,
+the fields with <code class="literal">time_series_dimension</code> set <code class="literal">true</code> and the <code class="literal">@timestamp</code> field determine the group.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO565-3"><i class="conum" data-value="3"></i></a><a href="#CO565-7"></a></p>
+</td>
+<td align="left" valign="top">
+<p>In the rollup job, the <code class="literal">fixed_interval</code> field determines how timestamps are aggregated as part of the grouping.
+In the index template, the <code class="literal">fixed_interval</code> field has the same purpose. Note that downsampling does not support calendar intervals.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO565-4"><i class="conum" data-value="4"></i></a><a href="#CO565-5"></a><a href="#CO565-9"></a><a href="#CO565-10"></a></p>
+</td>
+<td align="left" valign="top">
+<p>In the rollup job, the <code class="literal">metrics</code> field define the metrics and how to store these metrics. In the index template,
+all fields with a <code class="literal">time_series_metric</code> are metric fields. If a field has <code class="literal">gauge</code> as <code class="literal">time_series_metric</code> attribute
+value, then min, max, sum and value counts are stored for this field in the downsampled index. If a field has
+<code class="literal">counter</code> as  <code class="literal">time_series_metric</code> attribute value, then only the last value stored for this field in the downsampled
+index.</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="rollup-search-limitations.html">« Rollup search limitations</a>
+</span>
+<span class="next">
+<a href="transforms.html">Transforming data »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
