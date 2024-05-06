@@ -146,7 +146,7 @@ Not what you want? See the
 <a class="xref" href="install-stack-demo-secure.html#install-stack-demo-secure-second-node" title="Step 4: Configure security on additional Elasticsearch nodes">Step 4: Configure security on additional Elasticsearch nodes</a>
 </li>
 <li class="listitem">
-<a class="xref" href="install-stack-demo-secure.html#install-stack-demo-secure-kib-es" title="Step 5: Generate a certificate for Kibana to access Elasticsearch">Step 5: Generate a certificate for Kibana to access Elasticsearch</a>
+<a class="xref" href="install-stack-demo-secure.html#install-stack-demo-secure-kib-es" title="Step 5: Generate server-side and client-side certificates for Kibana">Step 5: Generate server-side and client-side certificates for Kibana</a>
 </li>
 <li class="listitem">
 <a class="xref" href="install-stack-demo-secure.html#install-stack-demo-secure-fleet" title="Step 6: Install Fleet with SSL certificates configured">Step 6: Install Fleet with SSL certificates configured</a>
@@ -749,8 +749,8 @@ chmod 750 /etc/elasticsearch/certs/ca</pre>
 </li>
 </ol>
 </div>
-<h2><a id="install-stack-demo-secure-kib-es"></a>Step 5: Generate a certificate for Kibana to access Elasticsearch<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/stack-docs/edit/8.14/docs/en/install-upgrade/installing-stack-demo-secure.asciidoc">edit</a></h2>
-<p>Now that the transport and HTTP layers are configured with encryption using the new certificates, we&#8217;ll set up certificates for encryption between Kibana and Elasticsearch. For additional details about any of these steps, refer to <a href="/guide/en/kibana/8.14/elasticsearch-mutual-tls.html" class="ulink" target="_top">Mutual TLS authentication between Kibana and Elasticsearch</a>.</p>
+<h2><a id="install-stack-demo-secure-kib-es"></a>Step 5: Generate server-side and client-side certificates for Kibana<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/stack-docs/edit/8.14/docs/en/install-upgrade/installing-stack-demo-secure.asciidoc">edit</a></h2>
+<p>Now that the transport and HTTP layers are configured with encryption using the new certificates, there are two more tasks that must be accomplished for end-to-end connectivity to Elasticsearch: Set up certificates for encryption between Kibana and Elasticsearch, and between the client browser and Kibana. For additional details about any of these steps, refer to <a href="/guide/en/kibana/8.14/elasticsearch-mutual-tls.html" class="ulink" target="_top">Mutual TLS authentication between Kibana and Elasticsearch</a> and <a href="/guide/en/elasticsearch/reference/8.14/security-basic-setup-https.html#encrypt-kibana-browser" class="ulink" target="_top">Encrypt traffic between your browser and Kibana</a>.</p>
 <div class="olist orderedlist">
 <ol class="orderedlist">
 <li class="listitem">
@@ -779,6 +779,68 @@ chmod 750 /etc/elasticsearch/certs/ca</pre>
 </div>
 </li>
 <li class="listitem">
+<p>Log in to the first Elasticsearch node and use the certificate utility to generate a certificate bundle for the Kibana server. This certificate will be used to encrypt the traffic between Kibana and the client&#8217;s browser. In the command, replace &lt;DNS name&gt; and &lt;IP address&gt; with the name and IP address of your Kibana server host:</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">sudo /usr/share/elasticsearch/bin/elasticsearch-certutil cert --name kibana-server --ca-cert /etc/elasticsearch/certs/ca/ca.crt --ca-key /etc/elasticsearch/certs/ca/ca.key  --dns &lt;DNS name&gt; --ip &lt;IP address&gt; --pem</pre>
+</div>
+<p>When prompted, specify a unique name for the output file, such as <code class="literal">kibana-cert-bundle.zip</code>.</p>
+</li>
+<li class="listitem">
+<p>Copy the generated archive over to your Kibana host and unpack it:</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">sudo unzip kibana-cert-bundle.zip</pre>
+</div>
+<p>The unpacked archive will create a directory, <code class="literal">kibana-server</code>,  containing the new Kibana key and certificate:</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">ls -l kibana-server/
+total 8
+-rw-r--r--. 1 root root 1208 May  3 16:08 kibana-server.crt
+-rw-r--r--. 1 root root 1675 May  3 16:08 kibana-server.key</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Copy the certificate and key into <code class="literal">/etc/kibana</code>:</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">sudo cp kibana-server.crt /etc/kibana/
+sudo cp kibana-server.key /etc/kibana/</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Update the permissions on the certificate files to ensure that they’re readable. From inside the <code class="literal">/etc/kibana</code> directory, run:</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">sudo chmod 640 *.crt
+sudo chmod 640 *.key</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Open <code class="literal">/etc/kibana/kibana.yml</code> and make the following changes:</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">server.ssl.certificate: /etc/kibana/kibana-server.crt
+server.ssl.key: /etc/kibana/kibana-server.key
+server.ssl.enabled: true</pre>
+</div>
+<p>Keep the file open for the next step.</p>
+</li>
+<li class="listitem">
+<p>To ensure that Kibana sessions are not invalidated, set up an encryption key by assigning any string of 32 characters or longer to the <code class="literal">xpack.security.encryptionKey</code> setting (this string will be configured in <code class="literal">kibana.yml</code> and does not need to be remembered). To generate a random string, you can use the following bash commands:</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 32 | head -n 1</pre>
+</div>
+<p>Using your own string or the output of the above command sequence, add the encryption key setting to <code class="literal">/etc/kibana/kibana.yml</code>:</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">xpack.security.encryptionKey: previously_create_string</pre>
+</div>
+<p>Save and close the file.</p>
+</li>
+<li class="listitem">
 <p>Restart the Kibana service:</p>
 <div class="pre_wrapper lang-shell">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -802,7 +864,8 @@ chmod 750 /etc/elasticsearch/certs/ca</pre>
 <p>In the log file you should find a <code class="literal">Kibana is now available</code> message.</p>
 </li>
 <li class="listitem">
-Open a web browser to the external IP address of the Kibana host machine: <code class="literal">https://&lt;kibana-host-address&gt;:5601`</code>. Note that the URL should use <code class="literal">https</code> and not <code class="literal">http</code>.
+<p>You should now have an end-to-end ecnrypted deployment with Elasticsearch and Kibana that provides encryption between both the cluster nodes and Kibana, and HTTPS access to Kibana.</p>
+<p>Open a web browser to the external IP address of the Kibana host machine: <code class="literal">https://&lt;kibana-host-address&gt;:5601</code>. Note that the URL should use the <code class="literal">https</code> and not the <code class="literal">http</code> protocol.</p>
 </li>
 <li class="listitem">
 Log in using the <code class="literal">elastic</code> user and password that you configured in Step 1 of <a class="xref" href="installing-stack-demo-self.html" title="Tutorial 1: Installing a self-managed Elastic Stack">Tutorial 1: Installing a self-managed Elastic Stack</a>.
