@@ -42,17 +42,12 @@ Not what you want? See the
 <h2 class="title"><a id="filebeat-input-http_endpoint"></a>HTTP Endpoint input<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-http-endpoint.asciidoc">edit</a></h2>
 </div></div></div>
 
-<div class="warning admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p>This functionality is in beta and is subject to change. The design and code is less mature than official GA features and is being provided as-is with no warranties. Beta features are not subject to the support SLA of official GA features.</p>
-</div>
-</div>
 <p>The HTTP Endpoint input initializes a listening HTTP server that collects
-incoming HTTP POST requests containing a JSON body. The body must be either an
-object or an array of objects. Any other data types will result in an HTTP 400
-(Bad Request) response. For arrays, one document is created for each object in
-the array.</p>
+incoming HTTP POST requests containing a JSON body. The body must be either
+an object or an array of objects, otherwise a Common Expression Language
+expression that converts the the JSON body to these types can be provided.
+Any other data types will result in an HTTP 400 (Bad Request) response. For
+arrays, one document is created for each object in the array.</p>
 <p>gzip encoded request bodies are supported if a <code class="literal">Content-Encoding: gzip</code> header
 is sent with the request.</p>
 <p>This input can for example be used to receive incoming webhooks from a
@@ -86,7 +81,7 @@ configurations.</p>
 <tr>
 <td align="left" valign="top"><p>400</p></td>
 <td align="left" valign="top"><p>Bad Request</p></td>
-<td align="left" valign="top"><p>Returned if JSON body decoding fails.</p></td>
+<td align="left" valign="top"><p>Returned if JSON body decoding fails or if <code class="literal">wait_for_completion_timeout</code> query validation fails.</p></td>
 </tr>
 <tr>
 <td align="left" valign="top"><p>401</p></td>
@@ -113,9 +108,25 @@ configurations.</p>
 <td align="left" valign="top"><p>Internal Server Error</p></td>
 <td align="left" valign="top"><p>Returned if an I/O error occurs reading the request.</p></td>
 </tr>
+<tr>
+<td align="left" valign="top"><p>504</p></td>
+<td align="left" valign="top"><p>Gateway Timeout</p></td>
+<td align="left" valign="top"><p>Returned if a request publication cannot be ACKed within the required timeout.</p></td>
+</tr>
 </tbody>
 </table>
 </div>
+<p>The endpoint will enforce end-to-end ACK when a URL query parameter
+<code class="literal">wait_for_completion_timeout</code> with a duration is provided. For example
+<code class="literal">http://localhost:8080/?wait_for_completion_timeout=1m</code> will wait up
+to 1 minute for the event to be published to the cluster and then return
+the user-defined response message. In the case that the publication
+does not complete within the timeout duration, the HTTP response will
+have a 504 Gateway Timeout status code. The syntax for durations is
+a number followed by units which may be h, m and s. No other HTTP query
+is accepted. If another query parameter is provided or duration syntax
+is incorrect, the request will fail with an HTTP 400 "Bad Request"
+status.</p>
 <p>Example configurations:</p>
 <p>Basic example:</p>
 <div class="pre_wrapper lang-yaml">
@@ -138,6 +149,16 @@ configurations.</p>
   response_body: '{"message": "success"}'
   url: "/"
   prefix: "json"</pre>
+</div>
+<p>Map request to root of document example:</p>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: http_endpoint
+  enabled: true
+  listen_address: 192.168.1.1
+  listen_port: 8080
+  prefix: "."</pre>
 </div>
 <p>Multiple endpoints example:</p>
 <div class="pre_wrapper lang-yaml">
@@ -234,6 +255,39 @@ configurations.</p>
   preserve_original_event: true
   include_headers: ["TestHeader"]</pre>
 </div>
+<p>Common Expression Language example:</p>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: http_endpoint
+  enabled: true
+  listen_address: 192.168.1.1
+  listen_port: 8080
+  program: |
+    obj.records.map(r, {
+     "requestId": obj.requestId,
+     "timestamp": string(obj.timestamp),
+     "event": r,
+    })</pre>
+</div>
+<p>This example would allow handling of a JSON body that is an object containing
+more than one event that each should be ingested as separate documents with
+the common timestamp and request ID:</p>
+<div class="pre_wrapper lang-json">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-json">{
+  "requestId": "ed4acda5-034f-9f42-bba1-f29aea6d7d8f",
+  "timestamp": 1578090901599,
+  "records": [
+    {
+      "data": "event record 1"
+    },
+    {
+      "data": "event record 2"
+    }
+  ]
+}</pre>
+</div>
 <div class="section">
 <div class="titlepage"><div><div>
 <h3 class="title"><a id="_configuration_options_10"></a>Configuration options<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-http-endpoint.asciidoc">edit</a></h3>
@@ -262,7 +316,7 @@ configurations.</p>
 <p>By default the input expects the incoming POST to include a Content-Type of <code class="literal">application/json</code> to try to enforce the incoming data to be valid JSON.
 In certain scenarios when the source of the request is not able to do that, it can be overwritten with another value or set to null.</p>
 <h4><a id="_program"></a><code class="literal">program</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-http-endpoint.asciidoc">edit</a></h4>
-<p>The normal operation of the input treats the body either as a single event when the body is an object, or as a set of events when the body is an array. If the body should be handled differently, for example a set of events in an array field of an object to be handled as a set of events, then a <a href="https://opensource.google.com/projects/cel" class="ulink" target="_top">Common Expression Language (CEL)</a> program can be provided through this configuration field. No CEL extensions are provided beyond the function in the CEL <a href="https://github.com/google/cel-spec/blob/master/doc/langdef.md#standard" class="ulink" target="_top">standard library</a>. CEL <a href="https://pkg.go.dev/github.com/google/cel-go/cel#OptionalTypes" class="ulink" target="_top">optional types</a> are supported.</p>
+<p>The normal operation of the input treats the body either as a single event when the body is an object, or as a set of events when the body is an array. If the body should be handled differently, for example a set of events in an array field of an object to be handled as a set of events, then a <a href="https://opensource.google.com/projects/cel" class="ulink" target="_top">Common Expression Language (CEL)</a> program can be provided through this configuration field. The name of the object in the CEL program is <code class="literal">obj</code>. No CEL extensions are provided beyond the function in the CEL <a href="https://github.com/google/cel-spec/blob/master/doc/langdef.md#standard" class="ulink" target="_top">standard library</a>. CEL <a href="https://pkg.go.dev/github.com/google/cel-go/cel#OptionalTypes" class="ulink" target="_top">optional types</a> are supported.</p>
 <h4><a id="_response_code"></a><code class="literal">response_code</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-http-endpoint.asciidoc">edit</a></h4>
 <p>The HTTP response code returned upon success. Should be in the 2XX range.</p>
 <h4><a id="_response_body"></a><code class="literal">response_body</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-http-endpoint.asciidoc">edit</a></h4>
@@ -274,7 +328,7 @@ In certain scenarios when the source of the request is not able to do that, it c
 <h4><a id="_url"></a><code class="literal">url</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-http-endpoint.asciidoc">edit</a></h4>
 <p>This options specific which URL path to accept requests on. Defaults to <code class="literal">/</code></p>
 <h4><a id="_prefix"></a><code class="literal">prefix</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-http-endpoint.asciidoc">edit</a></h4>
-<p>This option specifies which prefix the incoming request will be mapped to.</p>
+<p>This option specifies which prefix the incoming request will be mapped to. If <code class="literal">prefix</code> is "<code class="literal">.</code>", the request will be mapped to the root of the resulting document.</p>
 <h4><a id="_include_headers"></a><code class="literal">include_headers</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-http-endpoint.asciidoc">edit</a></h4>
 <p>This options specifies a list of HTTP headers that should be copied from the incoming request and included in the document.
 All configured headers will always be canonicalized to match the headers of the incoming request.
@@ -350,6 +404,10 @@ observe the activity of the input.</p>
 <td align="left" valign="top"><p>Number of event arrays published.</p></td>
 </tr>
 <tr>
+<td align="left" valign="top"><p><code class="literal">batches_acked_total</code></p></td>
+<td align="left" valign="top"><p>Number of event arrays ACKed.</p></td>
+</tr>
+<tr>
 <td align="left" valign="top"><p><code class="literal">events_published_total</code></p></td>
 <td align="left" valign="top"><p>Number of events published.</p></td>
 </tr>
@@ -364,6 +422,10 @@ observe the activity of the input.</p>
 <tr>
 <td align="left" valign="top"><p><code class="literal">batch_processing_time</code></p></td>
 <td align="left" valign="top"><p>Histogram of the elapsed successful batch processing times in nanoseconds (time of receipt to time of ACK for non-empty batches).</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">batch_ack_time</code></p></td>
+<td align="left" valign="top"><p>Histogram of the elapsed successful batch ACKing times in nanoseconds (time of handler start to time of ACK for non-empty batches).</p></td>
 </tr>
 </tbody>
 </table>
