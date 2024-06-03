@@ -60,6 +60,9 @@ Not what you want? See the
 <li class="listitem">
 <a class="xref" href="profiling-self-managed-ops.html#profiling-self-managed-upgrade" title="Upgrade a self-hosted stack">Upgrading backend binaries</a>
 </li>
+<li class="listitem">
+<a class="xref" href="profiling-self-managed-ops.html#profiling-self-managed-kubernetes-tips" title="Kubernetes tips">Kubernetes tips</a>
+</li>
 </ul>
 </div>
 <h5><a id="profiling-self-managed-ops-sizing-guidance"></a>Resource guide<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/main/docs/en/observability/profiling-self-managed-ops.asciidoc">edit</a></h5>
@@ -338,6 +341,85 @@ so you may need to restart the service manually or through any other automation 
 <p>Download the corresponding binary version and replace the existing one, using the command seen in the <a class="xref" href="profiling-self-managed-running.html#profiling-self-managed-running-linux-binary" title="Binary">Binary</a> section of the setup guide.
 Replace the old binary and restart the services.</p>
 <p>You will find the links to the new binaries in the "Add Data" page, under the "Binary" tab.</p>
+<h5><a id="profiling-self-managed-kubernetes-tips"></a>Kubernetes tips<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/main/docs/en/observability/profiling-self-managed-ops.asciidoc">edit</a></h5>
+<p>When deploying the Universal Profiling backend on Kubernetes, there are some best practices to follow.</p>
+<h6><a id="_ingress_configuration"></a>Ingress configuration<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/main/docs/en/observability/profiling-self-managed-ops.asciidoc">edit</a></h6>
+<p>If you are using an ingress controller, the connection routing to the collector Service should be configured to use the gRPC protocol.</p>
+<p>We provide an <code class="literal">Ingress</code> resource as part of the Helm chart. Because the ingress can be any implementation,
+you must configure the controller with a class name and
+any necessary annotations using the <code class="literal">ingress.annotations</code> field.</p>
+<p>For example, when using an NGINX ingress controller,
+set the annotation <code class="literal">nginx.ingress.kubernetes.io/backend-protocol: "GRPC"</code>, as shown in the following example:</p>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">ingress:
+  create: true
+  ingressClassName: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"</pre>
+</div>
+<p>For symbolizer, the connection routing should be configured to use the HTTP protocol.
+There is usually no need to customize annotations for this type of service, but the chart provides similar configuration options.</p>
+<h6><a id="_output_tls_configuration"></a>Output TLS configuration<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/main/docs/en/observability/profiling-self-managed-ops.asciidoc">edit</a></h6>
+<p>You can secure the communication between the Universal Profiling backend and the Elasticsearch cluster by enabling TLS
+in the <code class="literal">output.elasticsearch</code> section of the collector and symbolizer configuration files.</p>
+<p>To do so, Kubernetes secrets containing the TLS key pairs should be provisioned in the namespace where the backend is installed.
+In case of self-signed certificates, the CA bundle used to validate Elasticsearch&#8217;s certificates should also be part of the secret.</p>
+<p>Create two secrets, one for the collector and one for the symbolizer, with the names <code class="literal">pf-symbolizer-tls-certificate</code> and <code class="literal">pf-collector-tls-certificate</code>.
+The secrets should contain the following keys:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">tls.key</code>: the certificate private key
+</li>
+<li class="listitem">
+<code class="literal">tls.cert</code>: the certificate public key
+</li>
+<li class="listitem">
+<code class="literal">ca.cert</code> (optional): the certificate CA bundle
+</li>
+</ul>
+</div>
+<p>Follow these steps to enable TLS connection from collector/symbolizer to Elasticsearch:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Create secrets with the TLS key pairs (omit the <code class="literal">ca.cert</code> field if you are not using a self-signed CA):</p>
+<div class="pre_wrapper lang-terminal">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-terminal">kubectl create secret generic pf-collector-tls-certificate --from-file=tls.key=/path/to/key.pem \
+--from-file=tls.cert=/path/to/cert.pem --from-file=ca.cert=/path/to/ca.crt</pre>
+</div>
+<div class="pre_wrapper lang-terminal">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-terminal">kubectl create secret generic pf-symbolizer-tls-certificate --from-file=tls.key=/path/to/key.pem \
+--from-file=tls.cert=/path/to/cert.pem --from-file=ca.cert=/path/to/ca.crt</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Update the collector and symbolizer Helm values files to enable the use of TLS configuration, uncommenting the <code class="literal">output.elasticsearch.ssl</code> section:</p>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">output:
+  elasticsearch:
+    ssl:
+      enabled: true</pre>
+</div>
+</li>
+<li class="listitem">
+Upgrade the charts using the <code class="literal">helm upgrade</code> command, providing the updated values file.
+</li>
+</ol>
+</div>
+<h6><a id="_horizontal_scaling"></a>Horizontal scaling<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/main/docs/en/observability/profiling-self-managed-ops.asciidoc">edit</a></h6>
+<p>When scaling the Universal Profiling backend on Kubernetes, you can increase the number of replicas for the collector, or
+enable Horizontal Pod Autoscaling V2.</p>
+<p>To enable HPAv2 for the collector or symbolizer, you can set the <code class="literal">autoscalingV2</code> dictionary in each Helm values file.</p>
+<p>At the moment, <span class="strong strong"><strong>it is not recommended to enable an autoscaler for symbolizer</strong></span>.
+Due to a current limitation on how symbolizer replicas can synchronize their workloads, it is best
+to only use a single replica for the symbolizer.
+Scale the symbolizer vertically first.
+Only in case of high latency in symbolizing native frames (10+ minutes) you can evaluate adding more replicas.</p>
 </div>
 <div class="navfooter">
 <span class="prev">
