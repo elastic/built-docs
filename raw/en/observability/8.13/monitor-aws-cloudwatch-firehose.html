@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Monitor CloudWatch logs | Elastic Observability [8.13] | Elastic</title>
+<meta class="elastic" name="content" content="Monitor CloudWatch logs | Elastic Observability [8.13]">
+
+<link rel="home" href="index.html" title="Elastic Observability [8.13]"/>
+<link rel="up" href="monitor-aws-firehose.html" title="Monitor Amazon Web Services (AWS) with Amazon Data Firehose"/>
+<link rel="prev" href="monitor-aws-waf-firehose.html" title="Monitor Web Application Firewall (WAF) logs"/>
+<link rel="next" href="monitor-aws-firehose-troubleshooting.html" title="Troubleshooting"/>
+<meta class="elastic" name="product_version" content="8.13"/>
+<meta class="elastic" name="product_name" content="Observability"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Observability/Guide/8.13"/>
+<meta name="DC.subject" content="Observability"/>
+<meta name="DC.identifier" content="8.13"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+<strong>IMPORTANT</strong>: No additional bug fixes or documentation updates
+will be released for this version. For the latest information, see the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elastic Observability [8.13]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="monitor-amazon-web-services.html">Amazon Web Services (AWS) monitoring</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="monitor-aws-firehose.html">Monitor Amazon Web Services (AWS) with Amazon Data Firehose</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="monitor-aws-waf-firehose.html">« Monitor Web Application Firewall (WAF) logs</a>
+</span>
+<span class="next">
+<a href="monitor-aws-firehose-troubleshooting.html">Troubleshooting »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="monitor-aws-cloudwatch-firehose"></a>Monitor CloudWatch logs<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.13/docs/en/observability/cloud-monitoring/aws/monitor-aws-cloudwatch-firehose.asciidoc">edit</a></h3>
+</div></div></div>
+
+<p>In this section, you&#8217;ll learn how to export log events from CloudWatch logs to an Elastic cluster by using Amazon Data Firehose.</p>
+<p>You&#8217;ll go through the following steps:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Install AWS integration in Kibana
+</li>
+<li class="listitem">
+Select a CloudWatch log group to monitor
+</li>
+<li class="listitem">
+Create a delivery stream in Amazon Data Firehose
+</li>
+<li class="listitem">
+Set up a subscription filter to forward the logs using the Firehose stream
+</li>
+<li class="listitem">
+Visualize your logs in Kibana
+</li>
+</ul>
+</div>
+<h5><a id="firehose-cloudwatch-prerequisites"></a>Before you begin<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.13/docs/en/observability/cloud-monitoring/aws/monitor-aws-cloudwatch-firehose.asciidoc">edit</a></h5>
+<p>We assume that you already have:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+An AWS account with permissions to pull the necessary data from AWS.
+</li>
+<li class="listitem">
+A deployment using our hosted Elasticsearch Service on <a href="/cloud/elasticsearch-service/signup?page=docs&amp;placement=docs-body" class="ulink" target="_top">Elastic Cloud</a>. The deployment includes an Elasticsearch cluster for storing and searching your data, and Kibana for visualizing and managing your data. AWS Data Firehose works with Elastic Stack version 7.17 or greater, running on Elastic Cloud only.
+</li>
+</ul>
+</div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>AWS PrivateLink is not supported. Make sure the deployment is on AWS, because the Amazon Data Firehose delivery stream connects specifically to an endpoint that needs to be on AWS.</p>
+</div>
+</div>
+<h5><a id="firehose-cloudwatch-step-one"></a>Step 1: Install AWS integration in Kibana<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.13/docs/en/observability/cloud-monitoring/aws/monitor-aws-cloudwatch-firehose.asciidoc">edit</a></h5>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+In Kibana, navigate to <span class="strong strong"><strong>Management</strong></span> &gt; <span class="strong strong"><strong>Integrations</strong></span> and browse the catalog to find the AWS integration.
+</li>
+<li class="listitem">
+Navigate to the <span class="strong strong"><strong>Settings</strong></span> tab and click <span class="strong strong"><strong>Install AWS assets</strong></span>.
+</li>
+</ol>
+</div>
+<h5><a id="firehose-cloudwatch-step-two"></a>Step 2: Select a CloudWatch log group to monitor<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.13/docs/en/observability/cloud-monitoring/aws/monitor-aws-cloudwatch-firehose.asciidoc">edit</a></h5>
+<div class="imageblock">
+<div class="content">
+<img src="firehose-cloudwatch-log-group.png" alt="CloudWatch log group">
+</div>
+</div>
+<p>In this tutorial, you are going to collect application logs from an AWS Lambda-based app and forward them to Elastic.</p>
+<p><span class="strong strong"><strong>Create a Lambda function</strong></span></p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>You can skip this section if you already have a Lambda function, or any other service or application that sends logs to a CloudWatch log group. Take note of the log group from which you want to collect log events and move to the next section.</p>
+</div>
+</div>
+<p>Like many other services and platforms in AWS, Lambda functions natively log directly to CloudWatch out of the box.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Go to the <a href="https://console.aws.amazon.com/" class="ulink" target="_top">AWS console</a> and open the AWS Lambda page.
+</li>
+<li class="listitem">
+Click <span class="strong strong"><strong>Create function</strong></span> and select the option to create a function from scratch.
+</li>
+<li class="listitem">
+Select a <span class="strong strong"><strong>Function name</strong></span>.
+</li>
+<li class="listitem">
+As a <span class="strong strong"><strong>Runtime</strong></span>, select a recent version of Python. For example, Python 3.11.
+</li>
+<li class="listitem">
+Select your <span class="strong strong"><strong>Architecture</strong></span> of choice between <code class="literal">arm64</code> and <code class="literal">x86_64</code>.
+</li>
+<li class="listitem">
+<p>Confirm and create the Lambda function.</p>
+<p>When AWS finishes creating the function, go to the <span class="strong strong"><strong>Code source</strong></span> section and paste the following Python code as function source code:</p>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python">import json
+
+def lambda_handler(event, context):
+    print("Received event: " + json.dumps(event))</pre>
+</div>
+</li>
+<li class="listitem">
+Click <span class="strong strong"><strong>Deploy</strong></span> to deploy the changes to the source code.
+</li>
+</ol>
+</div>
+<p><span class="strong strong"><strong>Generate some sample logs</strong></span></p>
+<p>With the function ready to go, you can invoke it a few times to generate sample logs.
+On the function page, follow these steps:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Select <span class="strong strong"><strong>Test</strong></span>.
+</li>
+<li class="listitem">
+Select the option to create a new test event.
+</li>
+<li class="listitem">
+Name the test event and <span class="strong strong"><strong>Save</strong></span> the changes.
+</li>
+<li class="listitem">
+Click the <span class="strong strong"><strong>Test</strong></span> button to execute the function.
+</li>
+</ol>
+</div>
+<p>Visit the function&#8217;s log group. Usually, the AWS console offers a handy link to jump straight to the log group it created for this function&#8217;s logs.
+You should get something similar to the following:</p>
+<div class="imageblock">
+<div class="content">
+<img src="firehose-cloudwatch-sample-logs.png" alt="CloudWatch log group with sample logs">
+</div>
+</div>
+<p>Take note of the log group name for this Lambda function, as you will need it in the next steps.</p>
+<h5><a id="firehose-cloudwatch-step-three"></a>Step 3: Create a stream in Amazon Data Firehose<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.13/docs/en/observability/cloud-monitoring/aws/monitor-aws-cloudwatch-firehose.asciidoc">edit</a></h5>
+<div class="imageblock">
+<div class="content">
+<img src="firehose-cloudwatch-firehose-stream.png" alt="Amazon Firehose Stream">
+</div>
+</div>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Go to the <a href="https://console.aws.amazon.com/" class="ulink" target="_top">AWS console</a> and navigate to Amazon Data Firehose.
+</li>
+<li class="listitem">
+Click <span class="strong strong"><strong>Create Firehose stream</strong></span> and choose the source and destination of your Firehose stream. Unless you are streaming data from Kinesis Data Streams, set source to <code class="literal">Direct PUT</code> and destination to <code class="literal">Elastic</code>.
+</li>
+<li class="listitem">
+<p>Provide a meaningful <span class="strong strong"><strong>Firehose stream name</strong></span> that will allow you to identify this delivery stream later.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>For advanced use cases, source records can be transformed by invoking a custom Lambda function. When using Elastic integrations, this should not be required.</p>
+</div>
+</div>
+</li>
+<li class="listitem">
+In the <span class="strong strong"><strong>Destination settings</strong></span> section, set the following parameter:
+<code class="literal">es_datastream_name</code> = <code class="literal">logs-aws.generic-default</code>
+</li>
+</ol>
+</div>
+<p>The Firehose stream is now ready to send logs to your Elastic Cloud deployment.</p>
+<h5><a id="firehose-cloudwatch-step-four"></a>Step 4: Send Lambda function log events to a Firehose stream<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.13/docs/en/observability/cloud-monitoring/aws/monitor-aws-cloudwatch-firehose.asciidoc">edit</a></h5>
+<div class="imageblock">
+<div class="content">
+<img src="firehose-cloudwatch-subscription-filter.png" alt="CloudWatch subscription filter">
+</div>
+</div>
+<p>To send log events from CloudWatch to Firehose, open the log group where the Lambda service is logging and create a subscription filter.</p>
+<p><span class="strong strong"><strong>Create a subscription filter for Amazon Data Firehose</strong></span></p>
+<p>The <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/Subscriptions.html" class="ulink" target="_top">subscription filter</a> allows you to pick log events from the log group and forward them to other services, such as an Amazon Kinesis stream, an Amazon Data Firehose stream, or AWS Lambda.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+On the log group page, select <span class="strong strong"><strong>Subscription filters</strong></span> and click the <span class="strong strong"><strong>Create Amazon Data Firehose subscription filter</strong></span> button.
+</li>
+</ol>
+</div>
+<p>From here, follow these steps:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Choose a destination. Select the Firehose stream you created in the previous step.
+</li>
+<li class="listitem">
+<p>Grant the CloudWatch service permission to send log events to the stream in Firehose:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Create a new role with a trust policy that allows CloudWatch service to assume the role.
+</li>
+<li class="listitem">
+Assign a policy to the role that permits "putting records" into a Firehose  stream.
+</li>
+</ol>
+</div>
+</li>
+<li class="listitem">
+<p>Create a new IAM role and use the following JSON as the trust policy:</p>
+<div class="pre_wrapper lang-json">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-json">{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "Service": "logs.&lt;REGION&gt;.amazonaws.com"
+            },
+            "Action": "sts:AssumeRole",
+            "Condition": {
+                "StringLike": {
+                    "aws:SourceArn": "arn:aws:logs:&lt;REGION&gt;:&lt;ACCOUNT_ID&gt;:*"
+                }
+            }
+        }
+    ]
+}</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Assign a policy to the IAM role by using the following JSON file:</p>
+<div class="pre_wrapper lang-json">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-json">{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": "firehose:PutRecord",
+            "Resource": "arn:aws:firehose:&lt;REGION&gt;:&lt;ACCOUNT_ID&gt;:deliverystream/&lt;YOUR_FIREHOSE_STREAM&gt;"
+        }
+    ]
+}</pre>
+</div>
+</li>
+</ol>
+</div>
+<p>When the new role is ready, you can select it in the subscription filter.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Configure log format and filters. Select the "Other" in the <span class="strong strong"><strong>Log format</strong></span> option.
+</li>
+<li class="listitem">
+<p>Set log format and filters</p>
+<p>If you want to forward all log events, you can empty the filter pattern. You can use the <span class="strong strong"><strong>Subscription filter pattern</strong></span> to forward only the log events that match the pattern. The <span class="strong strong"><strong>Test pattern</strong></span> tool on the same page allows you to test filter patterns before creating the subscription filter.</p>
+</li>
+<li class="listitem">
+<p>Generate additional logs.</p>
+<p>Open the AWS Lambda page again, select the function you created, and execute it a few times to generate new log events.</p>
+</li>
+</ol>
+</div>
+<p><span class="strong strong"><strong>Check if there are destination error logs</strong></span></p>
+<p>On the <a href="https://console.aws.amazon.com/" class="ulink" target="_top">AWS console</a>, navigate to your Firehose stream and check for entries in the <span class="strong strong"><strong>Destination error logs</strong></span> section.</p>
+<p>If everything is running smoothly, this list is empty. If there&#8217;s an error, you can check the details. The following example shows a delivery stream that fails to send records to the Elastic stack due to bad authentication settings:</p>
+<div class="imageblock">
+<div class="content">
+<img src="firehose-cloudwatch-destination-errors.png" alt="Firehose destination errors">
+</div>
+</div>
+<p>The Firehose delivery stream reports:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+The number of failed deliveries.
+</li>
+<li class="listitem">
+The failure detail.
+</li>
+</ul>
+</div>
+<h5><a id="firehose-cloudwatch-step-five"></a>Step 5: Visualize your logs in Kibana<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.13/docs/en/observability/cloud-monitoring/aws/monitor-aws-cloudwatch-firehose.asciidoc">edit</a></h5>
+<div class="imageblock">
+<div class="content">
+<img src="firehose-cloudwatch-data-stream.png" alt="Vizualize logs in Kibana">
+</div>
+</div>
+<p>With the logs streaming to the Elastic stack, you can now visualize them in Kibana.</p>
+<p>In Kibana, navigate to the <span class="strong strong"><strong>Discover</strong></span> page and select the index pattern that matches the Firehose stream name. Here is a sample of logs from the Lambda function you forwarded to the <code class="literal">logs-aws.generic-default</code> data stream:</p>
+<div class="imageblock">
+<div class="content">
+<img src="firehose-cloudwatch-verify-discover.png" alt="Sample logs in Discover">
+</div>
+</div>
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="monitor-aws-waf-firehose.html">« Monitor Web Application Firewall (WAF) logs</a>
+</span>
+<span class="next">
+<a href="monitor-aws-firehose-troubleshooting.html">Troubleshooting »</a>
+</span>
+</div>
+</div>
+</body>
+</html>
