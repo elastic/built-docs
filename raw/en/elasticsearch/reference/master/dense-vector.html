@@ -241,12 +241,26 @@ that sacrifices result accuracy for improved speed.</p>
 <h3 class="title"><a id="dense-vector-quantization"></a>Automatically quantize vectors for kNN search<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/mapping/types/dense-vector.asciidoc">edit</a></h3>
 </div></div></div>
 <p>The <code class="literal">dense_vector</code> type supports quantization to reduce the memory footprint required when <a class="xref" href="knn-search.html#approximate-knn" title="Approximate kNN">searching</a> <code class="literal">float</code> vectors.
-Currently the only quantization method supported is <code class="literal">int8</code> and provided vectors <code class="literal">element_type</code> must be <code class="literal">float</code>. To use
-a quantized index, you can set your index type to <code class="literal">int8_hnsw</code>. When indexing <code class="literal">float</code> vectors, the current default
+The two following quantization strategies are supported:</p>
+<p>+</p>
+<p><code class="literal">int8</code> - Quantizes each dimension of the vector to 1-byte integers. This can reduce the memory footprint by 75% at the cost of some accuracy.
+<code class="literal">int4</code> - Quantizes each dimension of the vector to half-byte integers. This can reduce the memory footprint by 87% at the cost of some accuracy.</p>
+<p>To use a quantized index, you can set your index type to <code class="literal">int8_hnsw</code> or <code class="literal">int4_hnsw</code>. When indexing <code class="literal">float</code> vectors, the current default
 index type is <code class="literal">int8_hnsw</code>.</p>
-<p>When using the <code class="literal">int8_hnsw</code> index, each of the <code class="literal">float</code> vectors' dimensions are quantized to 1-byte integers. This can
-reduce the memory footprint by as much as 75% at the cost of some accuracy. However, the disk usage can increase by
-25% due to the overhead of storing the quantized and raw vectors.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Quantization will continue to keep the raw float vector values on disk for reranking, reindexing, and quantization improvements over the lifetime of the data.
+This means disk usage will increase by ~25% for <code class="literal">int8</code> and ~12.5% for <code class="literal">int4</code> due to the overhead of storing the quantized and raw vectors.</p>
+</div>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p><code class="literal">int4</code> quantization requires an even number of vector dimensions.</p>
+</div>
+</div>
+<p>Here is an example of how to create a byte-quantized index:</p>
 <div class="pre_wrapper lang-ruby alternative">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-ruby alternative">response = client.indices.create(
@@ -288,6 +302,27 @@ puts response</pre>
 }</pre>
 </div>
 <div class="console_widget has-ruby" data-snippet="snippets/198.console"></div>
+<p>Here is an example of how to create a half-byte-quantized index:</p>
+<a id="b6f690896001f8f9ad5bf24e1304a552"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT my-byte-quantized-index
+{
+  "mappings": {
+    "properties": {
+      "my_vector": {
+        "type": "dense_vector",
+        "dims": 4,
+        "index": true,
+        "index_options": {
+          "type": "int4_hnsw"
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/199.console"></div>
 </div>
 
 <div class="section child_attributes">
@@ -473,10 +508,19 @@ quantization for scalable approximate kNN search with <code class="literal">elem
 by 4x at the cost of some accuracy. See <a class="xref" href="dense-vector.html#dense-vector-quantization" title="Automatically quantize vectors for kNN search">Automatically quantize vectors for kNN search</a>.
 </li>
 <li class="listitem">
+<code class="literal">int4_hnsw</code> - This utilizes the <a href="https://arxiv.org/abs/1603.09320" class="ulink" target="_top">HNSW algorithm</a> in addition to automatically scalar
+quantization for scalable approximate kNN search with <code class="literal">element_type</code> of <code class="literal">float</code>. This can reduce the memory footprint
+by 8x at the cost of some accuracy. See <a class="xref" href="dense-vector.html#dense-vector-quantization" title="Automatically quantize vectors for kNN search">Automatically quantize vectors for kNN search</a>.
+</li>
+<li class="listitem">
 <code class="literal">flat</code> - This utilizes a brute-force search algorithm for exact kNN search. This supports all <code class="literal">element_type</code> values.
 </li>
 <li class="listitem">
 <code class="literal">int8_flat</code> - This utilizes a brute-force search algorithm in addition to automatically scalar quantization. Only supports
+<code class="literal">element_type</code> of <code class="literal">float</code>.
+</li>
+<li class="listitem">
+<code class="literal">int4_flat</code> - This utilizes a brute-force search algorithm in addition to automatically half-byte scalar quantization. Only supports
 <code class="literal">element_type</code> of <code class="literal">float</code>.
 </li>
 </ul>
@@ -490,7 +534,7 @@ by 4x at the cost of some accuracy. See <a class="xref" href="dense-vector.html#
 <dd>
 (Optional, integer)
 The number of neighbors each node will be connected to in the HNSW graph.
-Defaults to <code class="literal">16</code>. Only applicable to <code class="literal">hnsw</code> and <code class="literal">int8_hnsw</code> index types.
+Defaults to <code class="literal">16</code>. Only applicable to <code class="literal">hnsw</code>, <code class="literal">int8_hnsw</code>, and <code class="literal">int4_hnsw</code> index types.
 </dd>
 <dt>
 <span class="term">
@@ -500,7 +544,7 @@ Defaults to <code class="literal">16</code>. Only applicable to <code class="lit
 <dd>
 (Optional, integer)
 The number of candidates to track while assembling the list of nearest
-neighbors for each new node. Defaults to <code class="literal">100</code>. Only applicable to <code class="literal">hnsw</code> and <code class="literal">int8_hnsw</code> index types.
+neighbors for each new node. Defaults to <code class="literal">100</code>. Only applicable to <code class="literal">hnsw</code>, <code class="literal">int8_hnsw</code>, and <code class="literal">int4_hnsw</code> index types.
 </dd>
 <dt>
 <span class="term">
@@ -509,11 +553,13 @@ neighbors for each new node. Defaults to <code class="literal">100</code>. Only 
 </dt>
 <dd>
 (Optional, float)
-Only applicable to <code class="literal">int8_hnsw</code> and <code class="literal">int8_flat</code> index types. The confidence interval to use when quantizing the vectors,
-can be any value between and including <code class="literal">0.90</code> and <code class="literal">1.0</code>. This value restricts the values used when calculating
-the quantization thresholds. For example, a value of <code class="literal">0.95</code> will only use the middle 95% of the values when
-calculating the quantization thresholds (e.g. the highest and lowest 2.5% of values will be ignored).
-Defaults to <code class="literal">1/(dims + 1)</code>.
+Only applicable to <code class="literal">int8_hnsw</code>, <code class="literal">int4_hnsw</code>, <code class="literal">int8_flat</code>, and <code class="literal">int4_flat</code> index types. The confidence interval to use when quantizing the vectors.
+Can be any value between and including <code class="literal">0.90</code> and <code class="literal">1.0</code> or exactly <code class="literal">0</code>. When the value is <code class="literal">0</code>, this indicates that dynamic
+quantiles should be calculated for optimized quantization. When between <code class="literal">0.90</code> and <code class="literal">1.0</code>,
+this value restricts the values used when calculating the quantization thresholds.
+For example, a value of <code class="literal">0.95</code> will only use the middle 95% of the values when calculating the quantization thresholds
+(e.g. the highest and lowest 2.5% of values will be ignored).
+Defaults to <code class="literal">1/(dims + 1)</code> for <code class="literal">int8</code> quantized vectors and <code class="literal">0</code> for <code class="literal">int4</code> for dynamic quantile calculation.
 </dd>
 </dl>
 </div>
