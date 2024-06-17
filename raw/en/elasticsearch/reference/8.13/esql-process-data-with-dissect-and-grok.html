@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Data processing with DISSECT and GROK | Elasticsearch Guide [8.13] | Elastic</title>
+<meta class="elastic" name="content" content="Data processing with DISSECT and GROK | Elasticsearch Guide [8.13]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.13]"/>
+<link rel="up" href="esql-language.html" title="ES|QL reference"/>
+<link rel="prev" href="esql-multivalued-fields.html" title="ES|QL multivalued fields"/>
+<link rel="next" href="esql-enrich-data.html" title="Data enrichment"/>
+<meta class="elastic" name="product_version" content="8.13"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.13"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.13"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+<strong>IMPORTANT</strong>: No additional bug fixes or documentation updates
+will be released for this version. For the latest information, see the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.13]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="esql.html">ES|QL</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="esql-language.html">ES|QL reference</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="esql-multivalued-fields.html">« ES|QL multivalued fields</a>
+</span>
+<span class="next">
+<a href="esql-enrich-data.html">Data enrichment »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="esql-process-data-with-dissect-and-grok"></a>Data processing with DISSECT and GROK<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-process-data-with-dissect-grok.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>Your data may contain unstructured strings that you want to structure. This
+makes it easier to analyze the data. For example, log messages may contain IP
+addresses that you want to extract so you can find the most active IP addresses.</p>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/esql/unstructured-data.png" alt="unstructured data" width="75%">
+</div>
+</div>
+<p>Elasticsearch can structure your data at index time or query time. At index time, you can
+use the <a class="xref" href="dissect-processor.html" title="Dissect processor">Dissect</a> and <a class="xref" href="grok-processor.html" title="Grok processor">Grok</a> ingest
+processors, or the Logstash <a href="/guide/en/logstash/8.13/plugins-filters-dissect.html" class="ulink" target="_top">Dissect</a> and
+<a href="/guide/en/logstash/8.13/plugins-filters-grok.html" class="ulink" target="_top">Grok</a> filters. At query time, you can
+use the ES|QL <a class="xref" href="esql-commands.html#esql-dissect" title="DISSECT"><code class="literal">DISSECT</code></a> and <a class="xref" href="esql-commands.html#esql-grok" title="GROK"><code class="literal">GROK</code></a> commands.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="esql-grok-or-dissect"></a><code class="literal">DISSECT</code> or <code class="literal">GROK</code>? Or both?<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-process-data-with-dissect-grok.asciidoc">edit</a></h3>
+</div></div></div>
+<p><code class="literal">DISSECT</code> works by breaking up a string using a delimiter-based pattern. <code class="literal">GROK</code>
+works similarly, but uses regular expressions. This makes <code class="literal">GROK</code> more powerful,
+but generally also slower. <code class="literal">DISSECT</code> works well when data is reliably repeated.
+<code class="literal">GROK</code> is a better choice when you really need the power of regular expressions,
+for example when the structure of your text varies from row to row.</p>
+<p>You can use both <code class="literal">DISSECT</code> and <code class="literal">GROK</code> for hybrid use cases. For example when a
+section of the line is reliably repeated, but the entire line is not. <code class="literal">DISSECT</code>
+can deconstruct the section of the line that is repeated. <code class="literal">GROK</code> can process the
+remaining field values using regular expressions.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="esql-process-data-with-dissect"></a>Process data with <code class="literal">DISSECT</code><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-process-data-with-dissect-grok.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The <a class="xref" href="esql-commands.html#esql-dissect" title="DISSECT"><code class="literal">DISSECT</code></a> processing command matches a string against a
+delimiter-based pattern, and extracts the specified keys as columns.</p>
+<p>For example, the following pattern:</p>
+<div class="pre_wrapper lang-txt">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-txt">%{clientip} [%{@timestamp}] %{status}</pre>
+</div>
+<p>matches a log line of this format:</p>
+<div class="pre_wrapper lang-txt">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-txt">1.2.3.4 [2023-01-23T12:15:00.000Z] Connected</pre>
+</div>
+<p>and results in adding the following columns to the input table:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">clientip:keyword</th>
+<th align="left" valign="top">@timestamp:keyword</th>
+<th align="left" valign="top">status:keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>1.2.3.4</p></td>
+<td align="left" valign="top"><p>2023-01-23T12:15:00.000Z</p></td>
+<td align="left" valign="top"><p>Connected</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="esql-dissect-patterns"></a>Dissect patterns<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-process-data-with-dissect-grok.asciidoc">edit</a></h4>
+</div></div></div>
+<p>A dissect pattern is defined by the parts of the string that will be discarded. In the previous example, the first part
+to be discarded is a single space. Dissect finds this space, then assigns the value of <code class="literal">clientip</code> everything up
+until that space.
+Next, dissect matches the <code class="literal">[</code> and then <code class="literal">]</code> and then assigns <code class="literal">@timestamp</code> to everything in-between <code class="literal">[</code> and <code class="literal">]</code>.
+Paying special attention to the parts of the string to discard will help build successful dissect patterns.</p>
+<p>An empty key (<code class="literal">%{}</code>) or <a class="xref" href="esql-process-data-with-dissect-and-grok.html#esql-named-skip-key" title="Named skip key (?)">named skip key</a> can be used to
+match values, but exclude the value from the output.</p>
+<p>All matched values are output as keyword string data types. Use the
+<a class="xref" href="esql-functions-operators.html#esql-type-conversion-functions" title="ES|QL type conversion functions">Type conversion functions</a> to convert to another data type.</p>
+<p>Dissect also supports <a class="xref" href="esql-process-data-with-dissect-and-grok.html#esql-dissect-key-modifiers" title="Dissect key modifiers">key modifiers</a> that can
+change dissect&#8217;s default behavior. For example, you can instruct dissect to
+ignore certain fields, append fields, skip over padding, etc.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="esql-dissect-terminology"></a>Terminology<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-process-data-with-dissect-grok.asciidoc">edit</a></h4>
+</div></div></div>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+dissect pattern
+</span>
+</dt>
+<dd>
+the set of fields and delimiters describing the textual
+format. Also known as a dissection.
+The dissection is described using a set of <code class="literal">%{}</code> sections:
+<code class="literal">%{a} - %{b} - %{c}</code>
+</dd>
+<dt>
+<span class="term">
+field
+</span>
+</dt>
+<dd>
+the text from <code class="literal">%{</code> to <code class="literal">}</code> inclusive.
+</dd>
+<dt>
+<span class="term">
+delimiter
+</span>
+</dt>
+<dd>
+the text between <code class="literal">}</code> and the next <code class="literal">%{</code> characters.
+Any set of characters other than <code class="literal">%{</code>, <code class="literal">'not }'</code>, or <code class="literal">}</code> is a delimiter.
+</dd>
+<dt>
+<span class="term">
+key
+</span>
+</dt>
+<dd>
+<p>the text between the <code class="literal">%{</code> and <code class="literal">}</code>, exclusive of the <code class="literal">?</code>, <code class="literal">+</code>, <code class="literal">&amp;</code> prefixes
+and the ordinal suffix.</p>
+<p>Examples:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">%{?aaa}</code> - the key is <code class="literal">aaa</code>
+</li>
+<li class="listitem">
+<code class="literal">%{+bbb/3}</code> - the key is <code class="literal">bbb</code>
+</li>
+<li class="listitem">
+<code class="literal">%{&amp;ccc}</code> - the key is <code class="literal">ccc</code>
+</li>
+</ul>
+</div>
+</dd>
+</dl>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="esql-dissect-examples"></a>Examples<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-process-data-with-dissect-grok.asciidoc">edit</a></h4>
+</div></div></div>
+<p>The following example parses a string that contains a timestamp, some text, and
+an IP address:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW a = "2023-01-23T12:15:00.000Z - some text - 127.0.0.1"
+| DISSECT a "%{date} - %{msg} - %{ip}"
+| KEEP date, msg, ip</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">date:keyword</th>
+<th align="left" valign="top">msg:keyword</th>
+<th align="left" valign="top">ip:keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>2023-01-23T12:15:00.000Z</p></td>
+<td align="left" valign="top"><p>some text</p></td>
+<td align="left" valign="top"><p>127.0.0.1</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>By default, <code class="literal">DISSECT</code> outputs keyword string columns. To convert to another
+type, use <a class="xref" href="esql-functions-operators.html#esql-type-conversion-functions" title="ES|QL type conversion functions">Type conversion functions</a>:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW a = "2023-01-23T12:15:00.000Z - some text - 127.0.0.1"
+| DISSECT a "%{date} - %{msg} - %{ip}"
+| KEEP date, msg, ip
+| EVAL date = TO_DATETIME(date)</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">msg:keyword</th>
+<th align="left" valign="top">ip:keyword</th>
+<th align="left" valign="top">date:date</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>some text</p></td>
+<td align="left" valign="top"><p>127.0.0.1</p></td>
+<td align="left" valign="top"><p>2023-01-23T12:15:00.000Z</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="esql-dissect-key-modifiers"></a>Dissect key modifiers<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-process-data-with-dissect-grok.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Key modifiers can change the default behavior for dissection. Key modifiers may be found on the left or right
+of the <code class="literal">%{keyname}</code> always inside the <code class="literal">%{</code> and <code class="literal">}</code>. For example <code class="literal">%{+keyname -&gt;}</code> has the append and right padding
+modifiers.</p>
+<div class="table">
+<a id="esql-dissect-key-modifiers-table"></a>
+<p class="title"><strong>Table 80. Dissect key modifiers</strong></p>
+<div class="table-contents">
+<table border="1" cellpadding="4px" summary="Dissect key modifiers" class="styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+<col class="col_4"/>
+<col class="col_5"/>
+<col class="col_6"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Modifier</th>
+<th align="left" valign="top">Name</th>
+<th align="left" valign="top">Position</th>
+<th align="left" valign="top">Example</th>
+<th align="left" valign="top">Description</th>
+<th align="left" valign="top">Details</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">-&gt;</code></p></td>
+<td align="left" valign="top"><p>Skip right padding</p></td>
+<td align="left" valign="top"><p>(far) right</p></td>
+<td align="left" valign="top"><p><code class="literal">%{keyname1-&gt;}</code></p></td>
+<td align="left" valign="top"><p>Skips any repeated characters to the right</p></td>
+<td align="left" valign="top"><p><a class="xref" href="esql-process-data-with-dissect-and-grok.html#esql-dissect-modifier-skip-right-padding" title="Right padding modifier (-&gt;)">link</a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">+</code></p></td>
+<td align="left" valign="top"><p>Append</p></td>
+<td align="left" valign="top"><p>left</p></td>
+<td align="left" valign="top"><p><code class="literal">%{+keyname} %{+keyname}</code></p></td>
+<td align="left" valign="top"><p>Appends two or more fields together</p></td>
+<td align="left" valign="top"><p><a class="xref" href="esql-process-data-with-dissect-and-grok.html#esql-append-modifier" title="Append modifier (+)">link</a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">+</code> with <code class="literal">/n</code></p></td>
+<td align="left" valign="top"><p>Append with order</p></td>
+<td align="left" valign="top"><p>left and right</p></td>
+<td align="left" valign="top"><p><code class="literal">%{+keyname/2} %{+keyname/1}</code></p></td>
+<td align="left" valign="top"><p>Appends two or more fields together in the order specified</p></td>
+<td align="left" valign="top"><p><a class="xref" href="esql-process-data-with-dissect-and-grok.html#esql-append-order-modifier" title="Append with order modifier (+ and /n)">link</a></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">?</code></p></td>
+<td align="left" valign="top"><p>Named skip key</p></td>
+<td align="left" valign="top"><p>left</p></td>
+<td align="left" valign="top"><p><code class="literal">%{?ignoreme}</code></p></td>
+<td align="left" valign="top"><p>Skips the matched value in the output. Same behavior as <code class="literal">%{}</code></p></td>
+<td align="left" valign="top"><p><a class="xref" href="esql-process-data-with-dissect-and-grok.html#esql-named-skip-key" title="Named skip key (?)">link</a></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="esql-dissect-modifier-skip-right-padding"></a>Right padding modifier (<code class="literal">-&gt;</code>)<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/ingest/processors/dissect.asciidoc">edit</a></h5>
+</div></div></div>
+<p>The algorithm that performs the dissection is very strict in that it requires all characters in the pattern to match
+the source string. For example, the pattern <code class="literal">%{fookey} %{barkey}</code> (1 space), will match the string "foo&#160;bar"
+(1 space), but will not match the string "foo&#160;&#160;bar" (2 spaces) since the pattern has only 1 space and the
+source string has 2 spaces.</p>
+<p>The right padding modifier helps with this case. Adding the right padding modifier to the pattern <code class="literal">%{fookey-&gt;} %{barkey}</code>,
+It will now will match "foo&#160;bar" (1 space) and "foo&#160;&#160;bar" (2 spaces)
+and even "foo&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;bar" (10 spaces).</p>
+<p>Use the right padding modifier to allow for repetition of the characters after a <code class="literal">%{keyname-&gt;}</code>.</p>
+<p>The right padding modifier may be placed on any key with any other modifiers. It should always be the furthest right
+modifier. For example: <code class="literal">%{+keyname/1-&gt;}</code> and <code class="literal">%{-&gt;}</code></p>
+<p>For example:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW message="1998-08-10T17:15:42          WARN"
+| DISSECT message "%{ts-&gt;} %{level}"</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">message:keyword</th>
+<th align="left" valign="top">ts:keyword</th>
+<th align="left" valign="top">level:keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>1998-08-10T17:15:42          WARN</p></td>
+<td align="left" valign="top"><p>1998-08-10T17:15:42</p></td>
+<td align="left" valign="top"><p>WARN</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The right padding modifier may be used with an empty key to help skip unwanted data. For example, the same input string, but wrapped with brackets requires the use of an empty right padded key to achieve the same result.</p>
+<p>For example:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW message="[1998-08-10T17:15:42]          [WARN]"
+| DISSECT message "[%{ts}]%{-&gt;}[%{level}]"</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">message:keyword</th>
+<th align="left" valign="top">ts:keyword</th>
+<th align="left" valign="top">level:keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>[1998-08-10T17:15:42]          [WARN]</p></td>
+<td align="left" valign="top"><p>1998-08-10T17:15:42</p></td>
+<td align="left" valign="top"><p>WARN</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="esql-append-modifier"></a>Append modifier (<code class="literal">+</code>)<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/ingest/processors/dissect.asciidoc">edit</a></h5>
+</div></div></div>
+<p>Dissect supports appending two or more results together for the output.
+Values are appended left to right. An append separator can be specified.
+In this example the append_separator is defined as a space.</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW message="john jacob jingleheimer schmidt"
+| DISSECT message "%{+name} %{+name} %{+name} %{+name}" APPEND_SEPARATOR=" "</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">message:keyword</th>
+<th align="left" valign="top">name:keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>john jacob jingleheimer schmidt</p></td>
+<td align="left" valign="top"><p>john jacob jingleheimer schmidt</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="esql-append-order-modifier"></a>Append with order modifier (<code class="literal">+</code> and <code class="literal">/n</code>)<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/ingest/processors/dissect.asciidoc">edit</a></h5>
+</div></div></div>
+<p>Dissect supports appending two or more results together for the output.
+Values are appended based on the order defined (<code class="literal">/n</code>). An append separator can be specified.
+In this example the append_separator is defined as a comma.</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW message="john jacob jingleheimer schmidt"
+| DISSECT message "%{+name/2} %{+name/4} %{+name/3} %{+name/1}" APPEND_SEPARATOR=","</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">message:keyword</th>
+<th align="left" valign="top">name:keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>john jacob jingleheimer schmidt</p></td>
+<td align="left" valign="top"><p>schmidt,john,jingleheimer,jacob</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h5 class="title"><a id="esql-named-skip-key"></a>Named skip key (<code class="literal">?</code>)<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/ingest/processors/dissect.asciidoc">edit</a></h5>
+</div></div></div>
+<p>Dissect supports ignoring matches in the final result. This can be done with an empty key <code class="literal">%{}</code>, but for readability
+it may be desired to give that empty key a name.</p>
+<p>This can be done with a named skip key using the <code class="literal">{?name}</code> syntax. In the
+following query, <code class="literal">ident</code> and <code class="literal">auth</code> are not added to the output table:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW message="1.2.3.4 - - 30/Apr/1998:22:00:52 +0000"
+| DISSECT message "%{clientip} %{?ident} %{?auth} %{@timestamp}"</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">message:keyword</th>
+<th align="left" valign="top">clientip:keyword</th>
+<th align="left" valign="top">@timestamp:keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>1.2.3.4 - - 30/Apr/1998:22:00:52 +0000</p></td>
+<td align="left" valign="top"><p>1.2.3.4</p></td>
+<td align="left" valign="top"><p>30/Apr/1998:22:00:52 +0000</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="esql-dissect-limitations"></a>Limitations<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-process-data-with-dissect-grok.asciidoc">edit</a></h4>
+</div></div></div>
+<p>The <code class="literal">DISSECT</code> command does not support reference keys.</p>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="esql-process-data-with-grok"></a>Process data with <code class="literal">GROK</code><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-process-data-with-dissect-grok.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The <a class="xref" href="esql-commands.html#esql-grok" title="GROK"><code class="literal">GROK</code></a> processing command matches a string against a pattern based on
+regular expressions, and extracts the specified keys as columns.</p>
+<p>For example, the following pattern:</p>
+<div class="pre_wrapper lang-txt">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-txt">%{IP:ip} \[%{TIMESTAMP_ISO8601:@timestamp}\] %{GREEDYDATA:status}</pre>
+</div>
+<p>matches a log line of this format:</p>
+<div class="pre_wrapper lang-txt">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-txt">1.2.3.4 [2023-01-23T12:15:00.000Z] Connected</pre>
+</div>
+<p>Putting it together as an ES|QL query:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW a = "1.2.3.4 [2023-01-23T12:15:00.000Z] Connected"
+| GROK a "%{IP:ip} \\[%{TIMESTAMP_ISO8601:@timestamp}\\] %{GREEDYDATA:status}"</pre>
+</div>
+<p><code class="literal">GROK</code> adds the following columns to the input table:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">@timestamp:keyword</th>
+<th align="left" valign="top">ip:keyword</th>
+<th align="left" valign="top">status:keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>2023-01-23T12:15:00.000Z</p></td>
+<td align="left" valign="top"><p>1.2.3.4</p></td>
+<td align="left" valign="top"><p>Connected</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Special regex characters in grok patterns, like <code class="literal">[</code> and <code class="literal">]</code> need to be escaped
+with a <code class="literal">\</code>. For example, in the earlier pattern:</p>
+<div class="pre_wrapper lang-txt">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-txt">%{IP:ip} \[%{TIMESTAMP_ISO8601:@timestamp}\] %{GREEDYDATA:status}</pre>
+</div>
+<p>In ES|QL queries, the backslash character itself is a special character that
+needs to be escaped with another <code class="literal">\</code>. For this example, the corresponding ES|QL
+query becomes:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW a = "1.2.3.4 [2023-01-23T12:15:00.000Z] Connected"
+| GROK a "%{IP:ip} \\[%{TIMESTAMP_ISO8601:@timestamp}\\] %{GREEDYDATA:status}"</pre>
+</div>
+</div>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="esql-grok-patterns"></a>Grok patterns<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-process-data-with-dissect-grok.asciidoc">edit</a></h4>
+</div></div></div>
+<p>The syntax for a grok pattern is <code class="literal">%{SYNTAX:SEMANTIC}</code></p>
+<p>The <code class="literal">SYNTAX</code> is the name of the pattern that matches your text. For example,
+<code class="literal">3.44</code> is matched by the <code class="literal">NUMBER</code> pattern and <code class="literal">55.3.244.1</code> is matched by the
+<code class="literal">IP</code> pattern. The syntax is how you match.</p>
+<p>The <code class="literal">SEMANTIC</code> is the identifier you give to the piece of text being matched.
+For example, <code class="literal">3.44</code> could be the duration of an event, so you could call it
+simply <code class="literal">duration</code>. Further, a string <code class="literal">55.3.244.1</code> might identify the <code class="literal">client</code>
+making a request.</p>
+<p>By default, matched values are output as keyword string data types. To convert a
+semantic&#8217;s data type, suffix it with the target data type. For example
+<code class="literal">%{NUMBER:num:int}</code>, which converts the <code class="literal">num</code> semantic from a string to an
+integer. Currently the only supported conversions are <code class="literal">int</code> and <code class="literal">float</code>. For
+other types, use the <a class="xref" href="esql-functions-operators.html#esql-type-conversion-functions" title="ES|QL type conversion functions">Type conversion functions</a>.</p>
+<p>For an overview of the available patterns, refer to
+<a href="https://github.com/elastic/elasticsearch//blob/8.13/libs/grok/src/main/resources/patterns" class="ulink" target="_top">GitHub</a>. You can
+also retrieve a list of all patterns using a <a class="xref" href="grok-processor.html#grok-processor-rest-get" title="Retrieving patterns from REST endpoint">REST
+API</a>.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="esql-grok-regex"></a>Regular expressions<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-process-data-with-dissect-grok.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Grok is based on regular expressions. Any regular expressions are valid in grok
+as well. Grok uses the Oniguruma regular expression library. Refer to
+<a href="https://github.com/kkos/oniguruma/blob/master/doc/RE" class="ulink" target="_top">the Oniguruma GitHub
+repository</a> for the full supported regexp syntax.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="esql-custom-patterns"></a>Custom patterns<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-process-data-with-dissect-grok.asciidoc">edit</a></h4>
+</div></div></div>
+<p>If grok doesn&#8217;t have a pattern you need, you can use the Oniguruma syntax for
+named capture which lets you match a piece of text and save it as a column:</p>
+<div class="pre_wrapper lang-txt">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-txt">(?&lt;field_name&gt;the pattern here)</pre>
+</div>
+<p>For example, postfix logs have a <code class="literal">queue id</code> that is a 10 or 11-character
+hexadecimal value. This can be captured to a column named <code class="literal">queue_id</code> with:</p>
+<div class="pre_wrapper lang-txt">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-txt">(?&lt;queue_id&gt;[0-9A-F]{10,11})</pre>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="esql-grok-examples"></a>Examples<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-process-data-with-dissect-grok.asciidoc">edit</a></h4>
+</div></div></div>
+<p>The following example parses a string that contains a timestamp, an IP address,
+an email address, and a number:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW a = "2023-01-23T12:15:00.000Z 127.0.0.1 some.email@foo.com 42"
+| GROK a "%{TIMESTAMP_ISO8601:date} %{IP:ip} %{EMAILADDRESS:email} %{NUMBER:num}"
+| KEEP date, ip, email, num</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+<col class="col_4"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">date:keyword</th>
+<th align="left" valign="top">ip:keyword</th>
+<th align="left" valign="top">email:keyword</th>
+<th align="left" valign="top">num:keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>2023-01-23T12:15:00.000Z</p></td>
+<td align="left" valign="top"><p>127.0.0.1</p></td>
+<td align="left" valign="top"><p><a href="mailto:some.email@foo.com" class="ulink" target="_top">some.email@foo.com</a></p></td>
+<td align="left" valign="top"><p>42</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>By default, <code class="literal">GROK</code> outputs keyword string columns. <code class="literal">int</code> and <code class="literal">float</code> types can
+be converted by appending <code class="literal">:type</code> to the semantics in the pattern. For example
+<code class="literal">{NUMBER:num:int}</code>:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW a = "2023-01-23T12:15:00.000Z 127.0.0.1 some.email@foo.com 42"
+| GROK a "%{TIMESTAMP_ISO8601:date} %{IP:ip} %{EMAILADDRESS:email} %{NUMBER:num:int}"
+| KEEP date, ip, email, num</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+<col class="col_4"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">date:keyword</th>
+<th align="left" valign="top">ip:keyword</th>
+<th align="left" valign="top">email:keyword</th>
+<th align="left" valign="top">num:integer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>2023-01-23T12:15:00.000Z</p></td>
+<td align="left" valign="top"><p>127.0.0.1</p></td>
+<td align="left" valign="top"><p><a href="mailto:some.email@foo.com" class="ulink" target="_top">some.email@foo.com</a></p></td>
+<td align="left" valign="top"><p>42</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>For other type conversions, use <a class="xref" href="esql-functions-operators.html#esql-type-conversion-functions" title="ES|QL type conversion functions">Type conversion functions</a>:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW a = "2023-01-23T12:15:00.000Z 127.0.0.1 some.email@foo.com 42"
+| GROK a "%{TIMESTAMP_ISO8601:date} %{IP:ip} %{EMAILADDRESS:email} %{NUMBER:num:int}"
+| KEEP date, ip, email, num
+| EVAL date = TO_DATETIME(date)</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+<col class="col_4"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">ip:keyword</th>
+<th align="left" valign="top">email:keyword</th>
+<th align="left" valign="top">num:integer</th>
+<th align="left" valign="top">date:date</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>127.0.0.1</p></td>
+<td align="left" valign="top"><p><a href="mailto:some.email@foo.com" class="ulink" target="_top">some.email@foo.com</a></p></td>
+<td align="left" valign="top"><p>42</p></td>
+<td align="left" valign="top"><p>2023-01-23T12:15:00.000Z</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="esql-grok-debugger"></a>Grok debugger<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-process-data-with-dissect-grok.asciidoc">edit</a></h4>
+</div></div></div>
+<p>To write and debug grok patterns, you can use the
+<a href="/guide/en/kibana/8.13/xpack-grokdebugger.html" class="ulink" target="_top">Grok Debugger</a>. It provides a UI for
+testing patterns against sample data. Under the covers, it uses the same engine
+as the <code class="literal">GROK</code> command.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h4 class="title"><a id="esql-grok-limitations"></a>Limitations<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-process-data-with-dissect-grok.asciidoc">edit</a></h4>
+</div></div></div>
+<p>The <code class="literal">GROK</code> command does not support configuring <a class="xref" href="grok-processor.html#custom-patterns" title="Custom Patterns">custom
+patterns</a>, or <a class="xref" href="grok-processor.html#trace-match" title="Providing Multiple Match Patterns">multiple patterns</a>. The <code class="literal">GROK</code> command is not
+subject to <a class="xref" href="grok-processor.html#grok-watchdog" title="Grok watchdog">Grok watchdog settings</a>.</p>
+</div>
+
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="esql-multivalued-fields.html">« ES|QL multivalued fields</a>
+</span>
+<span class="next">
+<a href="esql-enrich-data.html">Data enrichment »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

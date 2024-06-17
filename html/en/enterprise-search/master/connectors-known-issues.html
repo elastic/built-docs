@@ -61,7 +61,7 @@
     <link rel="stylesheet" type="text/css" href="/guide/static/styles.css" />
   </head>
 
-  <!--© 2015-2022 Elasticsearch B.V. -->
+  <!--© 2015-2025 Elasticsearch B.V. -->
   <!-- All Elastic documentation is licensed under a Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License. -->
   <!-- http://creativecommons.org/licenses/by-nc-nd/4.0/ -->
 
@@ -178,6 +178,105 @@ Elastic does not support deployments running mismatched versions (except during 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
+<p><span class="strong strong"><strong>OOM errors when syncing large database tables</strong></span></p>
+<p>Syncs after the initial sync can cause out-of-memory (OOM) errors when syncing large database tables.
+This occurs because database connectors load and store IDs in memory.
+For tables with millions of records, this can lead to memory exhaustion if the connector service has insufficient RAM.</p>
+<p>To mitigate this issue, you can:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p><span class="strong strong"><strong>Increase RAM allocation</strong></span>:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong>Elastic Cloud</strong></span>: Upgrade the Enterprise Search instance to a larger size. Note that for native connectors running on Elastic Cloud, the connector service runs on the Enterprise Search node. It only has access to up to 40% of the node’s RAM allocation.
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Self-managed</strong></span>: Increase RAM allocation for the machine/container running the connector service.</p>
+<details>
+<summary class="title">RAM <span class="strong strong"><strong>sizing guidelines</strong></span></summary>
+<div class="content">
+<p>The following table shows the estimated RAM usage for loading IDs into memory.</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Number of IDs</strong></span></p></td>
+<td align="left" valign="top"><p><span class="strong strong"><strong>Memory Usage in MB (2X buffer)</strong></span></p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>1,000,000</p></td>
+<td align="left" valign="top"><p>≈ 45.78 MB</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>10,000,000</p></td>
+<td align="left" valign="top"><p>≈ 457.76 MB</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>50,000,000</p></td>
+<td align="left" valign="top"><p>≈ 2288.82 MB (≈ 2.29 GB)</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>100,000,000</p></td>
+<td align="left" valign="top"><p>≈ 4577.64 MB (≈ 4.58 GB)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</details>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Optimize</strong></span> <a class="xref" href="sync-rules.html" title="Connector sync rules"><span class="strong strong"><strong>sync rules</strong></span></a>:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Review and optimize sync rules to filter and reduce data retrieved from the source before syncing.
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Use a self-managed connector client</strong></span> instead of a native connector:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Because connector clients run on your infrastructure, they are not subject to the same RAM limitations of the Enterprise Search node.
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p><span class="strong strong"><strong>Upgrades from deployments running on versions earlier than 8.9.0 can cause sync job failures</strong></span></p>
+<p>Due to a bug, the <code class="literal">job_type</code> field mapping will be missing after upgrading from deployments running on versions earlier than 8.9.0.
+Sync jobs won&#8217;t be displayed in the Kibana UI (job history) and the connector service won&#8217;t be able to start new sync jobs.
+<span class="strong strong"><strong>This will only occur if you have previously scheduled sync jobs.</strong></span></p>
+<p>To resolve this issue, you can manually add the missing field with the following command and trigger a sync job:</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT .elastic-connectors-sync-jobs-v1/_mapping
+{
+  "properties": {
+    "job_type": {
+      "type": "keyword"
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/19.console"></div>
+</li>
+<li class="listitem">
 <p><span class="strong strong"><strong>The connector service will fail to sync when the connector tries to fetch more more than 2,147,483,647 (<em>2^31-1</em>) documents from a data source</strong></span></p>
 <p>A workaround is to manually partition the data to be synced using multiple search indices.</p>
 </li>
@@ -185,14 +284,16 @@ Elastic does not support deployments running mismatched versions (except during 
 <p><span class="strong strong"><strong>Custom scheduling might break when upgrading from version 8.6 or earlier.</strong></span></p>
 <p>If you encounter the error <code class="literal">'custom_schedule_triggered': undefined method 'each' for nil:NilClass (NoMethodError)</code>, it means the custom scheduling feature migration failed.
 You can use the following manual workaround:</p>
-<div class="pre_wrapper lang-sh">
-<pre class="programlisting prettyprint lang-sh">POST /.elastic-connectors/_update/&lt;connector-id&gt;
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">POST /.elastic-connectors/_update/&lt;connector-id&gt;
 {
   "doc": {
     "custom_scheduling": {}
   }
 }</pre>
 </div>
+<div class="console_widget" data-snippet="snippets/20.console"></div>
 <p>This error can appear on Connectors or Crawlers that aren&#8217;t the cause of the issue.
 If the error continues, try running the above command for every document in the <code class="literal">.elastic-connectors</code> index.</p>
 </li>
@@ -210,6 +311,7 @@ Only the following two field properties are required, as the rest will be autopo
 <li class="listitem">
 <p><code class="literal">value</code>: any value, as long as it is of the correct <code class="literal">type</code> (<code class="literal">list</code> type values should be saved as comma-separated strings)</p>
 <div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-console">POST /.elastic-connectors/_update/&lt;connector_id&gt;
 {
   "doc" : {
@@ -234,13 +336,13 @@ Only the following two field properties are required, as the rest will be autopo
   }
 }</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/3.console"></div>
+<div class="console_widget" data-snippet="snippets/21.console"></div>
 </li>
 </ul>
 </div>
 </li>
 <li class="listitem">
-<p><span class="strong strong"><strong>Python connectors that upgraded from *8.7.1</strong></span> will report document volumes in gigabytes (GB) instead of megabytes (MB)*</p>
+<p><span class="strong strong"><strong>Python connectors that upgraded from 8.7.1 will report document volumes in gigabytes (GB) instead of megabytes (MB)</strong></span></p>
 <p>As a result, true document volume will be under-reported by a factor of 1024.</p>
 </li>
 <li class="listitem">

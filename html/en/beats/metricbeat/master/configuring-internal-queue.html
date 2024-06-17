@@ -61,7 +61,7 @@
     <link rel="stylesheet" type="text/css" href="/guide/static/styles.css" />
   </head>
 
-  <!--© 2015-2022 Elasticsearch B.V. -->
+  <!--© 2015-2025 Elasticsearch B.V. -->
   <!-- All Elastic documentation is licensed under a Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License. -->
   <!-- http://creativecommons.org/licenses/by-nc-nd/4.0/ -->
 
@@ -135,6 +135,7 @@ config file or by setting options in the <code class="literal">queue</code> sect
 output. Only one queue type can be configured.</p>
 <p>This sample configuration sets the memory queue to buffer up to 4096 events:</p>
 <div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-yaml">queue.mem:
   events: 4096</pre>
 </div>
@@ -143,40 +144,49 @@ output. Only one queue type can be configured.</p>
 <p>The memory queue waits for the output to acknowledge or drop events. If
 the queue is full, no new events can be inserted into the memory queue. Only
 after the signal from the output will the queue free up space for more events to be accepted.</p>
-<p>The memory queue is controlled by the parameters <code class="literal">flush.min_events</code> and <code class="literal">flush.timeout</code>. If
-<code class="literal">flush.timeout</code> is <code class="literal">0s</code> or <code class="literal">flush.min_events</code> is <code class="literal">0</code> or <code class="literal">1</code> then events can be sent by the output as
-soon as they are available. If the output supports a <code class="literal">bulk_max_size</code> parameter it controls the
-maximum batch size that can be sent.</p>
-<p>If <code class="literal">flush.min_events</code> is greater than <code class="literal">1</code> and <code class="literal">flush.timeout</code> is greater than <code class="literal">0s</code>, events will only
-be sent to the output when the queue contains at least <code class="literal">flush.min_events</code> events or the
-<code class="literal">flush.timeout</code> period has expired. In this mode the maximum size batch that that can be sent by the
-output is <code class="literal">flush.min_events</code>. If the output supports a <code class="literal">bulk_max_size</code> parameter, values of
-<code class="literal">bulk_max_size</code> greater than <code class="literal">flush.min_events</code> have no effect. The value of <code class="literal">flush.min_events</code>
-should be evenly divisible by <code class="literal">bulk_max_size</code> to avoid sending partial batches to the output.</p>
-<p>This sample configuration forwards events to the output if 512 events are available or the oldest
-available event has been waiting for 5s in the queue:</p>
+<p>The memory queue is controlled by the parameters <code class="literal">flush.min_events</code> and <code class="literal">flush.timeout</code>.
+<code class="literal">flush.min_events</code> gives a limit on the number of events that can be included in a
+single batch, and <code class="literal">flush.timeout</code> specifies how long the queue should wait to completely
+fill an event request. If the output supports a <code class="literal">bulk_max_size</code> parameter, the maximum
+batch size will be the smaller of <code class="literal">bulk_max_size</code> and <code class="literal">flush.min_events</code>.</p>
+<p><code class="literal">flush.min_events</code> is a legacy parameter, and new configurations should prefer to control
+batch size with <code class="literal">bulk_max_size</code>. As of 8.13, there is never a performance advantage to
+limiting batch size with <code class="literal">flush.min_events</code> instead of <code class="literal">bulk_max_size</code>.</p>
+<p>In synchronous mode, an event request is always filled as soon as events are available,
+even if there are not enough events to fill the requested batch. This is useful when
+latency must be minimized. To use synchronous mode, set <code class="literal">flush.timeout</code> to 0.</p>
+<p>For backwards compatibility, synchronous mode can also be activated by setting <code class="literal">flush.min_events</code>
+to 0 or 1. In this case, batch size will be capped at 1/2 the queue capacity.</p>
+<p>In asynchronous mode, an event request will wait up to the specified timeout to try
+and fill the requested batch completely. If the timeout expires, the queue returns a
+partial batch with all available events. To use asynchronous mode, set <code class="literal">flush.timeout</code>
+to a positive duration, e.g. <code class="literal">5s</code>.</p>
+<p>This sample configuration forwards events to the output when there are enough events
+to fill the output&#8217;s request (usually controlled by <code class="literal">bulk_max_size</code>, and limited to at
+most 512 events by <code class="literal">flush.min_events</code>), or when events have been waiting for 5s without
+filling the requested size:</p>
 <div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-yaml">queue.mem:
   events: 4096
   flush.min_events: 512
   flush.timeout: 5s</pre>
 </div>
-<h3><a id="_configuration_options_13"></a>Configuration options<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/libbeat/docs/queueconfig.asciidoc">edit</a></h3>
+<h3><a id="_configuration_options_14"></a>Configuration options<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/libbeat/docs/queueconfig.asciidoc">edit</a></h3>
 <p>You can specify the following options in the <code class="literal">queue.mem</code> section of the <code class="literal">metricbeat.yml</code> config file:</p>
 <h5><a id="queue-mem-events-option"></a><code class="literal">events</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/libbeat/docs/queueconfig.asciidoc">edit</a></h5>
-<p>Number of events the queue can store. This value should be evenly divisible by <code class="literal">flush.min_events</code> to
-avoid sending partial batches to the output.</p>
+<p>Number of events the queue can store.</p>
 <p>The default value is 3200 events.</p>
 <h5><a id="queue-mem-flush-min-events-option"></a><code class="literal">flush.min_events</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/libbeat/docs/queueconfig.asciidoc">edit</a></h5>
-<p>Minimum number of events required for publishing. If this value is set to 0 or 1, events are
-available to the output immediately. If this value is greater than 1 the output must wait for the
-queue to accumulate this minimum number of events or for <code class="literal">flush.timeout</code> to expire before
-publishing. When greater than <code class="literal">1</code> this value also defines the maximum possible batch that can be
-sent by the output.</p>
+<p>If greater than 1, specifies the maximum number of events per batch. In this case the
+output must wait for the
+queue to accumulate the requested number of events or for <code class="literal">flush.timeout</code> to expire before
+publishing.</p>
+<p>If 0 or 1, sets the maximum number of events per batch to half the queue size, and sets
+the queue to synchronous mode (equivalent to <code class="literal">flush.timeout</code> of 0).</p>
 <p>The default value is 1600.</p>
 <h5><a id="queue-mem-flush-timeout-option"></a><code class="literal">flush.timeout</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/libbeat/docs/queueconfig.asciidoc">edit</a></h5>
-<p>Maximum wait time for <code class="literal">flush.min_events</code> to be fulfilled. If set to 0s, events are available to the
-output immediately.</p>
+<p>Maximum wait time for event requests from the output to be fulfilled. If set to 0s, events are returned immediately.</p>
 <p>The default value is 10s.</p>
 <h3><a id="configuration-internal-queue-disk"></a>Configure the disk queue<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/libbeat/docs/queueconfig.asciidoc">edit</a></h3>
 <p>The disk queue stores pending events on the disk rather than main memory.
@@ -189,6 +199,7 @@ a simple and relatively low-overhead way to add a layer of robustness to
 incoming event data.</p>
 <p>To enable the disk queue with default settings, specify a maximum size:</p>
 <div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-yaml">queue.disk:
   max_size: 10GB</pre>
 </div>

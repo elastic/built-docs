@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Data enrichment | Elasticsearch Guide [8.13] | Elastic</title>
+<meta class="elastic" name="content" content="Data enrichment | Elasticsearch Guide [8.13]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.13]"/>
+<link rel="up" href="esql-language.html" title="ES|QL reference"/>
+<link rel="prev" href="esql-process-data-with-dissect-and-grok.html" title="Data processing with DISSECT and GROK"/>
+<link rel="next" href="esql-using.html" title="Using ES|QL"/>
+<meta class="elastic" name="product_version" content="8.13"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.13"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.13"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body><div class="page_header">
+<strong>IMPORTANT</strong>: No additional bug fixes or documentation updates
+will be released for this version. For the latest information, see the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div id="content">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.13]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="esql.html">ES|QL</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="esql-language.html">ES|QL reference</a></span>
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="esql-process-data-with-dissect-and-grok.html">« Data processing with DISSECT and GROK</a>
+</span>
+<span class="next">
+<a href="esql-using.html">Using ES|QL »</a>
+</span>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="esql-enrich-data"></a>Data enrichment<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-enrich-data.asciidoc">edit</a></h2>
+</div></div></div>
+
+<p>The ES|QL <a class="xref" href="esql-commands.html#esql-enrich" title="ENRICH"><code class="literal">ENRICH</code></a> processing command combines, at query-time, data from
+one or more source indexes with field-value combinations found in Elasticsearch enrich
+indexes.</p>
+<p>For example, you can use <code class="literal">ENRICH</code> to:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Identify web services or vendors based on known IP addresses
+</li>
+<li class="listitem">
+Add product information to retail orders based on product IDs
+</li>
+<li class="listitem">
+Supplement contact information based on an email address
+</li>
+</ul>
+</div>
+<h4><a id="esql-how-enrich-works"></a>How the <code class="literal">ENRICH</code> command works<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-enrich-data.asciidoc">edit</a></h4>
+<p>The <code class="literal">ENRICH</code> command adds new columns to a table, with data from Elasticsearch indices.
+It requires a few special components:</p>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/esql/esql-enrich.png" alt="esql enrich">
+</div>
+</div>
+<div class="variablelist">
+<a id="esql-enrich-policy"></a>
+<dl class="variablelist">
+<dt>
+<span class="term">
+Enrich policy
+</span>
+</dt>
+<dd>
+<p>A set of configuration options used to add the right enrich data to the input
+table.</p>
+<p>An enrich policy contains:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+A list of one or more <em>source indices</em> which store enrich data as documents
+</li>
+<li class="listitem">
+The <em>policy type</em> which determines how the processor matches the enrich data
+to incoming documents
+</li>
+<li class="listitem">
+A <em>match field</em> from the source indices used to match incoming documents
+</li>
+<li class="listitem">
+<em>Enrich fields</em> containing enrich data from the source indices you want to add
+to incoming documents
+</li>
+</ul>
+</div>
+<p>After <a class="xref" href="esql-enrich-data.html#esql-create-enrich-policy" title="Create an enrich policy">creating a policy</a>, it must be
+<a class="xref" href="esql-enrich-data.html#esql-execute-enrich-policy" title="Execute the enrich policy">executed</a> before it can be used. Executing an
+enrich policy uses data from the policy&#8217;s source indices to create a streamlined
+system index called the <em>enrich index</em>. The <code class="literal">ENRICH</code> command uses this index to
+match and enrich an input table.</p>
+</dd>
+</dl>
+</div>
+<div class="variablelist">
+<a id="esql-source-index"></a>
+<dl class="variablelist">
+<dt>
+<span class="term">
+Source index
+</span>
+</dt>
+<dd>
+An index which stores enrich data that the <code class="literal">ENRICH</code> command can add to input
+tables. You can create and manage these indices just like a regular Elasticsearch index.
+You can use multiple source indices in an enrich policy. You also can use the
+same source index in multiple enrich policies.
+</dd>
+</dl>
+</div>
+<div class="variablelist">
+<a id="esql-enrich-index"></a>
+<dl class="variablelist">
+<dt>
+<span class="term">
+Enrich index
+</span>
+</dt>
+<dd>
+<p>A special system index tied to a specific enrich policy.</p>
+<p>Directly matching rows from input tables to documents in source indices could be
+slow and resource intensive. To speed things up, the <code class="literal">ENRICH</code> command uses an
+enrich index.</p>
+<p>Enrich indices contain enrich data from source indices but have a few special
+properties to help streamline them:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+They are system indices, meaning they&#8217;re managed internally by Elasticsearch and only
+intended for use with enrich processors and the ES|QL <code class="literal">ENRICH</code> command.
+</li>
+<li class="listitem">
+They always begin with <code class="literal">.enrich-*</code>.
+</li>
+<li class="listitem">
+They are read-only, meaning you can&#8217;t directly change them.
+</li>
+<li class="listitem">
+They are <a class="xref" href="indices-forcemerge.html" title="Force merge API">force merged</a> for fast retrieval.
+</li>
+</ul>
+</div>
+</dd>
+</dl>
+</div>
+<h4><a id="esql-set-up-enrich-policy"></a>Set up an enrich policy<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-enrich-data.asciidoc">edit</a></h4>
+<p>To start using <code class="literal">ENRICH</code>, follow these steps:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Check the <a class="xref" href="enrich-setup.html#enrich-prereqs" title="Prerequisites">prerequisites</a>.
+</li>
+<li class="listitem">
+<a class="xref" href="esql-enrich-data.html#esql-create-enrich-source-index" title="Add enrich data">Add enrich data</a>.
+</li>
+<li class="listitem">
+<a class="xref" href="esql-enrich-data.html#esql-create-enrich-policy" title="Create an enrich policy">Create an enrich policy</a>.
+</li>
+<li class="listitem">
+<a class="xref" href="esql-enrich-data.html#esql-execute-enrich-policy" title="Execute the enrich policy">Execute the enrich policy</a>.
+</li>
+<li class="listitem">
+<a class="xref" href="esql-enrich-data.html#esql-use-enrich" title="Use the enrich policy">Use the enrich policy</a>
+</li>
+</ol>
+</div>
+<p>Once you have enrich policies set up, you can <a class="xref" href="esql-enrich-data.html#esql-update-enrich-data" title="Update an enrich index">update
+your enrich data</a> and <a class="xref" href="esql-enrich-data.html#esql-update-enrich-policies" title="Update an enrich policy">update your enrich
+policies</a>.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The <code class="literal">ENRICH</code> command performs several operations and may impact the speed of
+your query.</p>
+</div>
+</div>
+<h4><a id="esql-enrich-prereqs"></a>Prerequisites<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-enrich-data.asciidoc">edit</a></h4>
+<p>To use enrich policies, you must have:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">read</code> index privileges for any indices used
+</li>
+<li class="listitem">
+The <code class="literal">enrich_user</code> <a class="xref" href="built-in-roles.html" title="Built-in roles">built-in role</a>
+</li>
+</ul>
+</div>
+<h4><a id="esql-create-enrich-source-index"></a>Add enrich data<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-enrich-data.asciidoc">edit</a></h4>
+<p>To begin, add documents to one or more source indices. These documents should
+contain the enrich data you eventually want to add to incoming data.</p>
+<p>You can manage source indices just like regular Elasticsearch indices using the
+<a class="xref" href="docs.html" title="Document APIs">document</a> and <a class="xref" href="indices.html" title="Index APIs">index</a> APIs.</p>
+<p>You also can set up <a href="/guide/en/beats/libbeat/8.13/getting-started.html" class="ulink" target="_top">Beats</a>, such as a
+<a href="/guide/en/beats/filebeat/8.13/filebeat-installation-configuration.html" class="ulink" target="_top">Filebeat</a>, to
+automatically send and index documents to your source indices. See
+<a href="/guide/en/beats/libbeat/8.13/getting-started.html" class="ulink" target="_top">Getting started with Beats</a>.</p>
+<h4><a id="esql-create-enrich-policy"></a>Create an enrich policy<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-enrich-data.asciidoc">edit</a></h4>
+<p>After adding enrich data to your source indices, use the
+<a class="xref" href="put-enrich-policy-api.html" title="Create enrich policy API">create enrich policy API</a> or
+<a class="xref" href="index-mgmt.html#manage-enrich-policies" title="Manage enrich policies">Index Management in Kibana</a> to create an enrich policy.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Once created, you can&#8217;t update or change an enrich policy.
+See <a class="xref" href="enrich-setup.html#update-enrich-policies" title="Update an enrich policy">Update an enrich policy</a>.</p>
+</div>
+</div>
+<h4><a id="esql-execute-enrich-policy"></a>Execute the enrich policy<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-enrich-data.asciidoc">edit</a></h4>
+<p>Once the enrich policy is created, you need to execute it using the
+<a class="xref" href="execute-enrich-policy-api.html" title="Execute enrich policy API">execute enrich policy API</a> or
+<a class="xref" href="index-mgmt.html#manage-enrich-policies" title="Manage enrich policies">Index Management in Kibana</a> to create an
+<a class="xref" href="ingest-enriching-data.html#enrich-index">enrich index</a>.</p>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/esql/esql-enrich-policy.png" alt="esql enrich policy">
+</div>
+</div>
+<p>The <em>enrich index</em> contains documents from the policy&#8217;s source indices.
+Enrich indices always begin with <code class="literal">.enrich-*</code>,
+are read-only,
+and are <a class="xref" href="indices-forcemerge.html" title="Force merge API">force merged</a>.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Enrich indices should only be used by the <a class="xref" href="enrich-processor.html" title="Enrich processor">enrich processor</a>
+or the <a class="xref" href="esql-commands.html#esql-enrich" title="ENRICH">ES|QL <code class="literal">ENRICH</code> command</a>. Avoid using enrich indices for
+other purposes.</p>
+</div>
+</div>
+<h4><a id="esql-use-enrich"></a>Use the enrich policy<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-enrich-data.asciidoc">edit</a></h4>
+<p>After the policy has been executed, you can use the <a class="xref" href="esql-commands.html#esql-enrich" title="ENRICH"><code class="literal">ENRICH</code>
+command</a> to enrich your data.</p>
+<div class="imageblock text-center">
+<div class="content">
+<img src="images/esql/esql-enrich-command.png" alt="esql enrich command" width="50%">
+</div>
+</div>
+<p>The following example uses the <code class="literal">languages_policy</code> enrich policy to add a new
+column for each enrich field defined in the policy. The match is performed using
+the <code class="literal">match_field</code> defined in the <a class="xref" href="esql-enrich-data.html#esql-enrich-policy">enrich policy</a> and
+requires that the input table has a column with the same name (<code class="literal">language_code</code>
+in this example). <code class="literal">ENRICH</code> will look for records in the
+<a class="xref" href="esql-enrich-data.html#esql-enrich-index">enrich index</a> based on the match field value.</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW language_code = "1"
+| ENRICH languages_policy</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">language_code:keyword</th>
+<th align="left" valign="top">language_name:keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>1</p></td>
+<td align="left" valign="top"><p>English</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>To use a column with a different name than the <code class="literal">match_field</code> defined in the
+policy as the match field, use <code class="literal">ON &lt;column-name&gt;</code>:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW a = "1"
+| ENRICH languages_policy ON a</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">a:keyword</th>
+<th align="left" valign="top">language_name:keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>1</p></td>
+<td align="left" valign="top"><p>English</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>By default, each of the enrich fields defined in the policy is added as a
+column. To explicitly select the enrich fields that are added, use
+<code class="literal">WITH &lt;field1&gt;, &lt;field2&gt;, ...</code>:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW a = "1"
+| ENRICH languages_policy ON a WITH language_name</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">a:keyword</th>
+<th align="left" valign="top">language_name:keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>1</p></td>
+<td align="left" valign="top"><p>English</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>You can rename the columns that are added using <code class="literal">WITH new_name=&lt;field1&gt;</code>:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">ROW a = "1"
+| ENRICH languages_policy ON a WITH name = language_name</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">a:keyword</th>
+<th align="left" valign="top">name:keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>1</p></td>
+<td align="left" valign="top"><p>English</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>In case of name collisions, the newly created columns will override existing
+columns.</p>
+<h4><a id="esql-update-enrich-data"></a>Update an enrich index<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-enrich-data.asciidoc">edit</a></h4>
+<p>Once created, you cannot update
+or index documents to an enrich index.
+Instead, update your source indices
+and <a class="xref" href="execute-enrich-policy-api.html" title="Execute enrich policy API">execute</a> the enrich policy again.
+This creates a new enrich index from your updated source indices.
+The previous enrich index will deleted with a delayed maintenance job.
+By default this is done every 15 minutes.</p>
+<h4><a id="esql-update-enrich-policies"></a>Update an enrich policy<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-enrich-data.asciidoc">edit</a></h4>
+<p>Once created, you can&#8217;t update or change an enrich policy.
+Instead, you can:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Create and <a class="xref" href="execute-enrich-policy-api.html" title="Execute enrich policy API">execute</a> a new enrich policy.
+</li>
+<li class="listitem">
+Replace the previous enrich policy
+with the new enrich policy
+in any in-use enrich processors or ES|QL queries.
+</li>
+<li class="listitem">
+Use the <a class="xref" href="delete-enrich-policy-api.html" title="Delete enrich policy API">delete enrich policy</a> API or
+<a class="xref" href="index-mgmt.html#manage-enrich-policies" title="Manage enrich policies">Index Management in Kibana</a>
+    to delete the previous enrich policy.
+</li>
+</ol>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_limitations_8"></a>Limitations<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.13/docs/reference/esql/esql-enrich-data.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The ES|QL <code class="literal">ENRICH</code> command only supports enrich policies of type <code class="literal">match</code>.
+Furthermore, <code class="literal">ENRICH</code> only supports enriching on a column of type <code class="literal">keyword</code>.</p>
+</div>
+
+</div>
+<div class="navfooter">
+<span class="prev">
+<a href="esql-process-data-with-dissect-and-grok.html">« Data processing with DISSECT and GROK</a>
+</span>
+<span class="next">
+<a href="esql-using.html">Using ES|QL »</a>
+</span>
+</div>
+</div>
+</body>
+</html>

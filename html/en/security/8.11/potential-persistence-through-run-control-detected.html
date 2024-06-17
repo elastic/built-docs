@@ -8,8 +8,8 @@
 
 <link rel="home" href="index.html" title="Elastic Security Solution [8.11]"/>
 <link rel="up" href="prebuilt-rules.html" title="Prebuilt rule reference"/>
-<link rel="prev" href="potential-persistence-through-motd-file-creation-detected.html" title="Potential Persistence Through MOTD File Creation Detected"/>
-<link rel="next" href="potential-persistence-through-systemd-udevd.html" title="Potential Persistence Through Systemd-udevd"/>
+<link rel="prev" href="potential-password-spraying-of-microsoft-365-user-accounts.html" title="Potential Password Spraying of Microsoft 365 User Accounts"/>
+<link rel="next" href="potential-persistence-through-init-d-detected.html" title="Potential Persistence Through init.d Detected"/>
 <meta class="elastic" name="product_version" content="8.11"/>
 <meta class="elastic" name="product_name" content="Security"/>
 <meta class="elastic" name="website_area" content="documentation"/>
@@ -61,7 +61,7 @@
     <link rel="stylesheet" type="text/css" href="/guide/static/styles.css" />
   </head>
 
-  <!--© 2015-2022 Elasticsearch B.V. -->
+  <!--© 2015-2025 Elasticsearch B.V. -->
   <!-- All Elastic documentation is licensed under a Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License. -->
   <!-- http://creativecommons.org/licenses/by-nc-nd/4.0/ -->
 
@@ -115,10 +115,10 @@ will be released for this version. For the latest information, see the
 </div>
 <div class="navheader">
 <span class="prev">
-<a href="potential-persistence-through-motd-file-creation-detected.html">« Potential Persistence Through MOTD File Creation Detected</a>
+<a href="potential-password-spraying-of-microsoft-365-user-accounts.html">« Potential Password Spraying of Microsoft 365 User Accounts</a>
 </span>
 <span class="next">
-<a href="potential-persistence-through-systemd-udevd.html">Potential Persistence Through Systemd-udevd »</a>
+<a href="potential-persistence-through-init-d-detected.html">Potential Persistence Through init.d Detected »</a>
 </span>
 </div>
 <div class="section">
@@ -183,7 +183,7 @@ Data Source: Elastic Defend
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 109</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 111</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -195,75 +195,212 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<h3 class="title"><a id="_investigation_guide_340"></a>Investigation guide<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.11/docs/detections/prebuilt-rules/rule-details/potential-persistence-through-run-control-detected.asciidoc">edit</a></h3>
+<h3 class="title"><a id="_investigation_guide_351"></a>Investigation guide<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.11/docs/detections/prebuilt-rules/rule-details/potential-persistence-through-run-control-detected.asciidoc">edit</a></h3>
 </div></div></div>
-<div class="pre_wrapper lang-markdown">
-<pre class="programlisting prettyprint lang-markdown">## Triage and analysis
-
-### Investigating Potential Persistence Through Run Control Detected
-
-The `rc.local` file executes custom commands or scripts during system startup on Linux systems. `rc.local` has been deprecated in favor of the use of `systemd services`, and more recent Unix distributions no longer leverage this method of on-boot script execution.
-
-There might still be users that use `rc.local` in a benign matter, so investigation to see whether the file is malicious is vital.
-
-Detection alerts from this rule indicate the creation of a new `/etc/rc.local` file.
-
-&gt; **Note**:
-&gt; This investigation guide uses the {security-guide}/security/master/invest-guide-run-osquery.html[Osquery Markdown Plugin] introduced in Elastic Stack version 8.5.0. Older Elastic Stack versions will display unrendered Markdown in this guide.
-&gt; This investigation guide uses {security-guide}/security/current/osquery-placeholder-fields.html[placeholder fields] to dynamically pass alert data into Osquery queries. Placeholder fields were introduced in Elastic Stack version 8.7.0. If you're using Elastic Stack version 8.6.0 or earlier, you'll need to manually adjust this investigation guide's queries to ensure they properly run.
-
-#### Possible Investigation Steps
-
-- Identify the user account that performed the action and whether it should perform this kind of action.
-- Investigate the file that was created or modified.
-  - !{osquery{"label":"Osquery - Retrieve File Information","query":"SELECT * FROM file WHERE path = {{file.path}}"}}
-- Investigate the script execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence and whether they are located in expected locations.
-  - !{osquery{"label":"Osquery - Retrieve Running Processes by User","query":"SELECT pid, username, name FROM processes p JOIN users u ON u.uid = p.uid ORDER BY username"}}
-- Investigate whether the `/lib/systemd/system/rc-local.service` and `/run/systemd/generator/multi-user.target.wants/rc-local.service` files were created through the `systemd-rc-local-generator` located at `/usr/lib/systemd/system-generators/systemd-rc-local-generator`.
-  - !{osquery{"label":"Osquery - Retrieve rc-local.service File Information","query":"SELECT * FROM file WHERE (path = '/run/systemd/generator/multi-user.target.wants/rc-local.service' OR path = '/run/systemd/generator/multi-user.target.wants/rc-local.service')"}}
-  - In case the file is not present here, `sudo systemctl status rc-local` can be executed to find the location of the rc-local unit file.
-  - If `rc-local.service` is found, manual investigation is required to check for the rc script execution. Systemd will generate syslogs in case of the execution of the rc-local service. `sudo cat /var/log/syslog | grep "rc-local.service|/etc/rc.local Compatibility"` can be executed to check for the execution of the service.
-    - If logs are found, it's likely that the contents of the `rc.local` file have been executed. Analyze the logs. In case several syslog log files are available, use a wildcard to search through all of the available logs.
-- Investigate other alerts associated with the user/host during the past 48 hours.
-- Validate whether this activity is related to planned patches, updates, network administrator activity, or legitimate software installations.
-- Investigate whether the altered scripts call other malicious scripts elsewhere on the file system.
-  - If scripts or executables were dropped, retrieve the files and determine if they are malicious:
-    - Use a private sandboxed malware analysis system to perform analysis.
-      - Observe and collect information about the following activities:
-        - Attempts to contact external domains and addresses.
-          - Check if the domain is newly registered or unexpected.
-          - Check the reputation of the domain or IP address.
-        - File access, modification, and creation activities.
-        - Cron jobs, services and other persistence mechanisms.
-            - !{osquery{"label":"Osquery - Retrieve Crontab Information","query":"SELECT * FROM crontab"}}
-
-### False Positive Analysis
-
-- If this activity is related to new benign software installation activity, consider adding exceptions — preferably with a combination of user and command line conditions.
-- If this activity is related to a system administrator who uses `rc.local` for administrative purposes, consider adding exceptions for this specific administrator user account.
-- Try to understand the context of the execution by thinking about the user, machine, or business purpose. A small number of endpoints, such as servers with unique software, might appear unusual but satisfy a specific business need.
-
-### Response and remediation
-- Initiate the incident response process based on the outcome of the triage.
-- Isolate the involved host to prevent further post-compromise behavior.
-- If the triage identified malware, search the environment for additional compromised hosts.
-  - Implement temporary network rules, procedures, and segmentation to contain the malware.
-  - Stop suspicious processes.
-  - Immediately block the identified indicators of compromise (IoCs).
-  - Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
-- Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
-- Delete the `service/rc.local` files or restore their original configuration.
-- Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-- Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-- Leverage the incident response data and logging to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).</pre>
+<p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
+<p><span class="strong strong"><strong>Investigating Potential Persistence Through Run Control Detected</strong></span></p>
+<p>The <code class="literal">rc.local</code> file executes custom commands or scripts during system startup on Linux systems. <code class="literal">rc.local</code> has been deprecated in favor of the use of <code class="literal">systemd services</code>, and more recent Unix distributions no longer leverage this method of on-boot script execution.</p>
+<p>There might still be users that use <code class="literal">rc.local</code> in a benign matter, so investigation to see whether the file is malicious is vital.</p>
+<p>Detection alerts from this rule indicate the creation of a new <code class="literal">/etc/rc.local</code> file.</p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Note</strong></span>:
+This investigation guide uses the <a href="/guide/en/security/master/invest-guide-run-osquery.html" class="ulink" target="_top">Osquery Markdown Plugin</a> introduced in Elastic Stack version 8.5.0. Older Elastic Stack versions will display unrendered Markdown in this guide.
+This investigation guide uses <a href="/guide/en/security/current/osquery-placeholder-fields.html" class="ulink" target="_top">placeholder fields</a> to dynamically pass alert data into Osquery queries. Placeholder fields were introduced in Elastic Stack version 8.7.0. If you&#8217;re using Elastic Stack version 8.6.0 or earlier, you&#8217;ll need to manually adjust this investigation guide&#8217;s queries to ensure they properly run.</p>
+</blockquote>
+</div>
+<p><span class="strong strong"><strong>Possible Investigation Steps</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Identify the user account that performed the action and whether it should perform this kind of action.
+</li>
+<li class="listitem">
+Investigate the file that was created or modified.
+</li>
+<li class="listitem">
+!{osquery{"label":"Osquery - Retrieve File Information","query":"SELECT * FROM file WHERE path = {{file.path}}"}}
+</li>
+<li class="listitem">
+Investigate the script execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence and whether they are located in expected locations.
+</li>
+<li class="listitem">
+!{osquery{"label":"Osquery - Retrieve Running Processes by User","query":"SELECT pid, username, name FROM processes p JOIN users u ON u.uid = p.uid ORDER BY username"}}
+</li>
+<li class="listitem">
+Investigate whether the <code class="literal">/lib/systemd/system/rc-local.service</code> and <code class="literal">/run/systemd/generator/multi-user.target.wants/rc-local.service</code> files were created through the <code class="literal">systemd-rc-local-generator</code> located at <code class="literal">/usr/lib/systemd/system-generators/systemd-rc-local-generator</code>.
+</li>
+<li class="listitem">
+!{osquery{"label":"Osquery - Retrieve rc-local.service File Information","query":"SELECT * FROM file WHERE (path = <em>/run/systemd/generator/multi-user.target.wants/rc-local.service</em> OR path =\n'/run/systemd/generator/multi-user.target.wants/rc-local.service')\n"}}
+</li>
+<li class="listitem">
+In case the file is not present here, <code class="literal">sudo systemctl status rc-local</code> can be executed to find the location of the rc-local unit file.
+</li>
+<li class="listitem">
+If <code class="literal">rc-local.service</code> is found, manual investigation is required to check for the rc script execution. Systemd will generate syslogs in case of the execution of the rc-local service. <code class="literal">sudo cat /var/log/syslog | grep "rc-local.service|/etc/rc.local Compatibility"</code> can be executed to check for the execution of the service.
+</li>
+<li class="listitem">
+If logs are found, it&#8217;s likely that the contents of the <code class="literal">rc.local</code> file have been executed. Analyze the logs. In case several syslog log files are available, use a wildcard to search through all of the available logs.
+</li>
+<li class="listitem">
+Investigate other alerts associated with the user/host during the past 48 hours.
+</li>
+<li class="listitem">
+Validate whether this activity is related to planned patches, updates, network administrator activity, or legitimate software installations.
+</li>
+<li class="listitem">
+Investigate whether the altered scripts call other malicious scripts elsewhere on the file system.
+</li>
+<li class="listitem">
+If scripts or executables were dropped, retrieve the files and determine if they are malicious:
+</li>
+<li class="listitem">
+Use a private sandboxed malware analysis system to perform analysis.
+</li>
+<li class="listitem">
+Observe and collect information about the following activities:
+</li>
+<li class="listitem">
+Attempts to contact external domains and addresses.
+</li>
+<li class="listitem">
+Check if the domain is newly registered or unexpected.
+</li>
+<li class="listitem">
+Check the reputation of the domain or IP address.
+</li>
+<li class="listitem">
+File access, modification, and creation activities.
+</li>
+<li class="listitem">
+Cron jobs, services and other persistence mechanisms.
+</li>
+<li class="listitem">
+!{osquery{"label":"Osquery - Retrieve Crontab Information","query":"SELECT * FROM crontab"}}
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>False Positive Analysis</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+If this activity is related to new benign software installation activity, consider adding exceptions — preferably with a combination of user and command line conditions.
+</li>
+<li class="listitem">
+If this activity is related to a system administrator who uses <code class="literal">rc.local</code> for administrative purposes, consider adding exceptions for this specific administrator user account.
+</li>
+<li class="listitem">
+Try to understand the context of the execution by thinking about the user, machine, or business purpose. A small number of endpoints, such as servers with unique software, might appear unusual but satisfy a specific business need.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Response and remediation</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Initiate the incident response process based on the outcome of the triage.
+</li>
+<li class="listitem">
+Isolate the involved host to prevent further post-compromise behavior.
+</li>
+<li class="listitem">
+If the triage identified malware, search the environment for additional compromised hosts.
+</li>
+<li class="listitem">
+Implement temporary network rules, procedures, and segmentation to contain the malware.
+</li>
+<li class="listitem">
+Stop suspicious processes.
+</li>
+<li class="listitem">
+Immediately block the identified indicators of compromise (IoCs).
+</li>
+<li class="listitem">
+Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
+</li>
+<li class="listitem">
+Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
+</li>
+<li class="listitem">
+Delete the <code class="literal">service/rc.local</code> files or restore their original configuration.
+</li>
+<li class="listitem">
+Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
+</li>
+<li class="listitem">
+Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
+</li>
+<li class="listitem">
+Leverage the incident response data and logging to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+</li>
+</ul>
 </div>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<h3 class="title"><a id="_rule_query_617"></a>Rule query<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.11/docs/detections/prebuilt-rules/rule-details/potential-persistence-through-run-control-detected.asciidoc">edit</a></h3>
+<h3 class="title"><a id="_setup_459"></a>Setup<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.11/docs/detections/prebuilt-rules/rule-details/potential-persistence-through-run-control-detected.asciidoc">edit</a></h3>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule requires data coming in from Elastic Defend.</p>
+<p><span class="strong strong"><strong>Elastic Defend Integration Setup</strong></span></p>
+<p>Elastic Defend is integrated into the Elastic Agent using Fleet. Upon configuration, the integration allows the Elastic Agent to monitor events on your host and send data to the Elastic Security app.</p>
+<p><span class="strong strong"><strong>Prerequisite Requirements:</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Fleet is required for Elastic Defend.
+</li>
+<li class="listitem">
+To configure Fleet Server refer to the <a href="/guide/en/fleet/current/fleet-server.html" class="ulink" target="_top">documentation</a>.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>The following steps should be executed in order to add the Elastic Defend integration on a Linux System:</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Go to the Kibana home page and click "Add integrations".
+</li>
+<li class="listitem">
+In the query bar, search for "Elastic Defend" and select the integration to see more details about it.
+</li>
+<li class="listitem">
+Click "Add Elastic Defend".
+</li>
+<li class="listitem">
+Configure the integration name and optionally add a description.
+</li>
+<li class="listitem">
+Select the type of environment you want to protect, either "Traditional Endpoints" or "Cloud Workloads".
+</li>
+<li class="listitem">
+Select a configuration preset. Each preset comes with different default settings for Elastic Agent, you can further customize these later by configuring the Elastic Defend integration policy. <a href="/guide/en/security/current/configure-endpoint-integration-policy.html" class="ulink" target="_top">Helper guide</a>.
+</li>
+<li class="listitem">
+We suggest selecting "Complete EDR (Endpoint Detection and Response)" as a configuration setting, that provides "All events; all preventions"
+</li>
+<li class="listitem">
+Enter a name for the agent policy in "New agent policy name". If other agent policies already exist, you can click the "Existing hosts" tab and select an existing policy instead.
+For more details on Elastic Agent configuration settings, refer to the <a href="/guide/en/fleet/8.10/agent-policy.html" class="ulink" target="_top">helper guide</a>.
+</li>
+<li class="listitem">
+Click "Save and Continue".
+</li>
+<li class="listitem">
+To complete the integration, select "Add Elastic Agent to your hosts" and continue to the next section to install the Elastic Agent on your hosts.
+For more details on Elastic Defend refer to the <a href="/guide/en/security/current/install-endpoint.html" class="ulink" target="_top">helper guide</a>.
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_rule_query_640"></a>Rule query<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.11/docs/detections/prebuilt-rules/rule-details/potential-persistence-through-run-control-detected.asciidoc">edit</a></h3>
 </div></div></div>
 <div class="pre_wrapper lang-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-js">host.os.type : "linux" and event.category : "file" and
 event.type : ("change" or "file_modify_event" or "creation" or "file_create_event") and
 file.path : "/etc/rc.local" and not process.name : (
@@ -328,10 +465,10 @@ Reference URL: <a href="https://attack.mitre.org/techniques/T1037/004/" class="u
 </div>
 <div class="navfooter">
 <span class="prev">
-<a href="potential-persistence-through-motd-file-creation-detected.html">« Potential Persistence Through MOTD File Creation Detected</a>
+<a href="potential-password-spraying-of-microsoft-365-user-accounts.html">« Potential Password Spraying of Microsoft 365 User Accounts</a>
 </span>
 <span class="next">
-<a href="potential-persistence-through-systemd-udevd.html">Potential Persistence Through Systemd-udevd »</a>
+<a href="potential-persistence-through-init-d-detected.html">Potential Persistence Through init.d Detected »</a>
 </span>
 </div>
 </div>
