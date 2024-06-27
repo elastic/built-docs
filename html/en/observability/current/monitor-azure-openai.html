@@ -693,7 +693,7 @@ From there, you can view and analyze your data to monitor the cost and performan
 <div class="olist orderedlist">
 <ol class="orderedlist">
 <li class="listitem">
-From the Kibana homepage, click <span class="strong strong"><strong>Add integrations</strong></span>.
+From the Kibana homepage, select <span class="strong strong"><strong>Add integrations</strong></span>.
 </li>
 <li class="listitem">
 Select the <span class="strong strong"><strong>APM</strong></span> integration.
@@ -722,91 +722,72 @@ Scroll down to <span class="strong strong"><strong>APM Agents</strong></span> an
 <pre class="programlisting prettyprint lang-bash">export AZURE_OPENAI_API_KEY="your-Azure-OpenAI-API-key"
 export AZURE_OPENAI_ENDPOINT="your-Azure-OpenAI-endpoint"
 export OPENAI_API_VERSION="your_api_version"
-export OTEL_EXPORTER_OTLP_AUTH_HEADER="your-otel-exporter-auth-header"
-export OTEL_EXPORTER_OTLP_ENDPOINT="your-otel-exporter-endpoint"</pre>
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20&lt;your-otel-exporter-auth-header&gt;"
+export OTEL_EXPORTER_OTLP_ENDPOINT="your-otel-exporter-endpoint"
+export OTEL_RESOURCE_ATTRIBUTES=service.name=your-service-name</pre>
 </div>
 <h5><a id="azure-openai-apm-python-libraries"></a>Download Python libraries<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/8.14/docs/en/observability/cloud-monitoring/azure/monitor-azure-openai-apm.asciidoc">edit</a></h5>
-<p>Install the following Python libraries using these commands:</p>
+<p>Install the necessary Python libraries using this command:</p>
 <div class="pre_wrapper lang-bash">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-bash">pip3 install opentelemetry-api
-pip3 install opentelemetry-sdk
-pip3 install opentelemetry-exporter-otlp
-pip3 install opentelemetry-instrumentation
-pip3 install opentelemetry-instrumentation-requests
-pip3 install openai
-pip3 install flask</pre>
+<pre class="programlisting prettyprint lang-bash">pip3 install openai flask opentelemetry-distro[otlp] opentelemetry-instrumentation</pre>
 </div>
 <h5><a id="azure-openai-apm-instrument"></a>Instrument the application<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/8.14/docs/en/observability/cloud-monitoring/azure/monitor-azure-openai-apm.asciidoc">edit</a></h5>
 <p>The following code is from the <a href="https://github.com/mdbirnstiehl/AzureOpenAIAPMmonitoringOtel" class="ulink" target="_top">example application</a>. In a real use case, you would add the import statements to your code.</p>
 <p>The app we&#8217;re using in this tutorial is a simple example that calls Azure OpenAI APIs with the following message: “How do I send my APM data to Elastic Observability?”:</p>
 <div class="pre_wrapper lang-python">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-python">from openai import AzureOpenAI
-import openai
+<pre class="programlisting prettyprint lang-python">import os
+
 from flask import Flask
-import monitor  # Import the module
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-import urllib
-import os
-
+from openai import AzureOpenAI
 from opentelemetry import trace
-from opentelemetry.sdk.resources import SERVICE_NAME, Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.instrumentation.requests import RequestsInstrumentor
 
-# Service name is required for most backends
-resource = Resource(attributes={
-    SERVICE_NAME: "your-service-name"
-})
-
-provider = TracerProvider(resource=resource)
-processor = BatchSpanProcessor(OTLPSpanExporter(endpoint=os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT'),
-        headers="Authorization=Bearer%20"+os.getenv('OTEL_EXPORTER_OTLP_AUTH_HEADER')))
-
-provider.add_span_processor(processor)
-trace.set_tracer_provider(provider)
-tracer = trace.get_tracer(__name__)
-RequestsInstrumentor().instrument()
+from monitor import count_completion_requests_and_tokens
 
 
-
-# Initialize Flask app and instrument it
+# Initialize Flask app
 app = Flask(__name__)
 
 # Set OpenAI API key
 client = AzureOpenAI(
     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
     api_version=os.getenv("OPENAI_API_VERSION"),
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
 )
 
+# Monkey-patch the openai.Completion.create function
+client.chat.completions.create = count_completion_requests_and_tokens(
+    client.chat.completions.create
+)
+
+tracer = trace.get_tracer("counter")
+
+
 @app.route("/completion")
-@tracer.start_as_current_span("do_work")
+@tracer.start_as_current_span("completion")
 def completion():
-    response = openai.chat.completions.create(
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=[
-            {"role": "user", "content": "How do I send my APM data to Elastic Observability?"}
+            {
+                "role": "user",
+                "content": "How do I send my APM data to Elastic Observability?",
+            }
         ],
         max_tokens=20,
-        temperature=0
+        temperature=0,
     )
-
-    return(response.choices[0].message.content.strip())
-
-if __name__ == "__main__":
-    app.run(host="localhost", port=8000, debug=True)</pre>
+    return response.choices[0].message.content.strip()</pre>
 </div>
+<p>The code uses monkey patching, a technique in Python that dynamically modifies the behavior of a class or module at runtime by modifying its attributes or methods, to modify the behavior of the <code class="literal">chat.completions</code> call so we can add the response metrics to the OpenTelemetry spans.</p>
 <p>The <a href="https://github.com/mdbirnstiehl/AzureOpenAIAPMmonitoringOtel/blob/main/monitor.py" class="ulink" target="_top"><code class="literal">monitor.py</code> file</a> in the example application instruments the application and can be used to instrument your own applications.</p>
-<p>The <code class="literal">monitor.py</code> code uses monkey patching, a technique in Python that dynamically modifies the behavior of a class or module at runtime by modifying its attributes or methods, to modify the behavior of the <code class="literal">chat.completions</code> call so we can add the response metrics to the OpenTelemetry spans:</p>
 <div class="pre_wrapper lang-python">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-python">def count_completion_requests_and_tokens(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        counters['completion_count'] += 1
+        counters["completion_count"] += 1
         response = func(*args, **kwargs)
 
         token_count = response.usage.total_tokens
@@ -818,7 +799,7 @@ if __name__ == "__main__":
         # Set OpenTelemetry attributes
         span = trace.get_current_span()
         if span:
-            span.set_attribute("completion_count", counters['completion_count'])
+            span.set_attribute("completion_count", counters["completion_count"])
             span.set_attribute("token_count", token_count)
             span.set_attribute("prompt_tokens", prompt_tokens)
             span.set_attribute("completion_tokens", completion_tokens)
@@ -826,29 +807,33 @@ if __name__ == "__main__":
             span.set_attribute("cost", cost)
             span.set_attribute("response", strResponse)
         return response
-    return wrapper
 
-# Monkey-patch the openai.Completion.create function
-openai.chat.completions.create = count_completion_requests_and_tokens(openai.chat.completions.create)</pre>
+    return wrapper</pre>
 </div>
 <p>Adding this data to our span lets us send it to our OTLP endpoint, so you can search for the data in Observability and build dashboards and visualizations.</p>
 <p>Implementing the following function allows you to calculate the cost of a single request to the OpenAI APIs.</p>
 <div class="pre_wrapper lang-python">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-python">def calculate_cost(response):
-    if response.model in ['gpt-4', 'gpt-4-0314']:
-        cost = (response.usage.prompt_tokens * 0.03 + response.usage.completion_tokens * 0.06) / 1000
-    elif response.model in ['gpt-4-32k', 'gpt-4-32k-0314']:
-        cost = (response.usage.prompt_tokens * 0.06 + response.usage.completion_tokens * 0.12) / 1000
-    elif 'gpt-3.5-turbo' in response.model:
+    if response.model in ["gpt-4", "gpt-4-0314"]:
+        cost = (
+            response.usage.prompt_tokens * 0.03
+            + response.usage.completion_tokens * 0.06
+        ) / 1000
+    elif response.model in ["gpt-4-32k", "gpt-4-32k-0314"]:
+        cost = (
+            response.usage.prompt_tokens * 0.06
+            + response.usage.completion_tokens * 0.12
+        ) / 1000
+    elif "gpt-3.5-turbo" in response.model:
         cost = response.usage.total_tokens * 0.002 / 1000
-    elif 'davinci' in response.model:
+    elif "davinci" in response.model:
         cost = response.usage.total_tokens * 0.02 / 1000
-    elif 'curie' in response.model:
+    elif "curie" in response.model:
         cost = response.usage.total_tokens * 0.002 / 1000
-    elif 'babbage' in response.model:
+    elif "babbage" in response.model:
         cost = response.usage.total_tokens * 0.0005 / 1000
-    elif 'ada' in response.model:
+    elif "ada" in response.model:
         cost = response.usage.total_tokens * 0.0004 / 1000
     else:
         cost = 0
