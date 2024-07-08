@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Elastic Agent deployment models with mutual TLS | Fleet and Elastic Agent Guide [master] | Elastic</title>
+<meta class="elastic" name="content" content="Elastic Agent deployment models with mutual TLS | Fleet and Elastic Agent Guide [master]">
+
+<link rel="home" href="index.html" title="Fleet and Elastic Agent Guide [master]"/>
+<link rel="up" href="secure.html" title="Secure Elastic Agent connections"/>
+<link rel="prev" href="secure-connections.html" title="Configure SSL/TLS for self-managed Fleet Servers"/>
+<link rel="next" href="secure-logstash-connections.html" title="Configure SSL/TLS for the Logstash output"/>
+<meta class="elastic" name="product_version" content="master"/>
+<meta class="elastic" name="product_name" content="Fleet and Elastic Agent"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Fleet/Guide/Elastic Agent/master"/>
+<meta name="DC.subject" content="Fleet and Elastic Agent"/>
+<meta name="DC.identifier" content="master"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body>
+<div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="secure-connections.html">« Configure SSL/TLS for self-managed Fleet Servers</a>
+</span>
+<span class="next">
+<a href="secure-logstash-connections.html">Configure SSL/TLS for the Logstash output »</a>
+</span>
+</div>
+<div class="book" lang="en">
+<div class="titlepage">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Fleet and Elastic Agent Guide [master]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="secure.html">Secure Elastic Agent connections</a></span>
+</div>
+<div>
+<div><h1 class="title"><a id="id-1"></a>Elastic Agent deployment models with mutual TLS</h1><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/security/mutual-tls.asciidoc">edit</a></div>
+</div>
+<!--EXTRA-->
+</div>
+<div id="content">
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="mutual-tls"></a>Elastic Agent deployment models with mutual TLS<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/security/mutual-tls.asciidoc">edit</a></h2>
+</div></div></div>
+<p>Mutual Transport Layer Security (mTLS) provides a higher level of security and trust compared to one-way TLS, where only the server presents a certificate. It ensures that not only the server is who it claims to be, but the client is also authenticated. This is particularly valuable in scenarios where both parties need to establish trust and validate each other&#8217;s identities, such as in secure API communication, web services, or remote authentication.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="mutual-tls.html#mutual-tls-overview" title="Overview">Overview</a>
+</li>
+<li class="listitem">
+<a class="xref" href="mutual-tls.html#mutual-tls-on-premise" title="On-premise deployments">On-premise deployments</a>
+</li>
+<li class="listitem">
+<a class="xref" href="mutual-tls.html#mutual-tls-cloud" title="Fleet Server on Elastic Cloud">Fleet Server on Elastic Cloud</a>
+</li>
+<li class="listitem">
+<a class="xref" href="mutual-tls.html#mutual-tls-cloud-proxy" title="Fleet Server on Elastic Cloud using a proxy">Fleet Server on Elastic Cloud using a proxy</a>
+</li>
+<li class="listitem">
+<a class="xref" href="mutual-tls.html#mutual-tls-on-premise-hosted-es" title="Fleet Server on-premise and Hosted Elasticsearch Service">Fleet Server on-premise and Hosted Elasticsearch Service</a>
+</li>
+</ul>
+</div>
+<h4><a id="mutual-tls-overview"></a>Overview<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/security/mutual-tls.asciidoc">edit</a></h4>
+<p>With mutual TLS the following authentication and certification verification occurs:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong>Client Authentication</strong></span>: The client presents its digital certificate to the server during the TLS handshake. This certificate is issued by a trusted Certificate Authority (CA) and contains the client&#8217;s public key.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Server Authentication</strong></span>: The server also presents its digital certificate to the client, proving its identity and sharing its public key. The server&#8217;s certificate is also issued by a trusted CA.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Certificate Verification</strong></span>: Both the client and server verify each other&#8217;s certificates by checking the digital signatures against the CAs' public key (note that the client and server need not use the same CA).
+</li>
+</ul>
+</div>
+<p>Fleet-managed Elastic Agent has two main connections to ensure correct operations:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Connectivity to Fleet Server (the control plane, to check in, download policies, and similar).
+</li>
+<li class="listitem">
+Connectivity to an Output (the data plane, such as Elasticsearch or Logstash).
+</li>
+</ul>
+</div>
+<p>In order to bootstrap, Elastic Agent initially must establish a secure connection to the Fleet Server, which can reside on-premises or in Elastic Cloud. This connectivity verification process ensures the agent&#8217;s authenticity. Once verified, the agent receives the policy configuration. This policy download equips the agent with the knowledge of the other components it needs to engage with. For instance, it gains insights into the output destinations it should write data to.</p>
+<p>When mTLS is required, the secure setup between Elastic Agent, Fleet, and Fleet Server is configured through the following steps:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+mTLS is enabled.
+</li>
+<li class="listitem">
+The initial mTLS connection between Elastic Agent and Fleet Server is configured when Elastic Agent is enrolled, using the parameters passed through the <code class="literal">elastic-agent install</code> or <code class="literal">elastic-agent enroll</code> command.
+</li>
+<li class="listitem">
+<p>Once enrollment has completed, Elastic Agent downloads the initial Elastic Agent policy from Fleet Server.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+If the Elastic Agent policy contains mTLS configuration settings, those settings will take precedence over those used during enrollment: This includes both the mTLS settings used for connectivity between Elastic Agent and Fleet Server (and the Fleet application in Kibana, for Fleet-managed Elastic Agent), and the settings used between Elastic Agent and it&#8217;s specified output.
+</li>
+<li class="listitem">
+If the Elastic Agent policy does not contain any TLS, mTLS, or proxy configuration settings, these settings will remain as they were specified when Elastic Agent enrolled. Note that the initial TLS, mTLS, or proxy configuration settings can not be removed through the Elastic Agent policy; they can only be updated.
+</li>
+</ol>
+</div>
+</li>
+</ol>
+</div>
+<h4><a id="mutual-tls-on-premise"></a>On-premise deployments<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/security/mutual-tls.asciidoc">edit</a></h4>
+<div class="imageblock">
+<div class="content">
+<img src="images/mutual-tls-on-prem.png" alt="Diagram of mutual TLS on premise deployment model">
+</div>
+</div>
+<p>Refer to the steps in <a class="xref" href="secure-connections.html" title="Configure SSL/TLS for self-managed Fleet Servers">Configure SSL/TLS for self-managed Fleet Servers</a>. To configure mutual TLS, include the following additional parameters when you install Elastic Agent and Fleet Server.</p>
+<h5><a id="_elastic_agent_settings"></a>Elastic Agent settings<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/security/mutual-tls.asciidoc">edit</a></h5>
+<p>During Elastic Agent installation on premise use the following options:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--certificate-authorities</code></p></td>
+<td align="left" valign="top"><p>List of CA certificates that are trusted when Fleet Server connects to Elastic Agent</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--elastic-agent-cert</code></p></td>
+<td align="left" valign="top"><p>Elastic Agent certificate to present to Fleet Server during authentication</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--elastic-agent-cert-key</code></p></td>
+<td align="left" valign="top"><p>Elastic Agent certificate key to present to Fleet Server</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h5><a id="_fleet_server_settings"></a>Fleet Server settings<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/security/mutual-tls.asciidoc">edit</a></h5>
+<p>During Fleet Server installation on-premise Fleet Server authenticates with Elasticsearch and Elastic Agents. You can use the following CLI options to facilitate these secure connections:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--fleet-server-es-ca</code></p></td>
+<td align="left" valign="top"><p>CA to use for the Elasticsearch connection</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--fleet-server-es-cert</code></p></td>
+<td align="left" valign="top"><p>Fleet Server certificate to present to Elasticsearch</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--fleet-server-es-cert-key</code></p></td>
+<td align="left" valign="top"><p>Fleet Server certificate key to present to Elasticsearch</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--certificate-authorities</code></p></td>
+<td align="left" valign="top"><p>List of CA certificates that are trusted when Elastic Agent connects to Fleet Server and when Fleet Server validates the Elastic Agent identity.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--fleet-server-cert</code></p></td>
+<td align="left" valign="top"><p>Fleet Server certificate to present to Elastic Agents during authentication</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--fleet-server-cert-key</code></p></td>
+<td align="left" valign="top"><p>Fleet Server&#8217;s private certificate key used to decrypt the certificate</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h5><a id="_fleet_settings"></a>Fleet settings:<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/security/mutual-tls.asciidoc">edit</a></h5>
+<p>In Kibana, navigate to Fleet, open the <span class="strong strong"><strong>Settings</strong></span> tab, and choose the <span class="strong strong"><strong>Output</strong></span> that you&#8217;d like to configure.
+In the <span class="strong strong"><strong>Advanced YAML configuration</strong></span>, add the following settings:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ssl.certificate_authorities</code></p></td>
+<td align="left" valign="top"><p>List of CA certificates that are trusted when Fleet Server connects to Elastic Agent</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ssl.certificate</code></p></td>
+<td align="left" valign="top"><p>This certificate will be passed down to all the agents that have this output configured in their policy. This certificate is used by the agent when establishing mTLS to the output.</p>
+<p>You may either apply the full certificate, in which case all the agents get the same certificate OR alternatively point to a local directory on the agent where the certificate resides, if the certificates are to be unique per agent.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">ssl.key</code></p></td>
+<td align="left" valign="top"><p>This certificate key will be passed down to all the agents that have this output configured in their policy. The certificate key is used to decrypt the SSL certificate.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Note the following when you specify these SSL settings:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+The certificate authority, certificate, and certificate key need to be specified as a path to a local file. You cannot specify a directory.
+</li>
+<li class="listitem">
+You can define multiple CAs or paths to CAs.
+</li>
+<li class="listitem">
+Only one certificate and certificate key can be defined.
+</li>
+</ul>
+</div>
+</div>
+</div>
+<p>In the <span class="strong strong"><strong>Advanced YAML configuration</strong></span> these settings should be added in the following format:</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">ssl.certificate_authorities:
+  - /path/to/ca
+ssl.certificate: /path/to/cert
+ssl.key: /path/to/cert_key</pre>
+</div>
+<p>OR</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">ssl.certificate_authorities:
+  - /path/to/ca
+ssl.certificate: /path/to/cert
+ssl.key: /path/to/cert_key</pre>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="images/mutual-tls-onprem-advanced-yaml.png" alt="Screen capture of output advanced yaml settings">
+</div>
+</div>
+<h4><a id="mutual-tls-cloud"></a>Fleet Server on Elastic Cloud<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/security/mutual-tls.asciidoc">edit</a></h4>
+<p>In this deployment model, all traffic ingress into Elastic Cloud has its TLS connection terminated at the Elastic Cloud boundary. Since this termination is not handled on a per-tenant basis, a client-specific certificate can NOT be used at this point.</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/mutual-tls-cloud.png" alt="Diagram of mutual TLS on cloud deployment model">
+</div>
+</div>
+<p>We currently don&#8217;t support mTLS in this deployment model. An alternate deployment model is shown below where you can deploy your own secure proxy where TLS connections are terminated.</p>
+<h4><a id="mutual-tls-cloud-proxy"></a>Fleet Server on Elastic Cloud using a proxy<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/security/mutual-tls.asciidoc">edit</a></h4>
+<p>In this scenario, where you have access to the proxy, you can configure mTLS between the agent and your proxy.</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/mutual-tls-cloud-proxy.png" alt="Diagram of mutual TLS on cloud deployment model with a proxy">
+</div>
+</div>
+<h5><a id="_elastic_agent_settings_2"></a>Elastic Agent settings<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/security/mutual-tls.asciidoc">edit</a></h5>
+<p>During Elastic Agent installation on premise use the following options:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--certificate-authorities</code></p></td>
+<td align="left" valign="top"><p>List of CA certificates that are trusted when Elastic Agent connects to Fleet Server or to the proxy between Elastic Agent and Fleet Server</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--elastic-agent-cert</code></p></td>
+<td align="left" valign="top"><p>Elastic Agent certificate to present  during authentication to Fleet Server or to the proxy between Elastic Agent and Fleet Server</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--elastic-agent-cert-key</code></p></td>
+<td align="left" valign="top"><p>Elastic Agent&#8217;s private certificate key used to decrypt the certificate</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h4><a id="mutual-tls-on-premise-hosted-es"></a>Fleet Server on-premise and Hosted Elasticsearch Service<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/security/mutual-tls.asciidoc">edit</a></h4>
+<p>In some scenarios you may want to deploy Fleet Server on your own premises. In this case, you&#8217;re able to provide your own certificates and certificate authority to enable mTLS between Fleet Server and Elastic Agent.</p>
+<p>However, as with the <a class="xref" href="mutual-tls.html#mutual-tls-cloud" title="Fleet Server on Elastic Cloud">Fleet Server on Elastic Cloud</a> use case, the data plane TLS connections terminate at the Elastic Cloud boundary. Elastic Cloud is not a multi-tenanted service and therefore can&#8217;t provide per-user certificates.</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/mutual-tls-fs-onprem.png" alt="Diagram of mutual TLS with Fleet Server on premise and hosted Elasticsearch Service deployment model">
+</div>
+</div>
+<p>Similar to the Fleet Server on Elastic Cloud use case, a secure proxy can be placed in such an environment to terminate the TLS connections and satisfy the mTLS requirements.</p>
+<div class="imageblock">
+<div class="content">
+<img src="images/mutual-tls-fs-onprem-proxy.png" alt="Diagram of mutual TLS with Fleet Server on premise and hosted Elasticsearch Service deployment model with a proxy">
+</div>
+</div>
+<h5><a id="_elastic_agent_settings_3"></a>Elastic Agent settings<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/security/mutual-tls.asciidoc">edit</a></h5>
+<p>During Elastic Agent installation on premise use the following options, similar to <a class="xref" href="mutual-tls.html#mutual-tls-on-premise" title="On-premise deployments">Elastic Agent deployment on premises</a>:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--certificate-authorities</code></p></td>
+<td align="left" valign="top"><p>List of CA certificates that are trusted for when Elastic Agent connects to Fleet Server</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--elastic-agent-cert</code></p></td>
+<td align="left" valign="top"><p>Elastic Agent certificate to present to Fleet Server during authentication</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--elastic-agent-cert-key</code></p></td>
+<td align="left" valign="top"><p>Elastic Agent&#8217;s private certificate key used to decrypt the certificate</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h5><a id="_fleet_server_settings_2"></a>Fleet Server settings<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/security/mutual-tls.asciidoc">edit</a></h5>
+<p>During Fleet Server installation on-premise use the following options so that Fleet Server can authenticate itself to the agent and then also to the secure proxy server:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--fleet-server-es-ca</code></p></td>
+<td align="left" valign="top"><p>CA to use for the Elasticsearch connection, via secure proxy. This CA is used to authenticate the TLS connection from a secure proxy</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--certificate-authorities</code></p></td>
+<td align="left" valign="top"><p>List of CA certificates that are trusted when Elastic Agent connects to Fleet Server</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--fleet-server-cert</code></p></td>
+<td align="left" valign="top"><p>Fleet Server certificate to present to Elastic Agents during authentication</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">--fleet-server-cert-key</code></p></td>
+<td align="left" valign="top"><p>Fleet Server&#8217;s private certificate key used to decrypt the certificate</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h5><a id="_fleet_settings_2"></a>Fleet settings<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/ingest-docs/edit/main/docs/en/ingest-management/security/mutual-tls.asciidoc">edit</a></h5>
+<p>This is the same as what&#8217;s described for <a class="xref" href="mutual-tls.html#mutual-tls-on-premise" title="On-premise deployments">on premise deployments</a>. The main difference is that you need to use certificates that are accepted by the secure proxy, as the mTLS is set up between the agent and the secure proxy.</p>
+</div>
+</div>
+</div><div class="navfooter">
+<span class="prev">
+<a href="secure-connections.html">« Configure SSL/TLS for self-managed Fleet Servers</a>
+</span>
+<span class="next">
+<a href="secure-logstash-connections.html">Configure SSL/TLS for the Logstash output »</a>
+</span>
+</div>
+</body>
+</html>
