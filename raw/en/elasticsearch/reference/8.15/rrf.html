@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="keywords" content="Elasticsearch diagnostic, diagnostics">
+<title>Reciprocal rank fusion | Elasticsearch Guide [8.15] | Elastic</title>
+<meta class="elastic" name="content" content="Reciprocal rank fusion | Elasticsearch Guide [8.15]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.15]"/>
+<link rel="up" href="search.html" title="Search APIs"/>
+<link rel="prev" href="retriever.html" title="Retriever"/>
+<link rel="next" href="scroll-api.html" title="Scroll API"/>
+<meta class="elastic" name="product_version" content="8.15"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.15"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.15"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body>
+<div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="retriever.html">« Retriever</a>
+</span>
+<span class="next">
+<a href="scroll-api.html">Scroll API »</a>
+</span>
+</div>
+<div class="book" lang="en">
+<div class="titlepage">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.15]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="rest-apis.html">REST APIs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="search.html">Search APIs</a></span>
+</div>
+<div>
+<div><h1 class="title"><a id="id-1"></a>Reciprocal rank fusion</h1><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.15/docs/reference/search/rrf.asciidoc">edit</a></div>
+</div>
+<!--EXTRA-->
+</div>
+<div id="content">
+<div class="section">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="rrf"></a>Reciprocal rank fusion<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.15/docs/reference/search/rrf.asciidoc">edit</a></h2>
+</div></div></div>
+<p>preview::["This functionality is in technical preview and may be changed or removed in a future release.
+The syntax will likely change before GA.
+Elastic will work to fix any issues, but features in technical preview are not subject to the support SLA of official GA features."]</p>
+<p><a href="https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf" class="ulink" target="_top">Reciprocal rank fusion (RRF)</a>
+is a method for combining multiple result sets with different relevance indicators into a single result set.
+RRF requires no tuning, and the different relevance indicators do not have to be related to each other to achieve high-quality results.</p>
+<p>RRF uses the following formula to determine the score for ranking each document:</p>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python">score = 0.0
+for q in queries:
+    if d in result(q):
+        score += 1.0 / ( k + rank( result(q), d ) )
+return score
+
+# where
+# k is a ranking constant
+# q is a query in the set of queries
+# d is a document in the result set of q
+# result(q) is the result set of q
+# rank( result(q), d ) is d's rank within the result(q) starting from 1</pre>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="rrf-api"></a>Reciprocal rank fusion API<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.15/docs/reference/search/rrf.asciidoc">edit</a></h3>
+</div></div></div>
+<p>You can use RRF as part of a <a class="xref" href="search-search.html" title="Search API">search</a> to combine and rank documents using separate sets of top documents (result sets) from a combination of <a class="xref" href="retriever.html" title="Retriever">child retrievers</a> using an
+<a class="xref" href="retriever.html#rrf-retriever" title="RRF Retriever">RRF retriever</a>.
+A minimum of <span class="strong strong"><strong>two</strong></span> child retrievers is required for ranking.</p>
+<p>An RRF retriever is an optional object defined as part of a search request&#8217;s
+<a class="xref" href="search-search.html#request-body-retriever">retriever parameter</a>.
+The RRF retriever object contains the following parameters:</p>
+<div class="variablelist">
+<dl class="variablelist">
+<dt>
+<span class="term">
+<code class="literal">retrievers</code>
+</span>
+</dt>
+<dd>
+<p>
+(Required, array of retriever objects)
+</p>
+<p>A list of child retrievers to specify which sets of returned top documents
+will have the RRF formula applied to them. Each child retriever carries an
+equal weight as part of the RRF formula. Two or more child retrievers are
+required.</p>
+</dd>
+<dt>
+<span class="term">
+<code class="literal">rank_constant</code>
+</span>
+</dt>
+<dd>
+<p>
+(Optional, integer)
+</p>
+<p>This value determines how much influence documents in individual
+result sets per query have over the final ranked result set. A higher value indicates
+that lower ranked documents have more influence. This value must be greater than or
+equal to <code class="literal">1</code>. Defaults to <code class="literal">60</code>.</p>
+</dd>
+<dt>
+<span class="term">
+<code class="literal">window_size</code>
+</span>
+</dt>
+<dd>
+<p>
+(Optional, integer)
+</p>
+<p>This value determines the size of the individual result sets per
+query. A higher value will improve result relevance at the cost of performance. The final
+ranked result set is pruned down to the search request&#8217;s <a class="xref" href="search-search.html#search-size-param">size</a>.
+<code class="literal">window_size</code> must be greater than or equal to <code class="literal">size</code> and greater than or equal to <code class="literal">1</code>.
+Defaults to the <code class="literal">size</code> parameter.</p>
+</dd>
+</dl>
+</div>
+<p>An example request using RRF:</p>
+<a id="ee223e604bb695cad2517d28ae63ac34"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET example-index/_search
+{
+    "retriever": {
+        "rrf": { <a id="CO823-1"></a><i class="conum" data-value="3"></i>
+            "retrievers": [
+                {
+                    "standard": { <a id="CO823-2"></a><i class="conum" data-value="2"></i>
+                        "query": {
+                            "term": {
+                                "text": "shoes"
+                            }
+                        }
+                    }
+                },
+                {
+                    "knn": { <a id="CO823-3"></a><i class="conum" data-value="1"></i>
+                        "field": "vector",
+                        "query_vector": [1.25, 2, 3.5],
+                        "k": 50,
+                        "num_candidates": 100
+                    }
+                }
+            ],
+            "rank_window_size": 50,
+            "rank_constant": 20
+        }
+    }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3046.console"></div>
+<p>In the above example, we execute the <code class="literal">knn</code> and <code class="literal">standard</code> retrievers independently of each other.
+Then we use the <code class="literal">rrf</code> retriever to combine the results.</p>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO823-3"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>First, we execute the kNN search specified by the <code class="literal">knn</code> retriever to get its global top 50 results.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO823-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Second, we execute the query specified by the <code class="literal">standard</code> retriever to get its global top 50 results.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO823-1"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Then, on a coordinating node, we combine the kNN search top documents with the query top documents and rank them based on the RRF formula using parameters from the <code class="literal">rrf</code> retriever to get the combined top documents using the default <code class="literal">size</code> of <code class="literal">10</code>.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>Note that if <code class="literal">k</code> from a knn search is larger than <code class="literal">rank_window_size</code>, the results are truncated to <code class="literal">rank_window_size</code>.
+If <code class="literal">k</code> is smaller than <code class="literal">rank_window_size</code>, the results are <code class="literal">k</code> size.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="rrf-supported-features"></a>Reciprocal rank fusion supported features<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.15/docs/reference/search/rrf.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The <code class="literal">rrf</code> retriever supports:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="search-aggregations.html" title="Aggregations">aggregations</a>
+</li>
+<li class="listitem">
+<a class="xref" href="search-search.html#search-from-param">from</a>
+</li>
+</ul>
+</div>
+<p>The <code class="literal">rrf</code> retriever does not currently support:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="search-search.html#search-api-scroll-query-param">scroll</a>
+</li>
+<li class="listitem">
+<a class="xref" href="search-search.html#search-api-pit">point in time</a>
+</li>
+<li class="listitem">
+<a class="xref" href="search-search.html#search-sort-param">sort</a>
+</li>
+<li class="listitem">
+<a class="xref" href="filter-search-results.html#rescore" title="Rescore filtered search results">rescore</a>
+</li>
+<li class="listitem">
+<a class="xref" href="search-suggesters.html" title="Suggesters">suggesters</a>
+</li>
+<li class="listitem">
+<a class="xref" href="highlighting.html" title="Highlighting">highlighting</a>
+</li>
+<li class="listitem">
+<a class="xref" href="collapse-search-results.html" title="Collapse search results">collapse</a>
+</li>
+<li class="listitem">
+<a class="xref" href="search-profile.html#profiling-queries" title="Profiling Queries">profiling</a>
+</li>
+</ul>
+</div>
+<p>Using unsupported features as part of a search with an <code class="literal">rrf</code> retriever results in an exception.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="rrf-using-multiple-standard-retrievers"></a>Reciprocal rank fusion using multiple standard retrievers<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.15/docs/reference/search/rrf.asciidoc">edit</a></h3>
+</div></div></div>
+<p>The <code class="literal">rrf</code> retriever provides a way to combine and rank multiple <code class="literal">standard</code> retrievers.
+A primary use case is combining top documents from a traditional BM25 query and an <a class="xref" href="semantic-search-elser.html" title="Tutorial: semantic search with ELSER">ELSER</a> query to achieve improved relevance.</p>
+<p>An example request using RRF with multiple standard retrievers:</p>
+<a id="0350ff5ebb8207c004eb771088339cb4"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET example-index/_search
+{
+    "retriever": {
+        "rrf": { <a id="CO824-1"></a><i class="conum" data-value="3"></i>
+            "retrievers": [
+                {
+                    "standard": { <a id="CO824-2"></a><i class="conum" data-value="1"></i>
+                        "query": {
+                            "term": {
+                                "text": "blue shoes sale"
+                            }
+                        }
+                    }
+                },
+                {
+                    "standard": { <a id="CO824-3"></a><i class="conum" data-value="2"></i>
+                        "query": {
+                            "sparse_vector":{
+                                "field": "ml.tokens",
+                                "inference_id": "my_elser_model",
+                                "query": "What blue shoes are on sale?"
+                            }
+                        }
+                    }
+                }
+            ],
+            "rank_window_size": 50,
+            "rank_constant": 20
+        }
+    }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3047.console"></div>
+<p>In the above example, we execute each of the two <code class="literal">standard</code> retrievers independently of each other.
+Then we use the <code class="literal">rrf</code> retriever to combine the results.</p>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO824-2"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>First we run the <code class="literal">standard</code> retriever specifying a term query for <code class="literal">blue shoes sales</code> using the standard BM25 scoring algorithm.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO824-3"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Next we run the <code class="literal">standard</code> retriever specifying a sparse_vector query for <code class="literal">What blue shoes are on sale?</code>
+using our <a class="xref" href="semantic-search-elser.html" title="Tutorial: semantic search with ELSER">ELSER</a> scoring algorithm.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO824-1"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">rrf</code> retriever allows us to combine the two top documents sets generated by completely independent scoring algorithms with equal weighting.</p>
+</td>
+</tr>
+</table>
+</div>
+<p>Not only does this remove the need to figure out what the appropriate weighting is using linear combination, but RRF is also shown to give improved relevance over either query individually.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="rrf-using-sub-searches"></a>Reciprocal rank fusion using sub searches<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.15/docs/reference/search/rrf.asciidoc">edit</a></h3>
+</div></div></div>
+<p>RRF using sub searches is no longer supported.
+Use the <a class="xref" href="retriever.html" title="Retriever">retriever API</a> instead.
+See <a class="xref" href="rrf.html#rrf-using-multiple-standard-retrievers" title="Reciprocal rank fusion using multiple standard retrievers">using multiple standard retrievers</a> for an example.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="rrf-full-example"></a>Reciprocal rank fusion full example<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.15/docs/reference/search/rrf.asciidoc">edit</a></h3>
+</div></div></div>
+<p>We begin by creating a mapping for an index with a text field, a vector field, and an integer field along with indexing several documents.
+For this example we are going to use a vector with only a single dimension to make the ranking easier to explain.</p>
+<a id="3b1ff884f3bab390ae357e622c0544a9"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT example-index
+{
+    "mappings": {
+        "properties": {
+            "text" : {
+                "type" : "text"
+            },
+            "vector": {
+                "type": "dense_vector",
+                "dims": 1,
+                "index": true,
+                "similarity": "l2_norm",
+                 "index_options": {
+                     "type": "hnsw"
+                 }
+            },
+            "integer" : {
+                "type" : "integer"
+            }
+        }
+    }
+}
+
+PUT example-index/_doc/1
+{
+    "text" : "rrf",
+    "vector" : [5],
+    "integer": 1
+}
+
+PUT example-index/_doc/2
+{
+    "text" : "rrf rrf",
+    "vector" : [4],
+    "integer": 2
+}
+
+PUT example-index/_doc/3
+{
+    "text" : "rrf rrf rrf",
+    "vector" : [3],
+    "integer": 1
+}
+
+PUT example-index/_doc/4
+{
+    "text" : "rrf rrf rrf rrf",
+    "integer": 2
+}
+
+PUT example-index/_doc/5
+{
+    "vector" : [0],
+    "integer": 1
+}
+
+POST example-index/_refresh</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3048.console"></div>
+<p>We now execute a search using an <code class="literal">rrf</code> retriever with a <code class="literal">standard</code> retriever specifying a BM25 query, a <code class="literal">knn</code> retriever specifying a kNN search, and a terms aggregation.</p>
+<a id="7e74d1a54e816e8f40cfdaa01b070788"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET example-index/_search
+{
+    "retriever": {
+        "rrf": {
+            "retrievers": [
+                {
+                    "standard": {
+                        "query": {
+                            "term": {
+                                "text": "rrf"
+                            }
+                        }
+                    }
+                },
+                {
+                    "knn": {
+                        "field": "vector",
+                        "query_vector": [3],
+                        "k": 5,
+                        "num_candidates": 5
+                    }
+                }
+            ],
+            "rank_window_size": 5,
+            "rank_constant": 1
+        }
+    },
+    "size": 3,
+    "aggs": {
+        "int_count": {
+            "terms": {
+                "field": "integer"
+            }
+        }
+    }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3049.console"></div>
+<p>And we receive the response with ranked <code class="literal">hits</code> and the terms aggregation result.
+We have both the ranker&#8217;s <code class="literal">score</code> and the <code class="literal">_rank</code> option to show our top-ranked documents.</p>
+<div class="pre_wrapper lang-console-response">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console-response">{
+    "took": ...,
+    "timed_out" : false,
+    "_shards" : {
+        "total" : 1,
+        "successful" : 1,
+        "skipped" : 0,
+        "failed" : 0
+    },
+    "hits" : {
+        "total" : {
+            "value" : 5,
+            "relation" : "eq"
+        },
+        "max_score" : null,
+        "hits" : [
+            {
+                "_index" : "example-index",
+                "_id" : "3",
+                "_score" : 0.8333334,
+                "_rank" : 1,
+                "_source" : {
+                    "integer" : 1,
+                    "vector" : [
+                        3
+                    ],
+                    "text" : "rrf rrf rrf"
+                }
+            },
+            {
+                "_index" : "example-index",
+                "_id" : "2",
+                "_score" : 0.5833334,
+                "_rank" : 2,
+                "_source" : {
+                    "integer" : 2,
+                    "vector" : [
+                        4
+                    ],
+                    "text" : "rrf rrf"
+                }
+            },
+            {
+                "_index" : "example-index",
+                "_id" : "4",
+                "_score" : 0.5,
+                "_rank" : 3,
+                "_source" : {
+                    "integer" : 2,
+                    "text" : "rrf rrf rrf rrf"
+                }
+            }
+        ]
+    },
+    "aggregations" : {
+        "int_count" : {
+            "doc_count_error_upper_bound" : 0,
+            "sum_other_doc_count" : 0,
+            "buckets" : [
+                {
+                    "key" : 1,
+                    "doc_count" : 3
+                },
+                {
+                    "key" : 2,
+                    "doc_count" : 2
+                }
+            ]
+        }
+    }
+}</pre>
+</div>
+<p>Let&#8217;s break down how these hits were ranked.
+We start by running the <code class="literal">standard</code> retriever specifying a query and the <code class="literal">knn</code> retriever specifying a kNN search separately to collect what their individual hits are.</p>
+<p>First, we look at the hits for the query from the <code class="literal">standard</code> retriever.</p>
+<a id="464ec738d00e84f49c6c769b48bc049f"></a>
+<div class="pre_wrapper lang-console-result">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console-result">"hits" : [
+    {
+        "_index" : "example-index",
+        "_id" : "4",
+        "_score" : 0.16152832,              <a id="CO825-1"></a><i class="conum" data-value="1"></i>
+        "_source" : {
+            "integer" : 2,
+            "text" : "rrf rrf rrf rrf"
+        }
+    },
+    {
+        "_index" : "example-index",
+        "_id" : "3",                        <a id="CO825-2"></a><i class="conum" data-value="2"></i>
+        "_score" : 0.15876243,
+        "_source" : {
+            "integer" : 1,
+            "vector" : [3],
+            "text" : "rrf rrf rrf"
+        }
+    },
+    {
+        "_index" : "example-index",
+        "_id" : "2",                        <a id="CO825-3"></a><i class="conum" data-value="3"></i>
+        "_score" : 0.15350538,
+        "_source" : {
+            "integer" : 2,
+            "vector" : [4],
+            "text" : "rrf rrf"
+        }
+    },
+    {
+        "_index" : "example-index",
+        "_id" : "1",                        <a id="CO825-4"></a><i class="conum" data-value="4"></i>
+        "_score" : 0.13963442,
+        "_source" : {
+            "integer" : 1,
+            "vector" : [5],
+            "text" : "rrf"
+        }
+    }
+]</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO825-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>rank 1, <code class="literal">_id</code> 4</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO825-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>rank 2, <code class="literal">_id</code> 3</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO825-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>rank 3, <code class="literal">_id</code> 2</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO825-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>rank 4, <code class="literal">_id</code> 1</p>
+</td>
+</tr>
+</table>
+</div>
+<p>Note that our first hit doesn&#8217;t have a value for the <code class="literal">vector</code> field.
+Now, we look at the results for the kNN search from the <code class="literal">knn</code> retriever.</p>
+<a id="18f499a1ac0619546f0e8834b77e559a"></a>
+<div class="pre_wrapper lang-console-result">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console-result">"hits" : [
+    {
+        "_index" : "example-index",
+        "_id" : "3",                   <a id="CO826-1"></a><i class="conum" data-value="1"></i>
+        "_score" : 1.0,
+        "_source" : {
+            "integer" : 1,
+            "vector" : [3],
+            "text" : "rrf rrf rrf"
+        }
+    },
+    {
+        "_index" : "example-index",
+        "_id" : "2",                   <a id="CO826-2"></a><i class="conum" data-value="2"></i>
+        "_score" : 0.5,
+        "_source" : {
+            "integer" : 2,
+            "vector" : [4],
+            "text" : "rrf rrf"
+        }
+    },
+    {
+        "_index" : "example-index",
+        "_id" : "1",                   <a id="CO826-3"></a><i class="conum" data-value="3"></i>
+        "_score" : 0.2,
+        "_source" : {
+            "integer" : 1,
+            "vector" : [5],
+            "text" : "rrf"
+        }
+    },
+    {
+        "_index" : "example-index",
+        "_id" : "5",                   <a id="CO826-4"></a><i class="conum" data-value="4"></i>
+        "_score" : 0.1,
+        "_source" : {
+            "integer" : 1,
+            "vector" : [0]
+        }
+    }
+]</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO826-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>rank 1, <code class="literal">_id</code> 3</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO826-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>rank 2, <code class="literal">_id</code> 2</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO826-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>rank 3, <code class="literal">_id</code> 1</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO826-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>rank 4, <code class="literal">_id</code> 5</p>
+</td>
+</tr>
+</table>
+</div>
+<p>We can now take the two individually ranked result sets and apply the RRF formula to them using parameters from the <code class="literal">rrf</code> retriever to get our final ranking.</p>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python"># doc  | query     | knn       | score
+_id: 1 = 1.0/(1+4) + 1.0/(1+3) = 0.4500
+_id: 2 = 1.0/(1+3) + 1.0/(1+2) = 0.5833
+_id: 3 = 1.0/(1+2) + 1.0/(1+1) = 0.8333
+_id: 4 = 1.0/(1+1)             = 0.5000
+_id: 5 =             1.0/(1+4) = 0.2000</pre>
+</div>
+<p>We rank the documents based on the RRF formula with a <code class="literal">rank_window_size</code> of <code class="literal">5</code> truncating the bottom <code class="literal">2</code> docs in our RRF result set with a <code class="literal">size</code> of <code class="literal">3</code>.
+We end with <code class="literal">_id: 3</code> as <code class="literal">_rank: 1</code>, <code class="literal">_id: 2</code> as <code class="literal">_rank: 2</code>, and <code class="literal">_id: 4</code> as <code class="literal">_rank: 3</code>.
+This ranking matches the result set from the original RRF search as expected.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_explain_in_rrf"></a>Explain in RRF<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.15/docs/reference/search/rrf.asciidoc">edit</a></h3>
+</div></div></div>
+<p>In addition to individual query scoring details, we can make use of the <code class="literal">explain=true</code> parameter to get information on how the RRF scores for each document were computed.
+Working with the example above, and by adding <code class="literal">explain=true</code> to the search request, we&#8217;d now have a response that looks like the following:</p>
+<div class="pre_wrapper lang-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js">{
+    "hits":
+    [
+        {
+            "_index": "example-index",
+            "_id": "3",
+            "_score": 0.8333334,
+            "_rank": 1,
+            "_explanation":
+            {
+                "value": 0.8333334,                                                                                                                                               <a id="CO827-1"></a><i class="conum" data-value="1"></i>
+                "description": "rrf score: [0.8333334] computed for initial ranks [2, 1] with rankConstant: [1] as sum of [1 / (rank + rankConstant)] for each query",            <a id="CO827-2"></a><i class="conum" data-value="2"></i>
+                "details":                                                                                                                                                        <a id="CO827-3"></a><i class="conum" data-value="3"></i>
+                [
+                    {
+                        "value": 2,                                                                                                                                               <a id="CO827-4"></a><i class="conum" data-value="4"></i>
+                        "description": "rrf score: [0.33333334], for rank [2] in query at index [0] computed as [1 / (2 + 1]), for matching query with score: ",
+                        "details":                                                                                                                                                <a id="CO827-5"></a><i class="conum" data-value="5"></i>
+                        [
+                            {
+                                "value": 0.15876243,
+                                "description": "weight(text:rrf in 0) [PerFieldSimilarity], result of:",
+                                "details":
+                                [
+                                    ...
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "value": 1,                                                                                                                                              <a id="CO827-6"></a><i class="conum" data-value="6"></i>
+                        "description": "rrf score: [0.5], for rank [1] in query at index [1] computed as [1 / (1 + 1]), for matching query with score: ",
+                        "details":
+                        [
+                            {
+                                "value": 1,
+                                "description": "within top k documents",
+                                "details":
+                                []
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        ...
+    ]
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO827-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>the final RRF score for document with <code class="literal">_id=3</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO827-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>a description on how this score was computed based on the ranks of this document in each individual query</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO827-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>details on how the RRF score was computed for each of the queries</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO827-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>the <code class="literal">value</code> heres specifies the <code class="literal">rank</code> of this document in the specific query</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO827-5"><i class="conum" data-value="5"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>standard <code class="literal">explain</code> output of the underlying query, describing matching terms and weights</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO827-6"><i class="conum" data-value="6"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>the <code class="literal">value</code> heres specifies the <code class="literal">rank</code> of this document for the second (<code class="literal">knn</code>) query</p>
+</td>
+</tr>
+</table>
+</div>
+<p>In addition to the above, explain in RRF also supports <a class="xref" href="query-dsl-bool-query.html#named-queries" title="Named queries">named queries</a> using the <code class="literal">_name</code> parameter.
+Using named queries allows for easier and more intuitive understanding of the RRF score computation, especially when dealing with multiple queries.
+So, we would now have:</p>
+<div class="pre_wrapper lang-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js">GET example-index/_search
+{
+    "retriever": {
+        "rrf": {
+            "retrievers": [
+                {
+                    "standard": {
+                        "query": {
+                            "term": {
+                                "text": "rrf"
+                            }
+                        }
+                    }
+                },
+                {
+                    "knn": {
+                        "field": "vector",
+                        "query_vector": [3],
+                        "k": 5,
+                        "num_candidates": 5,
+                        "_name": "my_knn_query"                           <a id="CO828-1"></a><i class="conum" data-value="1"></i>
+                    }
+                }
+            ],
+            "rank_window_size": 5,
+            "rank_constant": 1
+        }
+    },
+    "size": 3,
+    "aggs": {
+        "int_count": {
+            "terms": {
+                "field": "integer"
+            }
+        }
+    }
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO828-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Here we specify a <code class="literal">_name</code> for the <code class="literal">knn</code> retriever</p>
+</td>
+</tr>
+</table>
+</div>
+<p>The response would now include the named query in the explanation:</p>
+<div class="pre_wrapper lang-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js">{
+    "hits":
+    [
+        {
+            "_index": "example-index",
+            "_id": "3",
+            "_score": 0.8333334,
+            "_rank": 1,
+            "_explanation":
+            {
+                "value": 0.8333334,
+                "description": "rrf score: [0.8333334] computed for initial ranks [2, 1] with rankConstant: [1] as sum of [1 / (rank + rankConstant)] for each query",
+                "details":
+                [
+                    {
+                        "value": 2,
+                        "description": "rrf score: [0.33333334], for rank [2] in query at index [0] computed as [1 / (2 + 1]), for matching query with score: ",
+                        "details":
+                        [
+                            ...
+                        ]
+                    },
+                    {
+                        "value": 1,
+                        "description": "rrf score: [0.5], for rank [1] in query [my_knn_query] computed as [1 / (1 + 1]), for matching query with score: ",                      <a id="CO829-1"></a><i class="conum" data-value="1"></i>
+                        "details":
+                        [
+                           ...
+                        ]
+                    }
+                ]
+            }
+        }
+        ...
+    ]
+}</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO829-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Instead of the anonymous <code class="literal">at index n</code> , we now have a reference to the named query <code class="literal">my_knn_query</code>.</p>
+</td>
+</tr>
+</table>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="_pagination_in_rrf"></a>Pagination in RRF<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.15/docs/reference/search/rrf.asciidoc">edit</a></h3>
+</div></div></div>
+<p>When using <code class="literal">rrf</code> you can paginate through the results using the <code class="literal">from</code> parameter.
+As the final ranking is solely dependent on the original query ranks, to ensure consistency when paginating, we have to make sure that while <code class="literal">from</code> changes, the order of what we have already seen remains intact.
+To that end, we&#8217;re using a fixed <code class="literal">rank_window_size</code> as the whole available result set upon which we can paginate.
+This essentially means that if:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">from + size</code> &le; <code class="literal">rank_window_size</code> : we could get  <code class="literal">results[from: from+size]</code> documents back from the final <code class="literal">rrf</code> ranked result set
+</li>
+<li class="listitem">
+<code class="literal">from + size</code> &gt; <code class="literal">rank_window_size</code> : we would get 0 results back, as the request would fall outside the available <code class="literal">rank_window_size</code>-sized result set.
+</li>
+</ul>
+</div>
+<p>An important thing to note here is that since <code class="literal">rank_window_size</code> is all the results that we&#8217;ll get to see from the individual query components, pagination guarantees consistency, i.e. no documents are skipped or duplicated in multiple pages, iff <code class="literal">rank_window_size</code> remains the same.
+If <code class="literal">rank_window_size</code> changes, then the order of the results might change as well, even for the same ranks.</p>
+<p>To illustrate all of the above, let&#8217;s consider the following simplified example where we have two queries, <code class="literal">queryA</code> and <code class="literal">queryB</code> and their ranked documents:</p>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python">     |  queryA   |  queryB    |
+_id: |  1        |  5         |
+_id: |  2        |  4         |
+_id: |  3        |  3         |
+_id: |  4        |  1         |
+_id: |           |  2         |</pre>
+</div>
+<p>For <code class="literal">rank_window_size=5</code> we would get to see all documents from both <code class="literal">queryA</code> and <code class="literal">queryB</code>.
+Assuming a <code class="literal">rank_constant=1</code>, the <code class="literal">rrf</code> scores would be:</p>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python"># doc   | queryA     | queryB       | score
+_id: 1 =  1.0/(1+1)  + 1.0/(1+4)      = 0.7
+_id: 2 =  1.0/(1+2)  + 1.0/(1+5)      = 0.5
+_id: 3 =  1.0/(1+3)  + 1.0/(1+3)      = 0.5
+_id: 4 =  1.0/(1+4)  + 1.0/(1+2)      = 0.533
+_id: 5 =    0        + 1.0/(1+1)      = 0.5</pre>
+</div>
+<p>So the final ranked result set would be [<code class="literal">1</code>, <code class="literal">4</code>, <code class="literal">2</code>, <code class="literal">3</code>, <code class="literal">5</code>] and we would paginate over that, since <code class="literal">rank_window_size == len(results)</code>.
+In this scenario, we would have:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">from=0, size=2</code> would return documents [<code class="literal">1</code>, <code class="literal">4</code>] with ranks <code class="literal">[1, 2]</code>
+</li>
+<li class="listitem">
+<code class="literal">from=2, size=2</code> would return documents [<code class="literal">2</code>, <code class="literal">3</code>] with ranks <code class="literal">[3, 4]</code>
+</li>
+<li class="listitem">
+<code class="literal">from=4, size=2</code> would return document [<code class="literal">5</code>] with rank <code class="literal">[5]</code>
+</li>
+<li class="listitem">
+<code class="literal">from=6, size=2</code> would return an empty result set as it there are no more results to iterate over
+</li>
+</ul>
+</div>
+<p>Now, if we had a <code class="literal">rank_window_size=2</code>, we would only get to see <code class="literal">[1, 2]</code> and <code class="literal">[5, 4]</code> documents for queries <code class="literal">queryA</code> and <code class="literal">queryB</code> respectively.
+Working out the math, we would see that the results would now be slightly different, because we would have no knowledge of the documents in positions <code class="literal">[3: end]</code> for either query.</p>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python"># doc   | queryA     | queryB         | score
+_id: 1 =  1.0/(1+1)  + 0              = 0.5
+_id: 2 =  1.0/(1+2)  + 0              = 0.33
+_id: 4 =    0        + 1.0/(1+2)      = 0.33
+_id: 5 =    0        + 1.0/(1+1)      = 0.5</pre>
+</div>
+<p>The final ranked result set would be [<code class="literal">1</code>, <code class="literal">5</code>, <code class="literal">2</code>, <code class="literal">4</code>], and we would be able to paginate on the top <code class="literal">rank_window_size</code> results, i.e. [<code class="literal">1</code>, <code class="literal">5</code>].
+So for the same params as above, we would now have:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">from=0, size=2</code> would return [<code class="literal">1</code>, <code class="literal">5</code>] with ranks <code class="literal">[1, 2]</code>
+</li>
+<li class="listitem">
+<code class="literal">from=2, size=2</code> would return an empty result set as it would fall outside the available <code class="literal">rank_window_size</code> results.
+</li>
+</ul>
+</div>
+</div>
+
+</div>
+</div>
+</div><div class="navfooter">
+<span class="prev">
+<a href="retriever.html">« Retriever</a>
+</span>
+<span class="next">
+<a href="scroll-api.html">Scroll API »</a>
+</span>
+</div>
+</body>
+</html>

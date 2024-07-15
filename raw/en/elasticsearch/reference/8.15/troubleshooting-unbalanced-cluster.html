@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="keywords" content="hot-spotting, hotspot, hot-spot, hot spot, hotspots, hotspotting">
+<title>Troubleshooting an unbalanced cluster | Elasticsearch Guide [8.15] | Elastic</title>
+<meta class="elastic" name="content" content="Troubleshooting an unbalanced cluster | Elasticsearch Guide [8.15]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.15]"/>
+<link rel="up" href="troubleshooting.html" title="Troubleshooting"/>
+<link rel="prev" href="troubleshooting-shards-capacity-issues.html" title="Troubleshooting shards capacity health issues"/>
+<link rel="next" href="diagnostic.html" title="Capturing diagnostics"/>
+<meta class="elastic" name="product_version" content="8.15"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.15"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.15"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body>
+<div class="page_header">
+You are looking at preliminary documentation for a future release.
+Not what you want? See the
+<a href="../current/index.html">current release documentation</a>.
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="troubleshooting-shards-capacity-issues.html">« Troubleshooting shards capacity health issues</a>
+</span>
+<span class="next">
+<a href="diagnostic.html">Capturing diagnostics »</a>
+</span>
+</div>
+<div class="book" lang="en">
+<div class="titlepage">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.15]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="troubleshooting.html">Troubleshooting</a></span>
+</div>
+<div>
+<div><h1 class="title"><a id="id-1"></a>Troubleshooting an unbalanced cluster</h1><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.15/docs/reference/troubleshooting/troubleshooting-unbalanced-cluster.asciidoc">edit</a></div>
+</div>
+<!--EXTRA-->
+</div>
+<div id="content">
+<div class="chapter">
+<div class="titlepage"><div><div>
+<h2 class="title"><a id="troubleshooting-unbalanced-cluster"></a>Troubleshooting an unbalanced cluster<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.15/docs/reference/troubleshooting/troubleshooting-unbalanced-cluster.asciidoc">edit</a></h2>
+</div></div></div>
+<p>Elasticsearch balances shards across data tiers to achieve a good compromise between:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+shard count
+</li>
+<li class="listitem">
+disk usage
+</li>
+<li class="listitem">
+write load (for indices in data streams)
+</li>
+</ul>
+</div>
+<p>Elasticsearch does not take into account the amount or complexity of search queries when rebalancing shards.
+This is indirectly achieved by balancing shard count and disk usage.</p>
+<p>There is no guarantee that individual components will be evenly spread across the nodes.
+This could happen if some nodes have fewer shards, or are using less disk space,
+but are assigned shards with higher write loads.</p>
+<p>Use the <a class="xref" href="cat-allocation.html" title="cat allocation API">cat allocation command</a> to list workloads per node:</p>
+<div class="pre_wrapper lang-ruby alternative">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.cat.allocation(
+  v: true
+)
+puts response</pre>
+</div>
+<a id="5c7ece1f30267adabdb832424871900a"></a>
+<div class="pre_wrapper lang-console default has-ruby">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console default has-ruby">GET /_cat/allocation?v</pre>
+</div>
+<div class="console_widget has-ruby" data-snippet="snippets/2288.console"></div>
+<p>The API returns the following response:</p>
+<div class="pre_wrapper lang-text">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-text">shards shards.undesired write_load.forecast disk.indices.forecast disk.indices disk.used disk.avail disk.total disk.percent host      ip        node    node.role
+     1                0                 0.0                  260b         260b    47.3gb     43.4gb    100.7gb           46 127.0.0.1 127.0.0.1 CSUXak2 himrst</pre>
+</div>
+<p>This response contains the following information that influences balancing:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">shards</code> is the current number of shards allocated to the node
+</li>
+<li class="listitem">
+<code class="literal">shards.undesired</code> is the number of shards that needs to be moved to other nodes to finish balancing
+</li>
+<li class="listitem">
+<code class="literal">disk.indices.forecast</code> is the expected disk usage according to projected shard growth
+</li>
+<li class="listitem">
+<code class="literal">write_load.forecast</code> is the projected total write load associated with this node
+</li>
+</ul>
+</div>
+<p>A cluster is considered balanced when all shards are in their desired locations,
+which means that no further shard movements are planned (all <code class="literal">shards.undesired</code> values are equal to 0).</p>
+<p>Some operations such as node restarting, decommissioning, or changing cluster allocation settings
+are disruptive and might require multiple shards to move in order to rebalance the cluster.</p>
+<p>Shard movement order is not deterministic and mostly determined by the source and target node readiness to move a shard.
+While rebalancing is in progress some nodes might appear busier than others.</p>
+<p>When a shard is allocated to an undesired node it uses the resources of the current node instead of the target.
+This might cause a hotspot (disk or CPU) when multiple shards reside on the current node that have not been
+moved to their corresponding targets yet.</p>
+<p>If a cluster takes a long time to finish rebalancing you might find the following log entries:</p>
+<div class="pre_wrapper lang-text">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-text">[WARN][o.e.c.r.a.a.DesiredBalanceReconciler] [10%] of assigned shards (10/100) are not on their desired nodes, which exceeds the warn threshold of [10%]</pre>
+</div>
+<p>This is not concerning as long as the number of such shards is decreasing and this warning appears occasionally,
+for example after rolling restarts or changing allocation settings.</p>
+<p>If the cluster has this warning repeatedly for an extended period of time (multiple hours),
+it is possible that the desired balance is diverging too far from the current state.</p>
+<p>If so, increase the <a class="xref" href="modules-cluster.html#shards-rebalancing-heuristics" title="Shard balancing heuristics settings"><code class="literal">cluster.routing.allocation.balance.threshold</code></a>
+to reduce the sensitivity of the algorithm that tries to level up the shard count and disk usage within the cluster.</p>
+<p>And reset the desired balance using the following API call:</p>
+<a id="b3756e700d0f6c7e8919003bdf26bc8f"></a>
+<a id="delete-desired-balance-request-example"></a><div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">DELETE /_internal/desired_balance</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/2289.console"></div>
+</div>
+</div>
+</div><div class="navfooter">
+<span class="prev">
+<a href="troubleshooting-shards-capacity-issues.html">« Troubleshooting shards capacity health issues</a>
+</span>
+<span class="next">
+<a href="diagnostic.html">Capturing diagnostics »</a>
+</span>
+</div>
+</body>
+</html>
