@@ -322,6 +322,7 @@ that contain special characters:</p>
 </dt>
 <dd>
 The column name.
+In case of duplicate column names, only the rightmost duplicate creates a column.
 </dd>
 <dt>
 <span class="term">
@@ -457,6 +458,8 @@ multiple values, <code class="literal">DISSECT</code> will process each value.
 </dt>
 <dd>
 A <a class="xref" href="esql-process-data-with-dissect-and-grok.html#esql-dissect-patterns" title="Dissect patterns">dissect pattern</a>.
+If a field name conflicts with an existing column, the existing column is dropped.
+If a field name is used more than once, only the rightmost duplicate creates a column.
 </dd>
 <dt>
 <span class="term">
@@ -617,7 +620,9 @@ name as the <code class="literal">match_field</code> defined in the <a class="xr
 The enrich fields from the enrich index that are added to the result as new
 columns. If a column with the same name as the enrich field already exists, the
 existing column will be replaced by the new column. If not specified, each of
-the enrich fields defined in the policy is added
+the enrich fields defined in the policy is added.
+A column with the same name as the enrich field will be dropped unless the
+enrich field is renamed.
 </dd>
 <dt>
 <span class="term">
@@ -627,6 +632,9 @@ the enrich fields defined in the policy is added
 <dd>
 Enables you to change the name of the column that&#8217;s added for each of the enrich
 fields. Defaults to the enrich field name.
+If a column has the same name as the new name, it will be discarded.
+If a name (new or original) occurs more than once, only the rightmost duplicate
+creates a new column.
 </dd>
 </dl>
 </div>
@@ -777,6 +785,8 @@ columns.</p>
 </dt>
 <dd>
 The column name.
+If a column with the same name already exists, the existing column is dropped.
+If a column name is used more than once, only the rightmost duplicate creates a column.
 </dd>
 <dt>
 <span class="term">
@@ -785,7 +795,7 @@ The column name.
 </dt>
 <dd>
 The value for the column. Can be a literal, an expression, or a
-<a class="xref" href="esql-functions-operators.html#esql-functions" title="Functions overview">function</a>.
+<a class="xref" href="esql-functions-operators.html#esql-functions" title="Functions overview">function</a>. Can use columns defined left of this one.
 </dd>
 </dl>
 </div>
@@ -984,6 +994,9 @@ multiple values, <code class="literal">GROK</code> will process each value.
 </dt>
 <dd>
 A grok pattern.
+If a field name conflicts with an existing column, the existing column is discarded.
+If a field name is used more than once, a multi-valued column will be created with one value
+per each occurrence of the field name.
 </dd>
 </dl>
 </div>
@@ -1096,6 +1109,47 @@ be converted by appending <code class="literal">:type</code> to the semantics in
 </tbody>
 </table>
 </div>
+<p>If a field name is used more than once, <code class="literal">GROK</code> creates a multi-valued
+column:</p>
+<div class="pre_wrapper lang-esql merge styled">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql merge styled">FROM addresses
+| KEEP city.name, zip_code
+| GROK zip_code "%{WORD:zip_parts} %{WORD:zip_parts}"</pre>
+</div>
+<div class="informaltable">
+<table border="1" cellpadding="4px" class="monospaced styled">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">city.name:keyword</th>
+<th align="left" valign="top">zip_code:keyword</th>
+<th align="left" valign="top">zip_parts:keyword</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>Amsterdam</p></td>
+<td align="left" valign="top"><p>1016 ED</p></td>
+<td align="left" valign="top"><p>["1016", "ED"]</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>San Francisco</p></td>
+<td align="left" valign="top"><p>CA 94108</p></td>
+<td align="left" valign="top"><p>["CA", "94108"]</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>Tokyo</p></td>
+<td align="left" valign="top"><p>100-7014</p></td>
+<td align="left" valign="top"><p>null</p></td>
+</tr>
+</tbody>
+</table>
+</div>
 <h3><a id="esql-keep"></a><code class="literal">KEEP</code><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.15/docs/reference/esql/processing-commands/keep.asciidoc">edit</a></h3>
 <p><span class="strong strong"><strong>Syntax</strong></span></p>
 <div class="pre_wrapper lang-esql">
@@ -1112,6 +1166,8 @@ be converted by appending <code class="literal">:type</code> to the semantics in
 </dt>
 <dd>
 A comma-separated list of columns to keep. Supports wildcards.
+See below for the behavior in case an existing column matches multiple
+given wildcards or column names.
 </dd>
 </dl>
 </div>
@@ -1133,7 +1189,7 @@ Wildcard only (<code class="literal">*</code>)
 </li>
 </ol>
 </div>
-<p>If a field matches two expressions with the same precedence, the right-most expression wins.</p>
+<p>If a field matches two expressions with the same precedence, the rightmost expression wins.</p>
 <p>Refer to the examples for illustrations of these precedence rules.</p>
 <p><span class="strong strong"><strong>Examples</strong></span></p>
 <p>The columns are returned in the specified order:</p>
@@ -1468,6 +1524,7 @@ settings:</p>
 </dt>
 <dd>
 The name of the <code class="literal">table</code> provided in the request to match.
+If the table&#8217;s column names conflict with existing columns, the existing columns will be dropped.
 </dd>
 <dt>
 <span class="term">
@@ -1605,7 +1662,9 @@ The name of a column you want to rename.
 </span>
 </dt>
 <dd>
-The new name of the column.
+The new name of the column. If it conflicts with an existing column name,
+the existing column is dropped. If multiple columns are renamed to the same
+name, all but the rightmost column with the same new name are dropped.
 </dd>
 </dl>
 </div>
@@ -1703,6 +1762,8 @@ sort order, <code class="literal">null</code> values are sorted first. You can c
 <dd>
 The name by which the aggregated value is returned. If omitted, the name is
 equal to the corresponding expression (<code class="literal">expressionX</code>).
+If multiple columns have the same name, all but the rightmost column with this
+name will be ignored.
 </dd>
 <dt>
 <span class="term">
@@ -1719,6 +1780,7 @@ An expression that computes an aggregated value.
 </dt>
 <dd>
 An expression that outputs the values to group by.
+If its name coincides with one of the computed columns, that column will be ignored.
 </dd>
 </dl>
 </div>
