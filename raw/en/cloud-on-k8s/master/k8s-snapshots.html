@@ -64,6 +64,10 @@ Set up a Snapshot Lifecycle Management Policy through <a href="/guide/en/elastic
 </div>
 </div>
 <p>For more information on Elasticsearch snapshots, check <a href="/guide/en/elasticsearch/reference/current/snapshot-restore.html" class="ulink" target="_top">Snapshot and Restore</a> in the Elasticsearch documentation.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="k8s_configuration_examples"></a>Configuration examples<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/main/docs/orchestrating-elastic-stack-applications/elasticsearch/snapshots.asciidoc">edit</a></h3>
+</div></div></div>
 <p>What follows is a non-exhaustive list of configuration examples. The first example might be worth reading even if you are targeting a Cloud provider other than GCP as it covers adding snapshot repository credentials to the Elasticsearch keystore and illustrates the basic workflow of setting up a snapshot repository:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -76,13 +80,13 @@ Set up a Snapshot Lifecycle Management Policy through <a href="/guide/en/elastic
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<a class="xref" href="k8s-snapshots.html#k8s-basic-snapshot-azure" title="Basic snapshot repository setup for Azure">Basic snapshot repository setup for Azure</a>
-</li>
-<li class="listitem">
 <a class="xref" href="k8s-snapshots.html#k8s-gke-workload-identiy" title="Use GKE Workload Identity">Use GKE Workload Identity</a>
 </li>
 <li class="listitem">
 <a class="xref" href="k8s-snapshots.html#k8s-iam-service-accounts" title="Use AWS IAM roles for service accounts (IRSA)">Use AWS IAM roles for service accounts (IRSA)</a>
+</li>
+<li class="listitem">
+<a class="xref" href="k8s-snapshots.html#k8s-azure-workload-identity" title="Use Azure Workload Identity">Use Azure Workload Identity</a>
 </li>
 </ul>
 </div>
@@ -94,10 +98,6 @@ Set up a Snapshot Lifecycle Management Policy through <a href="/guide/en/elastic
 </li>
 </ul>
 </div>
-<div class="section">
-<div class="titlepage"><div><div>
-<h3 class="title"><a id="k8s_configuration_examples"></a>Configuration examples<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/main/docs/orchestrating-elastic-stack-applications/elasticsearch/snapshots.asciidoc">edit</a></h3>
-</div></div></div>
 <div class="section">
 <div class="titlepage"><div><div>
 <h4 class="title"><a id="k8s-basic-snapshot-gcs"></a>Basic snapshot repository setup using GCS as an example<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/main/docs/orchestrating-elastic-stack-applications/elasticsearch/snapshots.asciidoc">edit</a></h4>
@@ -416,6 +416,183 @@ spec:
 
 <div class="section">
 <div class="titlepage"><div><div>
+<h4 class="title"><a id="k8s-azure-workload-identity"></a>Use Azure Workload Identity<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/main/docs/orchestrating-elastic-stack-applications/elasticsearch/snapshots.asciidoc">edit</a></h4>
+</div></div></div>
+<p>Starting with version 8.16 Elasticsearch supports Azure Workload identity which allows the use of Azure blob storage for Elasticsearch snapshots without exposing Azure credentials directly to Elasticsearch.</p>
+<p>Follow the <a href="https://learn.microsoft.com/en-us/azure/aks/workload-identity-deploy-cluster" class="ulink" target="_top">Azure documentation</a> for setting up workload identity for the first five steps:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<a href="https://learn.microsoft.com/en-us/azure/aks/workload-identity-deploy-cluster#create-a-resource-group" class="ulink" target="_top">Create a resource group</a>, if it does not exist yet.
+</li>
+<li class="listitem">
+<a href="https://learn.microsoft.com/en-us/azure/aks/workload-identity-deploy-cluster#create-an-aks-cluster" class="ulink" target="_top">Create</a> or <a href="https://learn.microsoft.com/en-us/azure/aks/workload-identity-deploy-cluster#update-an-existing-aks-cluster" class="ulink" target="_top">update</a> your AKS cluster to enable workload identity.
+</li>
+<li class="listitem">
+<a href="https://learn.microsoft.com/en-us/azure/aks/workload-identity-deploy-cluster#retrieve-the-oidc-issuer-url" class="ulink" target="_top">Retrieve the OIDC issuer URL</a>.
+</li>
+<li class="listitem">
+<a href="https://learn.microsoft.com/en-us/azure/aks/workload-identity-deploy-cluster#create-a-managed-identity" class="ulink" target="_top">Create a managed identity</a> and <a href="https://learn.microsoft.com/en-us/azure/aks/workload-identity-deploy-cluster#create-a-kubernetes-service-account" class="ulink" target="_top">link it to a Kubernetes service account</a>.
+</li>
+<li class="listitem">
+<p><a href="https://learn.microsoft.com/en-us/azure/aks/workload-identity-deploy-cluster#create-the-federated-identity-credential" class="ulink" target="_top">Create the federated identity credential</a>.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The following steps diverge from the tutorial in the Azure documentation. However, variables initialised as part of the Azure tutorial are still assumed to be present.</p>
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Create an Azure storage account, if it does not exist yet.</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">az storage account create \
+      --name esstorage \
+      --resource-group "${RESOURCE_GROUP}" \
+      --location "${LOCATION}" \
+      --encryption-services blob \
+      --sku Standard_ZRS <a id="CO11-1"></a><i class="conum" data-value="1"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO11-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This can be any of the supported storage account types <code class="literal">Standard_LRS</code>, <code class="literal">Standard_ZRS</code>, <code class="literal">Standard_GRS</code>, <code class="literal">Standard_RAGRS</code> but not <code class="literal">Premium_LRS</code> see <a href="/guide/en/elasticsearch/reference/current/repository-azure.html" class="ulink" target="_top">the Elasticsearch documentation</a> for details.</p>
+</td>
+</tr>
+</table>
+</div>
+</li>
+<li class="listitem">
+<p>Create a container in the storage account, for this example <code class="literal">es-snapshots</code>.</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">az storage container create \
+   --account-name "${STORAGE_ACCOUNT_NAME}" \
+   --name es-snapshots --auth-mode login</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Create a role assignment between the managed identity and the storage account.</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">IDENTITY_PRINCIPAL_ID=$(az identity show \
+    --name "${USER_ASSIGNED_IDENTITY_NAME}" \
+    --resource-group "${RESOURCE_GROUP}" \
+    --query principalId --o tsv)
+
+STORAGE_SCOPE=$(az storage account show \
+  --resource-group "${RESOURCE_GROUP}" \
+  --name "${STORAGE_ACCOUNT_NAME}" --query id -o tsv | sed 's#/##') <a id="CO12-1"></a><i class="conum" data-value="1"></i>
+
+az role assignment create \
+  --assignee-object-id "${IDENTITY_PRINCIPAL_ID}" \
+  --role "Storage Blob Data Contributor" \
+  --scope "${STORAGE_SCOPE}"</pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO12-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The storage account ID needs to be specified as the scope for the role assignment without the leading slash returned by the <code class="literal">az storage account show</code> command.</p>
+</td>
+</tr>
+</table>
+</div>
+</li>
+<li class="listitem">
+<p>Create a Kubernetes secret, called <code class="literal">keystore</code> in this example, with the storage account name. This is necessary to be able to specify the account name as a secure setting in Elasticsearch in the next step.</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">kubectl create secret generic keystore \
+  --from-literal=azure.client.default.account=${STORAGE_ACCOUNT_NAME}</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Create an Elasticsearch cluster that uses the Kubernetes service account created earlier.</p>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: az-workload-identity-sample
+spec:
+  version: 8.16.0
+  secureSettings:
+  - secretName: keystore <a id="CO13-1"></a><i class="conum" data-value="1"></i>
+  nodeSets:
+  - name: default
+    count: 1
+    podTemplate:
+      metadata:
+        labels:
+          azure.workload.identity/use: "true"
+      spec:
+        serviceAccountName: workload-identity-sa <a id="CO13-2"></a><i class="conum" data-value="2"></i>
+        containers:
+        - name: elasticsearch
+          env:
+          - name: AZURE_FEDERATED_TOKEN_FILE <a id="CO13-3"></a><i class="conum" data-value="3"></i>
+            value: /usr/share/elasticsearch/config/azure/tokens/azure-identity-token
+          volumeMounts:
+          - name: azure-identity-token
+            mountPath: /usr/share/elasticsearch/config/azure/tokens <a id="CO13-4"></a><i class="conum" data-value="3"></i></pre>
+</div>
+<div class="calloutlist">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO13-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Specify the Kubernetes secret created in the previous step to configure the Azure storage account name as a secure setting.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO13-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>This is the service account created earlier in the steps from the <a href="https://learn.microsoft.com/en-us/azure/aks/workload-identity-deploy-cluster#create-a-kubernetes-service-account" class="ulink" target="_top">Azure Workload Identity</a> tutorial.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO13-3"><i class="conum" data-value="3"></i></a><a href="#CO13-4"></a></p>
+</td>
+<td align="left" valign="top">
+<p>The corresponding volume is injected by the <a href="https://azure.github.io/azure-workload-identity/docs/installation/mutating-admission-webhook.html" class="ulink" target="_top">Azure Workload Identity Mutating Admission Webhook</a>. For Elasticsearch to be able to access the token, the mount needs to be in a sub-directory of the Elasticsearch config directory. The corresponding environment variable needs to be adjusted as well.</p>
+</td>
+</tr>
+</table>
+</div>
+</li>
+<li class="listitem">
+<p>Create a snapshot repository of type <code class="literal">azure</code> through the Elasticsearch API, or through <a class="xref" href="k8s-stack-config-policy.html" title="Elastic Stack configuration policies"><em>Elastic Stack configuration policies</em></a>.</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">POST _snapshot/my_azure_repository
+{
+  "type": "azure",
+  "settings": {
+    "container": "es-snapshots"
+  }
+}</pre>
+</div>
+</li>
+</ol>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
 <h4 class="title"><a id="k8s-s3-compatible"></a>Use S3-compatible services<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/main/docs/orchestrating-elastic-stack-applications/elasticsearch/snapshots.asciidoc">edit</a></h4>
 </div></div></div>
 <p>The following example assumes that you have deployed and configured a S3 compatible object store like <a href="https://min.io" class="ulink" target="_top">MinIO</a> that can be reached from the Kubernetes cluster, and also that you have created a bucket in said service, called <code class="literal">es-repo</code> in this example. The example also assumes an Elasticsearch cluster named <code class="literal">es</code> is deployed within the cluster.
@@ -519,8 +696,8 @@ spec:
   "type": "s3",
   "settings": {
     "bucket": "es-repo",
-    "path_style_access": true,	<a id="CO11-1"></a><i class="conum" data-value="1"></i>
-    "endpoint": "https://mys3service.default.svc.cluster.local/" <a id="CO11-2"></a><i class="conum" data-value="2"></i>
+    "path_style_access": true,	<a id="CO14-1"></a><i class="conum" data-value="1"></i>
+    "endpoint": "https://mys3service.default.svc.cluster.local/" <a id="CO14-2"></a><i class="conum" data-value="2"></i>
   }
 }</pre>
 </div>
@@ -528,7 +705,7 @@ spec:
 <table border="0" summary="Callout list">
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO11-1"><i class="conum" data-value="1"></i></a></p>
+<p><a href="#CO14-1"><i class="conum" data-value="1"></i></a></p>
 </td>
 <td align="left" valign="top">
 <p>Whether or not you need to enable <code class="literal">path_style_access</code> depends on your choice of S3-compatible storage service and how it is deployed. If it is exposed through a standard Kubernetes service it is likely you need this option</p>
@@ -536,7 +713,7 @@ spec:
 </tr>
 <tr>
 <td align="left" valign="top" width="5%">
-<p><a href="#CO11-2"><i class="conum" data-value="2"></i></a></p>
+<p><a href="#CO14-2"><i class="conum" data-value="2"></i></a></p>
 </td>
 <td align="left" valign="top">
 <p>Replace this with the actual endpoint of your S3-compatible service</p>
@@ -596,30 +773,6 @@ spec:
 <div class="pre_wrapper lang-sh">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-sh">kubectl apply -f elasticsearch.yaml</pre>
-</div>
-</div>
-
-<div class="section">
-<div class="titlepage"><div><div>
-<h4 class="title"><a id="k8s-basic-snapshot-azure"></a>Basic snapshot repository setup for Azure<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/cloud-on-k8s/edit/main/docs/orchestrating-elastic-stack-applications/elasticsearch/snapshots.asciidoc">edit</a></h4>
-</div></div></div>
-<p>This is identical to <a class="xref" href="k8s-snapshots.html#k8s-basic-snapshot-gcs" title="Basic snapshot repository setup using GCS as an example">Basic snapshot repository setup using GCS as an example</a> except for configuring storage account credentials through the Elasticsearch keystore.</p>
-<div class="olist orderedlist">
-<ol class="orderedlist">
-<li class="listitem">
-Follow the Microsoft documentation to <a href="https://docs.microsoft.com/en-us/azure/storage/common/storage-account-create" class="ulink" target="_top">set up an Azure storage account</a> with an access key, and then <a href="https://docs.microsoft.com/en-us/azure/storage/blobs/storage-quickstart-blobs-portal" class="ulink" target="_top">create a container</a>.
-</li>
-<li class="listitem">
-Create two files for your Azure storage account credentials: <code class="literal">azure.client.secondary.account</code> and <code class="literal">azure.client.secondary.key</code> containing the associated values.
-</li>
-<li class="listitem">
-<p>Next, follow the same steps as in <a class="xref" href="k8s-snapshots.html#k8s-secure-settings" title="Configure GCS credentials through the Elasticsearch keystore">Configure GCS credentials through the Elasticsearch keystore</a> to create a Kubernetes secret from these files, reference it in the <code class="literal">secureSettings</code> section of the Elasticsearch resource and apply the modifications.</p>
-<div class="pre_wrapper lang-sh">
-<div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-sh">kubectl create secret generic az-storage-credentials --from-file=azure.client.default.account --from-file=azure.client.default.key -n &lt;namespace&gt;</pre>
-</div>
-</li>
-</ol>
 </div>
 </div>
 
