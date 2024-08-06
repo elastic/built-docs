@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>APM Server performance diagnostic | Elastic Observability [master] | Elastic</title>
+<meta class="elastic" name="content" content="APM Server performance diagnostic | Elastic Observability [master]">
+
+<link rel="home" href="index.html" title="Elastic Observability [master]"/>
+<link rel="up" href="apm-troubleshoot-apm.html" title="Troubleshoot"/>
+<link rel="prev" href="apm-enable-apm-server-debugging.html" title="Enable APM Server binary debugging"/>
+<link rel="next" href="apm-upgrade.html" title="Upgrade"/>
+<meta class="elastic" name="product_version" content="master"/>
+<meta class="elastic" name="product_name" content="Observability"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Observability/Guide/master"/>
+<meta name="DC.subject" content="Observability"/>
+<meta name="DC.identifier" content="master"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body>
+<div class="page_header">
+This documentation contains work-in-progress information for future Elastic Stack and Cloud releases. Use the version selector to view supported release docs. It also contains some Elastic Cloud serverless information. Check out our <a href="https://www.elastic.co/docs/current/serverless">serverless docs</a> for more details.
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="apm-enable-apm-server-debugging.html">« Enable APM Server binary debugging</a>
+</span>
+<span class="next">
+<a href="apm-upgrade.html">Upgrade »</a>
+</span>
+</div>
+<div class="book" lang="en">
+<div class="titlepage">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elastic Observability [master]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="apm.html">Application performance monitoring (APM)</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="apm-troubleshoot-apm.html">Troubleshoot</a></span>
+</div>
+<div>
+<div><h1 class="title"><a id="id-1"></a>APM Server performance diagnostic</h1><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/main/docs/en/observability/apm/apm-performance-diagnostic.asciidoc">edit</a></div>
+</div>
+<!--EXTRA-->
+</div>
+<div id="content">
+<div class="section">
+<div class="titlepage"><div><div>
+<h3 class="title"><a id="apm-performance-diagnostic"></a>APM Server performance diagnostic<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/main/docs/en/observability/apm/apm-performance-diagnostic.asciidoc">edit</a></h3>
+</div></div></div>
+<h5><a id="apm-es-backpressure"></a>Diagnosing backpressure from Elasticsearch<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/observability-docs/edit/main/docs/en/observability/apm/apm-performance-diagnostic.asciidoc">edit</a></h5>
+<p>When Elasticsearch is under excessive load or indexing pressure, APM Server could experience the downstream backpressure when indexing new documents into Elasticsearch.
+Most commonly, backpressure from Elasticsearch will manifest itself in the form of higher indexing latency and/or rejected requests, which in return could lead APM Server to deny incoming requests.
+As a result, APM agents connected to the affected APM Server will suffer from throttling and/or request timeout when shipping APM events.</p>
+<p>To quickly identify possible issues try looking for similar error logs lines in APM Server logs:</p>
+<div class="pre_wrapper lang-json">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-json">...
+{"log.level":"error","@timestamp":"2024-07-27T23:46:28.529Z","log.origin":{"function":"github.com/elastic/go-docappender/v2.(*Appender).flush","file.name":"v2@v2.2.0/appender.go","file.line":370},"message":"bulk indexing request failed","service.name":"apm-server","error":{"message":"flush failed (429): [429 Too Many Requests]"},"ecs.version":"1.6.0"}
+{"log.level":"error","@timestamp":"2024-07-27T23:55:38.612Z","log.origin":{"function":"github.com/elastic/go-docappender/v2.(*Appender).flush","file.name":"v2@v2.2.0/appender.go","file.line":370},"message":"bulk indexing request failed","service.name":"apm-server","error":{"message":"flush failed (503): [503 Service Unavailable]"},"ecs.version":"1.6.0"}
+...</pre>
+</div>
+<p>To gain better insight into APM Server health and performance, consider enabling the monitoring feature by following the steps in <a class="xref" href="apm-monitor-apm.html" title="Monitor APM Server">Monitor APM Server</a>.
+When enabled, APM Server will additionally report a set of vital metrics to help you identify any performance degradation.</p>
+<p>Pay careful attention to the next metric fields:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">beats_stats.metrics.libbeat.output.events.active</code> that represents the number of buffered pending documents waiting to be ingested;
+(<em>if this value is increasing rapidly it may indicate Elasticsearch backpressure</em>)
+</li>
+<li class="listitem">
+<code class="literal">beats_stats.metrics.libbeat.output.events.acked</code> that represents the total number of documents that have been ingested successfully;
+</li>
+<li class="listitem">
+<code class="literal">beats_stats.metrics.libbeat.output.events.failed</code> that represents the total number of documents that failed to ingest;
+(<em>if this value is increasing rapidly it may indicate Elasticsearch backpressure</em>)
+</li>
+<li class="listitem">
+<code class="literal">beats_stats.metrics.libbeat.output.events.toomany</code> that represents the number of documents that failed to ingest due to Elasticsearch responding with 429 Too many Requests;
+(<em>if this value is increasing rapidly it may indicate Elasticsearch backpressure</em>)
+</li>
+<li class="listitem">
+<code class="literal">beats_stats.output.elasticsearch.bulk_requests.available</code> that represents the number of bulk indexers available for making bulk index requests;
+(<em>if this value is equal to 0 it may indicate Elasticsearch backpressure</em>)
+</li>
+<li class="listitem">
+<code class="literal">beats_stats.output.elasticsearch.bulk_requests.completed</code> that represents the number of already completed bulk requests;
+</li>
+<li class="listitem">
+<code class="literal">beats_stats.metrics.output.elasticsearch.indexers.active</code> that represents the number of active bulk indexers that are concurrently processing batches;
+</li>
+</ul>
+</div>
+<p>See <a href="/guide/en/beats/metricbeat/master/exported-fields-beat.html" class="ulink" target="_top">Metricbeat documentation</a> for the full list of exported metric fields.</p>
+<p>One likely cause of excessive indexing pressure or rejected requests is undersized Elasticsearch. To mitigate this, follow the guidance in <a href="/guide/en/elasticsearch/reference/master/rejected-requests.html" class="ulink" target="_top">Rejected requests</a>.</p>
+<p>(Not recommended) If scaling Elasticsearch resources up is not an option, you can adjust the <code class="literal">flush_bytes</code>, <code class="literal">flush_interval</code>, <code class="literal">max_retries</code> and <code class="literal">timeout</code> settings described in <a class="xref" href="apm-elasticsearch-output.html" title="Configure the Elasticsearch output">Configure the Elasticsearch output</a> to reduce APM Server indexing pressure. However, consider that increasing number of buffered documents and/or reducing retries may lead to a higher rate of dropped APM events. Down below a custom configuration example is listed where the number of default buffered documents is roughly doubled while Elasticsearch indexing retries are decreased simultaneously. This configuration provides a generic example and might not be applicable to your situation. Try adjusting the settings further to see what works for you.</p>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">output.elasticsearch:
+  flush_bytes: "2MB" # double the default value
+  flush_interval: "2s" # double the default value
+  max_retries: 1 # decrease the default value
+  timeout: 60 # decrease the default value</pre>
+</div>
+</div>
+</div>
+</div><div class="navfooter">
+<span class="prev">
+<a href="apm-enable-apm-server-debugging.html">« Enable APM Server binary debugging</a>
+</span>
+<span class="next">
+<a href="apm-upgrade.html">Upgrade »</a>
+</span>
+</div>
+</body>
+</html>
