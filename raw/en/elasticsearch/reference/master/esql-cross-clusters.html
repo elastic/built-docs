@@ -123,12 +123,6 @@ This could be the preferred model when a single administrator has full control o
 We generally recommend that roles and their privileges be identical in both clusters.</p>
 <p>Refer to <a class="xref" href="remote-clusters-cert.html" title="Add remote clusters using TLS certificate authentication">TLS certificate authentication</a> for prerequisites and detailed setup instructions.</p>
 <h5><a id="esql-ccs-security-model-api-key"></a>API key authentication<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/esql/esql-across-clusters.asciidoc">edit</a></h5>
-<div class="note admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p><code class="literal">ENRICH</code> is <span class="strong strong"><strong>not supported</strong></span> in this version when using ES|QL with the API key based security model.</p>
-</div>
-</div>
 <p>The following information pertains to using ES|QL across clusters with the <a class="xref" href="remote-clusters-api-key.html" title="Add remote clusters using API key authentication"><span class="strong strong"><strong>API key based security model</strong></span></a>. You&#8217;ll need to follow the steps on that page for the <span class="strong strong"><strong>full setup instructions</strong></span>. This page only contains additional information specific to ES|QL.</p>
 <p>API key based cross-cluster search (CCS) enables more granular control over allowed actions between clusters.
 This may be the preferred model when you have different administrators for different clusters and want more control over who can access what data. In this model, cluster administrators must explicitly define the access given to clusters and users.</p>
@@ -144,32 +138,12 @@ Add the API key to the keystore on the <span class="strong strong"><strong>local
 </ul>
 </div>
 <p>Using ES|QL with the API key based security model requires some additional permissions that may not be needed when using the traditional query DSL based search.
-The following example API call creates a role that can query remote indices using ES|QL when using the API key based security model.</p>
-<div class="pre_wrapper lang-js alternative">
+The following example API call creates a role that can query remote indices using ES|QL when using the API key based security model.
+The final privilege, <code class="literal">remote_cluster</code>, is required to allow remote enrich operations.</p>
+<a id="7f2d511cb64743c006225e5933a14bb4"></a>
+<div class="pre_wrapper lang-console">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js alternative">const response = await client.security.putRole({
-  name: "remote1",
-  cluster: ["cross_cluster_search"],
-  indices: [
-    {
-      names: [""],
-      privileges: ["read"],
-    },
-  ],
-  remote_indices: [
-    {
-      names: ["logs-*"],
-      privileges: ["read", "read_cross_cluster"],
-      clusters: ["my_remote_cluster"],
-    },
-  ],
-});
-console.log(response);</pre>
-</div>
-<a id="0b8fa90bc9aeeadb420ad785bd0b9953"></a>
-<div class="pre_wrapper lang-console default has-js">
-<div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-console default has-js">POST /_security/role/remote1
+<pre class="programlisting prettyprint lang-console">POST /_security/role/remote1
 {
   "cluster": ["cross_cluster_search"], <a id="CO455-1"></a><i class="conum" data-value="1"></i>
   "indices": [
@@ -184,11 +158,21 @@ console.log(response);</pre>
       "privileges": [ "read","read_cross_cluster" ], <a id="CO455-4"></a><i class="conum" data-value="4"></i>
       "clusters" : ["my_remote_cluster"] <a id="CO455-5"></a><i class="conum" data-value="5"></i>
     }
-  ]
+  ],
+   "remote_cluster": [ <a id="CO455-6"></a><i class="conum" data-value="6"></i>
+        {
+            "privileges": [
+                "monitor_enrich"
+            ],
+            "clusters": [
+                "my_remote_cluster"
+            ]
+        }
+    ]
 }</pre>
 </div>
-<div class="console_widget has-js" data-snippet="snippets/1741.console"></div>
-<div class="calloutlist default has-js lang-console">
+<div class="console_widget" data-snippet="snippets/1741.console"></div>
+<div class="calloutlist">
 <table border="0" summary="Callout list">
 <tr>
 <td align="left" valign="top" width="5%">
@@ -232,6 +216,14 @@ This remote cluster must be configured with a <a class="xref" href="security-api
 Verify connection using the <a class="xref" href="cluster-remote-info.html" title="Remote cluster info API">Remote cluster info</a> API.</p>
 </td>
 </tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO455-6"><i class="conum" data-value="6"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>Required to allow remote enrichment. Without this, the user cannot read from the <code class="literal">.enrich</code> indices on the remote cluster. The <code class="literal">remote_cluster</code> security privilege was introduced in version <span class="strong strong"><strong>8.15.0</strong></span>.</p>
+</td>
+</tr>
 </table>
 </div>
 <p>You will then need a user or API key with the permissions you created above. The following example API call creates a user with the <code class="literal">remote1</code> role.</p>
@@ -255,6 +247,12 @@ console.log(response);</pre>
 </div>
 <div class="console_widget has-js" data-snippet="snippets/1742.console"></div>
 <p>Remember that all cross-cluster requests from the local cluster are bound by the cross cluster API key’s privileges, which are controlled by the remote cluster&#8217;s administrator.</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Cross cluster API keys created in versions prior to 8.15.0 will need to replaced or updated to add the new permissions required for ES|QL with ENRICH.</p>
+</div>
+</div>
 <h4><a id="ccq-remote-cluster-setup"></a>Remote cluster setup<a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/esql/esql-across-clusters.asciidoc">edit</a></h4>
 <p>Once the security model is configured, you can add remote clusters.</p>
 <p>The following <a class="xref" href="cluster-update-settings.html" title="Cluster update settings API">cluster update settings</a> API request
@@ -400,10 +398,12 @@ ES|QL can execute the enrich command on either the local cluster or the remote
 clusters, aiming to minimize computation or inter-cluster data transfer. Ensuring that
 the policy exists with consistent data on both the local cluster and the remote
 clusters is critical for ES|QL to produce a consistent query result.</p>
-<div class="note admon">
+<div class="tip admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>Enrich across clusters is <span class="strong strong"><strong>not supported</strong></span> in this version when using ES|QL with the <a class="xref" href="remote-clusters-api-key.html" title="Add remote clusters using API key authentication"><span class="strong strong"><strong>API key based security model</strong></span></a>.</p>
+<p>Enrich in ES|QL across clusters using the API key based security model was introduced in version <span class="strong strong"><strong>8.15.0</strong></span>.
+Cross cluster API keys created in versions prior to 8.15.0 will need to replaced or updated to use the new required permissions.
+Refer to the example in the <a class="xref" href="esql-cross-clusters.html#esql-ccs-security-model-api-key" title="API key authentication">API key authentication</a> section.</p>
 </div>
 </div>
 <p>In the following example, the enrich with <code class="literal">hosts</code> policy can be executed on
