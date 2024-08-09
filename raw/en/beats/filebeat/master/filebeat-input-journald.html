@@ -56,7 +56,12 @@ This documentation contains work-in-progress information for future Elastic Stac
 </div>
 <p><a href="https://www.freedesktop.org/software/systemd/man/systemd-journald.service.html" class="ulink" target="_top"><code class="literal">journald</code></a>
 is a system service that collects and stores logging data. The <code class="literal">journald</code> input
-reads this log data and the metadata associated with it.</p>
+reads this log data and the metadata associated with it. To read this
+log data Filebeat calls <code class="literal">journalctl</code> to read from the journal, therefore
+Filebeat needs permission to execute <code class="literal">journalctl</code>.</p>
+<p>If the <code class="literal">journalctl</code> process exits unexpectedly the journald input will
+terminate with an error and Filebeat will need to be
+restarted to start reading from the jouranl again.</p>
 <p>The simplest configuration example is one that reads all logs from the default
 journal.</p>
 <div class="pre_wrapper lang-yaml">
@@ -105,20 +110,21 @@ and a fresh cursor.</p>
 <p>The <code class="literal">journald</code> input supports the following configuration options plus the
 <a class="xref" href="filebeat-input-journald.html#filebeat-input-journald-common-options" title="Common options">Common options</a> described later.</p>
 <h4><a id="filebeat-input-journald-id"></a><code class="literal">id</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-journald.asciidoc">edit</a></h4>
-<p>An optional unique identifier for the input. By providing a unique <code class="literal">id</code> you can
+<p>An unique identifier for the input. By providing a unique <code class="literal">id</code> you can
 operate multiple inputs on the same journal. This allows each input&#8217;s cursor to
-be persisted independently in the registry file.</p>
+be persisted independently in the registry file. Each journald input must have
+an unique ID.</p>
 <div class="pre_wrapper lang-yaml">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
 - type: journald
   id: consul.service
-  include_matches:
+  include_matches.match:
     - _SYSTEMD_UNIT=consul.service
 
 - type: journald
   id: vault.service
-  include_matches:
+  include_matches.match:
     - _SYSTEMD_UNIT=vault.service</pre>
 </div>
 <h4><a id="filebeat-input-journald-paths"></a><code class="literal">paths</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-journald.asciidoc">edit</a></h4>
@@ -127,12 +133,6 @@ path (to collect events from all journals in a directory), or a file path. If
 you specify a directory, Filebeat merges all journals under the directory
 into a single journal and reads them.</p>
 <p>If no paths are specified, Filebeat reads from the default journal.</p>
-<h4><a id="filebeat-input-journald-backoff"></a><code class="literal">backoff</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-journald.asciidoc">edit</a></h4>
-<p>The number of seconds to wait before trying to read again from journals. The
-default is 1s.</p>
-<h4><a id="filebeat-input-journald-max-backoff"></a><code class="literal">max_backoff</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-journald.asciidoc">edit</a></h4>
-<p>The maximum number of seconds to wait before attempting to read again from
-journals. The default is 60s.</p>
 <h4><a id="filebeat-input-journald-seek"></a><code class="literal">seek</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-journald.asciidoc">edit</a></h4>
 <p>The position to start reading the journal from. Valid settings are:</p>
 <div class="ulist itemizedlist">
@@ -146,30 +146,21 @@ Filebeat resends all log messages in the journal.
 will be sent until a new message is written.
 </li>
 <li class="listitem">
-<code class="literal">cursor</code>: On first read, starts reading at the beginning of the journal. After
-a reload or restart, continues reading at the last known position.
-</li>
-<li class="listitem">
 <code class="literal">since</code>: Use the <code class="literal">since</code> option to determine where to start reading from.
 </li>
 </ul>
 </div>
-<p>If you have old log files and want to skip lines, start Filebeat with
-<code class="literal">seek: tail</code> specified. Then stop Filebeat, set <code class="literal">seek: cursor</code>, and restart
-Filebeat.</p>
-<h4><a id="filebeat-input-journald-cursor_seek_fallback"></a><code class="literal">cursor_seek_fallback</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-journald.asciidoc">edit</a></h4>
-<p>The position to start reading the journal from if no cursor information is
-available. Valid options are <code class="literal">head</code>, <code class="literal">tail</code> and <code class="literal">since</code>.</p>
+<p>Regardless of the value of <code class="literal">seek</code> if Filebeat has a state (cursor) for this
+input, the <code class="literal">seek</code> value is ignored and the current cursor is used. To reset
+the cursor, just change the <code class="literal">id</code> of the input, this will start from a fresh state.</p>
 <h4><a id="filebeat-input-journald-since"></a><code class="literal">since</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-journald.asciidoc">edit</a></h4>
 <p>A time offset from the current time to start reading from. To use
-<code class="literal">since</code>, either the <code class="literal">seek</code> option must be set to <code class="literal">since</code>, or the <code class="literal">seek</code> mode
-must be set to <code class="literal">cursor</code> and the <code class="literal">cursor_seek_fallback</code> set to <code class="literal">since</code>.</p>
+<code class="literal">since</code>, <code class="literal">seek</code> option must be set to <code class="literal">since</code>.</p>
 <p>This example demonstrates how to resume from the persisted cursor when
 it exists, or otherwise begin reading logs from the last 24 hours.</p>
 <div class="pre_wrapper lang-yaml">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-yaml">seek: cursor
-cursor_seek_fallback: since
+<pre class="programlisting prettyprint lang-yaml">seek: since
 since: -24h</pre>
 </div>
 <h4><a id="filebeat-input-journald-units"></a><code class="literal">units</code><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-journald.asciidoc">edit</a></h4>
@@ -210,18 +201,26 @@ expressions. Pattern matching is not supported.</p>
 <p>If you configured a filter expression, only entries with this field set will be iterated by the journald reader of Filebeat.
 If the filter expressions apply to different fields, only entries with all fields set will be iterated.
 If they apply to the same fields, only entries where the field takes one of the specified values will be iterated.</p>
-<p><code class="literal">match</code>: List of filter expressions to match fields.
-<code class="literal">or</code>: The filter expressions listed under <code class="literal">or</code> are connected with a disjunction (or).
-<code class="literal">and</code>: The filter expressions listed under <code class="literal">and</code> are connected with a conjunction (and).</p>
+<p><code class="literal">match</code>: List of filter expressions to match fields.</p>
 <p>Please note that these expressions are limited. You can build complex filtering, but full logical
 expressions are not supported.</p>
-<p>The following include matches configuration reads all <code class="literal">systemd</code> syslog entries:</p>
+<p>The following include matches configuration will ingest entries that
+contain <code class="literal">journald.process.name: systemd</code> and <code class="literal">systemd.transport: syslog</code>.</p>
 <div class="pre_wrapper lang-yaml">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-yaml">include_matches.and:
-- match:
-  - "journald.process.name=systemd"
-  - "systemd.transport=syslog"</pre>
+<pre class="programlisting prettyprint lang-yaml">include_matches:
+  match:
+    - "journald.process.name=systemd"
+    - "systemd.transport=syslog"</pre>
+</div>
+<p>The following include matches configuration will ingest entries that
+contain <code class="literal">systemd.transport: systemd</code> or <code class="literal">systemd.transport: kernel</code>.</p>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">include_matches:
+  match:
+    - "systemd.transport=kernel"
+    - "systemd.transport=syslog"</pre>
 </div>
 <p>To reference fields, use one of the following:</p>
 <div class="ulist itemizedlist">
