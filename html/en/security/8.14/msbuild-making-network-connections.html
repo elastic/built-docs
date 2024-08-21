@@ -157,7 +157,14 @@ logs-windows.sysmon_operational-*
 <p><span class="strong strong"><strong>Runs every</strong></span>: 5m</p>
 <p><span class="strong strong"><strong>Searches indices from</strong></span>: now-9m (<a href="/guide/en/elasticsearch/reference/8.14/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
 <p><span class="strong strong"><strong>Maximum alerts per execution</strong></span>: 100</p>
-<p><span class="strong strong"><strong>References</strong></span>: None</p>
+<p><span class="strong strong"><strong>References</strong></span>:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://riccardoancarani.github.io/2019-10-19-hunting-covenant-msbuild/" class="ulink" target="_top">https://riccardoancarani.github.io/2019-10-19-hunting-covenant-msbuild/</a>
+</li>
+</ul>
+</div>
 <p><span class="strong strong"><strong>Tags</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -184,7 +191,7 @@ Data Source: Sysmon
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 109</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 110</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -196,9 +203,11 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<h3 class="title"><a id="_investigation_guide_307"></a>Investigation guide<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.14/docs/detections/prebuilt-rules/rule-details/msbuild-making-network-connections.asciidoc">edit</a></h3>
+<h3 class="title"><a id="_investigation_guide_306"></a>Investigation guide<a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.14/docs/detections/prebuilt-rules/rule-details/msbuild-making-network-connections.asciidoc">edit</a></h3>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
+<p><span class="strong strong"><strong>Performance</strong></span></p>
+<p>The performance impact of this rule is expected to be low to medium because of the first sequence, which looks for MsBuild.exe process execution. The events for this first sequence may be noisy, consider adding exceptions.</p>
 <p><span class="strong strong"><strong>Investigating MsBuild Making Network Connections</strong></span></p>
 <p>By examining the specific traits of Windows binaries (such as process trees, command lines, network connections, registry modifications, and so on) it&#8217;s possible to establish a baseline of normal activity. Deviations from this baseline can indicate malicious activity, such as masquerading and deserve further investigation.</p>
 <p>The Microsoft Build Engine, also known as MSBuild, is a platform for building applications. This engine provides an XML schema for a project file that controls how the build platform processes and builds software, and can be abused to proxy code execution.</p>
@@ -331,11 +340,32 @@ Using the incident response data, update logging and audit policies to improve t
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">sequence by process.entity_id
-  [process where host.os.type == "windows" and process.name : "MSBuild.exe" and event.type == "start"]
-  [network where host.os.type == "windows" and process.name : "MSBuild.exe" and
-     not cidrmatch(destination.ip, "127.0.0.1", "::1") and
-     not dns.question.name : "localhost"]</pre>
+<pre class="programlisting prettyprint lang-js">sequence by process.entity_id with maxspan=30s
+
+  /* Look for MSBuild.exe process execution */
+  /* The events for this first sequence may be noisy, consider adding exceptions */
+  [process where host.os.type == "windows"
+    and (
+          process.pe.original_file_name: "MSBuild.exe" or
+          process.name: "MSBuild.exe"
+        )
+    and event.type == "start" and user.id != "S-1-5-18"]
+
+  /* Followed by a network connection to an external address */
+  /* Exclude domains that are known to be benign */
+  [network where host.os.type == "windows"
+    and event.action: ("connection_attempted", "lookup_requested")
+    and (
+          process.pe.original_file_name: "MSBuild.exe" or
+          process.name: "MSBuild.exe"
+        )
+    and not user.id != "S-1-5-18" and
+    not cidrmatch(destination.ip, "127.0.0.1", "::1") and
+    not dns.question.name : (
+      "localhost",
+      "dc.services.visualstudio.com",
+      "vortex.data.microsoft.com",
+      "api.nuget.org")]</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
