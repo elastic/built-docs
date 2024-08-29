@@ -599,10 +599,118 @@ s3:GetBucketLocation</pre>
 <p>In case optional SQS metric <code class="literal">sqs_messages_waiting_gauge</code> is desired, the following permission is required:</p>
 <pre class="screen">sqs:GetQueueAttributes</pre>
 <div class="position-relative"><h3><a id="_s3_and_sqs_setup"></a>S3 and SQS setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></div>
-<p>Enable bucket notification: any new object creation in S3 bucket will also
-create a notification through SQS. Please see
-<a href="https://docs.aws.amazon.com/AmazonS3/latest/dev/ways-to-add-notification-config-to-bucket.html#step1-create-sqs-queue-for-notification" class="ulink" target="_top">create-sqs-queue-for-notification</a>
-for more details.</p>
+<p>To configure SQS notifications for an existing S3 bucket, you can follow
+<a href="https://docs.aws.amazon.com/AmazonS3/latest/dev/ways-to-add-notification-config-to-bucket.html#step1-create-sqs-queue-for-notification" class="ulink" target="_top">create-sqs-queue-for-notification</a> guide.</p>
+<p>Alternatively, you can follow steps given which utilize a CloudFormation template to create a S3 bucket connected to a SQS with object creation notifications already enabled.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>First copy the CloudFormation template given below to a desired location. For example, to file <code class="literal">awsCloudFormation.yaml</code></p>
+<details>
+<summary class="title">CloudFormation template</summary>
+<div class="content">
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Create a S3 bucket connected to a SQS for filebeat validations
+Resources:
+  S3BucketWithSQS:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-s3bucket
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: alias/aws/s3
+      PublicAccessBlockConfiguration:
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Queue: !GetAtt SQSWithS3BucketConnected.Arn
+    DependsOn:
+      - S3BucketWithSQSToSQSWithS3BucketConnectedPermission
+  S3BucketWithSQSBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3BucketWithSQS
+      PolicyDocument:
+        Id: RequireEncryptionInTransit
+        Version: '2012-10-17'
+        Statement:
+          - Principal: '*'
+            Action: '*'
+            Effect: Deny
+            Resource:
+              - !GetAtt S3BucketWithSQS.Arn
+              - !Sub ${S3BucketWithSQS.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+  SQSWithS3BucketConnected:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 345600
+  S3BucketWithSQSToSQSWithS3BucketConnectedPermission:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt SQSWithS3BucketConnected.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Sub arn:${AWS::Partition}:s3:::${AWS::StackName}-s3bucket
+      Queues:
+        - !Ref SQSWithS3BucketConnected
+Outputs:
+  S3BucketArn:
+    Description: The ARN of the S3 bucket to insert logs
+    Value: !GetAtt S3BucketWithSQS.Arn
+  SQSUrl:
+    Description: The SQS URL to use for filebeat
+    Value: !GetAtt SQSWithS3BucketConnected.QueueUrl</pre>
+</div>
+</div>
+</details>
+</li>
+<li class="listitem">
+<p>Next, create a CloudFormation stack sourcing the copied.</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">aws cloudformation create-stack --stack-name &lt;STACK_NAME&gt; --template-body file://awsCloudFormation.yaml</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Then, obtain the S3 bucket ARN and SQS queue url using stack&#8217;s output</p>
+<p>For this, you can describe the stack created above. The S3 ARN is set to <code class="literal">S3BucketArn</code> output and SQS url is set to <code class="literal">SQSUrl</code> output.
+The output will be populated once the <code class="literal">StackStatus</code> is set to <code class="literal">CREATE_COMPLETE</code>.</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">aws cloudformation describe-stacks --stack-name &lt;STACK_NAME&gt;</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Finally, you can configure filebeat to use SQS notifications</p>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: aws-s3
+  queue_url: &lt;URL_FROM_STACK&gt;
+  expand_event_list_from_field: Records
+  credential_profile_name: elastic-beats</pre>
+</div>
+<p>With this configuration, filebeat avoids polling and utilizes SQS notifications to extract logs from the S3 bucket.</p>
+</li>
+</ol>
+</div>
 <div class="position-relative"><h3><a id="_s3_sns_sqs_setup"></a>S3 &#8594; SNS &#8594; SQS setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></div>
 <p>If you would like to use the bucket notification in multiple different consumers
 (others than filebeat), you should use an SNS topic for the bucket notification.
