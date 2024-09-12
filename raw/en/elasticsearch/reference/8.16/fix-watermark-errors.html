@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="keywords" content="Elasticsearch, high watermark, low watermark, full disk, flood stage watermark">
+<title>Fix watermark errors | Elasticsearch Guide [8.16] | Elastic</title>
+<meta class="elastic" name="content" content="Fix watermark errors | Elasticsearch Guide [8.16]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.16]"/>
+<link rel="up" href="fix-common-cluster-issues.html" title="Fix common cluster issues"/>
+<link rel="prev" href="fix-common-cluster-issues.html" title="Fix common cluster issues"/>
+<link rel="next" href="circuit-breaker-errors.html" title="Circuit breaker errors"/>
+<meta class="elastic" name="product_version" content="8.16"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.16"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.16"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body>
+<div class="page_header">
+This documentation contains work-in-progress information for future Elastic Stack and Cloud releases. Use the version selector to view supported release docs. It also contains some Elastic Cloud serverless information. Check out our <a href="https://www.elastic.co/docs/current/serverless">serverless docs</a> for more details.
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="fix-common-cluster-issues.html">« Fix common cluster issues</a>
+</span>
+<span class="next">
+<a href="circuit-breaker-errors.html">Circuit breaker errors »</a>
+</span>
+</div>
+<div class="book" lang="en">
+<div class="titlepage">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.16]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="troubleshooting.html">Troubleshooting</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="fix-common-cluster-issues.html">Fix common cluster issues</a></span>
+</div>
+<div>
+<div><h1 class="title"><a id="id-1"></a>Fix watermark errors</h1><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/troubleshooting/common-issues/disk-usage-exceeded.asciidoc">edit</a></div>
+</div>
+<!--EXTRA-->
+</div>
+<div id="content">
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h2 class="title"><a id="fix-watermark-errors"></a>Fix watermark errors</h2><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/troubleshooting/common-issues/disk-usage-exceeded.asciidoc">edit</a></div>
+</div></div></div>
+
+<p>When a data node is critically low on disk space and has reached the
+<a class="xref" href="modules-cluster.html#cluster-routing-flood-stage">flood-stage disk usage watermark</a>, the following
+error is logged: <code class="literal">Error: disk usage exceeded flood-stage watermark, index has read-only-allow-delete block</code>.</p>
+<p>To prevent a full disk, when a node reaches this watermark, Elasticsearch <a class="xref" href="index-modules-blocks.html#index-block-settings" title="Index block settings">blocks writes</a>
+to any index with a shard on the node. If the block affects related system
+indices, Kibana and other Elastic Stack features may become unavailable. For example,
+this could induce Kibana&#8217;s <code class="literal">Kibana Server is not Ready yet</code>
+<a href="/guide/en/kibana/master/access.html#not-ready" class="ulink" target="_top">error message</a>.</p>
+<p>Elasticsearch will automatically remove the write block when the affected node&#8217;s disk
+usage falls below the <a class="xref" href="modules-cluster.html#cluster-routing-watermark-high">high disk watermark</a>.
+To achieve this, Elasticsearch attempts to rebalance some of the affected node&#8217;s shards
+to other nodes in the same data tier.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="fix-watermark-errors-rebalance"></a>Monitor rebalancing</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/troubleshooting/common-issues/disk-usage-exceeded.asciidoc">edit</a></div>
+</div></div></div>
+<p>To verify that shards are moving off the affected node until it falls below high
+watermark., use the <a class="xref" href="cat-shards.html" title="cat shards API">cat shards API</a> and <a class="xref" href="cat-recovery.html" title="cat recovery API">cat recovery API</a>:</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET _cat/shards?v=true
+
+GET _cat/recovery?v=true&amp;active_only=true</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/2155.console"></div>
+<p>If shards remain on the node keeping it about high watermark, use the
+<a class="xref" href="cluster-allocation-explain.html" title="Cluster allocation explain API">cluster allocation explanation API</a> to get an
+explanation for their allocation status.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET _cluster/allocation/explain
+{
+  "index": "my-index",
+  "shard": 0,
+  "primary": false
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/2156.console"></div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="fix-watermark-errors-temporary"></a>Temporary Relief</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/troubleshooting/common-issues/disk-usage-exceeded.asciidoc">edit</a></div>
+</div></div></div>
+<p>To immediately restore write operations, you can temporarily increase the
+<a class="xref" href="modules-cluster.html#disk-based-shard-allocation" title="Disk-based shard allocation settings">disk watermarks</a> and remove the
+<a class="xref" href="index-modules-blocks.html#index-block-settings" title="Index block settings">write block</a>.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT _cluster/settings
+{
+  "persistent": {
+    "cluster.routing.allocation.disk.watermark.low": "90%",
+    "cluster.routing.allocation.disk.watermark.low.max_headroom": "100GB",
+    "cluster.routing.allocation.disk.watermark.high": "95%",
+    "cluster.routing.allocation.disk.watermark.high.max_headroom": "20GB",
+    "cluster.routing.allocation.disk.watermark.flood_stage": "97%",
+    "cluster.routing.allocation.disk.watermark.flood_stage.max_headroom": "5GB",
+    "cluster.routing.allocation.disk.watermark.flood_stage.frozen": "97%",
+    "cluster.routing.allocation.disk.watermark.flood_stage.frozen.max_headroom": "5GB"
+  }
+}
+
+PUT */_settings?expand_wildcards=all
+{
+  "index.blocks.read_only_allow_delete": null
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/2157.console"></div>
+<p>When a long-term solution is in place, to reset or reconfigure the disk watermarks:</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT _cluster/settings
+{
+  "persistent": {
+    "cluster.routing.allocation.disk.watermark.low": null,
+    "cluster.routing.allocation.disk.watermark.low.max_headroom": null,
+    "cluster.routing.allocation.disk.watermark.high": null,
+    "cluster.routing.allocation.disk.watermark.high.max_headroom": null,
+    "cluster.routing.allocation.disk.watermark.flood_stage": null,
+    "cluster.routing.allocation.disk.watermark.flood_stage.max_headroom": null,
+    "cluster.routing.allocation.disk.watermark.flood_stage.frozen": null,
+    "cluster.routing.allocation.disk.watermark.flood_stage.frozen.max_headroom": null
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/2158.console"></div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="fix-watermark-errors-resolve"></a>Resolve</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/troubleshooting/common-issues/disk-usage-exceeded.asciidoc">edit</a></div>
+</div></div></div>
+<p>As a long-term solution, we recommend you do one of the following best suited
+to your use case:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+add nodes to the affected <a class="xref" href="data-tiers.html" title="Data tiers">data tiers</a>
+</li>
+<li class="listitem">
+<p>upgrade existing nodes to increase disk space</p>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>On Elasticsearch Service, <a href="https://support.elastic.co" class="ulink" target="_top">Elastic Support</a> intervention may
+become necessary if <a class="xref" href="cluster-health.html" title="Cluster health API">cluster health</a> reaches <code class="literal">status:red</code>.</p>
+</div>
+</div>
+</li>
+<li class="listitem">
+delete unneeded indices using the <a class="xref" href="indices-delete-index.html" title="Delete index API">delete index API</a>
+</li>
+<li class="listitem">
+update related <a class="xref" href="index-lifecycle-management.html" title="ILM: Manage the index lifecycle">ILM policy</a> to push indices
+through to later <a class="xref" href="data-tiers.html" title="Data tiers">data tiers</a>
+</li>
+</ul>
+</div>
+</div>
+
+</div>
+</div>
+</div><div class="navfooter">
+<span class="prev">
+<a href="fix-common-cluster-issues.html">« Fix common cluster issues</a>
+</span>
+<span class="next">
+<a href="circuit-breaker-errors.html">Circuit breaker errors »</a>
+</span>
+</div>
+</body>
+</html>

@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Tutorial: Using Cohere with Elasticsearch | Elasticsearch Guide [8.16] | Elastic</title>
+<meta class="elastic" name="content" content="Tutorial: Using Cohere with Elasticsearch | Elasticsearch Guide [8.16]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.16]"/>
+<link rel="up" href="semantic-search.html" title="Semantic search"/>
+<link rel="prev" href="semantic-search-elser.html" title="Tutorial: semantic search with ELSER"/>
+<link rel="next" href="semantic-search-deployed-nlp-model.html" title="Tutorial: semantic search with a deployed model"/>
+<meta class="elastic" name="product_version" content="8.16"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.16"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.16"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body>
+<div class="page_header">
+This documentation contains work-in-progress information for future Elastic Stack and Cloud releases. Use the version selector to view supported release docs. It also contains some Elastic Cloud serverless information. Check out our <a href="https://www.elastic.co/docs/current/serverless">serverless docs</a> for more details.
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="semantic-search-elser.html">« Tutorial: semantic search with ELSER</a>
+</span>
+<span class="next">
+<a href="semantic-search-deployed-nlp-model.html">Tutorial: semantic search with a deployed model »</a>
+</span>
+</div>
+<div class="book" lang="en">
+<div class="titlepage">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.16]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="search-with-elasticsearch.html">Search your data</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="semantic-search.html">Semantic search</a></span>
+</div>
+<div>
+<div><h1 class="title"><a id="id-1"></a>Tutorial: Using Cohere with Elasticsearch</h1><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/search/search-your-data/cohere-es.asciidoc">edit</a></div>
+</div>
+<!--EXTRA-->
+</div>
+<div id="content">
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h2 class="title"><a id="cohere-es"></a>Tutorial: Using Cohere with Elasticsearch</h2><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/search/search-your-data/cohere-es.asciidoc">edit</a></div>
+</div></div></div>
+
+<p>The instructions in this tutorial shows you how to compute embeddings with
+Cohere using the inference API and store them for efficient vector or hybrid
+search in Elasticsearch. This tutorial will use the Python Elasticsearch client to perform the
+operations.</p>
+<p>You&#8217;ll learn how to:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+create an inference endpoint for text embedding using the Cohere service,
+</li>
+<li class="listitem">
+create the necessary index mapping for the Elasticsearch index,
+</li>
+<li class="listitem">
+build an inference pipeline to ingest documents into the index together with the
+embeddings,
+</li>
+<li class="listitem">
+perform hybrid search on the data,
+</li>
+<li class="listitem">
+rerank search results by using Cohere&#8217;s rerank model,
+</li>
+<li class="listitem">
+design a RAG system with Cohere&#8217;s Chat API.
+</li>
+</ul>
+</div>
+<p>The tutorial uses the <a href="https://huggingface.co/datasets/mteb/scifact" class="ulink" target="_top">SciFact</a> data
+set.</p>
+<p>Refer to <a href="https://docs.cohere.com/docs/elasticsearch-and-cohere" class="ulink" target="_top">Cohere&#8217;s tutorial</a>
+for an example using a different data set.</p>
+<p>You can also review the <a href="https://colab.research.google.com/github/elastic/elasticsearch-labs/blob/main/notebooks/integrations/cohere/cohere-elasticsearch.ipynb" class="ulink" target="_top">Colab notebook version of this tutorial</a>.</p>
+<div class="position-relative"><h4><a id="cohere-es-req"></a>Requirements</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/search/search-your-data/cohere-es.asciidoc">edit</a></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+A paid <a href="https://cohere.com/" class="ulink" target="_top">Cohere account</a> is required to use the Inference API with the Cohere service as the Cohere free trial API usage is limited,
+</li>
+<li class="listitem">
+an <a href="/guide/en/cloud/current/ec-getting-started.html" class="ulink" target="_top">Elastic Cloud</a> account,
+</li>
+<li class="listitem">
+Python 3.7 or higher.
+</li>
+</ul>
+</div>
+<div class="position-relative"><h4><a id="cohere-es-packages"></a>Install required packages</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/search/search-your-data/cohere-es.asciidoc">edit</a></div>
+<p>Install Elasticsearch and Cohere:</p>
+<div class="pre_wrapper lang-py">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-py">!pip install elasticsearch
+!pip install cohere</pre>
+</div>
+<p>Import the required packages:</p>
+<div class="pre_wrapper lang-py">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-py">from elasticsearch import Elasticsearch, helpers
+import cohere
+import json
+import requests</pre>
+</div>
+<div class="position-relative"><h4><a id="cohere-es-client"></a>Create the Elasticsearch client</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/search/search-your-data/cohere-es.asciidoc">edit</a></div>
+<p>To create your Elasticsearch client, you need:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="/search-labs/tutorials/install-elasticsearch/elastic-cloud#finding-your-cloud-id" class="ulink" target="_top">your Cloud ID</a>,
+</li>
+<li class="listitem">
+<a href="/search-labs/tutorials/install-elasticsearch/elastic-cloud#creating-an-api-key" class="ulink" target="_top">an encoded API key</a>.
+</li>
+</ul>
+</div>
+<div class="pre_wrapper lang-py">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-py">ELASTICSEARCH_ENDPOINT = "elastic_endpoint"
+ELASTIC_API_KEY = "elastic_api_key"
+
+client = Elasticsearch(
+  cloud_id=ELASTICSEARCH_ENDPOINT,
+  api_key=ELASTIC_API_KEY
+)
+
+# Confirm the client has connected
+print(client.info())</pre>
+</div>
+<div class="position-relative"><h4><a id="cohere-es-infer-endpoint"></a>Create the inference endpoint</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/search/search-your-data/cohere-es.asciidoc">edit</a></div>
+<p><a class="xref" href="put-inference-api.html" title="Create inference API">Create the inference endpoint</a> first. In this example, the
+inference endpoint uses Cohere&#8217;s <code class="literal">embed-english-v3.0</code> model and the
+<code class="literal">embedding_type</code> is set to <code class="literal">byte</code>.</p>
+<div class="pre_wrapper lang-py">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-py">COHERE_API_KEY = "cohere_api_key"
+
+client.inference.put_model(
+    task_type="text_embedding",
+    inference_id="cohere_embeddings",
+    body={
+        "service": "cohere",
+        "service_settings": {
+            "api_key": COHERE_API_KEY,
+            "model_id": "embed-english-v3.0",
+            "embedding_type": "byte"
+        }
+    },
+)</pre>
+</div>
+<p>You can find your API keys in your Cohere dashboard under the
+<a href="https://dashboard.cohere.com/api-keys" class="ulink" target="_top">API keys section</a>.</p>
+<div class="position-relative"><h4><a id="cohere-es-index-mapping"></a>Create the index mapping</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/search/search-your-data/cohere-es.asciidoc">edit</a></div>
+<p>Create the index mapping for the index that will contain the embeddings.</p>
+<div class="pre_wrapper lang-py">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-py">client.indices.create(
+    index="cohere-embeddings",
+    settings={"index": {"default_pipeline": "cohere_embeddings"}},
+    mappings={
+        "properties": {
+            "text_embedding": {
+                "type": "dense_vector",
+                "dims": 1024,
+                "element_type": "byte",
+            },
+            "text": {"type": "text"},
+            "id": {"type": "integer"},
+            "title": {"type": "text"}
+        }
+    },
+)</pre>
+</div>
+<div class="position-relative"><h4><a id="cohere-es-infer-pipeline"></a>Create the inference pipeline</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/search/search-your-data/cohere-es.asciidoc">edit</a></div>
+<p>Now you have an inference endpoint and an index ready to store embeddings. The
+next step is to create an <a class="xref" href="ingest.html" title="Ingest pipelines">ingest pipeline</a> with an
+<a class="xref" href="inference-processor.html" title="Inference processor">inference processor</a> that will create the embeddings using
+the inference endpoint and stores them in the index.</p>
+<div class="pre_wrapper lang-py">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-py">client.ingest.put_pipeline(
+    id="cohere_embeddings",
+    description="Ingest pipeline for Cohere inference.",
+    processors=[
+        {
+            "inference": {
+                "model_id": "cohere_embeddings",
+                "input_output": {
+                    "input_field": "text",
+                    "output_field": "text_embedding",
+                },
+            }
+        }
+    ],
+)</pre>
+</div>
+<div class="position-relative"><h4><a id="cohere-es-insert-documents"></a>Prepare data and insert documents</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/search/search-your-data/cohere-es.asciidoc">edit</a></div>
+<p>This example uses the <a href="https://huggingface.co/datasets/mteb/scifact" class="ulink" target="_top">SciFact</a> data
+set that you can find on HuggingFace.</p>
+<div class="pre_wrapper lang-py">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-py">url = 'https://huggingface.co/datasets/mteb/scifact/raw/main/corpus.jsonl'
+
+# Fetch the JSONL data from the URL
+response = requests.get(url)
+response.raise_for_status()  # Ensure noticing bad responses
+
+# Split the content by new lines and parse each line as JSON
+data = [json.loads(line) for line in response.text.strip().split('\n') if line]
+# Now data is a list of dictionaries
+
+# Change `_id` key to `id` as `_id` is a reserved key in Elasticsearch.
+for item in data:
+    if '_id' in item:
+        item['id'] = item.pop('_id')
+
+# Prepare the documents to be indexed
+documents = []
+for line in data:
+    data_dict = line
+    documents.append({
+        "_index": "cohere-embeddings",
+        "_source": data_dict,
+        }
+      )
+
+# Use the bulk endpoint to index
+helpers.bulk(client, documents)
+
+print("Data ingestion completed, text embeddings generated!")</pre>
+</div>
+<p>Your index is populated with the SciFact data and text embeddings for the text
+field.</p>
+<div class="position-relative"><h4><a id="cohere-es-hybrid-search"></a>Hybrid search</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/search/search-your-data/cohere-es.asciidoc">edit</a></div>
+<p>Let&#8217;s start querying the index!</p>
+<p>The code below performs a hybrid search. The <code class="literal">kNN</code> query computes the relevance
+of search results based on vector similarity using the <code class="literal">text_embedding</code> field,
+the lexical search query uses BM25 retrieval to compute keyword similarity on
+the <code class="literal">title</code> and <code class="literal">text</code> fields.</p>
+<div class="pre_wrapper lang-py">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-py">query = "What is biosimilarity?"
+
+response = client.search(
+    index="cohere-embeddings",
+    size=100,
+    knn={
+        "field": "text_embedding",
+        "query_vector_builder": {
+            "text_embedding": {
+                "model_id": "cohere_embeddings",
+                "model_text": query,
+            }
+        },
+        "k": 10,
+        "num_candidates": 50,
+    },
+    query={
+        "multi_match": {
+            "query": query,
+            "fields": ["text", "title"]
+        }
+    }
+)
+
+raw_documents = response["hits"]["hits"]
+
+# Display the first 10 results
+for document in raw_documents[0:10]:
+  print(f'Title: {document["_source"]["title"]}\nText: {document["_source"]["text"]}\n')
+
+# Format the documents for ranking
+documents = []
+for hit in response["hits"]["hits"]:
+    documents.append(hit["_source"]["text"])</pre>
+</div>
+<div class="position-relative"><h5><a id="cohere-es-rerank-results"></a>Rerank search results</h5><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/search/search-your-data/cohere-es.asciidoc">edit</a></div>
+<p>To combine the results more effectively, use
+<a href="https://docs.cohere.com/docs/rerank-2" class="ulink" target="_top">Cohere&#8217;s Rerank v3</a> model through the
+inference API to provide a more precise semantic reranking of the results.</p>
+<p>Create an inference endpoint with your Cohere API key and the used model name as
+the <code class="literal">model_id</code> (<code class="literal">rerank-english-v3.0</code> in this example).</p>
+<div class="pre_wrapper lang-py">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-py">client.inference.put_model(
+    task_type="rerank",
+    inference_id="cohere_rerank",
+    body={
+        "service": "cohere",
+        "service_settings":{
+            "api_key": COHERE_API_KEY,
+            "model_id": "rerank-english-v3.0"
+           },
+        "task_settings": {
+            "top_n": 10,
+        },
+    }
+)</pre>
+</div>
+<p>Rerank the results using the new inference endpoint.</p>
+<div class="pre_wrapper lang-py">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-py"># Pass the query and the search results to the service
+response = client.inference.inference(
+    inference_id="cohere_rerank",
+    body={
+        "query": query,
+        "input": documents,
+        "task_settings": {
+            "return_documents": False
+            }
+        }
+)
+
+# Reconstruct the input documents based on the index provided in the rereank response
+ranked_documents = []
+for document in response.body["rerank"]:
+  ranked_documents.append({
+      "title": raw_documents[int(document["index"])]["_source"]["title"],
+      "text": raw_documents[int(document["index"])]["_source"]["text"]
+  })
+
+# Print the top 10 results
+for document in ranked_documents[0:10]:
+  print(f"Title: {document['title']}\nText: {document['text']}\n")</pre>
+</div>
+<p>The response is a list of documents in descending order of relevance. Each
+document has a corresponding index that reflects the order of the documents when
+they were sent to the inference endpoint.</p>
+<div class="position-relative"><h4><a id="cohere-es-rag"></a>Retrieval Augmented Generation (RAG) with Cohere and Elasticsearch</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/search/search-your-data/cohere-es.asciidoc">edit</a></div>
+<p><a href="https://docs.cohere.com/docs/retrieval-augmented-generation-rag" class="ulink" target="_top">RAG</a> is a method for generating text using additional information fetched from an external data source.
+With the ranked results, you can build a RAG system on the top of what you previously created by using <a href="https://docs.cohere.com/docs/chat-api" class="ulink" target="_top">Cohere&#8217;s Chat API</a>.</p>
+<p>Pass in the retrieved documents and the query to receive a grounded response using Cohere&#8217;s newest generative model <a href="https://docs.cohere.com/docs/command-r-plus" class="ulink" target="_top">Command R+</a>.</p>
+<p>Then pass in the query and the documents to the Chat API, and print out the response.</p>
+<div class="pre_wrapper lang-py">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-py">response = co.chat(message=query, documents=ranked_documents, model='command-r-plus')
+
+source_documents = []
+for citation in response.citations:
+    for document_id in citation.document_ids:
+        if document_id not in source_documents:
+            source_documents.append(document_id)
+
+print(f"Query: {query}")
+print(f"Response: {response.text}")
+print("Sources:")
+for document in response.documents:
+    if document['id'] in source_documents:
+        print(f"{document['title']}: {document['text']}")</pre>
+</div>
+<p>The response will look similar to this:</p>
+<div class="pre_wrapper lang-consol-result">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-consol-result">Query: What is biosimilarity?
+Response: Biosimilarity is based on the comparability concept, which has been used successfully for several decades to ensure close similarity of a biological product before and after a manufacturing change. Over the last 10 years, experience with biosimilars has shown that even complex biotechnology-derived proteins can be copied successfully.
+Sources:
+Interchangeability of Biosimilars: A European Perspective: (...)</pre>
+</div>
+</div>
+</div>
+</div><div class="navfooter">
+<span class="prev">
+<a href="semantic-search-elser.html">« Tutorial: semantic search with ELSER</a>
+</span>
+<span class="next">
+<a href="semantic-search-deployed-nlp-model.html">Tutorial: semantic search with a deployed model »</a>
+</span>
+</div>
+</body>
+</html>
