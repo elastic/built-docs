@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Rotate SSL/TLS CA certificates | Fleet and Elastic Agent Guide [8.16] | Elastic</title>
+<meta class="elastic" name="content" content="Rotate SSL/TLS CA certificates | Fleet and Elastic Agent Guide [8.16]">
+
+<link rel="home" href="index.html" title="Fleet and Elastic Agent Guide [8.16]"/>
+<link rel="up" href="secure.html" title="Secure Elastic Agent connections"/>
+<link rel="prev" href="secure-connections.html" title="Configure SSL/TLS for self-managed Fleet Servers"/>
+<link rel="next" href="mutual-tls.html" title="Elastic Agent deployment models with mutual TLS"/>
+<meta class="elastic" name="product_version" content="8.16"/>
+<meta class="elastic" name="product_name" content="Fleet and Elastic Agent"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Fleet/Guide/Elastic Agent/8.16"/>
+<meta name="DC.subject" content="Fleet and Elastic Agent"/>
+<meta name="DC.identifier" content="8.16"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body>
+<div class="page_header">
+This documentation contains work-in-progress information for future Elastic Stack and Cloud releases. Use the version selector to view supported release docs. It also contains some Elastic Cloud serverless information. Check out our <a href="https://www.elastic.co/docs/current/serverless">serverless docs</a> for more details.
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="secure-connections.html">« Configure SSL/TLS for self-managed Fleet Servers</a>
+</span>
+<span class="next">
+<a href="mutual-tls.html">Elastic Agent deployment models with mutual TLS »</a>
+</span>
+</div>
+<div class="book" lang="en">
+<div class="titlepage">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Fleet and Elastic Agent Guide [8.16]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="secure.html">Secure Elastic Agent connections</a></span>
+</div>
+<div>
+<div><h1 class="title"><a id="id-1"></a>Rotate SSL/TLS CA certificates</h1><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/8.x/docs/en/ingest-management/security/certificates-rotation.asciidoc">edit</a></div>
+</div>
+<!--EXTRA-->
+</div>
+<div id="content">
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h2 class="title"><a id="certificates-rotation"></a>Rotate SSL/TLS CA certificates</h2><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/8.x/docs/en/ingest-management/security/certificates-rotation.asciidoc">edit</a></div>
+</div></div></div>
+<p>In some scenarioes you may want to rotate your configured certificate authorities (CAs), for instance if your chosen CAs are due to expire. Refer to the following steps to rotate certificates between connected components:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="certificates-rotation.html#certificates-rotation-agent-fs" title="Rotating a Fleet Server CA">Rotating a Fleet Server CA</a>
+</li>
+<li class="listitem">
+<a class="xref" href="certificates-rotation.html#certificates-rotation-fs-es" title="Rotating an Elasticsearch CA for connections from Fleet Server">Rotating an Elasticsearch CA for connections from Fleet Server</a>
+</li>
+<li class="listitem">
+<a class="xref" href="certificates-rotation.html#certificates-rotation-agent-es" title="Rotating an Elasticsearch CA for connections from Elastic Agent">Rotating an Elasticsearch CA for connections from Elastic Agent</a>
+</li>
+</ul>
+</div>
+<div class="position-relative"><h4><a id="certificates-rotation-agent-fs"></a>Rotating a Fleet Server CA</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/8.x/docs/en/ingest-management/security/certificates-rotation.asciidoc">edit</a></div>
+<p>Elastic Agent communicates with Fleet Server to receive policies and to check for updates. There are two methods to rotate a CA certificate on Fleet Server for connections from Elastic Agent. The first method requires Elastic Agent to re-enroll with Fleet Server one or more times. The second method avoids re-enrollment and requires overwriting the existing CA file with a new certificate.</p>
+<p><span class="strong strong"><strong>Option 1: To renew an expiring CA certificate on Fleet Server with Elastic Agent re-enrollments</strong></span></p>
+<p>Using this method, the Elastic Agent with an old or expiring CA configured will be re-enrolled with Fleet Server using a new CA.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Update the Elastic Agent with the new Fleet Server CA:</p>
+<p>The Elastic Agent should already have a CA configured. Use the <a class="xref" href="elastic-agent-cmd-options.html#elastic-agent-enroll-command" title="elastic-agent enroll"><code class="literal">elastic-agent enroll</code></a> command to re-enroll the agent with an updated, comma separated set of CAs to use.</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">elastic-agent enroll \
+  --url=&lt;Fleet-Server-URL&gt; \
+  --enrollment-token=&lt;enrollment-token&gt; \
+  ... \
+  --certificate-authorities &lt;original_CA, new_CA&gt;</pre>
+</div>
+<p>A new agent enrollment will cause a new agent to appear in Fleet. This may be considered disruptive, however the old agent entry will transition to an offline state. A new agent enrollment is required in order for the Fleet Server configuration to be modified to accept multiple certificate authorities.</p>
+<p>At this point, all TLS connections are still relying on the original CA that was provided (<code class="literal">original_CA</code>) in order to authenticate Fleet Server certificates.</p>
+</li>
+<li class="listitem">
+<p>Rotate the certificates on Fleet Server:</p>
+<p>This procedure will reissue new certificates based on the new CA. Re-enroll Fleet Server with all the new certificates:</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">elastic-agent enroll ...
+  --url=&lt;Fleet-Server-URL&gt; \
+  --enrollment-token=&lt;enrollment-token&gt; \
+  ... \
+  --fleet-server-cert &lt;new_cert&gt; --certificate-authorities &lt;new_CA&gt;</pre>
+</div>
+<p>This will cause the TLS connections to the Elastic Agents to reset and will load the relevant new CA and certificates to the Fleet Server configuration.</p>
+</li>
+<li class="listitem">
+<p>The Elastic Agents will automatically establish new TLS connections as part of their normal operation:</p>
+<p>The new CA (<code class="literal">new_CA</code>) on the agent installed in Step 1 will be used to authenticate the certificates used by Fleet Server.</p>
+<p>Note that if the original CA (<code class="literal">original CA</code>) was compromised, then it may need to be removed from the agent&#8217;s CA list. To achieve this you need to enroll the agent again:</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">elastic-agent enroll ...
+  --url=&lt;Fleet-Server-URL&gt; \
+  --enrollment-token=&lt;enrollment-token&gt; \
+  ... \
+  --certificate-authorities &lt;new_CA&gt;</pre>
+</div>
+</li>
+</ol>
+</div>
+<p><span class="strong strong"><strong>Option 2: To renew an expiring CA certificate on Elasticsearch without Elastic Agent re-enrollments</strong></span></p>
+<p>Option 1 results in multiple Elastic Agent enrollments. Another option to avoid multiple enrollments is to overwrite the CA files with the new CA or certificate. This method uses a single file with multiple CAs that can be replaced.</p>
+<p>To use this option it is assumed that:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>Elastic Agents have already been enrolled using a file that contains the Certificate Authority:</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">elastic-agent enroll ...
+  --url=&lt;Fleet-Server-URL&gt; \
+  --enrollment-token=&lt;enrollment-token&gt; \
+  ... \
+  --certificate-authorities=&lt;CA.pem&gt;</pre>
+</div>
+</li>
+<li class="listitem">
+<p>The Elastic Agent running Fleet Server has already been enrolled with the following secure connection options, where each option points to files that contain the certificates and keys:</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">elastic-agent enroll ...
+  --url=&lt;Fleet-Server-URL&gt; \
+  --enrollment-token=&lt;enrollment-token&gt; \
+  ... \
+  --certificate-authorities=&lt;CA.pem&gt; \
+  --fleet-server-cert=&lt;fleet-cert.pem&gt; \
+  --fleet-server-cert-key=&lt;key.pem&gt;</pre>
+</div>
+</li>
+</ul>
+</div>
+<p>To update the Elastic Agent and Fleet Server configurations:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Update the configuration with the new CA by changing the content of <code class="literal">CA.pem</code> to include the new CA.</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">cat new_ca.pem &gt;&gt; CA.pem</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Restart the Elastic Agents. Note that this is not a re-enrollment. Restarting will force the Elastic Agents to reload the CAs.</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">elastic-agent restart</pre>
+</div>
+</li>
+<li class="listitem">
+<p>For the Elastic Agent that is running Fleet Server, overwrite the original <code class="literal">certificate</code>, <code class="literal">certificate-key</code>, and the <code class="literal">certificate-authority</code> with the new ones to use.</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">cat new-cert.pem &gt; cert.pem
+cat new-key.pem &gt; key.pem
+cat new_ca.pem &gt; CA.pem</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Restart the Elastic Agent that is running Fleet Server.</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">elastic-agent restart</pre>
+</div>
+</li>
+<li class="listitem">
+<p>If the original certificate needs to be removed from the Elastic Agents, overwrite the <code class="literal">CA.pem</code> with the new CA only:</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">cat new_ca.pem &gt; CA.pem</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Finally, restart the Elastic Agents again.</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">elastic-agent restart</pre>
+</div>
+</li>
+</ol>
+</div>
+<div class="position-relative"><h4><a id="certificates-rotation-fs-es"></a>Rotating an Elasticsearch CA for connections from Fleet Server</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/8.x/docs/en/ingest-management/security/certificates-rotation.asciidoc">edit</a></div>
+<p>Fleet Server communicates with Elasticsearch to send status information to Fleet about Elastic Agents and to retrieve updated policies to ship out to all Elastic Agents enrolled in a given policy. If you have Fleet Server  <a class="xref" href="fleet-deployment-models.html" title="Deployment models">deployed on-premise</a>, you may wish to rotate your configured CA certificate, for instance if the certificate is due to expire.</p>
+<p>To rotate a CA certificate on Elasticsearch for connections from Fleet Server:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Update the Fleet Server with the new Fleet Server CA:</p>
+<p>The Elastic Agent running Fleet Server should already have a CA configured. Use the <a class="xref" href="elastic-agent-cmd-options.html#elastic-agent-enroll-command" title="elastic-agent enroll"><code class="literal">elastic-agent enroll</code></a> command to re-enroll the agent running Fleet Server with an updated, comma separated set of CAs to use.</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">elastic-agent enroll \
+  --fleet-server-es=&lt;Elasticsearch-URL&gt; \
+  --fleet-server-service-token=&lt;service-token&gt; \
+  ... \
+  --fleet-server-es-ca &lt;original_ES_CA, new_ES_CA&gt;</pre>
+</div>
+<p>A new agent enrollment will cause two Fleet Server agents to appear in Fleet. This may be considered disruptive, however the old agent entry will transition to offline. A new agent enrollment is required in order for the Fleet Server configuration to be modified to accept multiple certificate authorities.</p>
+<p>At this point, all TLS connections are still relying on the original CA that was provided (<code class="literal">original_ES_CA</code>) in order to authenticate Elasticsearch certificates. Re-enrolling the Fleet Server will cause the agents going through that Fleet Server to also reset their TLS, but the connections will be re-established as required.</p>
+</li>
+<li class="listitem">
+<p>Rotate the certificates on Elasticsearch.</p>
+<p>Elasticsearch will use new certificates based on the new Elasticsearch CA. Since the Fleet Server has the original and the new Elasticsearch CAs in a chain, it will accept original and new certificates from Elasticsearch.</p>
+<p>Note that if the original Elasticsearch CA (<code class="literal">original_ES CA</code>) was compromised, then it may need to be removed from the Fleet Server&#8217;s CA list. To achieve this you need to enroll the Fleet Server agent again (if re-enrollment is a concern then use a file to hold the certificates and certificate-authority):</p>
+<div class="pre_wrapper lang-shell">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-shell">elastic-agent enroll \
+  --fleet-server-es=&lt;Elasticsearch-URL&gt; \
+  --fleet-server-service-token=&lt;service-token&gt; \
+  ... \
+  --fleet-server-es-ca &lt;new_ES_CA&gt;</pre>
+</div>
+</li>
+</ol>
+</div>
+<div class="position-relative"><h4><a id="certificates-rotation-agent-es"></a>Rotating an Elasticsearch CA for connections from Elastic Agent</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/8.x/docs/en/ingest-management/security/certificates-rotation.asciidoc">edit</a></div>
+<p>Using configuration information from a policy delivered by Fleet Server, Elastic Agent collects data and sends it to Elasticsearch.</p>
+<p>To rotate a CA certificate on Elasticsearch for connections from Elastic Agent:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+In Fleet open the <span class="strong strong"><strong>Settings</strong></span> tab.
+</li>
+<li class="listitem">
+In the <span class="strong strong"><strong>Outputs</strong></span> section, click the edit button for the Elasticsearch output that requires a certificate rotation.
+</li>
+<li class="listitem">
+<p>In the <span class="strong strong"><strong>Elasticsearch CA trusted fingerprint</strong></span> field, add the new trusted fingerprint to use. This is the SHA-256 fingerprint (hash) of the certificate authority used to self-sign Elasticsearch certificates. This fingerprint will be used to verify self-signed certificates presented by Elasticsearch.</p>
+<p>If this certificate is present in the chain during the handshake, it will be added to the <code class="literal">certificate_authorities</code> list and the handshake will continue normally.</p>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/certificate-rotation-agent-es.png" alt="Screen capture of the Edit Output UI: Elasticsearch CA trusted fingerprint">
+</div>
+</div>
+</li>
+</ol>
+</div>
+</div>
+</div>
+</div><div class="navfooter">
+<span class="prev">
+<a href="secure-connections.html">« Configure SSL/TLS for self-managed Fleet Servers</a>
+</span>
+<span class="next">
+<a href="mutual-tls.html">Elastic Agent deployment models with mutual TLS »</a>
+</span>
+</div>
+</body>
+</html>
