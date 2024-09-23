@@ -138,8 +138,8 @@ This documentation contains work-in-progress information for future Elastic Stac
 </div>
 </div>
 
-<p>The <code class="literal">streaming</code> input reads messages from a streaming data source, for example a websocket server. This input uses the <code class="literal">CEL engine</code> and the <code class="literal">mito</code> library interally to parse and process the messages. Having support for <code class="literal">CEL</code> allows you to parse and process the messages in a more flexible way. It has many similarities with the <code class="literal">cel</code> input as to how the <code class="literal">CEL</code> programs are written but deviates in the way the messages are read and processed. Currently only websocket server or API endpoints are supported.</p>
-<p>This input supports:</p>
+<p>The <code class="literal">streaming</code> input reads messages from a streaming data source, for example a websocket server. This input uses the <code class="literal">CEL engine</code> and the <code class="literal">mito</code> library internally to parse and process the messages. Having support for <code class="literal">CEL</code> allows you to parse and process the messages in a more flexible way. It has many similarities with the <code class="literal">cel</code> input as to how the <code class="literal">CEL</code> programs are written but differs in the way the messages are read and processed. Currently websocket server or API endpoints, and the Crowdstrike Falcon streaming API are supported.</p>
+<p>The websocket streaming input supports:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
@@ -166,6 +166,8 @@ Custom
 <p>The <code class="literal">streaming</code> input websocket handler does not currently support XML messages. Auto-reconnects are also not supported at the moment so reconnection will occur on input restart.</p>
 </div>
 </div>
+<p>The Crowdstrike streaming input requires OAuth2.0 as described in the Crowdstrike documentation for the API. When using the Crowdstrike streaming type, the <code class="literal">crowdstrike_app_id</code> configuration field must be set. This field specifies the <code class="literal">appId</code> parameter sent to the Crowdstrike API. See the Crowdstrike documentation for details.</p>
+<p>The <code class="literal">stream_type</code> configuration field specifies which type of streaming input to use, "websocket" or "crowdstrike". If it is not set, the input defaults to websocket streaming  .</p>
 <div class="section">
 <div class="titlepage"><div><div>
 <div class="position-relative"><h3 class="title"><a id="_execution_3"></a>Execution</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-streaming.asciidoc">edit</a></div>
@@ -218,7 +220,7 @@ The field could be an array or a single object that will be treated as an array 
 </tr>
 </table>
 </div>
-<p>Example configuration:</p>
+<p>Example configurations:</p>
 <div class="pre_wrapper lang-yaml">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
@@ -230,6 +232,27 @@ The field could be an array or a single object that will be treated as an array 
       "events": {
         "message":  inner_body.encode_json(),
       }
+    })</pre>
+</div>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+# Read and process events from the Crowdstrike Falcon Hose API
+- type: streaming
+  stream_type: crowdstrike
+  url: https://api.crowdstrike.com/sensors/entities/datafeed/v2
+  auth:
+    client_id: a23fcea2643868ef1a41565a1a8a1c7c
+    client_secret: c3VwZXJzZWNyZXRfY2xpZW50X3NlY3JldF9zaGhoaGgK
+    token_url: https://api.crowdstrike.com/oauth2/token
+  crowdstrike_app_id: my_app_id
+  program: |
+    state.response.decode_json().as(body,{
+      "events": [body],
+      ?"cursor": has(body.?metadata.offset) ?
+        optional.of({"offset": body.metadata.offset})
+      :
+        optional.none(),
     })</pre>
 </div>
 </div>
@@ -246,7 +269,7 @@ This will include any sensitive or secret information kept in the <code class="l
 <div class="titlepage"><div><div>
 <div class="position-relative"><h3 class="title"><a id="_authentication"></a>Authentication</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-streaming.asciidoc">edit</a></div>
 </div></div></div>
-<p>The Websocket input supports authentication via Basic token authentication, Bearer token authentication and authentication via a custom auth config. Unlike REST inputs Basic Authentication contains a basic auth token, Bearer Authentication contains a bearer token and custom auth contains any combination of custom header and value. These token/key values are are added to the request headers and are not exposed to the <code class="literal">state</code> object. The custom auth configuration is useful for constructing requests that require custom headers and values for authentication. The basic and bearer token configurations will always use the <code class="literal">Authorization</code> header and prepend the token with <code class="literal">Basic</code> or <code class="literal">Bearer</code> respectively.</p>
+<p>The websocket streaming input supports authentication via Basic token authentication, Bearer token authentication and authentication via a custom auth config. Unlike REST inputs Basic Authentication contains a basic auth token, Bearer Authentication contains a bearer token and custom auth contains any combination of custom header and value. These token/key values are are added to the request headers and are not exposed to the <code class="literal">state</code> object. The custom auth configuration is useful for constructing requests that require custom headers and values for authentication. The basic and bearer token configurations will always use the <code class="literal">Authorization</code> header and prepend the token with <code class="literal">Basic</code> or <code class="literal">Bearer</code> respectively.</p>
 <p>Example configurations with authentication:</p>
 <div class="pre_wrapper lang-yaml">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -280,6 +303,17 @@ This will include any sensitive or secret information kept in the <code class="l
     value: "Bearer dXNlcjpwYXNzd29yZA=="
   url: wss://localhost:443/_stream</pre>
 </div>
+<p>The crowdstrike streaming input requires OAuth2.0 authentication using a client ID, client secret and a token URL. These values are not exposed to the <code class="literal">state</code> object. OAuth2.0 scopes and endpoint parameters are available via the <code class="literal">auth.scopes</code> and <code class="literal">auth.endpoint_params</code> config parameters.</p>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: streaming
+  stream_type: crowdstrike
+  auth:
+    client_id: a23fcea2643868ef1a41565a1a8a1c7c
+    client_secret: c3VwZXJzZWNyZXRfY2xpZW50X3NlY3JldF9zaGhoaGgK
+    token_url: https://api.crowdstrike.com/oauth2/token</pre>
+</div>
 </div>
 
 <div class="section">
@@ -296,6 +330,8 @@ The state must contain a <code class="literal">response</code> map and may conta
 </div></div></div>
 <p>The <code class="literal">streaming</code> input supports the following configuration options plus the
 <a class="xref" href="filebeat-input-streaming.html#filebeat-input-streaming-common-options" title="Common options">Common options</a> described later.</p>
+<div class="position-relative"><h4><a id="stream_type-streaming"></a><code class="literal">stream_type</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-streaming.asciidoc">edit</a></div>
+<p>The flavor of streaming to use. This may be either "websocket", "crowdstrike", or unset. If the field is unset, websocket streaming is used.</p>
 <div class="position-relative"><h4><a id="program-streaming"></a><code class="literal">program</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-streaming.asciidoc">edit</a></div>
 <p>The CEL program that is executed on each message received. This field should ideally be present but if not the default program given below is used.</p>
 <div class="pre_wrapper lang-yaml">
