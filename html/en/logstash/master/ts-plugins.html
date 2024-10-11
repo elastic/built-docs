@@ -399,6 +399,57 @@ Edit the file adding the property, pointing to the path where the JUL definition
 </div>
 <p>The logs could contain sensible information, such credentials, and could be verbose but should give
 hits on the connection problem at HTTP level with the Azure Blob Storage.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="ts-date"></a>Date Filter issues and solutions</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/main/docs/static/troubleshoot/ts-date.asciidoc">edit</a></div>
+</div></div></div>
+<div class="position-relative"><h5><a id="ts-date-locale"></a>Date Parse Failures when using certain Locales</h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/main/docs/static/troubleshoot/ts-date.asciidoc">edit</a></div>
+<p><span class="strong strong"><strong>Symptoms</strong></span></p>
+<p>The Logstash Date Filter is unexpectedly unable to parse dates after upgrading to Logstash <code class="literal">8.15+</code>:</p>
+<p>A date filter configured to parse dates as follows:</p>
+<pre class="screen">date { locale =&gt; "en_gb" match =&gt; [ "[date]" , "yyyy MMM dd HH:mm:ss" ] target =&gt; "[parsed_date]"</pre>
+<p>when parsing the date <code class="literal">2024 Sep 30 11:11:11</code> would, prior to <code class="literal">8.15.0</code>, have created the following entry in the event:</p>
+<pre class="screen">"parsed_date" =&gt; 2024-09-30T11:11:11.000Z,</pre>
+<p>After <code class="literal">8.15.0</code>, this would have failed to parse with the following added instead:</p>
+<pre class="screen">"tags" =&gt; [
+        [0] "_dateparsefailure"
+    ]</pre>
+<p>as it now expects the date to be  <code class="literal">2024 Sept 30 11:11:11</code> for that specific locale.</p>
+<p><span class="strong strong"><strong>Background</strong></span></p>
+<p>Between JDK17 and JDK21, a change was made in the locale provider provided by the JVM internal.
+JDK17 and JDK21 uses the <a href="https://cldr.unicode.org/" class="ulink" target="_top">CLDR</a> locale provider by default, and between the release of JDK17 and JDK21, the version
+of CLDR used by the default changed from version 37 to version 42.</p>
+<p>This change included an update that changed the abbreviated form of September from <code class="literal">Sep</code> to <code class="literal">Sept</code> in certain locales, including <code class="literal">en_GB</code> and <code class="literal">en_AU</code>.
+This has caused some parse failures when there is a mismatch between the abbreviated form of date between Logstash and where the date was created.</p>
+<p>For example, if the systems running Logstash are running with either an <code class="literal">en_AU</code> or <code class="literal">en_GB locale</code>, they will
+ expect September dates to use the <code class="literal">Sept</code> abbreviated form when the format states <code class="literal">MMM</code>.
+If the systems generating these dates are creating dates with a Sep abbreviation, parsing will fail.</p>
+<p>Logstash <code class="literal">8.15.0</code> upgraded the bundled JDK version to JDK21, which included the updated version of the <code class="literal">CLDR</code>, changing the
+date parsing behavior for certain locales.</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>Mitigations**</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Change the locale in the date filter to a locale that still uses <code class="literal">Sep</code> as the abbreviated form for September, such as <code class="literal">en_US</code>.
+</li>
+<li class="listitem">
+Switch out the locale provider from CLDR to compat by setting <code class="literal">-Djava.locale.providers=COMPAT,SPI</code> in <code class="literal">jvm.options</code>.
+Note that this will fail for anyone using JDK23 and above, which drops support for the <code class="literal">compat</code> locale provider
+</li>
+<li class="listitem">
+Add filters to substitute <code class="literal">Sep</code> with <code class="literal">Sept</code> for all fields where the date is being parsed by the date filter.
+Make sure these filters are <span class="strong strong"><strong>before</strong></span> the date filter in the pipeline configuration.
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
 <div class="position-relative"><h2><a id="ts-other"></a>Other issues</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/logstash/edit/main/docs/static/troubleshoot/ts-other-issues.asciidoc">edit</a></div>
 <p>Coming soon, and you can help! If you have something to add, please:</p>
 <div class="ulist itemizedlist">
