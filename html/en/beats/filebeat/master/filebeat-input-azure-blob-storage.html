@@ -157,8 +157,8 @@ describing said error.
 <div class="icon"></div>
 <div class="admon_content">
 <a id="supported-types"></a>
-<p>NOTE: Currently only <code class="literal">JSON</code> and <code class="literal">NDJSON</code> are supported blob/file formats. Blobs/files may be also be gzip compressed.
-As for authentication types, we currently have support for <code class="literal">shared access keys</code> and <code class="literal">connection strings</code>.</p>
+<p><code class="literal">JSON</code>, <code class="literal">NDJSON</code> and <code class="literal">CSV</code> are supported blob/file formats. Blobs/files may be also be gzip compressed.
+<code class="literal">shared access keys</code>, <code class="literal">connection strings</code> and <code class="literal">Microsoft Entra ID RBAC</code> authentication types are supported.</p>
 </div>
 </div>
 <p><a id="basic-config"></a><span class="strong strong"><strong>A sample configuration with detailed explanation for each field is given below :-</strong></span></p>
@@ -377,10 +377,19 @@ This attribute is internally represented as an array, so we can add as many cont
 <div class="position-relative"><h4><a id="attrib-container-name"></a><code class="literal">name</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-azure-blob-storage.asciidoc">edit</a></div>
 <p>This is a specific subfield of a container. It specifies the container name.</p>
 <div class="position-relative"><h4><a id="attrib-max_workers"></a><code class="literal">max_workers</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-azure-blob-storage.asciidoc">edit</a></div>
-<p>This attribute defines the maximum number of workers (go routines / lightweight threads) are allocated in the worker pool (thread pool) for processing jobs
-which read contents of file. More number of workers equals a greater amount of concurrency achieved. There is an upper cap of <code class="literal">5000</code> workers per container that
-can be defined due to internal sdk constraints. This attribute can be specified both at the root level of the configuration as well at the container level.
-The container level values will always take priority and override the root level values if both are specified.</p>
+<p>This attribute defines the maximum number of workers allocated to the worker pool for processing jobs which read file contents. It can be specified both at the root level of the configuration, and at the container level. Container level values override root level values if both are specified. Larger number of workers do not necessarily improve throughput, and this should be carefully tuned based on the number of files, the size of the files being processed and resources available. Increasing <code class="literal">max_workers</code> to very high values may cause resource utilization problems and may lead to bottlenecks in processing. Usually a maximum of <code class="literal">2000</code> workers is recommended. A very low <code class="literal">max_worker</code> count will drastically increase the number of network calls required to fetch the blobs, which may cause a bottleneck in processing.</p>
+<p>The batch size for workload distribution is calculated by the input to ensure that there is an even workload across all workers. This means that for a given <code class="literal">max_workers</code> parameter value, the input will calculate the optimal batch size for that setting. The <code class="literal">max_workers</code> value should be configured based on factors such as the total number of files to be processed, available system resources and network bandwidth.</p>
+<p>Example:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Setting <code class="literal">max_workers=3</code> would result in each request fetching <code class="literal">3 blobs</code> (batch size = 3), which are then distributed among <code class="literal">3 workers</code>.
+</li>
+<li class="listitem">
+Setting <code class="literal">max_workers=100</code> would fetch <code class="literal">100 blobs</code> (batch size = 100) per request, distributed among <code class="literal">100 workers</code>.
+</li>
+</ul>
+</div>
 <div class="position-relative"><h4><a id="attrib-poll"></a><code class="literal">poll</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-azure-blob-storage.asciidoc">edit</a></div>
 <p>This attribute informs the scheduler whether to keep polling for new files or not. Default value of this is <code class="literal">false</code>, so it will not keep polling if not explicitly
 specified. This attribute can be specified both at the root level of the configuration as well at the container level. The container level values will always
@@ -453,6 +462,7 @@ the files that are downloaded. This is a list of selectors which are based on a 
     - regex: 'docs/'
     - regex: '/Security-Logs/'</pre>
 </div>
+<p>The <code class="literal">file_selectors</code> operation is performed within the agent locally. The agent will download all the files and then filter them based on the <code class="literal">file_selectors</code>. This can cause a bottleneck in processing if the number of files are very high. It is recommended to use this attribute only when the number of files are limited or ample resources are available.</p>
 <div class="position-relative"><h4><a id="attrib-expand_event_list_from_field"></a><code class="literal">expand_event_list_from_field</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-azure-blob-storage.asciidoc">edit</a></div>
 <p>If the file-set using this input expects to receive multiple messages bundled under a specific field or an array of objects then the config option for <code class="literal">expand_event_list_from_field</code> can be specified. This setting will be able to split the messages under the group value into separate events. For example, if
 you have logs that are in JSON format and events are found under the JSON object "Records". To split the events into separate events, the config option <code class="literal">expand_event_list_from_field</code> can be set to "Records". This attribute can be specified both at the root level of the configuration as well at the container level. The container level values will always take priority and override the root level values if both are specified.</p>
@@ -507,6 +517,7 @@ you have logs that are in JSON format and events are found under the JSON object
   - name: container_1
     timestamp_epoch: 1627233600</pre>
 </div>
+<p>The Azure Blob Storage APIs don&#8217;t provide a direct way to filter files based on timestamp, so the input will download all the files and then filter them based on the timestamp. This can cause a bottleneck in processing if the number of files are very high. It is recommended to use this attribute only when the number of files are limited or ample resources are available.</p>
 <p><a id="container-overrides"></a><span class="strong strong"><strong>The sample configs below will explain the container level overriding of attributes a bit further :-</strong></span></p>
 <p><span class="strong strong"><strong>CASE - 1 :</strong></span></p>
 <p>Here <code class="literal">container_1</code> is using root level attributes while <code class="literal">container_2</code> overrides the values :</p>
