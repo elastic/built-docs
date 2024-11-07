@@ -272,6 +272,9 @@ is not described here, please review the open issues in the following GitHub rep
 <li class="listitem">
 <a class="xref" href="fleet-troubleshooting.html#agent-sudo-error" title="Error when running Elastic Agent commands with sudo">Error when running Elastic Agent commands with <code class="literal">sudo</code></a>
 </li>
+<li class="listitem">
+<a class="xref" href="fleet-troubleshooting.html#agent-kubernetes-kustomize" title="Troubleshoot Elastic Agent installation on Kubernetes, with Kustomize">Troubleshoot Elastic Agent installation on Kubernetes, with Kustomize</a>
+</li>
 </ul>
 </div>
 <div class="position-relative"><h4><a id="deleted-policy-unenroll"></a>Elastic Agent unenroll fails</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/8.x/docs/en/ingest-management/troubleshooting/troubleshooting.asciidoc">edit</a></div>
@@ -1101,6 +1104,158 @@ Elastic Agent commands should not be run with <code class="literal">sudo</code>.
 <pre class="programlisting prettyprint lang-sh">Error: error loading agent config: error loading raw config: fail to read configuration /Library/Elastic/Agent/fleet.enc for the elastic-agent: fail to decode bytes: cipher: message authentication failed</pre>
 </div>
 <p>To resolve this, either install Elastic Agent without the <code class="literal">--unprivileged</code> flag so that it has administrative access, or run the Elastic Agent commands without the <code class="literal">sudo</code> prefix.</p>
+<div class="position-relative"><h4><a id="agent-kubernetes-kustomize"></a>Troubleshoot Elastic Agent installation on Kubernetes, with Kustomize</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/8.x/docs/en/ingest-management/troubleshooting/troubleshooting.asciidoc">edit</a></div>
+<p>Potential issues during Elastic Agent installation on Kubernetes can be categorized into two main areas:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<a class="xref" href="fleet-troubleshooting.html#agent-kustomize-manifest" title="Problems related to the creation of objects within the manifest">Problems related to the creation of objects within the manifest</a>.
+</li>
+<li class="listitem">
+<a class="xref" href="fleet-troubleshooting.html#agent-kustomize-after" title="Failures occurring within specific components after installation">Failures occurring within specific components after installation</a>.
+</li>
+</ol>
+</div>
+<div class="position-relative"><h5><a id="agent-kustomize-manifest"></a>Problems related to the creation of objects within the manifest</h5><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/8.x/docs/en/ingest-management/troubleshooting/troubleshooting.asciidoc">edit</a></div>
+<p>When troubleshooting installations performed with <a href="https://github.com/kubernetes-sigs/kustomize" class="ulink" target="_top">Kustomize</a>, it&#8217;s good practice to inspect the output of the rendered manifest. To do this, take the installation command provided by Kibana Onboarding and replace the final part, <code class="literal">| kubectl apply -f-</code>, with a redirection to a local file. This allows for easier analysis of the rendered output.</p>
+<p>For example, the following command, originally provided by Kibana for an Elastic Agent Standalone installation, has been modified to redirect the output for troubleshooting purposes:</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">kubectl kustomize https://github.com/elastic/elastic-agent/deploy/kubernetes/elastic-agent-kustomize/default/elastic-agent-standalone\?ref\=v8.15.3 | sed -e 's/JUFQSV9LRVkl/ZDAyNnZaSUJ3eWIwSUlCT0duRGs6Q1JfYmJoVFRUQktoN2dXTkd0FNMtdw==/g' -e "s/%ES_HOST%/https:\/\/7a912e8674a34086eacd0e3d615e6048.us-west2.gcp.elastic-cloud.com:443/g" -e "s/%ONBOARDING_ID%/db687358-2c1f-4ec9-86e0-8f1baa4912ed/g" -e "s/\(docker.elastic.co\/beats\/elastic-agent:\).*$/\18.15.3/g" -e "/{CA_TRUSTED}/c\ " &gt; elastic_agent_installation_complete_manifest.yaml</pre>
+</div>
+<p>The previous command generates a local file named <code class="literal">elastic_agent_installation_complete_manifest.yaml</code>, which you can use for further analysis. It contains the complete set of resources required for the Elastic Agent installation, including:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+RBAC objects (<code class="literal">ServiceAccounts</code>, <code class="literal">Roles</code>, etc.)
+</li>
+<li class="listitem">
+<code class="literal">ConfigMaps</code> and <code class="literal">Secrets</code> for Elastic Agent configuration
+</li>
+<li class="listitem">
+Elastic Agent Standalone deployed as a <code class="literal">DaemonSet</code>
+</li>
+<li class="listitem">
+<a href="https://github.com/kubernetes/kube-state-metrics" class="ulink" target="_top">Kube-state-metrics</a> deployed as a <code class="literal">Deployment</code>
+</li>
+</ul>
+</div>
+<p>The content of this file is equivalent to what you&#8217;d obtain by following the <a class="xref" href="running-on-kubernetes-standalone.html" title="Run Elastic Agent Standalone on Kubernetes">Run Elastic Agent Standalone on Kubernetes</a> steps, with the exception that <code class="literal">kube-state-metrics</code> is not included in the standalone method.</p>
+<p><span class="strong strong"><strong>Possible issues</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+If your user doesn&#8217;t have <span class="strong strong"><strong>cluster-admin</strong></span> privileges, the RBAC resources creation might fail.
+</li>
+<li class="listitem">
+Some Kubernetes security mechanisms (like <a href="https://kubernetes.io/docs/concepts/security/pod-security-standards/" class="ulink" target="_top">Pod Security Standards</a>) could cause part of the manifest to be rejected, as <code class="literal">hostNetwork</code> access and <code class="literal">hostPath</code> volumes are required.
+</li>
+<li class="listitem">
+If you already have an installation of <code class="literal">kube-state-metrics</code>, it could cause part of the manifest installation to fail or to update your existing resources without notice.
+</li>
+</ul>
+</div>
+<div class="position-relative"><h5><a id="agent-kustomize-after"></a>Failures occurring within specific components after installation</h5><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/ingest-docs/edit/8.x/docs/en/ingest-management/troubleshooting/troubleshooting.asciidoc">edit</a></div>
+<p>If the installation is correct and all resources are deployed, but data is not flowing as expected (for example, you don&#8217;t see any data on the <span class="strong strong"><strong>[Metrics Kubernetes] Cluster Overview</strong></span> dashboard), check the following items:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Check resources status and ensure they are all in a <code class="literal">Running</code> state:</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">kubectl get pods -n kube-system | grep elastic
+kubectl get pods -n kube-system | grep kube-state-metrics</pre>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The default configuration assumes that both <code class="literal">kube-state-metrics</code> and the Elastic Agent <code class="literal">DaemonSet</code> are deployed in the <span class="strong strong"><strong>same namespace</strong></span> for communication purposes. If you change the namespace of any of the components, the agent configuration will need further policy updates.</p>
+</div>
+</div>
+</li>
+<li class="listitem">
+<p>Describe the Pods if they are in a <code class="literal">Pending</code> state:</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">kubectl describe -n kube-system &lt;name_of_elastic_agent_pod&gt;</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Check the logs of elastic-agents and kube-state-metrics, and look for errors or warnings:</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">kubectl logs -n kube-system &lt;name_of_elastic_agent_pod&gt;
+kubectl logs -n kube-system &lt;name_of_elastic_agent_pod&gt; | grep -i error
+kubectl logs -n kube-system &lt;name_of_elastic_agent_pod&gt; | grep -i warn</pre>
+</div>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">kubectl logs -n kube-system &lt;name_of_kube-state-metrics_pod&gt;</pre>
+</div>
+</li>
+</ol>
+</div>
+<p><span class="strong strong"><strong>Possible issues</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<p>Connectivity, authorization, or authentication issues when connecting to Elasticsearch:</p>
+<p>Ensure the API Key and Elasticsearch destination endpoint used during the installation is correct and is reachable from within the Pods.</p>
+<p>In an already installed system, the API Key is stored in a <code class="literal">Secret</code> named <code class="literal">elastic-agent-creds-&lt;hash&gt;</code>, and the endpoint is configured in the <code class="literal">ConfigMap</code> <code class="literal">elastic-agent-configs-&lt;hash&gt;</code>.</p>
+</li>
+<li class="listitem">
+<p>Missing cluster-level metrics (provided by <code class="literal">kube-state-metrics</code>):</p>
+<p>As described in <a class="xref" href="running-on-kubernetes-standalone.html" title="Run Elastic Agent Standalone on Kubernetes">Run Elastic Agent Standalone on Kubernetes</a>, the Elastic Agent Pod acting as <code class="literal">leader</code> is responsible for retrieving cluster-level metrics from <code class="literal">kube-state-metrics</code> and delivering them to <a href="/guide/en/elasticsearch/reference/8.x/data-streams.html" class="ulink" target="_top">data streams</a> prefixed as <code class="literal">metrics-kubernetes.state_&lt;resource&gt;</code>. In order to troubleshoot a situation where these metrics are not appearing:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Determine which Pod owns the <a class="xref" href="kubernetes_leaderelection-provider.html" title="Kubernetes LeaderElection Provider">leadership</a> <code class="literal">lease</code> in the cluster, with:</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">kubectl get lease -n kube-system elastic-agent-cluster-leader</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Check the logs of that Pod to see if there are errors when connecting to <code class="literal">kube-state-metrics</code> and if the <code class="literal">state_*</code> metrics are being sent to Elasticsearch.</p>
+<p>One way to check if <code class="literal">state_*</code> metrics are being delivered to Elasticsearch is to inspect log lines with the <code class="literal">"Non-zero metrics in the last 30s"</code> message and check the values of the <code class="literal">state_*</code> metrics within the line, with something like:</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">kubectl logs -n kube-system elastic-agent-xxxx | grep "Non-zero metrics" | grep "state_"</pre>
+</div>
+<p>If the previous command returns <code class="literal">"state_pod":{"events":213,"success":213}</code> or similar for all <code class="literal">state_*</code> metrics, it means the metrics are being delivered.</p>
+</li>
+<li class="listitem">
+<p>As a last resort, if you believe none of the Pods is acting as a leader, you can try deleting the <code class="literal">lease</code> to generate a new one:</p>
+<div class="pre_wrapper lang-sh">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-sh">kubectl delete lease -n kube-system elastic-agent-cluster-leader
+# wait a few seconds and check for the lease again
+kubectl get lease -n kube-system elastic-agent-cluster-leader</pre>
+</div>
+</li>
+</ol>
+</div>
+</li>
+<li class="listitem">
+<p>Performance problems:</p>
+<p>Monitor the CPU and Memory usage of the agents Pods and adjust the manifest requests and limits as needed. Refer to <a class="xref" href="scaling-on-kubernetes.html" title="Scaling Elastic Agent on Kubernetes">Scaling Elastic Agent on Kubernetes</a> for more details about the needed resources.</p>
+</li>
+</ul>
+</div>
+<p>Extra resources for Elastic Agent on Kubernetes troubleshooting and information:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a class="xref" href="fleet-troubleshooting.html#agent-oom-k8s" title="Elastic Agent Out of Memory errors on Kubernetes">Elastic Agent Out of Memory errors on Kubernetes</a>.
+</li>
+<li class="listitem">
+<a href="https://github.com/elastic/elastic-agent/tree/main/deploy/kubernetes/elastic-agent-kustomize/default" class="ulink" target="_top">Elastic Agent Kustomize Templates</a> documentation and resources.
+</li>
+<li class="listitem">
+Other examples and manifests to deploy <a href="https://github.com/elastic/elastic-agent/tree/main/deploy/kubernetes" class="ulink" target="_top">Elastic Agent on Kubernetes</a>.
+</li>
+</ul>
+</div>
 </div>
 </div>
 </div><div class="navfooter">
