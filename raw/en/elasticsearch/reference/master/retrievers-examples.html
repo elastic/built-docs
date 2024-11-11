@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Retrievers examples | Elasticsearch Guide [master] | Elastic</title>
+<meta class="elastic" name="content" content="Retrievers examples | Elasticsearch Guide [master]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [master]"/>
+<link rel="up" href="retrievers-overview.html" title="Retrievers"/>
+<link rel="prev" href="retrievers-overview.html" title="Retrievers"/>
+<link rel="next" href="knn-search.html" title="k-nearest neighbor (kNN) search"/>
+<meta class="elastic" name="product_version" content="master"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/master"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="master"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body>
+<div class="page_header">
+This documentation contains work-in-progress information for future Elastic Stack and Cloud releases. Use the version selector to view supported release docs. It also contains some Elastic Cloud serverless information. Check out our <a href="https://www.elastic.co/docs/current/serverless">serverless docs</a> for more details.
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="retrievers-overview.html">« Retrievers</a>
+</span>
+<span class="next">
+<a href="knn-search.html">k-nearest neighbor (kNN) search »</a>
+</span>
+</div>
+<div class="book" lang="en">
+<div class="titlepage">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [master]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="search-with-elasticsearch.html">Search your data</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="retrievers-overview.html">Retrievers</a></span>
+</div>
+<div>
+<div><h1 class="title"><a id="id-1"></a>Retrievers examples</h1><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+</div>
+<!--EXTRA-->
+</div>
+<div id="content">
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h2 class="title"><a id="retrievers-examples"></a>Retrievers examples</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+</div></div></div>
+<p>Learn how to combine different retrievers in these hands-on examples.
+To demonstrate the full functionality of retrievers, these examples require access to a <a class="xref" href="semantic-reranking.html#semantic-reranking-models" title="Cross-encoder and bi-encoder models">semantic reranking model</a> set up using the <a class="xref" href="inference-apis.html" title="Inference APIs">Elastic inference APIs</a>.</p>
+<div class="position-relative"><h4><a id="retrievers-examples-setup"></a>Add example data</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>To begin with, we&#8217;ll set up the necessary services and have them in place for later use.</p>
+<div class="pre_wrapper lang-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js">// Setup rerank task stored as `my-rerank-model`
+PUT _inference/rerank/my-rerank-model
+{
+ "service": "cohere",
+ "service_settings": {
+   "model_id": "rerank-english-v3.0",
+   "api_key": "{{COHERE_API_KEY}}"
+ }
+}</pre>
+</div>
+<p>Now that we have our reranking service in place, lets create the <code class="literal">retrievers_example</code> index, and add some documents to it.</p>
+<div class="pre_wrapper lang-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js">PUT retrievers_example
+{
+   "mappings": {
+       "properties": {
+           "vector": {
+               "type": "dense_vector",
+               "dims": 3,
+               "similarity": "l2_norm",
+               "index": true
+           },
+           "text": {
+               "type": "text"
+           },
+           "year": {
+               "type": "integer"
+           },
+           "topic": {
+               "type": "keyword"
+           }
+       }
+   }
+}</pre>
+</div>
+<div class="pre_wrapper lang-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js">POST /retrievers_example/_doc/1
+{
+ "vector": [0.23, 0.67, 0.89],
+ "text": "Large language models are revolutionizing information retrieval by boosting search precision, deepening contextual understanding, and reshaping user experiences in data-rich environments.",
+ "year": 2024,
+ "topic": ["llm", "ai", "information_retrieval"]
+}
+
+POST /retrievers_example/_doc/2
+{
+ "vector": [0.12, 0.56, 0.78],
+ "text": "Artificial intelligence is transforming medicine, from advancing diagnostics and tailoring treatment plans to empowering predictive patient care for improved health outcomes.",
+ "year": 2023,
+ "topic": ["ai", "medicine"]
+}
+
+POST /retrievers_example/_doc/3
+{
+ "vector": [0.45, 0.32, 0.91],
+  "text": "AI is redefining security by enabling advanced threat detection, proactive risk analysis, and dynamic defenses against increasingly sophisticated cyber threats.",
+ "year": 2024,
+ "topic": ["ai", "security"]
+}
+
+POST /retrievers_example/_doc/4
+{
+ "vector": [0.34, 0.21, 0.98],
+ "text": "Elastic introduces Elastic AI Assistant, the open, generative AI sidekick powered by ESRE to democratize cybersecurity and enable users of every skill level.",
+ "year": 2023,
+ "topic": ["ai", "elastic", "assistant"]
+}
+
+POST /retrievers_example/_doc/5
+{
+ "vector": [0.11, 0.65, 0.47],
+ "text": "Learn how to spin up a deployment of our hosted Elasticsearch Service and use Elastic Observability to gain deeper insight into the behavior of your applications and systems.",
+ "year": 2024,
+ "topic": ["documentation", "observability", "elastic"]
+}</pre>
+</div>
+<p>Now that we also have our documents in place, let&#8217;s try to run some queries using retrievers.</p>
+<div class="position-relative"><h4><a id="retrievers-examples-combining-standard-knn-retrievers-with-rrf"></a>Example: Combining query and kNN with RRF</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>First, let&#8217;s examine how to combine two different types of queries: a <code class="literal">kNN</code> query and a
+<code class="literal">query_string</code> query. While these queries may produce scores in different ranges, we can use
+Reciprocal Rank Fusion (<code class="literal">rrf</code>) to combine the results and generate a merged final result
+list.</p>
+<p>To implement this in the retriever framework, we start with the top-level element: our <code class="literal">rrf</code>
+retriever. This retriever operates on top of two other retrievers: a <code class="literal">knn</code> retriever and a
+<code class="literal">standard</code> retriever. Our query structure would look like this:</p>
+<div class="pre_wrapper lang-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js">GET /retrievers_example/_search
+{
+   "retriever":{
+       "rrf": {
+           "retrievers":[
+               {
+                   "standard":{
+                       "query":{
+                           "query_string":{
+                              "query": "(information retrieval) OR (artificial intelligence)",
+                              "default_field": "text"
+                           }
+                       }
+                   }
+               },
+               {
+                   "knn": {
+                       "field": "vector",
+                       "query_vector": [
+                           0.23,
+                           0.67,
+                           0.89
+                       ],
+                       "k": 3,
+                       "num_candidates": 5
+                   }
+               }
+           ],
+           "rank_window_size": 10,
+           "rank_constant": 1
+       }
+   },
+   "_source": ["text", "topic"]
+}</pre>
+</div>
+<div class="position-relative"><h4><a id="retrievers-examples-collapsing-retriever-results"></a>Example: Grouping results by year with <code class="literal">collapse</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>In our result set, we have many documents with the same <code class="literal">year</code> value. We can clean this
+up using the <code class="literal">collapse</code> parameter with our retriever. This enables grouping results by
+any field and returns only the highest-scoring document from each group. In this example
+we&#8217;ll collapse our results based on the <code class="literal">year</code> field.</p>
+<div class="pre_wrapper lang-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js">GET /retrievers_example/_search
+{
+   "retriever":{
+       "rrf": {
+           "retrievers":[
+               {
+                   "standard":{
+                       "query":{
+                           "query_string":{
+                              "query": "(information retrieval) OR (artificial intelligence)",
+                              "default_field": "text"
+                           }
+                       }
+                   }
+               },
+               {
+                   "knn": {
+                       "field": "vector",
+                       "query_vector": [
+                           0.23,
+                           0.67,
+                           0.89
+                       ],
+                       "k": 3,
+                       "num_candidates": 5
+                   }
+               }
+           ],
+           "rank_window_size": 10,
+           "rank_constant": 1
+       }
+   },
+   "collapse": {
+       "field": "year",
+       "inner_hits": {
+           "name": "topic related documents",
+           "_source": ["text", "year"]
+       }
+   },
+   "_source": ["text", "topic"]
+}</pre>
+</div>
+<div class="position-relative"><h4><a id="retrievers-examples-text-similarity-reranker-on-top-of-rrf"></a>Example: Rerank results of an RRF retriever</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>Previously, we used a <code class="literal">text_similarity_reranker</code> retriever within an <code class="literal">rrf</code> retriever.
+Because retrievers support full composability, we can also rerank the results of an
+<code class="literal">rrf</code> retriever. Let&#8217;s apply this to our first example.</p>
+<div class="pre_wrapper lang-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js">GET retrievers_example/_search
+{
+   "retriever": {
+       "text_similarity_reranker": {
+           "retriever": {
+               "rrf": {
+                   "retrievers": [
+                       {
+                           "standard":{
+                               "query":{
+                                   "query_string":{
+                                      "query": "(information retrieval) OR (artificial intelligence)",
+                                      "default_field": "text"
+                                   }
+                               }
+                           }
+                       },
+                       {
+                           "knn": {
+                               "field": "vector",
+                               "query_vector": [
+                                   0.23,
+                                   0.67,
+                                   0.89
+                               ],
+                               "k": 3,
+                               "num_candidates": 5
+                           }
+                       }
+                   ],
+                   "rank_window_size": 10,
+                   "rank_constant": 1
+               }
+           },
+           "field": "text",
+           "inference_id": "my-rerank-model",
+           "inference_text": "What are the state of the art applications of AI in information retrieval?"
+       }
+   },
+   "_source": ["text", "topic"]
+}</pre>
+</div>
+<div class="position-relative"><h4><a id="retrievers-examples-rrf-ranking-on-text-similarity-reranker-results"></a>Example: RRF with semantic reranker</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>For this example, we&#8217;ll replace our semantic query with the <code class="literal">my-rerank-model</code>
+reranker we previously configured. Since this is a reranker, it needs an initial pool of
+documents to work with. In this case, we&#8217;ll filter for documents about <code class="literal">ai</code> topics.</p>
+<div class="pre_wrapper lang-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js">GET /retrievers_example/_search
+{
+    "retriever": {
+        "rrf": {
+            "retrievers": [
+                {
+                    "knn": {
+                        "field": "vector",
+                        "query_vector": [
+                            0.23,
+                            0.67,
+                            0.89
+                        ],
+                        "k": 3,
+                        "num_candidates": 5
+                    }
+                },
+                {
+                    "text_similarity_reranker": {
+                        "retriever": {
+                            "standard": {
+                                "query": {
+                                    "term": {
+                                        "topic": "ai"
+                                    }
+                                }
+                            }
+                        },
+                        "field": "text",
+                        "inference_id": "my-rerank-model",
+                        "inference_text": "Can I use generative AI to identify user intent and improve search relevance?"
+                    }
+                }
+            ],
+            "rank_window_size": 10,
+            "rank_constant": 1
+        }
+    },
+    "_source": [
+        "text",
+        "topic"
+    ]
+}</pre>
+</div>
+<div class="position-relative"><h4><a id="retrievers-examples-chaining-text-similarity-reranker-retrievers"></a>Example: Chaining multiple semantic rerankers</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>Full composability means we can chain together multiple retrievers of the same type. For instance, imagine we have a computationally expensive reranker that&#8217;s specialized for AI content. We can rerank the results of a <code class="literal">text_similarity_reranker</code> using another <code class="literal">text_similarity_reranker</code> retriever. Each reranker can operate on different fields and/or use different inference services.</p>
+<div class="pre_wrapper lang-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js">GET retrievers_example/_search
+{
+   "retriever": {
+       "text_similarity_reranker": {
+           "retriever": {
+               "text_similarity_reranker": {
+                   "retriever": {
+                       "knn": {
+                           "field": "vector",
+                           "query_vector": [
+                               0.23,
+                               0.67,
+                               0.89
+                           ],
+                           "k": 3,
+                           "num_candidates": 5
+                       }
+                   },
+                   "rank_window_size": 100,
+                   "field": "text",
+                   "inference_id": "my-rerank-model",
+                   "inference_text": "What are the state of the art applications of AI in information retrieval?"
+               }
+           },
+           "rank_window_size": 10,
+           "field": "text",
+           "inference_id": "my-other-more-expensive-rerank-model",
+           "inference_text": "Applications of Large Language Models in technology and their impact on user satisfaction"
+       }
+   },
+   "_source": [
+       "text",
+       "topic"
+   ]
+}</pre>
+</div>
+<p>Note that our example applies two reranking steps. First, we rerank the top 100
+documents from the <code class="literal">knn</code> search using the <code class="literal">my-rerank-model</code> reranker. Then we
+pick the top 10 results and rerank them using the more fine-grained
+<code class="literal">my-other-more-expensive-rerank-model</code>.</p>
+<div class="position-relative"><h4><a id="retrievers-examples-rrf-and-aggregations"></a>Example: Combine RRF with aggregations</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>Retrievers support both composability and most of the standard <code class="literal">_search</code> functionality. For instance,
+we can compute aggregations with the <code class="literal">rrf</code> retriever. When using a compound retriever,
+the aggregations are computed based on its nested retrievers. In the following example,
+the <code class="literal">terms</code> aggregation for the <code class="literal">topic</code> field will include all results, not just the top <code class="literal">rank_window_size</code>,
+from the 2 nested retrievers, i.e. all documents whose <code class="literal">year</code> field is greater than 2023, and whose <code class="literal">topic</code> field
+matches the term <code class="literal">elastic</code>.</p>
+<div class="pre_wrapper lang-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js">GET retrievers_example/_search
+{
+    "retriever": {
+        "rrf": {
+            "retrievers": [
+                {
+                    "standard": {
+                        "query": {
+                            "range": {
+                                "year": {
+                                    "gt": 2023
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "standard": {
+                        "query": {
+                            "term": {
+                                "topic": "elastic"
+                            }
+                        }
+                    }
+                }
+            ],
+            "rank_window_size": 10,
+            "rank_constant": 1
+        }
+    },
+    "_source": [
+        "text",
+        "topic"
+    ],
+    "aggs": {
+        "topics": {
+            "terms": {
+                "field": "topic"
+            }
+        }
+    }
+}</pre>
+</div>
+</div>
+</div>
+</div><div class="navfooter">
+<span class="prev">
+<a href="retrievers-overview.html">« Retrievers</a>
+</span>
+<span class="next">
+<a href="knn-search.html">k-nearest neighbor (kNN) search »</a>
+</span>
+</div>
+</body>
+</html>
