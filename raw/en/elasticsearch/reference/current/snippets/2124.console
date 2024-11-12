@@ -1,19 +1,49 @@
-PUT _slm/policy/nightly-snapshots
+PUT _watcher/watch/log_event_watch
 {
-  "schedule": "0 30 2 * * ?",
-  "name": "<nightly-snap-{now/d}>",
-  "repository": "my_repository",
-  "config": {
-    "indices": "*",
-    "include_global_state": true,
-    "feature_states": [
-      "kibana",
-      "security"
-    ]
+  "trigger" : {
+    "schedule" : { "interval" : "5m" }
   },
-  "retention": {
-    "expire_after": "30d",
-    "min_count": 5,
-    "max_count": 50
+  "input" : {
+    "search" : {
+      "request" : {
+        "indices" : "log-events",
+        "body" : {
+          "size" : 0,
+          "query" : { "match" : { "status" : "error" } }
+        }
+      }
+    }
+  },
+  "condition" : {
+    "compare" : { "ctx.payload.hits.total" : { "gt" : 0 } }
+  },
+  "actions" : {
+    "email_administrator" : {
+      "email" : {
+        "to" : "sys.admino@host.domain",
+        "subject" : "Encountered {{ctx.payload.hits.total}} errors",
+        "body" : "Too many error in the system, see attached data",
+        "attachments" : {
+          "attached_data" : {
+            "data" : {
+              "format" : "json"
+            }
+          }
+        },
+        "priority" : "high"
+      }
+    },
+    "notify_pager" : {
+      "condition": {
+        "compare" : { "ctx.payload.hits.total" : { "gt" : 5 } }
+      },
+      "webhook" : {
+        "method" : "POST",
+        "host" : "pager.service.domain",
+        "port" : 1234,
+        "path" : "/{{watch_id}}",
+        "body" : "Encountered {{ctx.payload.hits.total}} errors"
+      }
+    }
   }
 }

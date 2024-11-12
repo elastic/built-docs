@@ -1,48 +1,64 @@
-PUT _watcher/watch/log_event_watch
+GET /_search
 {
-  "trigger" : {
-    "schedule" : { "interval" : "5m" }
-  },
-  "input" : {
-    "search" : {
-      "request" : {
-        "indices" : "log-events",
-        "body" : {
-          "size" : 0,
-          "query" : { "match" : { "status" : "error" } }
-        }
-      }
-    }
-  },
-  "condition" : {
-    "compare" : { "ctx.payload.hits.total" : { "gt" : 0 } }
-  },
-  "actions" : {
-    "email_administrator" : {
-      "email" : {
-        "to" : "sys.admino@host.domain",
-        "subject" : "Encountered {{ctx.payload.hits.total}} errors",
-        "body" : "Too many error in the system, see attached data",
-        "attachments" : {
-          "attached_data" : {
-            "data" : {
-              "format" : "json"
+  "query": {
+    "bool": {
+      "filter": [
+        {
+          "term": {
+            "event.outcome": "failure"
+          }
+        },
+        {
+          "range": {
+            "@timestamp": {
+              "gte": "2021-02-01",
+              "lt": "2021-02-04"
             }
           }
         },
-        "priority" : "high"
-      }
-    },
-    "notify_pager" : {
-      "condition": {
-        "compare" : { "ctx.payload.hits.total" : { "gt" : 5 } }
-      },
-      "webhook" : {
-        "method" : "POST",
-        "host" : "pager.service.domain",
-        "port" : 1234,
-        "path" : "/{{watch_id}}",
-        "body" : "Encountered {{ctx.payload.hits.total}} errors"
+        {
+          "term": {
+            "service.name": {
+              "value": "frontend-node"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "aggs": {
+    "failure_p_value": {
+      "significant_terms": {
+        "field": "user_agent.version",
+        "background_filter": {
+          "bool": {
+            "must_not": [
+              {
+                "term": {
+                  "event.outcome": "failure"
+                }
+              }
+            ],
+            "filter": [
+              {
+                "range": {
+                  "@timestamp": {
+                    "gte": "2021-02-01",
+                    "lt": "2021-02-04"
+                  }
+                }
+              },
+              {
+                "term": {
+                  "service.name": {
+                    "value": "frontend-node"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "p_value": {"background_is_superset": false, "normalize_above": 1000}
       }
     }
   }
