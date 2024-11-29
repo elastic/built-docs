@@ -1,0 +1,1261 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Retrievers examples | Elasticsearch Guide [master] | Elastic</title>
+<meta class="elastic" name="content" content="Retrievers examples | Elasticsearch Guide [master]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [master]"/>
+<link rel="up" href="retrievers-overview.html" title="Retrievers"/>
+<link rel="prev" href="retrievers-overview.html" title="Retrievers"/>
+<link rel="next" href="knn-search.html" title="k-nearest neighbor (kNN) search"/>
+<meta class="elastic" name="product_version" content="master"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/master"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="master"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body>
+<div class="page_header">
+This documentation contains work-in-progress information for future Elastic Stack and Cloud releases. Use the version selector to view supported release docs. It also contains some Elastic Cloud serverless information. Check out our <a href="https://www.elastic.co/docs/current/serverless">serverless docs</a> for more details.
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="retrievers-overview.html">« Retrievers</a>
+</span>
+<span class="next">
+<a href="knn-search.html">k-nearest neighbor (kNN) search »</a>
+</span>
+</div>
+<div class="book" lang="en">
+<div class="titlepage">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [master]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="search-with-elasticsearch.html">Search your data</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="retrievers-overview.html">Retrievers</a></span>
+</div>
+<div>
+<div><h1 class="title"><a id="id-1"></a>Retrievers examples</h1><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+</div>
+<!--EXTRA-->
+</div>
+<div id="content">
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h2 class="title"><a id="_retrievers_examples"></a>Retrievers examples</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+</div></div></div>
+<div class="position-relative"><h4><a id="retrievers-examples-setup"></a>Add example data</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>To begin with, lets create the <code class="literal">retrievers_example</code> index, and add some documents to it.</p>
+<a id="ee05714a83d75fb6858e3b9fcbeb8f8b"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT retrievers_example
+{
+   "mappings": {
+       "properties": {
+           "vector": {
+               "type": "dense_vector",
+               "dims": 3,
+               "similarity": "l2_norm",
+               "index": true
+           },
+           "text": {
+               "type": "text"
+           },
+           "year": {
+               "type": "integer"
+           },
+           "topic": {
+               "type": "keyword"
+           }
+       }
+   }
+}
+
+POST /retrievers_example/_doc/1
+{
+ "vector": [0.23, 0.67, 0.89],
+ "text": "Large language models are revolutionizing information retrieval by boosting search precision, deepening contextual understanding, and reshaping user experiences in data-rich environments.",
+ "year": 2024,
+ "topic": ["llm", "ai", "information_retrieval"]
+}
+
+POST /retrievers_example/_doc/2
+{
+ "vector": [0.12, 0.56, 0.78],
+ "text": "Artificial intelligence is transforming medicine, from advancing diagnostics and tailoring treatment plans to empowering predictive patient care for improved health outcomes.",
+ "year": 2023,
+ "topic": ["ai", "medicine"]
+}
+
+POST /retrievers_example/_doc/3
+{
+ "vector": [0.45, 0.32, 0.91],
+  "text": "AI is redefining security by enabling advanced threat detection, proactive risk analysis, and dynamic defenses against increasingly sophisticated cyber threats.",
+ "year": 2024,
+ "topic": ["ai", "security"]
+}
+
+POST /retrievers_example/_doc/4
+{
+ "vector": [0.34, 0.21, 0.98],
+ "text": "Elastic introduces Elastic AI Assistant, the open, generative AI sidekick powered by ESRE to democratize cybersecurity and enable users of every skill level.",
+ "year": 2023,
+ "topic": ["ai", "elastic", "assistant"]
+}
+
+POST /retrievers_example/_doc/5
+{
+ "vector": [0.11, 0.65, 0.47],
+ "text": "Learn how to spin up a deployment of our hosted Elasticsearch Service and use Elastic Observability to gain deeper insight into the behavior of your applications and systems.",
+ "year": 2024,
+ "topic": ["documentation", "observability", "elastic"]
+}
+
+POST /retrievers_example/_refresh</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/249.console"></div>
+<p>Now that we have our documents in place, let&#8217;s try to run some queries using retrievers.</p>
+<div class="position-relative"><h4><a id="retrievers-examples-combining-standard-knn-retrievers-with-rrf"></a>Example: Combining query and kNN with RRF</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>First, let&#8217;s examine how to combine two different types of queries: a <code class="literal">kNN</code> query and a
+<code class="literal">query_string</code> query. While these queries may produce scores in different ranges, we can use
+Reciprocal Rank Fusion (<code class="literal">rrf</code>) to combine the results and generate a merged final result
+list.</p>
+<p>To implement this in the retriever framework, we start with the top-level element: our <code class="literal">rrf</code>
+retriever. This retriever operates on top of two other retrievers: a <code class="literal">knn</code> retriever and a
+<code class="literal">standard</code> retriever. Our query structure would look like this:</p>
+<a id="97c6c07f46f4177f0565a04bc50924a3"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET /retrievers_example/_search
+{
+    "retriever": {
+        "rrf": {
+            "retrievers": [
+                {
+                    "standard": {
+                        "query": {
+                            "query_string": {
+                                "query": "(information retrieval) OR (artificial intelligence)",
+                                "default_field": "text"
+                            }
+                        }
+                    }
+                },
+                {
+                    "knn": {
+                        "field": "vector",
+                        "query_vector": [
+                            0.23,
+                            0.67,
+                            0.89
+                        ],
+                        "k": 3,
+                        "num_candidates": 5
+                    }
+                }
+            ],
+            "rank_window_size": 10,
+            "rank_constant": 1
+        }
+    },
+    "_source": false
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/250.console"></div>
+<p>This returns the following response based on the final rrf score for each result.</p>
+<details>
+<summary class="title">Example response</summary>
+<div class="content">
+<a id="195817617f1ee517aa1a17ef6054da2d"></a>
+<div class="pre_wrapper lang-console-result">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console-result">{
+    "took": 42,
+    "timed_out": false,
+    "_shards": {
+        "total": 1,
+        "successful": 1,
+        "skipped": 0,
+        "failed": 0
+    },
+    "hits": {
+        "total": {
+            "value": 3,
+            "relation": "eq"
+        },
+        "max_score": 0.8333334,
+        "hits": [
+            {
+                "_index": "retrievers_example",
+                "_id": "1",
+                "_score": 0.8333334
+            },
+            {
+                "_index": "retrievers_example",
+                "_id": "2",
+                "_score": 0.8333334
+            },
+            {
+                "_index": "retrievers_example",
+                "_id": "3",
+                "_score": 0.25
+            }
+        ]
+    }
+}</pre>
+</div>
+</div>
+</details>
+<div class="position-relative"><h4><a id="retrievers-examples-collapsing-retriever-results"></a>Example: Grouping results by year with <code class="literal">collapse</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>In our result set, we have many documents with the same <code class="literal">year</code> value. We can clean this
+up using the <code class="literal">collapse</code> parameter with our retriever. This, as with the standard <a class="xref" href="collapse-search-results.html" title="Collapse search results">collapse</a> feature,
+enables grouping results by any field and returns only the highest-scoring document from each group. In this example
+we&#8217;ll collapse our results based on the <code class="literal">year</code> field.</p>
+<a id="e6f6d3aeea7ecea47cfd5c3d727f7004"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET /retrievers_example/_search
+{
+    "retriever": {
+        "rrf": {
+            "retrievers": [
+                {
+                    "standard": {
+                        "query": {
+                            "query_string": {
+                                "query": "(information retrieval) OR (artificial intelligence)",
+                                "default_field": "text"
+                            }
+                        }
+                    }
+                },
+                {
+                    "knn": {
+                        "field": "vector",
+                        "query_vector": [
+                            0.23,
+                            0.67,
+                            0.89
+                        ],
+                        "k": 3,
+                        "num_candidates": 5
+                    }
+                }
+            ],
+            "rank_window_size": 10,
+            "rank_constant": 1
+        }
+    },
+    "collapse": {
+        "field": "year",
+        "inner_hits": {
+            "name": "topic related documents",
+            "_source": [
+                "year"
+            ]
+        }
+    },
+    "_source": false
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/251.console"></div>
+<p>This returns the following response with collapsed results.</p>
+<details>
+<summary class="title">Example response</summary>
+<div class="content">
+<a id="6b717b1eae26fdfcd21536eabc466961"></a>
+<div class="pre_wrapper lang-console-result">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console-result">{
+    "took": 42,
+    "timed_out": false,
+    "_shards": {
+        "total": 1,
+        "successful": 1,
+        "skipped": 0,
+        "failed": 0
+    },
+    "hits": {
+        "total": {
+            "value": 3,
+            "relation": "eq"
+        },
+        "max_score": 0.8333334,
+        "hits": [
+            {
+                "_index": "retrievers_example",
+                "_id": "1",
+                "_score": 0.8333334,
+                "fields": {
+                    "year": [
+                        2024
+                    ]
+                },
+                "inner_hits": {
+                    "topic related documents": {
+                        "hits": {
+                            "total": {
+                                "value": 2,
+                                "relation": "eq"
+                            },
+                            "max_score": 0.8333334,
+                            "hits": [
+                                {
+                                    "_index": "retrievers_example",
+                                    "_id": "1",
+                                    "_score": 0.8333334,
+                                    "_source": {
+                                        "year": 2024
+                                    }
+                                },
+                                {
+                                    "_index": "retrievers_example",
+                                    "_id": "3",
+                                    "_score": 0.25,
+                                    "_source": {
+                                        "year": 2024
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            {
+                "_index": "retrievers_example",
+                "_id": "2",
+                "_score": 0.8333334,
+                "fields": {
+                    "year": [
+                        2023
+                    ]
+                },
+                "inner_hits": {
+                    "topic related documents": {
+                        "hits": {
+                            "total": {
+                                "value": 1,
+                                "relation": "eq"
+                            },
+                            "max_score": 0.8333334,
+                            "hits": [
+                                {
+                                    "_index": "retrievers_example",
+                                    "_id": "2",
+                                    "_score": 0.8333334,
+                                    "_source": {
+                                        "year": 2023
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        ]
+    }
+}</pre>
+</div>
+</div>
+</details>
+<div class="position-relative"><h4><a id="retrievers-examples-highlighting-retriever-results"></a>Example: Highlighting results based on nested sub-retrievers</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>Highlighting is now also available for nested sub-retrievers matches. For example, consider the same
+<code class="literal">rrf</code> retriever as above, with a <code class="literal">knn</code> and <code class="literal">standard</code> retriever as its sub-retrievers. We can specify a <code class="literal">highlight</code>
+section, as defined in <a class="xref" href="highlighting.html" title="Highlighting">highlighting</a> documentation, and compute highlights for the top results.</p>
+<a id="bb2ba5d1885f87506f90dbb002e518f4"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET /retrievers_example/_search
+{
+    "retriever": {
+        "rrf": {
+            "retrievers": [
+                {
+                    "standard": {
+                        "query": {
+                            "query_string": {
+                                "query": "(information retrieval) OR (artificial intelligence)",
+                                "default_field": "text"
+                            }
+                        }
+                    }
+                },
+                {
+                    "knn": {
+                        "field": "vector",
+                        "query_vector": [
+                            0.23,
+                            0.67,
+                            0.89
+                        ],
+                        "k": 3,
+                        "num_candidates": 5
+                    }
+                }
+            ],
+            "rank_window_size": 10,
+            "rank_constant": 1
+        }
+    },
+    "highlight": {
+        "fields": {
+            "text": {
+                "fragment_size": 150,
+                "number_of_fragments": 3
+            }
+        }
+    },
+    "_source": false
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/252.console"></div>
+<p>This would highlight the <code class="literal">text</code> field, based on the matches produced by the <code class="literal">standard</code> retriever. The highlighted snippets
+would then be included in the response as usual, i.e. under each search hit.</p>
+<details>
+<summary class="title">Example response</summary>
+<div class="content">
+<a id="c66d9397404512f9c8cb5ca39a018167"></a>
+<div class="pre_wrapper lang-console-result">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console-result">{
+    "took": 42,
+    "timed_out": false,
+    "_shards": {
+        "total": 1,
+        "successful": 1,
+        "skipped": 0,
+        "failed": 0
+    },
+    "hits": {
+        "total": {
+            "value": 3,
+            "relation": "eq"
+        },
+        "max_score": 0.8333334,
+        "hits": [
+            {
+                "_index": "retrievers_example",
+                "_id": "1",
+                "_score": 0.8333334,
+                "highlight": {
+                    "text": [
+                        "Large language models are revolutionizing &lt;em&gt;information&lt;/em&gt; &lt;em&gt;retrieval&lt;/em&gt; by boosting search precision, deepening contextual understanding, and reshaping user experiences"
+                    ]
+                }
+            },
+            {
+                "_index": "retrievers_example",
+                "_id": "2",
+                "_score": 0.8333334,
+                "highlight": {
+                    "text": [
+                        "&lt;em&gt;Artificial&lt;/em&gt; &lt;em&gt;intelligence&lt;/em&gt; is transforming medicine, from advancing diagnostics and tailoring treatment plans to empowering predictive patient care for improved"
+                    ]
+                }
+            },
+            {
+                "_index": "retrievers_example",
+                "_id": "3",
+                "_score": 0.25
+            }
+        ]
+    }
+}</pre>
+</div>
+</div>
+</details>
+<div class="position-relative"><h4><a id="retrievers-examples-inner-hits-retriever-results"></a>Example: Computing inner hits from nested sub-retrievers</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>We can also define <code class="literal">inner_hits</code> to be computed on any of the sub-retrievers, and propagate those computations to the top
+level compound retriever. For example, let&#8217;s create a new index with a <code class="literal">knn</code> field, nested under the <code class="literal">nested_field</code> field,
+and index a couple of documents.</p>
+<a id="bee3fda7bb07086243424b62e5b16ca7"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT retrievers_example_nested
+{
+    "mappings": {
+        "properties": {
+            "nested_field": {
+                "type": "nested",
+                "properties": {
+                    "paragraph_id": {
+                        "type": "keyword"
+                    },
+                    "nested_vector": {
+                        "type": "dense_vector",
+                        "dims": 3,
+                        "similarity": "l2_norm",
+                        "index": true
+                    }
+                }
+            },
+            "topic": {
+                "type": "keyword"
+            }
+        }
+    }
+}
+
+POST /retrievers_example_nested/_doc/1
+{
+    "nested_field": [
+        {
+            "paragraph_id": "1a",
+            "nested_vector": [
+                -1.12,
+                -0.59,
+                0.78
+            ]
+        },
+        {
+            "paragraph_id": "1b",
+            "nested_vector": [
+                -0.12,
+                1.56,
+                0.42
+            ]
+        },
+        {
+            "paragraph_id": "1c",
+            "nested_vector": [
+                1,
+                -1,
+                0
+            ]
+        }
+    ],
+    "topic": [
+        "ai"
+    ]
+}
+
+POST /retrievers_example_nested/_doc/2
+{
+    "nested_field": [
+        {
+            "paragraph_id": "2a",
+            "nested_vector": [
+                0.23,
+                1.24,
+                0.65
+            ]
+        }
+    ],
+    "topic": [
+        "information_retrieval"
+    ]
+}
+
+POST /retrievers_example_nested/_doc/3
+{
+    "topic": [
+        "ai"
+    ]
+}
+
+POST /retrievers_example_nested/_refresh</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/253.console"></div>
+<p>Now we can run an <code class="literal">rrf</code> retriever query and also compute <a class="xref" href="inner-hits.html" title="Retrieve inner hits">inner hits</a> for the <code class="literal">nested_field.nested_vector</code>
+field, based on the <code class="literal">knn</code> query specified.</p>
+<a id="0bc6155e0c88062a4d8490da49db3aa8"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET /retrievers_example_nested/_search
+{
+    "retriever": {
+        "rrf": {
+            "retrievers": [
+                {
+                    "standard": {
+                        "query": {
+                            "nested": {
+                                "path": "nested_field",
+                                "inner_hits": {
+                                    "name": "nested_vector",
+                                    "_source": false,
+                                    "fields": [
+                                        "nested_field.paragraph_id"
+                                    ]
+                                },
+                                "query": {
+                                    "knn": {
+                                        "field": "nested_field.nested_vector",
+                                        "query_vector": [
+                                            1,
+                                            0,
+                                            0.5
+                                        ],
+                                        "k": 10
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "standard": {
+                        "query": {
+                            "term": {
+                                "topic": "ai"
+                            }
+                        }
+                    }
+                }
+            ],
+            "rank_window_size": 10,
+            "rank_constant": 1
+        }
+    },
+    "_source": [
+        "topic"
+    ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/254.console"></div>
+<p>This would propagate the <code class="literal">inner_hits</code> defined for the <code class="literal">knn</code> query to the <code class="literal">rrf</code> retriever, and compute inner hits for <code class="literal">rrf</code>'s top results.</p>
+<details>
+<summary class="title">Example response</summary>
+<div class="content">
+<a id="b737c771754c733ead94ccda3a1ccba8"></a>
+<div class="pre_wrapper lang-console-result">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console-result">{
+    "took": 42,
+    "timed_out": false,
+    "_shards": {
+        "total": 1,
+        "successful": 1,
+        "skipped": 0,
+        "failed": 0
+    },
+    "hits": {
+        "total": {
+            "value": 3,
+            "relation": "eq"
+        },
+        "max_score": 1.0,
+        "hits": [
+            {
+                "_index": "retrievers_example_nested",
+                "_id": "1",
+                "_score": 1.0,
+                "_source": {
+                    "topic": [
+                        "ai"
+                    ]
+                },
+                "inner_hits": {
+                    "nested_vector": {
+                        "hits": {
+                            "total": {
+                                "value": 3,
+                                "relation": "eq"
+                            },
+                            "max_score": 0.44353113,
+                            "hits": [
+                                {
+                                    "_index": "retrievers_example_nested",
+                                    "_id": "1",
+                                    "_nested": {
+                                        "field": "nested_field",
+                                        "offset": 2
+                                    },
+                                    "_score": 0.44353113,
+                                    "fields": {
+                                        "nested_field": [
+                                            {
+                                                "paragraph_id": [
+                                                    "1c"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                },
+                                {
+                                    "_index": "retrievers_example_nested",
+                                    "_id": "1",
+                                    "_nested": {
+                                        "field": "nested_field",
+                                        "offset": 1
+                                    },
+                                    "_score": 0.26567122,
+                                    "fields": {
+                                        "nested_field": [
+                                            {
+                                                "paragraph_id": [
+                                                    "1b"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                },
+                                {
+                                    "_index": "retrievers_example_nested",
+                                    "_id": "1",
+                                    "_nested": {
+                                        "field": "nested_field",
+                                        "offset": 0
+                                    },
+                                    "_score": 0.18478848,
+                                    "fields": {
+                                        "nested_field": [
+                                            {
+                                                "paragraph_id": [
+                                                    "1a"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            {
+                "_index": "retrievers_example_nested",
+                "_id": "2",
+                "_score": 0.33333334,
+                "_source": {
+                    "topic": [
+                        "information_retrieval"
+                    ]
+                },
+                "inner_hits": {
+                    "nested_vector": {
+                        "hits": {
+                            "total": {
+                                "value": 1,
+                                "relation": "eq"
+                            },
+                            "max_score": 0.32002488,
+                            "hits": [
+                                {
+                                    "_index": "retrievers_example_nested",
+                                    "_id": "2",
+                                    "_nested": {
+                                        "field": "nested_field",
+                                        "offset": 0
+                                    },
+                                    "_score": 0.32002488,
+                                    "fields": {
+                                        "nested_field": [
+                                            {
+                                                "paragraph_id": [
+                                                    "2a"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            {
+                "_index": "retrievers_example_nested",
+                "_id": "3",
+                "_score": 0.33333334,
+                "_source": {
+                    "topic": [
+                        "ai"
+                    ]
+                },
+                "inner_hits": {
+                    "nested_vector": {
+                        "hits": {
+                            "total": {
+                                "value": 0,
+                                "relation": "eq"
+                            },
+                            "max_score": null,
+                            "hits": []
+                        }
+                    }
+                }
+            }
+        ]
+    }
+}</pre>
+</div>
+</div>
+</details>
+<p>Note: if using more than one <code class="literal">inner_hits</code> we need to provide custom names for each <code class="literal">inner_hits</code> so that they
+are unique across all retrievers within the request.</p>
+<div class="position-relative"><h4><a id="retrievers-examples-rrf-and-aggregations"></a>Example: Combine RRF with aggregations</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>Retrievers support both composability and most of the standard <code class="literal">_search</code> functionality. For instance,
+we can compute aggregations with the <code class="literal">rrf</code> retriever. When using a compound retriever,
+the aggregations are computed based on its nested retrievers. In the following example,
+the <code class="literal">terms</code> aggregation for the <code class="literal">topic</code> field will include all results, not just the top <code class="literal">rank_window_size</code>,
+from the 2 nested retrievers, i.e. all documents whose <code class="literal">year</code> field is greater than 2023, and whose <code class="literal">topic</code> field
+matches the term <code class="literal">elastic</code>.</p>
+<a id="015e6e6132b6d6d44bddb06bc3b316ed"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET retrievers_example/_search
+{
+    "retriever": {
+        "rrf": {
+            "retrievers": [
+                {
+                    "standard": {
+                        "query": {
+                            "range": {
+                                "year": {
+                                    "gt": 2023
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "standard": {
+                        "query": {
+                            "term": {
+                                "topic": "elastic"
+                            }
+                        }
+                    }
+                }
+            ],
+            "rank_window_size": 10,
+            "rank_constant": 1
+        }
+    },
+    "_source": false,
+    "aggs": {
+        "topics": {
+            "terms": {
+                "field": "topic"
+            }
+        }
+    }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/255.console"></div>
+<details>
+<summary class="title">Example response</summary>
+<div class="content">
+<a id="30bf5561388f6c233d8be7dfb028f3d2"></a>
+<div class="pre_wrapper lang-console-result">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console-result">{
+    "took": 42,
+    "timed_out": false,
+    "_shards": {
+        "total": 1,
+        "successful": 1,
+        "skipped": 0,
+        "failed": 0
+    },
+    "hits": {
+        "total": {
+            "value": 4,
+            "relation": "eq"
+        },
+        "max_score": 0.5833334,
+        "hits": [
+            {
+                "_index": "retrievers_example",
+                "_id": "5",
+                "_score": 0.5833334
+            },
+            {
+                "_index": "retrievers_example",
+                "_id": "1",
+                "_score": 0.5
+            },
+            {
+                "_index": "retrievers_example",
+                "_id": "4",
+                "_score": 0.5
+            },
+            {
+                "_index": "retrievers_example",
+                "_id": "3",
+                "_score": 0.33333334
+            }
+        ]
+    },
+    "aggregations": {
+        "topics": {
+            "doc_count_error_upper_bound": 0,
+            "sum_other_doc_count": 0,
+            "buckets": [
+                {
+                    "key": "ai",
+                    "doc_count": 3
+                },
+                {
+                    "key": "elastic",
+                    "doc_count": 2
+                },
+                {
+                    "key": "assistant",
+                    "doc_count": 1
+                },
+                {
+                    "key": "documentation",
+                    "doc_count": 1
+                },
+                {
+                    "key": "information_retrieval",
+                    "doc_count": 1
+                },
+                {
+                    "key": "llm",
+                    "doc_count": 1
+                },
+                {
+                    "key": "observability",
+                    "doc_count": 1
+                },
+                {
+                    "key": "security",
+                    "doc_count": 1
+                }
+            ]
+        }
+    }
+}</pre>
+</div>
+</div>
+</details>
+<div class="position-relative"><h4><a id="retrievers-examples-explain-multiple-rrf"></a>Example: Explainability with multiple retrievers</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>By adding <code class="literal">explain: true</code> to the request, each retriever will now provide a detailed explanation of all the steps
+and calculations required to compute the final score. Composability is fully supported in the context of <code class="literal">explain</code>, and
+each retriever will provide its own explanation, as shown in the example below.</p>
+<a id="0d689ac6e78be5d438f9b5d441be2b44"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET /retrievers_example/_search
+{
+    "retriever": {
+        "rrf": {
+            "retrievers": [
+                {
+                    "standard": {
+                        "query": {
+                            "term": {
+                                "topic": "elastic"
+                            }
+                        }
+                    }
+                },
+                {
+                    "rrf": {
+                        "retrievers": [
+                            {
+                                "standard": {
+                                    "query": {
+                                        "query_string": {
+                                            "query": "(information retrieval) OR (artificial intelligence)",
+                                            "default_field": "text"
+                                        }
+                                    }
+                                }
+                            },
+                            {
+                                "knn": {
+                                    "field": "vector",
+                                    "query_vector": [
+                                        0.23,
+                                        0.67,
+                                        0.89
+                                    ],
+                                    "k": 3,
+                                    "num_candidates": 5
+                                }
+                            }
+                        ],
+                        "rank_window_size": 10,
+                        "rank_constant": 1
+                    }
+                }
+            ],
+            "rank_window_size": 10,
+            "rank_constant": 1
+        }
+    },
+    "_source": false,
+    "size": 1,
+    "explain": true
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/256.console"></div>
+<p>The output of which, albeit a bit verbose, will provide all the necessary info to assist in debugging and reason with ranking.</p>
+<details>
+<summary class="title">Example response</summary>
+<div class="content">
+<a id="de31dd30face7c91a46cdb87a7951a83"></a>
+<div class="pre_wrapper lang-console-result">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console-result">{
+    "took": 42,
+    "timed_out": false,
+    "_shards": {
+        "total": 1,
+        "successful": 1,
+        "skipped": 0,
+        "failed": 0
+    },
+    "hits": {
+        "total": {
+            "value": 5,
+            "relation": "eq"
+        },
+        "max_score": 0.5,
+        "hits": [
+            {
+                "_shard": "[retrievers_example][0]",
+                "_node": "jnrdZFKS3abUgWVsVdj2Vg",
+                "_index": "retrievers_example",
+                "_id": "1",
+                "_score": 0.5,
+                "_explanation": {
+                    "value": 0.5,
+                    "description": "rrf score: [0.5] computed for initial ranks [0, 1] with rankConstant: [1] as sum of [1 / (rank + rankConstant)] for each query",
+                    "details": [
+                        {
+                            "value": 0.0,
+                            "description": "rrf score: [0], result not found in query at index [0]",
+                            "details": []
+                        },
+                        {
+                            "value": 1,
+                            "description": "rrf score: [0.5], for rank [1] in query at index [1] computed as [1 / (1 + 1)], for matching query with score",
+                            "details": [
+                                {
+                                    "value": 0.8333334,
+                                    "description": "rrf score: [0.8333334] computed for initial ranks [2, 1] with rankConstant: [1] as sum of [1 / (rank + rankConstant)] for each query",
+                                    "details": [
+                                        {
+                                            "value": 2,
+                                            "description": "rrf score: [0.33333334], for rank [2] in query at index [0] computed as [1 / (2 + 1)], for matching query with score",
+                                            "details": [
+                                                {
+                                                    "value": 2.8129659,
+                                                    "description": "sum of:",
+                                                    "details": [
+                                                        {
+                                                            "value": 1.4064829,
+                                                            "description": "weight(text:information in 0) [PerFieldSimilarity], result of:",
+                                                            "details": [
+                                                                ***
+                                                            ]
+                                                        },
+                                                        {
+                                                            "value": 1.4064829,
+                                                            "description": "weight(text:retrieval in 0) [PerFieldSimilarity], result of:",
+                                                            "details": [
+                                                                ***
+                                                            ]
+                                                        }
+                                                    ]
+                                                }
+                                            ]
+                                        },
+                                        {
+                                            "value": 1,
+                                            "description": "rrf score: [0.5], for rank [1] in query at index [1] computed as [1 / (1 + 1)], for matching query with score",
+                                            "details": [
+                                                {
+                                                    "value": 1,
+                                                    "description": "doc [0] with an original score of [1.0] is at rank [1] from the following source queries.",
+                                                    "details": [
+                                                        {
+                                                            "value": 1.0,
+                                                            "description": "found vector with calculated similarity: 1.0",
+                                                            "details": []
+                                                        }
+                                                    ]
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+}</pre>
+</div>
+</div>
+</details>
+<div class="position-relative"><h4><a id="retrievers-examples-text-similarity-reranker-on-top-of-rrf"></a>Example: Rerank results of an RRF retriever</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>To demonstrate the full functionality of retrievers, the following examples also require access to a <a class="xref" href="semantic-reranking.html#semantic-reranking-models" title="Cross-encoder and bi-encoder models">semantic reranking model</a> set up using the <a class="xref" href="inference-apis.html" title="Inference APIs">Elastic inference APIs</a>.</p>
+<p>In this example we&#8217;ll set up a reranking service and use it with the <code class="literal">text_similarity_reranker</code> retriever to rerank our top results.</p>
+<a id="0165d22da5f2fc7678392b31d8eb5566"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT _inference/rerank/my-rerank-model
+{
+ "service": "cohere",
+ "service_settings": {
+   "model_id": "rerank-english-v3.0",
+   "api_key": "{{COHERE_API_KEY}}"
+ }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/257.console"></div>
+<p>Let&#8217;s start by reranking the results of the <code class="literal">rrf</code> retriever in our previous example.</p>
+<a id="78043831fd32004a82930c8ac8a1d809"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET retrievers_example/_search
+{
+    "retriever": {
+        "text_similarity_reranker": {
+            "retriever": {
+                "rrf": {
+                    "retrievers": [
+                        {
+                            "standard": {
+                                "query": {
+                                    "query_string": {
+                                        "query": "(information retrieval) OR (artificial intelligence)",
+                                        "default_field": "text"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "knn": {
+                                "field": "vector",
+                                "query_vector": [
+                                    0.23,
+                                    0.67,
+                                    0.89
+                                ],
+                                "k": 3,
+                                "num_candidates": 5
+                            }
+                        }
+                    ],
+                    "rank_window_size": 10,
+                    "rank_constant": 1
+                }
+            },
+            "field": "text",
+            "inference_id": "my-rerank-model",
+            "inference_text": "What are the state of the art applications of AI in information retrieval?"
+        }
+    },
+    "_source": false
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/258.console"></div>
+<div class="position-relative"><h4><a id="retrievers-examples-rrf-ranking-on-text-similarity-reranker-results"></a>Example: RRF with semantic reranker</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>For this example, we&#8217;ll replace the rrf&#8217;s <code class="literal">standard</code> retriever with the <code class="literal">text_similarity_reranker</code> retriever, using the
+<code class="literal">my-rerank-model</code> reranker we previously configured. Since this is a reranker, it needs an initial pool of
+documents to work with. In this case, we&#8217;ll rerank the top <code class="literal">rank_window_size</code> documents matching the  <code class="literal">ai</code> topic.</p>
+<a id="76e02434835630cb830724beb92df354"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET /retrievers_example/_search
+{
+    "retriever": {
+        "rrf": {
+            "retrievers": [
+                {
+                    "knn": {
+                        "field": "vector",
+                        "query_vector": [
+                            0.23,
+                            0.67,
+                            0.89
+                        ],
+                        "k": 3,
+                        "num_candidates": 5
+                    }
+                },
+                {
+                    "text_similarity_reranker": {
+                        "retriever": {
+                            "standard": {
+                                "query": {
+                                    "term": {
+                                        "topic": "ai"
+                                    }
+                                }
+                            }
+                        },
+                        "field": "text",
+                        "inference_id": "my-rerank-model",
+                        "inference_text": "Can I use generative AI to identify user intent and improve search relevance?"
+                    }
+                }
+            ],
+            "rank_window_size": 10,
+            "rank_constant": 1
+        }
+    },
+    "_source": false
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/259.console"></div>
+<div class="position-relative"><h4><a id="retrievers-examples-chaining-text-similarity-reranker-retrievers"></a>Example: Chaining multiple semantic rerankers</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/retrievers-examples.asciidoc">edit</a></div>
+<p>Full composability means we can chain together multiple retrievers of the same type. For instance,
+imagine we have a computationally expensive reranker that&#8217;s specialized for AI content. We can rerank the results of a <code class="literal">text_similarity_reranker</code> using another <code class="literal">text_similarity_reranker</code> retriever. Each reranker can operate on different fields and/or use different inference services.</p>
+<a id="ac22cc2b0f4ad659055feed2852a2d59"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET retrievers_example/_search
+{
+    "retriever": {
+        "text_similarity_reranker": {
+            "retriever": {
+                "text_similarity_reranker": {
+                    "retriever": {
+                        "knn": {
+                            "field": "vector",
+                            "query_vector": [
+                                0.23,
+                                0.67,
+                                0.89
+                            ],
+                            "k": 3,
+                            "num_candidates": 5
+                        }
+                    },
+                    "rank_window_size": 100,
+                    "field": "text",
+                    "inference_id": "my-rerank-model",
+                    "inference_text": "What are the state of the art applications of AI in information retrieval?"
+                }
+            },
+            "rank_window_size": 10,
+            "field": "text",
+            "inference_id": "my-other-more-expensive-rerank-model",
+            "inference_text": "Applications of Large Language Models in technology and their impact on user satisfaction"
+        }
+    },
+    "_source": false
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/260.console"></div>
+<p>Note that our example applies two reranking steps. First, we rerank the top 100
+documents from the <code class="literal">knn</code> search using the <code class="literal">my-rerank-model</code> reranker. Then we
+pick the top 10 results and rerank them using the more fine-grained
+<code class="literal">my-other-more-expensive-rerank-model</code>.</p>
+</div>
+</div>
+</div><div class="navfooter">
+<span class="prev">
+<a href="retrievers-overview.html">« Retrievers</a>
+</span>
+<span class="next">
+<a href="knn-search.html">k-nearest neighbor (kNN) search »</a>
+</span>
+</div>
+</body>
+</html>
