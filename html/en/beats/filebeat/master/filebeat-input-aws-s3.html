@@ -153,14 +153,19 @@ takes longer than half of the visibility timeout, the timeout is reset to ensure
 the message doesn&#8217;t return to the queue before processing is complete.</p>
 <p>If an error occurs during the processing of the S3 object, the processing will
 be stopped, and the SQS message will be returned to the queue for reprocessing.</p>
+<div class="position-relative"><h3><a id="_configuration_examples"></a>Configuration Examples</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></div>
+<div class="position-relative"><h4><a id="_sqs_with_json_files"></a>SQS with JSON files</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></div>
+<p>This example reads s3:ObjectCreated notifications from SQS, and assumes that
+all the S3 objects have a <code class="literal">Content-Type</code> of <code class="literal">application/json</code>.
+It splits the <code class="literal">Records</code> array in the JSON into separate events.</p>
 <div class="pre_wrapper lang-yaml">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
 - type: aws-s3
   queue_url: https://sqs.ap-southeast-1.amazonaws.com/1234/test-s3-queue
-  credential_profile_name: elastic-beats
   expand_event_list_from_field: Records</pre>
 </div>
+<div class="position-relative"><h4><a id="_s3_bucket_listing"></a>S3 bucket listing</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></div>
 <p>When using the direct polling list of S3 objects in an S3 buckets,
 a number of workers that will process the S3 objects listed must be set
 through the <code class="literal">number_of_workers</code> config.
@@ -176,6 +181,7 @@ Listing of the S3 bucket will be polled according the time interval defined by
   credential_profile_name: elastic-beats
   expand_event_list_from_field: Records</pre>
 </div>
+<div class="position-relative"><h4><a id="_s3_compatible_services"></a>S3-compatible services</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></div>
 <p>The <code class="literal">aws-s3</code> input can also poll third party S3-compatible services such as the
 Minio. Using non-AWS S3 compatible buckets requires the use of
 <code class="literal">access_key_id</code> and <code class="literal">secret_access_key</code> for authentication.  To specify the S3
@@ -198,6 +204,69 @@ that require a different endpoint.</p>
   endpoint: https://s3.example.com:9000
   expand_event_list_from_field: Records</pre>
 </div>
+<div class="position-relative"><h3><a id="_document_id_generation"></a>Document ID Generation</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></div>
+<p>This aws-s3 input feature prevents the duplication of events in Elasticsearch by
+generating a custom document <code class="literal">_id</code> for each event, rather than relying on
+Elasticsearch to automatically generate one. Each document in an Elasticsearch
+index must have a unique <code class="literal">_id</code>, and Filebeat uses this property to avoid
+ingesting duplicate events.</p>
+<p>The custom <code class="literal">_id</code> is based on several pieces of information from the S3 object:
+the Last-Modified timestamp, the bucket ARN, the object key, and the byte
+offset of the data in the event.</p>
+<p>Duplicate prevention is particularly useful in scenarios where Filebeat
+needs to retry an operation. Filebeat guarantees at-least-once delivery,
+meaning it will retry any failed or incomplete operations. These retries may be
+triggered by issues with the host, <code class="literal">{beatname_uc}</code>, network connectivity, or
+services such as Elasticsearch, SQS, or S3.</p>
+<div class="position-relative"><h4><a id="_limitations_of_id_based_deduplication"></a>Limitations of <code class="literal">_id</code>-Based Deduplication</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></div>
+<p>There are some limitations to consider when using <code class="literal">_id</code>-based deduplication in
+Elasticsearch:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Deduplication works only within a single index. The same <code class="literal">_id</code> can exist in
+different indices, which is important if you&#8217;re using data streams or index
+aliases. When the backing index rolls over, a duplicate may be ingested.
+</li>
+<li class="listitem">
+Indexing operations in Elasticsearch may take longer when an <code class="literal">_id</code> is
+specified. Elasticsearch needs to check if the ID already exists before
+writing, which can increase the time required for indexing.
+</li>
+</ul>
+</div>
+<div class="position-relative"><h4><a id="_disabling_duplicate_prevention"></a>Disabling Duplicate Prevention</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></div>
+<p>If you want to disable the <code class="literal">_id</code>-based deduplication, you can remove the
+document <code class="literal">_id</code> using the <a class="xref" href="drop-fields.html" title="Drop fields from events"><code class="literal">drop_fields</code></a> processor in
+Filebeat.</p>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+  - type: aws-s3
+    queue_url: https://queue.amazonaws.com/80398EXAMPLE/MyQueue
+    processors:
+      - drop_fields:
+          fields:
+            - '@metadata._id'
+          ignore_missing: true</pre>
+</div>
+<p>Alternatively, you can remove the <code class="literal">_id</code> field using an Elasticsearch Ingest
+Node pipeline.</p>
+<div class="pre_wrapper lang-json">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-json">{
+  "processors": [
+    {
+      "remove": {
+        "if": "ctx.input?.type == \"aws-s3\"",
+        "field": "_id",
+        "ignore_missing": true
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="position-relative"><h3><a id="_configuration"></a>Configuration</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></div>
 <p>The <code class="literal">aws-s3</code> input supports the following configuration options plus the
 <a class="xref" href="filebeat-input-aws-s3.html#filebeat-input-aws-s3-common-options" title="Common options">Common options</a> described later.</p>
 <div class="position-relative"><h4><a id="_api_timeout_2"></a><code class="literal">api_timeout</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></div>
@@ -645,6 +714,79 @@ accordingly.</p>
 <div class="position-relative"><h4><a id="_delete_after_backup"></a><code class="literal">delete_after_backup</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></div>
 <p>Controls whether fully processed files will be deleted from the bucket.</p>
 <p>This option can only be used together with the backup functionality.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="filebeat-input-aws-s3-common-options"></a>Common options</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
+</div></div></div>
+<p>The following configuration options are supported by all inputs.</p>
+<div class="position-relative"><h5><a id="_enabled_2"></a><code class="literal">enabled</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
+<p>Use the <code class="literal">enabled</code> option to enable and disable inputs. By default, enabled is
+set to true.</p>
+<div class="position-relative"><h5><a id="_tags_2"></a><code class="literal">tags</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
+<p>A list of tags that Filebeat includes in the <code class="literal">tags</code> field of each published
+event. Tags make it easy to select specific events in Kibana or apply
+conditional filtering in Logstash. These tags will be appended to the list of
+tags specified in the general configuration.</p>
+<p>Example:</p>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: aws-s3
+  . . .
+  tags: ["json"]</pre>
+</div>
+<div class="position-relative"><h5><a id="filebeat-input-aws-s3-fields"></a><code class="literal">fields</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
+<p>Optional fields that you can specify to add additional information to the
+output. For example, you might add fields that you can use for filtering log
+data. Fields can be scalar values, arrays, dictionaries, or any nested
+combination of these. By default, the fields that you specify here will be
+grouped under a <code class="literal">fields</code> sub-dictionary in the output document. To store the
+custom fields as top-level fields, set the <code class="literal">fields_under_root</code> option to true.
+If a duplicate field is declared in the general configuration, then its value
+will be overwritten by the value declared here.</p>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: aws-s3
+  . . .
+  fields:
+    app_id: query_engine_12</pre>
+</div>
+<div class="position-relative"><h5><a id="fields-under-root-aws-s3"></a><code class="literal">fields_under_root</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
+<p>If this option is set to true, the custom
+<a class="xref" href="filebeat-input-aws-s3.html#filebeat-input-aws-s3-fields" title="fields">fields</a> are stored as top-level fields in
+the output document instead of being grouped under a <code class="literal">fields</code> sub-dictionary. If
+the custom field names conflict with other field names added by Filebeat,
+then the custom fields overwrite the other fields.</p>
+<div class="position-relative"><h5><a id="_processors_2"></a><code class="literal">processors</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
+<p>A list of processors to apply to the input data.</p>
+<p>See <a class="xref" href="filtering-and-enhancing-data.html" title="Filter and enhance data with processors"><em>Processors</em></a> for information about specifying
+processors in your config.</p>
+<div class="position-relative"><h5><a id="_pipeline_2"></a><code class="literal">pipeline</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
+<p>The ingest pipeline ID to set for the events generated by this input.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The pipeline ID can also be configured in the Elasticsearch output, but
+this option usually results in simpler configuration files. If the pipeline is
+configured both in the input and output, the option from the
+input is used.</p>
+</div>
+</div>
+<div class="position-relative"><h5><a id="_keep_null_2"></a><code class="literal">keep_null</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
+<p>If this option is set to true, fields with <code class="literal">null</code> values will be published in
+the output document. By default, <code class="literal">keep_null</code> is set to <code class="literal">false</code>.</p>
+<div class="position-relative"><h5><a id="_index_2"></a><code class="literal">index</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
+<p>If present, this formatted string overrides the index for events from this input
+(for elasticsearch outputs), or sets the <code class="literal">raw_index</code> field of the event&#8217;s
+metadata (for other outputs). This string can only refer to the agent name and
+version and the event timestamp; for access to dynamic fields, use
+<code class="literal">output.elasticsearch.index</code> or a processor.</p>
+<p>Example value: <code class="literal">"%{[agent.name]}-myindex-%{+yyyy.MM.dd}"</code> might
+expand to <code class="literal">"filebeat-myindex-2019.11.01"</code>.</p>
+<div class="position-relative"><h5><a id="_publisher_pipeline_disable_host_2"></a><code class="literal">publisher_pipeline.disable_host</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
+<p>By default, all events contain <code class="literal">host.name</code>. This option can be set to <code class="literal">true</code> to
+disable the addition of this field to all events. The default value is <code class="literal">false</code>.</p>
 <div class="position-relative"><h3><a id="_aws_permissions_2"></a>AWS Permissions</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></div>
 <p>Specific AWS permissions are required for IAM user to access SQS and S3 when
 using the SQS notifications method:</p>
@@ -1004,167 +1146,6 @@ properties will be used as metadata in the resulting event when available.</p>
 </tbody>
 </table>
 </div>
-<div class="position-relative"><h3><a id="_metrics_2"></a>Metrics</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></div>
-<p>This input exposes metrics under the <a class="xref" href="http-endpoint.html" title="Configure an HTTP endpoint for metrics">HTTP monitoring endpoint</a>.
-These metrics are exposed under the <code class="literal">/inputs</code> path. They can be used to
-observe the activity of the input.</p>
-<div class="informaltable">
-<table border="1" cellpadding="4px">
-<colgroup>
-<col class="col_1"/>
-<col class="col_2"/>
-</colgroup>
-<thead>
-<tr>
-<th align="left" valign="top">Metric</th>
-<th align="left" valign="top">Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="left" valign="top"><p><code class="literal">sqs_messages_received_total</code></p></td>
-<td align="left" valign="top"><p>Number of SQS messages received (not necessarily processed fully).</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">sqs_visibility_timeout_extensions_total</code></p></td>
-<td align="left" valign="top"><p>Number of SQS visibility timeout extensions.</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">sqs_messages_inflight_gauge</code></p></td>
-<td align="left" valign="top"><p>Number of SQS messages inflight (gauge).</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">sqs_messages_returned_total</code></p></td>
-<td align="left" valign="top"><p>Number of SQS messages returned to queue (happens on errors implicitly after visibility timeout passes).</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">sqs_messages_deleted_total</code></p></td>
-<td align="left" valign="top"><p>Number of SQS messages deleted.</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">sqs_messages_waiting_gauge</code></p></td>
-<td align="left" valign="top"><p>Number of SQS messages waiting in the SQS queue (gauge). The value is refreshed every minute via data from <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_GetQueueAttributes.html&lt;GetQueueAttributes&gt" class="ulink" target="_top">https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_GetQueueAttributes.html&lt;GetQueueAttributes&gt</a>;. A value of <code class="literal">-1</code> indicates the metric is uninitialized or could not be collected due to an error.</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">sqs_worker_utilization</code></p></td>
-<td align="left" valign="top"><p>Rate of SQS worker utilization over the previous 5 seconds. 0 indicates idle, 1 indicates all workers utilized.</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">sqs_message_processing_time</code></p></td>
-<td align="left" valign="top"><p>Histogram of the elapsed SQS processing times in nanoseconds (time of receipt to time of delete/return).</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">sqs_lag_time</code></p></td>
-<td align="left" valign="top"><p>Histogram of the difference between the SQS SentTimestamp attribute and the time when the SQS message was received expressed in nanoseconds.</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">s3_objects_requested_total</code></p></td>
-<td align="left" valign="top"><p>Number of S3 objects downloaded.</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">s3_objects_listed_total</code></p></td>
-<td align="left" valign="top"><p>Number of S3 objects returned by list operations.</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">s3_objects_processed_total</code></p></td>
-<td align="left" valign="top"><p>Number of S3 objects that matched file_selectors rules.</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">s3_objects_acked_total</code></p></td>
-<td align="left" valign="top"><p>Number of S3 objects processed that were fully ACKed.</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">s3_bytes_processed_total</code></p></td>
-<td align="left" valign="top"><p>Number of S3 bytes processed.</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">s3_events_created_total</code></p></td>
-<td align="left" valign="top"><p>Number of events created from processing S3 data.</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">s3_objects_inflight_gauge</code></p></td>
-<td align="left" valign="top"><p>Number of S3 objects inflight (gauge).</p></td>
-</tr>
-<tr>
-<td align="left" valign="top"><p><code class="literal">s3_object_processing_time</code></p></td>
-<td align="left" valign="top"><p>Histogram of the elapsed S3 object processing times in nanoseconds (start of download to completion of parsing).</p></td>
-</tr>
-</tbody>
-</table>
-</div>
-<div class="section">
-<div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="filebeat-input-aws-s3-common-options"></a>Common options</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
-</div></div></div>
-<p>The following configuration options are supported by all inputs.</p>
-<div class="position-relative"><h5><a id="_enabled_2"></a><code class="literal">enabled</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
-<p>Use the <code class="literal">enabled</code> option to enable and disable inputs. By default, enabled is
-set to true.</p>
-<div class="position-relative"><h5><a id="_tags_2"></a><code class="literal">tags</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
-<p>A list of tags that Filebeat includes in the <code class="literal">tags</code> field of each published
-event. Tags make it easy to select specific events in Kibana or apply
-conditional filtering in Logstash. These tags will be appended to the list of
-tags specified in the general configuration.</p>
-<p>Example:</p>
-<div class="pre_wrapper lang-yaml">
-<div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
-- type: aws-s3
-  . . .
-  tags: ["json"]</pre>
-</div>
-<div class="position-relative"><h5><a id="filebeat-input-aws-s3-fields"></a><code class="literal">fields</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
-<p>Optional fields that you can specify to add additional information to the
-output. For example, you might add fields that you can use for filtering log
-data. Fields can be scalar values, arrays, dictionaries, or any nested
-combination of these. By default, the fields that you specify here will be
-grouped under a <code class="literal">fields</code> sub-dictionary in the output document. To store the
-custom fields as top-level fields, set the <code class="literal">fields_under_root</code> option to true.
-If a duplicate field is declared in the general configuration, then its value
-will be overwritten by the value declared here.</p>
-<div class="pre_wrapper lang-yaml">
-<div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
-- type: aws-s3
-  . . .
-  fields:
-    app_id: query_engine_12</pre>
-</div>
-<div class="position-relative"><h5><a id="fields-under-root-aws-s3"></a><code class="literal">fields_under_root</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
-<p>If this option is set to true, the custom
-<a class="xref" href="filebeat-input-aws-s3.html#filebeat-input-aws-s3-fields" title="fields">fields</a> are stored as top-level fields in
-the output document instead of being grouped under a <code class="literal">fields</code> sub-dictionary. If
-the custom field names conflict with other field names added by Filebeat,
-then the custom fields overwrite the other fields.</p>
-<div class="position-relative"><h5><a id="_processors_2"></a><code class="literal">processors</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
-<p>A list of processors to apply to the input data.</p>
-<p>See <a class="xref" href="filtering-and-enhancing-data.html" title="Filter and enhance data with processors"><em>Processors</em></a> for information about specifying
-processors in your config.</p>
-<div class="position-relative"><h5><a id="_pipeline_2"></a><code class="literal">pipeline</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
-<p>The ingest pipeline ID to set for the events generated by this input.</p>
-<div class="note admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p>The pipeline ID can also be configured in the Elasticsearch output, but
-this option usually results in simpler configuration files. If the pipeline is
-configured both in the input and output, the option from the
-input is used.</p>
-</div>
-</div>
-<div class="position-relative"><h5><a id="_keep_null_2"></a><code class="literal">keep_null</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
-<p>If this option is set to true, fields with <code class="literal">null</code> values will be published in
-the output document. By default, <code class="literal">keep_null</code> is set to <code class="literal">false</code>.</p>
-<div class="position-relative"><h5><a id="_index_2"></a><code class="literal">index</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
-<p>If present, this formatted string overrides the index for events from this input
-(for elasticsearch outputs), or sets the <code class="literal">raw_index</code> field of the event&#8217;s
-metadata (for other outputs). This string can only refer to the agent name and
-version and the event timestamp; for access to dynamic fields, use
-<code class="literal">output.elasticsearch.index</code> or a processor.</p>
-<p>Example value: <code class="literal">"%{[agent.name]}-myindex-%{+yyyy.MM.dd}"</code> might
-expand to <code class="literal">"filebeat-myindex-2019.11.01"</code>.</p>
-<div class="position-relative"><h5><a id="_publisher_pipeline_disable_host_2"></a><code class="literal">publisher_pipeline.disable_host</code></h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/filebeat/docs/inputs/input-common-options.asciidoc">edit</a></div>
-<p>By default, all events contain <code class="literal">host.name</code>. This option can be set to <code class="literal">true</code> to
-disable the addition of this field to all events. The default value is <code class="literal">false</code>.</p>
 <div class="position-relative"><h3><a id="aws-credentials-config"></a>AWS Credentials Configuration</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/libbeat/docs/aws-credentials-config.asciidoc">edit</a></div>
 <p>To configure AWS credentials, either put the credentials into the Filebeat configuration, or use a shared credentials file, as shown in the following examples.</p>
 <div class="position-relative"><h4><a id="_configuration_parameters"></a>Configuration parameters</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/libbeat/docs/aws-credentials-config.asciidoc">edit</a></div>
@@ -1480,6 +1461,94 @@ aws module making AWS api calls without have to generate new temporary credentia
 <p>IAM policy is an entity that defines permissions to an object within your AWS environment. Specific permissions needs
 to be added into the IAM user&#8217;s policy to authorize Metricbeat to collect AWS monitoring metrics. Please see documentation
 under each metricset for required permissions.</p>
+<div class="position-relative"><h3><a id="_metrics_2"></a>Metrics</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/main/x-pack/filebeat/docs/inputs/input-aws-s3.asciidoc">edit</a></div>
+<p>This input exposes metrics under the <a class="xref" href="http-endpoint.html" title="Configure an HTTP endpoint for metrics">HTTP monitoring endpoint</a>.
+These metrics are exposed under the <code class="literal">/inputs</code> path. They can be used to
+observe the activity of the input.</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top">Metric</th>
+<th align="left" valign="top">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p><code class="literal">sqs_messages_received_total</code></p></td>
+<td align="left" valign="top"><p>Number of SQS messages received (not necessarily processed fully).</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">sqs_visibility_timeout_extensions_total</code></p></td>
+<td align="left" valign="top"><p>Number of SQS visibility timeout extensions.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">sqs_messages_inflight_gauge</code></p></td>
+<td align="left" valign="top"><p>Number of SQS messages inflight (gauge).</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">sqs_messages_returned_total</code></p></td>
+<td align="left" valign="top"><p>Number of SQS messages returned to queue (happens on errors implicitly after visibility timeout passes).</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">sqs_messages_deleted_total</code></p></td>
+<td align="left" valign="top"><p>Number of SQS messages deleted.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">sqs_messages_waiting_gauge</code></p></td>
+<td align="left" valign="top"><p>Number of SQS messages waiting in the SQS queue (gauge). The value is refreshed every minute via data from <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_GetQueueAttributes.html&lt;GetQueueAttributes&gt" class="ulink" target="_top">https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_GetQueueAttributes.html&lt;GetQueueAttributes&gt</a>;. A value of <code class="literal">-1</code> indicates the metric is uninitialized or could not be collected due to an error.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">sqs_worker_utilization</code></p></td>
+<td align="left" valign="top"><p>Rate of SQS worker utilization over the previous 5 seconds. 0 indicates idle, 1 indicates all workers utilized.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">sqs_message_processing_time</code></p></td>
+<td align="left" valign="top"><p>Histogram of the elapsed SQS processing times in nanoseconds (time of receipt to time of delete/return).</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">sqs_lag_time</code></p></td>
+<td align="left" valign="top"><p>Histogram of the difference between the SQS SentTimestamp attribute and the time when the SQS message was received expressed in nanoseconds.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">s3_objects_requested_total</code></p></td>
+<td align="left" valign="top"><p>Number of S3 objects downloaded.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">s3_objects_listed_total</code></p></td>
+<td align="left" valign="top"><p>Number of S3 objects returned by list operations.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">s3_objects_processed_total</code></p></td>
+<td align="left" valign="top"><p>Number of S3 objects that matched file_selectors rules.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">s3_objects_acked_total</code></p></td>
+<td align="left" valign="top"><p>Number of S3 objects processed that were fully ACKed.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">s3_bytes_processed_total</code></p></td>
+<td align="left" valign="top"><p>Number of S3 bytes processed.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">s3_events_created_total</code></p></td>
+<td align="left" valign="top"><p>Number of events created from processing S3 data.</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">s3_objects_inflight_gauge</code></p></td>
+<td align="left" valign="top"><p>Number of S3 objects inflight (gauge).</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><code class="literal">s3_object_processing_time</code></p></td>
+<td align="left" valign="top"><p>Histogram of the elapsed S3 object processing times in nanoseconds (start of download to completion of parsing).</p></td>
+</tr>
+</tbody>
+</table>
+</div>
 </div>
 
 </div>
