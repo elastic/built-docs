@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Perform update or delete by query | Elasticsearch Guide [8.17] | Elastic</title>
+<meta class="elastic" name="content" content="Perform update or delete by query | Elasticsearch Guide [8.17]">
+
+<link rel="home" href="index.html" title="Elasticsearch Guide [8.17]"/>
+<link rel="up" href="ccr-disaster-recovery-bi-directional-tutorial.html" title="Tutorial: Disaster recovery based on bi-directional cross-cluster replication"/>
+<link rel="prev" href="_failback_when_clustera_comes_back_2.html" title="Failback when clusterA comes back"/>
+<link rel="next" href="_data_store_architecture.html" title="Data store architecture"/>
+<meta class="elastic" name="product_version" content="8.17"/>
+<meta class="elastic" name="product_name" content="Elasticsearch"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Elasticsearch/Reference/8.17"/>
+<meta name="DC.subject" content="Elasticsearch"/>
+<meta name="DC.identifier" content="8.17"/>
+</head>
+<body>
+<div class="navheader">
+<span class="prev">
+<a href="_failback_when_clustera_comes_back_2.html">« Failback when <code class="literal">clusterA</code> comes back</a>
+</span>
+<span class="next">
+<a href="_data_store_architecture.html">Data store architecture »</a>
+</span>
+</div>
+<div class="book" lang="en">
+<div class="titlepage">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Guide [8.17]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="xpack-ccr.html">Cross-cluster replication</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="ccr-disaster-recovery-bi-directional-tutorial.html">Tutorial: Disaster recovery based on bi-directional cross-cluster replication</a></span>
+</div>
+<div>
+<div><h1 class="title"><a id="id-1"></a>Perform update or delete by query</h1><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.17/docs/reference/ccr/bi-directional-disaster-recovery.asciidoc">edit</a></div>
+</div>
+<!--EXTRA-->
+</div>
+<div id="content">
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h2 class="title"><a id="_perform_update_or_delete_by_query"></a>Perform update or delete by query</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/8.17/docs/reference/ccr/bi-directional-disaster-recovery.asciidoc">edit</a></div>
+</div></div></div>
+<p>It is possible to update or delete the documents but you can only perform these actions on the leader index.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>First identify which backing index contains the document you want to update.</p>
+<div class="pre_wrapper lang-python alternative">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python alternative">resp = client.search(
+    index="logs-generic-default*",
+    filter_path="hits.hits._index",
+    query={
+        "match": {
+            "event.sequence": "97"
+        }
+    },
+)
+print(resp)</pre>
+</div>
+<div class="pre_wrapper lang-ruby alternative">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.search(
+  index: 'logs-generic-default*',
+  filter_path: 'hits.hits._index',
+  body: {
+    query: {
+      match: {
+        'event.sequence' =&gt; '97'
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
+<div class="pre_wrapper lang-js alternative">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js alternative">const response = await client.search({
+  index: "logs-generic-default*",
+  filter_path: "hits.hits._index",
+  query: {
+    match: {
+      "event.sequence": "97",
+    },
+  },
+});
+console.log(response);</pre>
+</div>
+<a id="0a3003fa5af850e415634b50b1029859"></a>
+<div class="pre_wrapper lang-console default has-python has-ruby has-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console default has-python has-ruby has-js">### On either of the cluster ###
+GET logs-generic-default*/_search?filter_path=hits.hits._index
+{
+"query": {
+    "match": {
+      "event.sequence": "97"
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget has-python has-ruby has-js" data-snippet="snippets/2352.console"></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+If the hits returns <code class="literal">"_index": ".ds-logs-generic-default-replicated_from_clustera-&lt;yyyy.MM.dd&gt;-*"</code>, then you need to proceed to the next step on <code class="literal">cluster A</code>.
+</li>
+<li class="listitem">
+If the hits returns <code class="literal">"_index": ".ds-logs-generic-default-replicated_from_clusterb-&lt;yyyy.MM.dd&gt;-*"</code>, then you need to proceed to the next step on <code class="literal">cluster B</code>.
+</li>
+<li class="listitem">
+If the hits returns <code class="literal">"_index": ".ds-logs-generic-default-&lt;yyyy.MM.dd&gt;-*"</code>, then you need to proceed to the next step on the same cluster where you performed the search query.
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Perform the update (or delete) by query:</p>
+<div class="pre_wrapper lang-python alternative">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python alternative">resp = client.update_by_query(
+    index="logs-generic-default",
+    query={
+        "match": {
+            "event.sequence": "97"
+        }
+    },
+    script={
+        "source": "ctx._source.event.original = params.new_event",
+        "lang": "painless",
+        "params": {
+            "new_event": "FOOBAR"
+        }
+    },
+)
+print(resp)</pre>
+</div>
+<div class="pre_wrapper lang-ruby alternative">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-ruby alternative">response = client.update_by_query(
+  index: 'logs-generic-default',
+  body: {
+    query: {
+      match: {
+        'event.sequence' =&gt; '97'
+      }
+    },
+    script: {
+      source: 'ctx._source.event.original = params.new_event',
+      lang: 'painless',
+      params: {
+        new_event: 'FOOBAR'
+      }
+    }
+  }
+)
+puts response</pre>
+</div>
+<div class="pre_wrapper lang-js alternative">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js alternative">const response = await client.updateByQuery({
+  index: "logs-generic-default",
+  query: {
+    match: {
+      "event.sequence": "97",
+    },
+  },
+  script: {
+    source: "ctx._source.event.original = params.new_event",
+    lang: "painless",
+    params: {
+      new_event: "FOOBAR",
+    },
+  },
+});
+console.log(response);</pre>
+</div>
+<a id="083e514297c09e91211f0d168aef1b0b"></a>
+<div class="pre_wrapper lang-console default has-python has-ruby has-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console default has-python has-ruby has-js">### On the cluster identified from the previous step ###
+POST logs-generic-default/_update_by_query
+{
+  "query": {
+    "match": {
+      "event.sequence": "97"
+    }
+  },
+  "script": {
+    "source": "ctx._source.event.original = params.new_event",
+    "lang": "painless",
+    "params": {
+      "new_event": "FOOBAR"
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget has-python has-ruby has-js" data-snippet="snippets/2353.console"></div>
+<div class="tip admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If a soft delete is merged away before it can be replicated to a follower the following process will fail due to incomplete history on the leader, see <a class="xref" href="index-modules.html#ccr-index-soft-deletes-retention-period">index.soft_deletes.retention_lease.period</a> for more details.</p>
+</div>
+</div>
+</li>
+</ol>
+</div>
+</div>
+</div>
+</div><div class="navfooter">
+<span class="prev">
+<a href="_failback_when_clustera_comes_back_2.html">« Failback when <code class="literal">clusterA</code> comes back</a>
+</span>
+<span class="next">
+<a href="_data_store_architecture.html">Data store architecture »</a>
+</span>
+</div>
+</body>
+</html>
