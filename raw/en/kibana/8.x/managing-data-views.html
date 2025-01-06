@@ -201,7 +201,7 @@ Select the data view that contains the runtime field you want to manage, then op
 <div class="icon"></div>
 <div class="admon_content">
 <p class="admon_title">Deprecated in 7.13.</p>
-<p>Use <a href="/guide/en/elasticsearch/reference/8.x/runtime.html" class="ulink" target="_top">runtime fields</a> instead of scripted fields. Runtime fields support Painless scripts and provide greater flexibility.</p>
+<p>Use <a href="/guide/en/elasticsearch/reference/8.x/runtime.html" class="ulink" target="_top">runtime fields</a> instead of scripted fields. Runtime fields support Painless scripting and provide greater flexibility. You can also use the <a href="/guide/en/elasticsearch/reference/8.x/esql.html" class="ulink" target="_top">Elasticsearch Query Language (ES|QL)</a> to compute values directly at query time.</p>
 </div>
 </div>
 <p>Scripted fields compute data on the fly from the data in your Elasticsearch indices. The data is shown on
@@ -221,6 +221,91 @@ buggy, you&#8217;ll get exceptions whenever you try to view the dynamically gene
 <pre class="screen">doc['field_name'].value</pre>
 <p>For more information on scripted fields and additional examples, refer to
 <a href="/blog/using-painless-kibana-scripted-fields" class="ulink" target="_top">Using Painless in Kibana scripted fields</a></p>
+<div class="position-relative"><h4><a id="migrate-off-scripted-fields"></a>Migrate to runtime fields or ES|QL queries</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/kibana/edit/8.x/docs/management/manage-data-views.asciidoc">edit</a></div>
+<p>The following code snippets demonstrate how an example scripted field called <code class="literal">computed_values</code> on the Kibana Sample Data Logs data view could be migrated to either a runtime field or an ES|QL query, highlighting the differences between each approach.</p>
+<div class="position-relative"><h5><a id="scripted-field-example"></a>Scripted field</h5><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/kibana/edit/8.x/docs/management/manage-data-views.asciidoc">edit</a></div>
+<p>In the scripted field example, variables are created to track all values the script will need to access or return. Since scripted fields can only return a single value, the created variables must be returned together as an array at the end of the script.</p>
+<div class="pre_wrapper lang-text">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-text">def hour_of_day = $('@timestamp', ZonedDateTime.parse('1970-01-01T00:00:00Z')).getHour();
+def time_of_day = '';
+
+if (hour_of_day &gt;= 22 || hour_of_day &lt; 5)
+  time_of_day = 'Night';
+else if (hour_of_day &lt; 12)
+  time_of_day = 'Morning';
+else if (hour_of_day &lt; 18)
+  time_of_day = 'Afternoon';
+else
+  time_of_day = 'Evening';
+
+def response_int = Integer.parseInt($('response.keyword', '200'));
+def response_category = '';
+
+if (response_int &lt; 200)
+  response_category = 'Informational';
+else if (response_int &lt; 300)
+  response_category = 'Successful';
+else if (response_int &lt; 400)
+  response_category = 'Redirection';
+else if (response_int &lt; 500)
+  response_category = 'Client Error';
+else
+  response_category = 'Server Error';
+
+return [time_of_day, response_category];</pre>
+</div>
+<div class="position-relative"><h5><a id="runtime-field-example"></a>Runtime field</h5><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/kibana/edit/8.x/docs/management/manage-data-views.asciidoc">edit</a></div>
+<p>Unlike scripted fields, runtime fields do not need to return a single value and can emit values at any point in the script, which will be combined and returned as a multi-value field. This allows for more flexibility in the script logic and removes the need to manually manage an array of values.</p>
+<div class="pre_wrapper lang-text">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-text">def hour_of_day = $('@timestamp', ZonedDateTime.parse('1970-01-01T00:00:00Z')).getHour();
+
+if (hour_of_day &gt;= 22 || hour_of_day &lt; 5)
+  emit('Night');
+else if (hour_of_day &lt; 12)
+  emit('Morning');
+else if (hour_of_day &lt; 18)
+  emit('Afternoon');
+else
+  emit('Evening');
+
+def response_int = Integer.parseInt($('response.keyword', '200'));
+
+if (response_int &lt; 200)
+  emit('Informational');
+else if (response_int &lt; 300)
+  emit('Successful');
+else if (response_int &lt; 400)
+  emit('Redirection');
+else if (response_int &lt; 500)
+  emit('Client Error');
+else
+  emit('Server Error');</pre>
+</div>
+<div class="position-relative"><h5><a id="esql-example"></a>ES|QL query</h5><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/kibana/edit/8.x/docs/management/manage-data-views.asciidoc">edit</a></div>
+<p>Alternatively, ES|QL can be used to skip the need for data view management entirely and simply compute the values you need at query time. ES|QL supports computing multiple field values in a single query, using computed values with its rich set of commands and functions, and even aggregations against computed values. This makes it an excellent solution for one-off queries and realtime data analysis.</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM kibana_sample_data_logs
+  | EVAL hour_of_day = DATE_EXTRACT("HOUR_OF_DAY", @timestamp)
+  | EVAL time_of_day = CASE(
+      hour_of_day &gt;= 22 OR hour_of_day &lt; 5, "Night",
+      hour_of_day &lt; 12, "Morning",
+      hour_of_day &lt; 18, "Afternoon",
+      "Evening"
+    )
+  | EVAL response_int = TO_INTEGER(response)
+  | EVAL response_category = CASE(
+      response_int &lt; 200, "Informational",
+      response_int &lt; 300, "Successful",
+      response_int &lt; 400, "Redirection",
+      response_int &lt; 500, "Client Error",
+      "Server Error"
+    )
+  | EVAL computed_values = MV_APPEND(time_of_day, response_category)
+  | DROP hour_of_day, time_of_day, response_int, response_category</pre>
+</div>
 <div class="position-relative"><h4><a id="create-scripted-field"></a>Create scripted fields</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/kibana/edit/8.x/docs/management/manage-data-views.asciidoc">edit</a></div>
 <p>Create and add scripted fields to your data views.</p>
 <div class="olist orderedlist">
@@ -244,6 +329,12 @@ Click <span class="strong strong"><strong>Create field</strong></span>.
 </div>
 <p>For more information about scripted fields in Elasticsearch, refer to <a href="/guide/en/elasticsearch/reference/8.x/modules-scripting.html" class="ulink" target="_top">Scripting</a>.</p>
 <div class="position-relative"><h4><a id="update-scripted-field"></a>Manage scripted fields</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/kibana/edit/8.x/docs/management/manage-data-views.asciidoc">edit</a></div>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>The ability to create new scripted fields has been removed from the <span class="strong strong"><strong>Data Views</strong></span> management page in 9.0. Existing scripted fields can still be edited or deleted, and the creation UI can be accessed by navigating directly to <code class="literal">/app/management/kibana/dataViews/dataView/{dataViewId}/create-field</code>, but we recommend migrating to runtime fields or ES|QL queries instead to prepare for removal.</p>
+</div>
+</div>
 <div class="olist orderedlist">
 <ol class="orderedlist">
 <li class="listitem">
