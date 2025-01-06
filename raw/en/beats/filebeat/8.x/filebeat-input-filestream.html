@@ -83,6 +83,13 @@ The <code class="literal">log</code> writes the complete file state.
 <li class="listitem">
 Stale entries can be removed from the registry, even if there is no active input.
 </li>
+<li class="listitem">
+The input can identify files based on their contents when using the
+<a class="xref" href="filebeat-input-filestream.html#filebeat-input-filestream-file-identity-fingerprint"><code class="literal">fingerprint</code></a>
+<a class="xref" href="filebeat-input-filestream.html#filebeat-input-filestream-file-identity" title="file_identity"><code class="literal">file_identity</code></a> instead
+of the default inode and device ID. This solves data duplication
+caused by inode reuse.
+</li>
 </ol>
 </div>
 <p>To configure this input, specify a list of glob-based <a class="xref" href="filebeat-input-filestream.html#filestream-input-paths" title="paths"><code class="literal">paths</code></a>
@@ -155,24 +162,53 @@ multiple input sections:</p>
 <div class="warning admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>Filebeat does not support reading from network shares and cloud providers.</p>
+<p>Some file identity methods do not support reading from
+network shares and cloud providers, to avoid duplicating events, use
+<code class="literal">fingerprint</code> when reading from network shares or cloud providers.</p>
 </div>
 </div>
-<p>However, one of the limitations of these data sources can be mitigated
-if you configure Filebeat adequately.</p>
 <p>By default, Filebeat identifies files based on their inodes and
 device IDs. However, on network shares and cloud providers these
 values might change during the lifetime of the file. If this happens
 Filebeat thinks that file is new and resends the whole content
 of the file. To solve this problem you can configure the <code class="literal">file_identity</code> option. Possible
-values besides the default <code class="literal">inode_deviceid</code> are <code class="literal">path</code>, <code class="literal">inode_marker</code> and <code class="literal">fingerprint</code>.</p>
+values besides the default <code class="literal">native</code> (inode + device ID) are
+<code class="literal">fingerprint</code>, <code class="literal">path</code> and <code class="literal">inode_marker</code>.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Changing <code class="literal">file_identity</code> is only supported when
+migrating from <code class="literal">native</code> or <code class="literal">path</code> to <code class="literal">fingerprint</code>.</p>
+</div>
+</div>
 <div class="warning admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>Changing <code class="literal">file_identity</code> methods between runs may result in
-duplicated events in the output.</p>
+<p>Any unsupported change in <code class="literal">file_identity</code> methods between
+runs may result in duplicated events in the output.</p>
 </div>
 </div>
+<p><code class="literal">fingerprint</code> is the recommended file identity because it does not
+rely on the file system/OS, it generates a hash from a portion of the
+file (the first 1024 bytes, by default) and uses that to identify the
+file. This works well with log rotation strategies that move/rename
+the file and on Windows as file identifiers might be more
+volatile. The downside is that Filebeat will wait until the file
+reaches 1024 bytes before start ingesting any file.</p>
+<div class="warning admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>In order to use this file identity option, one must enable
+the <a class="xref" href="filebeat-input-filestream.html#filebeat-input-filestream-scan-fingerprint" title="prospector.scanner.fingerprint">fingerprint
+option in the scanner</a>. Once this file identity is enabled, changing
+the fingerprint configuration (offset, length, etc) will lead to a
+global re-ingestion of all files that match the paths configuration of
+the input.</p>
+</div>
+</div>
+<p>Please refer to the
+<a class="xref" href="filebeat-input-filestream.html#filebeat-input-filestream-scan-fingerprint" title="prospector.scanner.fingerprint">fingerprint
+configuration for details</a>.</p>
 <p>Selecting <code class="literal">path</code> instructs Filebeat to identify files based on their
 paths. This is a quick way to avoid rereading files if inode and device ids
 might change. However, keep in mind if the files are rotated (renamed), they
@@ -186,15 +222,6 @@ UUID of the device or mountpoint where the input is stored. The following
 example oneliner generates a hidden marker file for the selected mountpoint <code class="literal">/logs</code>:
 Please note that you should not use this option on Windows as file identifiers might be
 more volatile.</p>
-<p>Selecting <code class="literal">fingerprint</code> instructs Filebeat to identify files based on their
-content byte range.</p>
-<div class="warning admon">
-<div class="icon"></div>
-<div class="admon_content">
-<p>In order to use this file identity option, one must enable the <a class="xref" href="filebeat-input-filestream.html#filebeat-input-filestream-scan-fingerprint" title="prospector.scanner.fingerprint">fingerprint option in the scanner</a>. Once this file identity is enabled, changing the fingerprint configuration (offset, length, etc) will lead to a global re-ingestion of all files that match the paths configuration of the input.</p>
-</div>
-</div>
-<p>Please refer to the <a class="xref" href="filebeat-input-filestream.html#filebeat-input-filestream-scan-fingerprint" title="prospector.scanner.fingerprint">fingerprint configuration for details</a>.</p>
 <div class="pre_wrapper lang-sh">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-sh">$ lsblk -o MOUNTPOINT,UUID | grep /logs | awk '{print $2}' &gt;&gt; /logs/.filebeat-marker</pre>
@@ -697,13 +724,21 @@ file that hasn&#8217;t been harvested for a longer period of time.</p>
 <p>This configuration option applies per input. You can use this option to
 indirectly set higher priorities on certain inputs by assigning a higher
 limit of harvesters.</p>
-<div class="position-relative"><h5><a id="_file_identity_2"></a><code class="literal">file_identity</code></h5><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/8.x/filebeat/docs/inputs/input-filestream-file-options.asciidoc">edit</a></div>
+<div class="position-relative"><h5><a id="filebeat-input-filestream-file-identity"></a><code class="literal">file_identity</code></h5><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/beats/edit/8.x/filebeat/docs/inputs/input-filestream-file-options.asciidoc">edit</a></div>
 <p>Different <code class="literal">file_identity</code> methods can be configured to suit the
 environment where you are collecting log messages.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>Changing <code class="literal">file_identity</code> is only supported from <code class="literal">native</code> or
+<code class="literal">path</code> to <code class="literal">fingerprint</code>. On those cases Filebeat will
+automatically migrate the state of the file when filestream starts.</p>
+</div>
+</div>
 <div class="warning admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>Changing <code class="literal">file_identity</code> methods between runs may result in
+<p>Any unsupported change in <code class="literal">file_identity</code> methods between
 duplicated events in the output.</p>
 </div>
 </div>
@@ -720,7 +755,15 @@ The default behaviour of Filebeat is to differentiate
 between files using their inodes and device ids.
 </p>
 <p>In some cases these values can change during the lifetime of a file.
-For example, when using the Linux <a href="https://en.wikipedia.org/wiki/Logical_Volume_Manager_%28Linux%29" class="ulink" target="_top">LVM</a> (Logical Volume Manager), device numbers are allocated dynamically at module load (refer to <a href="https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/logical_volume_manager_administration/lv#persistent_numbers" class="ulink" target="_top">Persistent Device Numbers</a> in the Red Hat Enterprise Linux documentation). To avoid the possibility of data duplication in this case, you can set <code class="literal">file_identity</code> to <code class="literal">path</code> rather than <code class="literal">native</code>.</p>
+For example, when using the Linux
+<a href="https://en.wikipedia.org/wiki/Logical_Volume_Manager_%28Linux%29" class="ulink" target="_top">LVM</a>
+(Logical Volume Manager), device numbers are allocated dynamically at
+module load (refer to
+<a href="https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/logical_volume_manager_administration/lv#persistent_numbers" class="ulink" target="_top">Persistent
+Device Numbers</a> in the Red Hat Enterprise Linux documentation). To
+avoid the possibility of data duplication in this case, you can set
+<code class="literal">file_identity</code> to <code class="literal">fingerprint</code> rather than the default <code class="literal">native</code>.</p>
+<p>The states of files generated by <code class="literal">native</code> file identity can be migrated to <code class="literal">fingerprint</code>.</p>
 </dd>
 </dl>
 </div>
@@ -756,6 +799,7 @@ If an input file is renamed, Filebeat will read it again if the new path
 matches the settings of the input.</p>
 </div>
 </div>
+<p>The states of files generated by <code class="literal">path</code> file identity can be migrated to <code class="literal">fingerprint</code>.</p>
 <div class="pre_wrapper lang-yaml">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-yaml">file_identity.path: ~</pre>
@@ -779,6 +823,7 @@ this method to distinguish files. This option is not supported on Windows.
 <pre class="programlisting prettyprint lang-yaml">file_identity.inode_marker.path: /logs/.filebeat-marker</pre>
 </div>
 <div class="variablelist">
+<a id="filebeat-input-filestream-file-identity-fingerprint"></a>
 <dl class="variablelist">
 <dt>
 <span class="term">
