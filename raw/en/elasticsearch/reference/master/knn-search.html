@@ -2349,7 +2349,7 @@ scored by their nearest passage vector (e.g. <code class="literal">"paragraph.ve
 <div class="icon"></div>
 <div class="admon_content">
 <p><code class="literal">filter</code> will always be over the top-level document metadata. This means you cannot filter based on <code class="literal">nested</code>
-      field metadata.</p>
+field metadata.</p>
 </div>
 </div>
 <div class="pre_wrapper lang-python alternative">
@@ -2849,6 +2849,403 @@ the global top <code class="literal">k</code> matches across shards. You cannot 
 <code class="literal">search_type</code> explicitly when running kNN search.</p>
 </div>
 </div>
+<div class="position-relative"><h4><a id="dense-vector-knn-search-rescoring"></a>Oversampling and rescoring for quantized vectors</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></div>
+<p>When using <a class="xref" href="dense-vector.html#dense-vector-quantization" title="Automatically quantize vectors for kNN search">quantized vectors</a> for kNN search, you can optionally rescore results to balance performance and accuracy, by doing:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong>Oversampling</strong></span>: Retrieve more candidates per shard.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Rescoring</strong></span>: Use the original vector values for re-calculating the score on the oversampled candidates.
+</li>
+</ul>
+</div>
+<p>As the non-quantized, original vectors are used to calculate the final score on the top results, rescoring combines:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+The performance and memory gains of approximate retrieval using quantized vectors for retrieving the top candidates.
+</li>
+<li class="listitem">
+The accuracy of using the original vectors for rescoring the top candidates.
+</li>
+</ul>
+</div>
+<p>All forms of quantization will result in some accuracy loss and as the quantization level increases the accuracy loss will also increase.
+Generally, we have found that:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">int8</code> requires minimal if any rescoring
+</li>
+<li class="listitem">
+<code class="literal">int4</code> requires some rescoring for higher accuracy and larger recall scenarios. Generally, oversampling by 1.5x-2x recovers most of the accuracy loss.
+</li>
+<li class="listitem">
+<code class="literal">bbq</code> requires rescoring except on exceptionally large indices or models specifically designed for quantization. We have found that between 3x-5x oversampling is generally sufficient. But for fewer dimensions or vectors that do not quantize well, higher oversampling may be required.
+</li>
+</ul>
+</div>
+<p>You can use the <code class="literal">rescore_vector</code> <span class="Admonishment Admonishment--preview">
+[<span class="Admonishment-title u-mono">preview</span>]
+<span class="Admonishment-detail">
+This functionality is in technical preview and may be changed or removed in a future release. Elastic will work to fix any issues, but features in technical preview are not subject to the support SLA of official GA features.
+</span>
+</span> option to automatically perform reranking.
+When a rescore <code class="literal">oversample</code> parameter is specified, the approximate kNN search will:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Retrieve <code class="literal">num_candidates</code> candidates per shard.
+</li>
+<li class="listitem">
+From these candidates, the top <code class="literal">k * oversample</code> candidates per shard will be rescored using the original vectors.
+</li>
+<li class="listitem">
+The top <code class="literal">k</code> rescored candidates will be returned.
+</li>
+</ul>
+</div>
+<p>Here is an example of using the <code class="literal">rescore_vector</code> option with the <code class="literal">oversample</code> parameter:</p>
+<a id="519e46350316a33162740e5d7968aa2c"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">POST image-index/_search
+{
+  "knn": {
+    "field": "image-vector",
+    "query_vector": [-5, 9, -12],
+    "k": 10,
+    "num_candidates": 100,
+    "rescore_vector": {
+      "oversample": 2.0
+    }
+  },
+  "fields": [ "title", "file-type" ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/279.console"></div>
+<p>This example will:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Search using approximate kNN for the top 100 candidates.
+</li>
+<li class="listitem">
+Rescore the top 20 candidates (<code class="literal">oversample * k</code>) per shard using the original, non quantized vectors.
+</li>
+<li class="listitem">
+Return the top 10 (<code class="literal">k</code>) rescored candidates.
+</li>
+<li class="listitem">
+Merge the rescored canddidates from all shards, and return the top 10 (<code class="literal">k</code>) results.
+</li>
+</ul>
+</div>
+<div class="position-relative"><h5><a id="dense-vector-knn-search-rescoring-rescore-additional"></a>Additional rescoring techniques</h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></div>
+<p>The following sections provide additional ways of rescoring:</p>
+<div class="position-relative"><h6><a id="dense-vector-knn-search-rescoring-rescore-section"></a>Use the <code class="literal">rescore</code> section for top-level kNN search</h6><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></div>
+<p>You can use this option when you don&#8217;t want to rescore on each shard, but on the top results from all shards.</p>
+<p>Use the <a class="xref" href="filter-search-results.html#rescore" title="Rescore filtered search results">rescore section</a> in the <code class="literal">_search</code> request to rescore the top results from a kNN search.</p>
+<p>Here is an example using the top level <code class="literal">knn</code> search with oversampling and using <code class="literal">rescore</code> to rerank the results:</p>
+<div class="pre_wrapper lang-python alternative">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python alternative">resp = client.search(
+    index="my-index",
+    size=10,
+    knn={
+        "query_vector": [
+            0.04283529,
+            0.85670587,
+            -0.51402352,
+            0
+        ],
+        "field": "my_int4_vector",
+        "k": 20,
+        "num_candidates": 50
+    },
+    rescore={
+        "window_size": 20,
+        "query": {
+            "rescore_query": {
+                "script_score": {
+                    "query": {
+                        "match_all": {}
+                    },
+                    "script": {
+                        "source": "(dotProduct(params.queryVector, 'my_int4_vector') + 1.0)",
+                        "params": {
+                            "queryVector": [
+                                0.04283529,
+                                0.85670587,
+                                -0.51402352,
+                                0
+                            ]
+                        }
+                    }
+                }
+            },
+            "query_weight": 0,
+            "rescore_query_weight": 1
+        }
+    },
+)
+print(resp)</pre>
+</div>
+<div class="pre_wrapper lang-js alternative">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js alternative">const response = await client.search({
+  index: "my-index",
+  size: 10,
+  knn: {
+    query_vector: [0.04283529, 0.85670587, -0.51402352, 0],
+    field: "my_int4_vector",
+    k: 20,
+    num_candidates: 50,
+  },
+  rescore: {
+    window_size: 20,
+    query: {
+      rescore_query: {
+        script_score: {
+          query: {
+            match_all: {},
+          },
+          script: {
+            source: "(dotProduct(params.queryVector, 'my_int4_vector') + 1.0)",
+            params: {
+              queryVector: [0.04283529, 0.85670587, -0.51402352, 0],
+            },
+          },
+        },
+      },
+      query_weight: 0,
+      rescore_query_weight: 1,
+    },
+  },
+});
+console.log(response);</pre>
+</div>
+<a id="befa73a8a419fcf3b7798548b54a20bf"></a>
+<div class="pre_wrapper lang-console default has-python has-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console default has-python has-js">POST /my-index/_search
+{
+  "size": 10, <a id="CO85-1"></a><i class="conum" data-value="1"></i>
+  "knn": {
+    "query_vector": [0.04283529, 0.85670587, -0.51402352, 0],
+    "field": "my_int4_vector",
+    "k": 20, <a id="CO85-2"></a><i class="conum" data-value="2"></i>
+    "num_candidates": 50
+  },
+  "rescore": {
+    "window_size": 20, <a id="CO85-3"></a><i class="conum" data-value="3"></i>
+    "query": {
+      "rescore_query": {
+        "script_score": {
+          "query": {
+            "match_all": {}
+          },
+          "script": {
+            "source": "(dotProduct(params.queryVector, 'my_int4_vector') + 1.0)", <a id="CO85-4"></a><i class="conum" data-value="4"></i>
+            "params": {
+              "queryVector": [0.04283529, 0.85670587, -0.51402352, 0]
+            }
+          }
+        }
+      },
+      "query_weight": 0, <a id="CO85-5"></a><i class="conum" data-value="5"></i>
+      "rescore_query_weight": 1 <a id="CO85-6"></a><i class="conum" data-value="6"></i>
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget has-python has-js" data-snippet="snippets/280.console"></div>
+<div class="calloutlist default has-python has-js lang-console">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO85-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The number of results to return, note its only 10 and we will oversample by 2x, gathering 20 nearest neighbors.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO85-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The number of results to return from the KNN search. This will do an approximate KNN search with 50 candidates
+per HNSW graph and use the quantized vectors, returning the 20 most similar vectors
+according to the quantized score. Additionally, since this is the top-level <code class="literal">knn</code> object, the global top 20 results
+will from all shards will be gathered before rescoring. Combining with <code class="literal">rescore</code>, this is oversampling by <code class="literal">2x</code>, meaning
+gathering 20 nearest neighbors according to quantized scoring and rescoring with higher fidelity float vectors.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO85-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The number of results to rescore, if you want to rescore all results, set this to the same value as <code class="literal">k</code></p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO85-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The script to rescore the results. Script score will interact directly with the originally provided float32 vector.</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO85-5"><i class="conum" data-value="5"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The weight of the original query, here we simply throw away the original score</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO85-6"><i class="conum" data-value="6"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The weight of the rescore query, here we only use the rescore query</p>
+</td>
+</tr>
+</table>
+</div>
+<div class="position-relative"><h6><a id="dense-vector-knn-search-rescoring-script-score"></a>Use a <code class="literal">script_score</code> query to rescore per shard</h6><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></div>
+<p>You can use this option when you want to rescore on each shard and want more fine-grained control on the rescoring
+than the <code class="literal">rescore_vector</code> option provides.</p>
+<p>Use rescore per shard with the <a class="xref" href="query-dsl-knn-query.html" title="Knn query">knn query</a> and <a class="xref" href="query-dsl-script-score-query.html" title="Script score query">script_score query </a>.
+Generally, this means that there will be more rescoring per shard, but this can increase overall recall at the cost of compute.</p>
+<div class="pre_wrapper lang-python alternative">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python alternative">resp = client.search(
+    index="my-index",
+    size=10,
+    query={
+        "script_score": {
+            "query": {
+                "knn": {
+                    "query_vector": [
+                        0.04283529,
+                        0.85670587,
+                        -0.51402352,
+                        0
+                    ],
+                    "field": "my_int4_vector",
+                    "num_candidates": 20
+                }
+            },
+            "script": {
+                "source": "(dotProduct(params.queryVector, 'my_int4_vector') + 1.0)",
+                "params": {
+                    "queryVector": [
+                        0.04283529,
+                        0.85670587,
+                        -0.51402352,
+                        0
+                    ]
+                }
+            }
+        }
+    },
+)
+print(resp)</pre>
+</div>
+<div class="pre_wrapper lang-js alternative">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js alternative">const response = await client.search({
+  index: "my-index",
+  size: 10,
+  query: {
+    script_score: {
+      query: {
+        knn: {
+          query_vector: [0.04283529, 0.85670587, -0.51402352, 0],
+          field: "my_int4_vector",
+          num_candidates: 20,
+        },
+      },
+      script: {
+        source: "(dotProduct(params.queryVector, 'my_int4_vector') + 1.0)",
+        params: {
+          queryVector: [0.04283529, 0.85670587, -0.51402352, 0],
+        },
+      },
+    },
+  },
+});
+console.log(response);</pre>
+</div>
+<a id="dcf82f3aacae49c0bb4ccbc673f13e9f"></a>
+<div class="pre_wrapper lang-console default has-python has-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console default has-python has-js">POST /my-index/_search
+{
+  "size": 10, <a id="CO86-1"></a><i class="conum" data-value="1"></i>
+  "query": {
+    "script_score": {
+      "query": {
+        "knn": { <a id="CO86-2"></a><i class="conum" data-value="2"></i>
+          "query_vector": [0.04283529, 0.85670587, -0.51402352, 0],
+          "field": "my_int4_vector",
+          "num_candidates": 20 <a id="CO86-3"></a><i class="conum" data-value="3"></i>
+        }
+      },
+      "script": {
+        "source": "(dotProduct(params.queryVector, 'my_int4_vector') + 1.0)", <a id="CO86-4"></a><i class="conum" data-value="4"></i>
+        "params": {
+          "queryVector": [0.04283529, 0.85670587, -0.51402352, 0]
+        }
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget has-python has-js" data-snippet="snippets/281.console"></div>
+<div class="calloutlist default has-python has-js lang-console">
+<table border="0" summary="Callout list">
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO86-1"><i class="conum" data-value="1"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The number of results to return</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO86-2"><i class="conum" data-value="2"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The <code class="literal">knn</code> query to perform the initial search, this is executed per-shard</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO86-3"><i class="conum" data-value="3"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The number of candidates to use for the initial approximate <code class="literal">knn</code> search. This will search using the quantized vectors
+and return the top 20 candidates per shard to then be scored</p>
+</td>
+</tr>
+<tr>
+<td align="left" valign="top" width="5%">
+<p><a href="#CO86-4"><i class="conum" data-value="4"></i></a></p>
+</td>
+<td align="left" valign="top">
+<p>The script to score the results. Script score will interact directly with the originally provided float32 vector.</p>
+</td>
+</tr>
+</table>
+</div>
 <div class="position-relative"><h3><a id="exact-knn"></a>Exact kNN</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></div>
 <p>To run an exact kNN search, use a <code class="literal">script_score</code> query with a vector function.</p>
 <div class="olist orderedlist">
@@ -2935,7 +3332,7 @@ console.log(response);</pre>
   }
 }</pre>
 </div>
-<div class="console_widget has-python has-ruby has-js" data-snippet="snippets/279.console"></div>
+<div class="console_widget has-python has-ruby has-js" data-snippet="snippets/282.console"></div>
 </li>
 <li class="listitem">
 <p>Index your data.</p>
@@ -2951,7 +3348,7 @@ console.log(response);</pre>
 { "product-vector": [0.5, 111.3, -13.0, 14.8, -156.0], "price": 1099 }
 ...</pre>
 </div>
-<div class="console_widget" data-snippet="snippets/280.console"></div>
+<div class="console_widget" data-snippet="snippets/283.console"></div>
 </li>
 <li class="listitem">
 <p>Use the <a class="xref" href="search-search.html" title="Search API">search API</a> to run a <code class="literal">script_score</code> query containing
@@ -3092,311 +3489,9 @@ console.log(response);</pre>
   }
 }</pre>
 </div>
-<div class="console_widget has-python has-ruby has-js" data-snippet="snippets/281.console"></div>
+<div class="console_widget has-python has-ruby has-js" data-snippet="snippets/284.console"></div>
 </li>
 </ol>
-</div>
-<div class="position-relative"><h4><a id="dense-vector-knn-search-reranking"></a>Oversampling and rescoring for quantized vectors</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/search/search-your-data/knn-search.asciidoc">edit</a></div>
-<p>All forms of quantization will result in some accuracy loss and as the quantization level increases the accuracy loss will also increase.
-Generally, we have found that:
-- <code class="literal">int8</code> requires minimal if any rescoring
-- <code class="literal">int4</code> requires some rescoring for higher accuracy and larger recall scenarios. Generally, oversampling by 1.5x-2x recovers most of the accuracy loss.
-- <code class="literal">bbq</code> requires rescoring except on exceptionally large indices or models specifically designed for quantization. We have found that between 3x-5x oversampling is generally sufficient. But for fewer dimensions or vectors that do not quantize well, higher oversampling may be required.</p>
-<p>There are two main ways to oversample and rescore. The first is to utilize the <a class="xref" href="filter-search-results.html#rescore" title="Rescore filtered search results">rescore section</a> in the <code class="literal">_search</code> request.</p>
-<p>Here is an example using the top level <code class="literal">knn</code> search with oversampling and using <code class="literal">rescore</code> to rerank the results:</p>
-<div class="pre_wrapper lang-python alternative">
-<div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-python alternative">resp = client.search(
-    index="my-index",
-    size=10,
-    knn={
-        "query_vector": [
-            0.04283529,
-            0.85670587,
-            -0.51402352,
-            0
-        ],
-        "field": "my_int4_vector",
-        "k": 20,
-        "num_candidates": 50
-    },
-    rescore={
-        "window_size": 20,
-        "query": {
-            "rescore_query": {
-                "script_score": {
-                    "query": {
-                        "match_all": {}
-                    },
-                    "script": {
-                        "source": "(dotProduct(params.queryVector, 'my_int4_vector') + 1.0)",
-                        "params": {
-                            "queryVector": [
-                                0.04283529,
-                                0.85670587,
-                                -0.51402352,
-                                0
-                            ]
-                        }
-                    }
-                }
-            },
-            "query_weight": 0,
-            "rescore_query_weight": 1
-        }
-    },
-)
-print(resp)</pre>
-</div>
-<div class="pre_wrapper lang-js alternative">
-<div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js alternative">const response = await client.search({
-  index: "my-index",
-  size: 10,
-  knn: {
-    query_vector: [0.04283529, 0.85670587, -0.51402352, 0],
-    field: "my_int4_vector",
-    k: 20,
-    num_candidates: 50,
-  },
-  rescore: {
-    window_size: 20,
-    query: {
-      rescore_query: {
-        script_score: {
-          query: {
-            match_all: {},
-          },
-          script: {
-            source: "(dotProduct(params.queryVector, 'my_int4_vector') + 1.0)",
-            params: {
-              queryVector: [0.04283529, 0.85670587, -0.51402352, 0],
-            },
-          },
-        },
-      },
-      query_weight: 0,
-      rescore_query_weight: 1,
-    },
-  },
-});
-console.log(response);</pre>
-</div>
-<a id="befa73a8a419fcf3b7798548b54a20bf"></a>
-<div class="pre_wrapper lang-console default has-python has-js">
-<div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-console default has-python has-js">POST /my-index/_search
-{
-  "size": 10, <a id="CO85-1"></a><i class="conum" data-value="1"></i>
-  "knn": {
-    "query_vector": [0.04283529, 0.85670587, -0.51402352, 0],
-    "field": "my_int4_vector",
-    "k": 20, <a id="CO85-2"></a><i class="conum" data-value="2"></i>
-    "num_candidates": 50
-  },
-  "rescore": {
-    "window_size": 20, <a id="CO85-3"></a><i class="conum" data-value="3"></i>
-    "query": {
-      "rescore_query": {
-        "script_score": {
-          "query": {
-            "match_all": {}
-          },
-          "script": {
-            "source": "(dotProduct(params.queryVector, 'my_int4_vector') + 1.0)", <a id="CO85-4"></a><i class="conum" data-value="4"></i>
-            "params": {
-              "queryVector": [0.04283529, 0.85670587, -0.51402352, 0]
-            }
-          }
-        }
-      },
-      "query_weight": 0, <a id="CO85-5"></a><i class="conum" data-value="5"></i>
-      "rescore_query_weight": 1 <a id="CO85-6"></a><i class="conum" data-value="6"></i>
-    }
-  }
-}</pre>
-</div>
-<div class="console_widget has-python has-js" data-snippet="snippets/282.console"></div>
-<div class="calloutlist default has-python has-js lang-console">
-<table border="0" summary="Callout list">
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO85-1"><i class="conum" data-value="1"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>The number of results to return, note its only 10 and we will oversample by 2x, gathering 20 nearest neighbors.</p>
-</td>
-</tr>
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO85-2"><i class="conum" data-value="2"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>The number of results to return from the KNN search. This will do an approximate KNN search with 50 candidates
-per HNSW graph and use the quantized vectors, returning the 20 most similar vectors
-according to the quantized score. Additionally, since this is the top-level <code class="literal">knn</code> object, the global top 20 results
-will from all shards will be gathered before rescoring. Combining with <code class="literal">rescore</code>, this is oversampling by <code class="literal">2x</code>, meaning
-gathering 20 nearest neighbors according to quantized scoring and rescoring with higher fidelity float vectors.</p>
-</td>
-</tr>
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO85-3"><i class="conum" data-value="3"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>The number of results to rescore, if you want to rescore all results, set this to the same value as <code class="literal">k</code></p>
-</td>
-</tr>
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO85-4"><i class="conum" data-value="4"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>The script to rescore the results. Script score will interact directly with the originally provided float32 vector.</p>
-</td>
-</tr>
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO85-5"><i class="conum" data-value="5"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>The weight of the original query, here we simply throw away the original score</p>
-</td>
-</tr>
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO85-6"><i class="conum" data-value="6"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>The weight of the rescore query, here we only use the rescore query</p>
-</td>
-</tr>
-</table>
-</div>
-<p>The second way is to score per shard with the <a class="xref" href="query-dsl-knn-query.html" title="Knn query">knn query</a> and <a class="xref" href="query-dsl-script-score-query.html" title="Script score query">script_score query </a>. Generally, this means that there will be more rescoring per shard, but this
-can increase overall recall at the cost of compute.</p>
-<div class="pre_wrapper lang-python alternative">
-<div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-python alternative">resp = client.search(
-    index="my-index",
-    size=10,
-    query={
-        "script_score": {
-            "query": {
-                "knn": {
-                    "query_vector": [
-                        0.04283529,
-                        0.85670587,
-                        -0.51402352,
-                        0
-                    ],
-                    "field": "my_int4_vector",
-                    "num_candidates": 20
-                }
-            },
-            "script": {
-                "source": "(dotProduct(params.queryVector, 'my_int4_vector') + 1.0)",
-                "params": {
-                    "queryVector": [
-                        0.04283529,
-                        0.85670587,
-                        -0.51402352,
-                        0
-                    ]
-                }
-            }
-        }
-    },
-)
-print(resp)</pre>
-</div>
-<div class="pre_wrapper lang-js alternative">
-<div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js alternative">const response = await client.search({
-  index: "my-index",
-  size: 10,
-  query: {
-    script_score: {
-      query: {
-        knn: {
-          query_vector: [0.04283529, 0.85670587, -0.51402352, 0],
-          field: "my_int4_vector",
-          num_candidates: 20,
-        },
-      },
-      script: {
-        source: "(dotProduct(params.queryVector, 'my_int4_vector') + 1.0)",
-        params: {
-          queryVector: [0.04283529, 0.85670587, -0.51402352, 0],
-        },
-      },
-    },
-  },
-});
-console.log(response);</pre>
-</div>
-<a id="dcf82f3aacae49c0bb4ccbc673f13e9f"></a>
-<div class="pre_wrapper lang-console default has-python has-js">
-<div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-console default has-python has-js">POST /my-index/_search
-{
-  "size": 10, <a id="CO86-1"></a><i class="conum" data-value="1"></i>
-  "query": {
-    "script_score": {
-      "query": {
-        "knn": { <a id="CO86-2"></a><i class="conum" data-value="2"></i>
-          "query_vector": [0.04283529, 0.85670587, -0.51402352, 0],
-          "field": "my_int4_vector",
-          "num_candidates": 20 <a id="CO86-3"></a><i class="conum" data-value="3"></i>
-        }
-      },
-      "script": {
-        "source": "(dotProduct(params.queryVector, 'my_int4_vector') + 1.0)", <a id="CO86-4"></a><i class="conum" data-value="4"></i>
-        "params": {
-          "queryVector": [0.04283529, 0.85670587, -0.51402352, 0]
-        }
-      }
-    }
-  }
-}</pre>
-</div>
-<div class="console_widget has-python has-js" data-snippet="snippets/283.console"></div>
-<div class="calloutlist default has-python has-js lang-console">
-<table border="0" summary="Callout list">
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO86-1"><i class="conum" data-value="1"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>The number of results to return</p>
-</td>
-</tr>
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO86-2"><i class="conum" data-value="2"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>The <code class="literal">knn</code> query to perform the initial search, this is executed per-shard</p>
-</td>
-</tr>
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO86-3"><i class="conum" data-value="3"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>The number of candidates to use for the initial approximate <code class="literal">knn</code> search. This will search using the quantized vectors
-and return the top 20 candidates per shard to then be scored</p>
-</td>
-</tr>
-<tr>
-<td align="left" valign="top" width="5%">
-<p><a href="#CO86-4"><i class="conum" data-value="4"></i></a></p>
-</td>
-<td align="left" valign="top">
-<p>The script to score the results. Script score will interact directly with the originally provided float32 vector.</p>
-</td>
-</tr>
-</table>
 </div>
 </div>
 </div>
