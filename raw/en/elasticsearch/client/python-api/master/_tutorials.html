@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Tutorials | Elasticsearch Python Client [master] | Elastic</title>
+<meta class="elastic" name="content" content="Tutorials | Elasticsearch Python Client [master]">
+
+<link rel="home" href="index.html" title="Elasticsearch Python Client [master]"/>
+<link rel="up" href="elasticsearch-dsl.html" title="Elasticsearch Python DSL"/>
+<link rel="prev" href="_configuration.html" title="Configuration"/>
+<link rel="next" href="_how_to_guides.html" title="How-To Guides"/>
+<meta class="elastic" name="product_version" content="master"/>
+<meta class="elastic" name="product_name" content="Clients"/>
+<meta class="elastic" name="website_area" content="documentation"/>
+<meta name="DC.type" content="Learn/Docs/Clients/Python/master"/>
+<meta name="DC.subject" content="Clients"/>
+<meta name="DC.identifier" content="master"/>
+<meta name="robots" content="noindex,nofollow"/>
+</head>
+<body>
+<div class="page_header">
+This documentation contains work-in-progress information for future Elastic Stack and Cloud releases. Use the version selector to view supported release docs. It also contains some Elastic Cloud serverless information. Check out our <a href="https://www.elastic.co/docs/current/serverless">serverless docs</a> for more details.
+</div>
+<div class="navheader">
+<span class="prev">
+<a href="_configuration.html">« Configuration</a>
+</span>
+<span class="next">
+<a href="_how_to_guides.html">How-To Guides »</a>
+</span>
+</div>
+<div class="book" lang="en">
+<div class="titlepage">
+<div class="breadcrumbs">
+<span class="breadcrumb-link"><a href="/guide/">Elastic Docs</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="index.html">Elasticsearch Python Client [master]</a></span>
+<span class="chevron-right">›</span><span class="breadcrumb-link"><a href="elasticsearch-dsl.html">Elasticsearch Python DSL</a></span>
+</div>
+<div>
+<div><h1 class="title"><a id="id-1"></a>Tutorials</h1><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-py/edit/main/docs/guide/dsl/tutorials.asciidoc">edit</a></div>
+</div>
+<!--EXTRA-->
+</div>
+<div id="content">
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h2 class="title"><a id="_tutorials"></a>Tutorials</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-py/edit/main/docs/guide/dsl/tutorials.asciidoc">edit</a></div>
+</div></div></div>
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_search"></a>Search</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-py/edit/main/docs/guide/dsl/tutorials.asciidoc">edit</a></div>
+</div></div></div>
+<p>Let&#8217;s have a typical search request written directly as a <code class="literal">dict</code>:</p>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python">from elasticsearch import Elasticsearch
+client = Elasticsearch("https://localhost:9200")
+
+response = client.search(
+    index="my-index",
+    body={
+      "query": {
+        "bool": {
+          "must": [{"match": {"title": "python"}}],
+          "must_not": [{"match": {"description": "beta"}}],
+          "filter": [{"term": {"category": "search"}}]
+        }
+      },
+      "aggs" : {
+        "per_tag": {
+          "terms": {"field": "tags"},
+          "aggs": {
+            "max_lines": {"max": {"field": "lines"}}
+          }
+        }
+      }
+    }
+)
+
+for hit in response['hits']['hits']:
+    print(hit['_score'], hit['_source']['title'])
+
+for tag in response['aggregations']['per_tag']['buckets']:
+    print(tag['key'], tag['max_lines']['value'])</pre>
+</div>
+<p>The problem with this approach is that it is very verbose, prone to
+syntax mistakes like incorrect nesting, hard to modify (eg. adding
+another filter) and definitely not fun to write.</p>
+<p>Let&#8217;s rewrite the example using the DSL module:</p>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python">from elasticsearch import Elasticsearch
+from elasticsearch.dsl import Search
+
+client = Elasticsearch("https://localhost:9200")
+
+s = Search(using=client, index="my-index") \
+    .filter("term", category="search") \
+    .query("match", title="python")   \
+    .exclude("match", description="beta")
+
+s.aggs.bucket('per_tag', 'terms', field='tags') \
+    .metric('max_lines', 'max', field='lines')
+
+response = s.execute()
+
+for hit in response:
+    print(hit.meta.score, hit.title)
+
+for tag in response.aggregations.per_tag.buckets:
+    print(tag.key, tag.max_lines.value)</pre>
+</div>
+<p>As you see, the library took care of:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+creating appropriate <code class="literal">Query</code> objects by name (eq. "match")
+</li>
+<li class="listitem">
+composing queries into a compound <code class="literal">bool</code> query
+</li>
+<li class="listitem">
+putting the <code class="literal">term</code> query in a filter context of the <code class="literal">bool</code> query
+</li>
+<li class="listitem">
+providing a convenient access to response data
+</li>
+<li class="listitem">
+no curly or square brackets everywhere
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_persistence"></a>Persistence</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-py/edit/main/docs/guide/dsl/tutorials.asciidoc">edit</a></div>
+</div></div></div>
+<p>Let&#8217;s have a simple Python class representing an article in a blogging
+system:</p>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python">from datetime import datetime
+from elasticsearch.dsl import Document, Date, Integer, Keyword, Text, connections
+
+# Define a default Elasticsearch client
+connections.create_connection(hosts="https://localhost:9200")
+
+class Article(Document):
+    title = Text(analyzer='snowball', fields={'raw': Keyword()})
+    body = Text(analyzer='snowball')
+    tags = Keyword()
+    published_from = Date()
+    lines = Integer()
+
+    class Index:
+        name = 'blog'
+        settings = {
+          "number_of_shards": 2,
+        }
+
+    def save(self, ** kwargs):
+        self.lines = len(self.body.split())
+        return super(Article, self).save(** kwargs)
+
+    def is_published(self):
+        return datetime.now() &gt; self.published_from
+
+# create the mappings in elasticsearch
+Article.init()
+
+# create and save and article
+article = Article(meta={'id': 42}, title='Hello world!', tags=['test'])
+article.body = ''' looong text '''
+article.published_from = datetime.now()
+article.save()
+
+article = Article.get(id=42)
+print(article.is_published())
+
+# Display cluster health
+print(connections.get_connection().cluster.health())</pre>
+</div>
+<p>In this example you can see:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+providing a default connection
+</li>
+<li class="listitem">
+defining fields with mapping configuration
+</li>
+<li class="listitem">
+setting index name
+</li>
+<li class="listitem">
+defining custom methods
+</li>
+<li class="listitem">
+overriding the built-in <code class="literal">.save()</code> method to hook into the persistence
+life cycle
+</li>
+<li class="listitem">
+retrieving and saving the object into Elasticsearch
+</li>
+<li class="listitem">
+accessing the underlying client for other APIs
+</li>
+</ul>
+</div>
+<p>You can see more in the <code class="literal">persistence</code> chapter.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_pre_built_faceted_search"></a>Pre-built Faceted Search</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-py/edit/main/docs/guide/dsl/tutorials.asciidoc">edit</a></div>
+</div></div></div>
+<p>If you have your `Document`s defined you can very easily create a
+faceted search class to simplify searching and filtering.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>This feature is experimental and may be subject to change.</p>
+</div>
+</div>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python">from elasticsearch.dsl import FacetedSearch, TermsFacet, DateHistogramFacet
+
+class BlogSearch(FacetedSearch):
+    doc_types = [Article, ]
+    # fields that should be searched
+    fields = ['tags', 'title', 'body']
+
+    facets = {
+        # use bucket aggregations to define facets
+        'tags': TermsFacet(field='tags'),
+        'publishing_frequency': DateHistogramFacet(field='published_from', interval='month')
+    }
+
+# empty search
+bs = BlogSearch()
+response = bs.execute()
+
+for hit in response:
+    print(hit.meta.score, hit.title)
+
+for (tag, count, selected) in response.facets.tags:
+    print(tag, ' (SELECTED):' if selected else ':', count)
+
+for (month, count, selected) in response.facets.publishing_frequency:
+    print(month.strftime('%B %Y'), ' (SELECTED):' if selected else ':', count)</pre>
+</div>
+<p>You can find more details in the <code class="literal">faceted_search</code> chapter.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_update_by_query"></a>Update By Query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-py/edit/main/docs/guide/dsl/tutorials.asciidoc">edit</a></div>
+</div></div></div>
+<p>Let&#8217;s resume the simple example of articles on a blog, and let&#8217;s assume
+that each article has a number of likes. For this example, imagine we
+want to increment the number of likes by 1 for all articles that match a
+certain tag and do not match a certain description. Writing this as a
+<code class="literal">dict</code>, we would have the following code:</p>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python">from elasticsearch import Elasticsearch
+client = Elasticsearch()
+
+response = client.update_by_query(
+    index="my-index",
+    body={
+      "query": {
+        "bool": {
+          "must": [{"match": {"tag": "python"}}],
+          "must_not": [{"match": {"description": "beta"}}]
+        }
+      },
+      "script"={
+        "source": "ctx._source.likes++",
+        "lang": "painless"
+      }
+    },
+  )</pre>
+</div>
+<p>Using the DSL, we can now express this query as such:</p>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python">from elasticsearch import Elasticsearch
+from elasticsearch.dsl import Search, UpdateByQuery
+
+client = Elasticsearch()
+ubq = UpdateByQuery(using=client, index="my-index") \
+      .query("match", title="python")   \
+      .exclude("match", description="beta") \
+      .script(source="ctx._source.likes++", lang="painless")
+
+response = ubq.execute()</pre>
+</div>
+<p>As you can see, the <code class="literal">Update By Query</code> object provides many of the
+savings offered by the <code class="literal">Search</code> object, and additionally allows one to
+update the results of the search based on a script assigned in the same
+manner.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_migration_from_the_standard_client"></a>Migration from the standard client</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch-py/edit/main/docs/guide/dsl/tutorials.asciidoc">edit</a></div>
+</div></div></div>
+<p>You don&#8217;t have to port your entire application to get the benefits of
+the DSL module, you can start gradually by creating a <code class="literal">Search</code> object
+from your existing <code class="literal">dict</code>, modifying it using the API and serializing it
+back to a <code class="literal">dict</code>:</p>
+<div class="pre_wrapper lang-python">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python">body = {...} # insert complicated query here
+
+# Convert to Search object
+s = Search.from_dict(body)
+
+# Add some filters, aggregations, queries, ...
+s.filter("term", tags="python")
+
+# Convert back to dict to plug back into existing code
+body = s.to_dict()</pre>
+</div>
+</div>
+
+</div>
+</div>
+</div><div class="navfooter">
+<span class="prev">
+<a href="_configuration.html">« Configuration</a>
+</span>
+<span class="next">
+<a href="_how_to_guides.html">How-To Guides »</a>
+</span>
+</div>
+</body>
+</html>
