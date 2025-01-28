@@ -376,6 +376,321 @@ The <code class="literal">elser</code> service of the inference API will be remo
 In the current version there is no impact. In a future version, users of the <code class="literal">elser</code> service will no longer be able to use it, and will be required to use the <code class="literal">elasticsearch</code> service to access elser through the inference API.</p>
 </div>
 </details>
+<div class="position-relative"><h3><a id="breaking_90_anomaly_detection_results"></a>Anomaly detection results migration</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/elasticsearch/edit/main/docs/reference/migration/migrate_9_0.asciidoc">edit</a></div>
+<p>The anomaly detection result indices <code class="literal">.ml-anomalies-*</code> created in Elasticsearch 7.x must be either reindexed, marked read-only, or deleted before upgrading to 9.x.</p>
+<p><span class="strong strong"><strong>Reindexing</strong></span>: While anomaly detection results are being reindexed, jobs continue to run and process new data.
+However, you cannot completely delete an anomaly detection job that stores results in this index until the reindexing is complete.</p>
+<p><span class="strong strong"><strong>Marking indices as read-only</strong></span>: This is useful for large indexes that contain the results of only one or a few anomaly detection jobs.
+If you delete these jobs later, you will not be able to create a new job with the same name.</p>
+<p><span class="strong strong"><strong>Deleting</strong></span>: Delete jobs that are no longer needed in the Machine Learning in Kibana.
+The result index is deleted when all jobs that store results in it have been deleted.</p>
+<details id="which_indices_require_attention">
+<summary class="title">Which indices require attention?</summary>
+<div class="content">
+<p>To identify indices that require action, use the <a class="xref" href="migration-api-deprecation.html" title="Deprecation info APIs">Deprecation info API</a>:</p>
+<a id="e715fb8c792bf09ac98f0ceca99beb84"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET /.ml-anomalies-*/_migration/deprecations</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3717.console"></div>
+<p>The response contains the list of critical deprecation warnings in the <code class="literal">index_settings</code> section:</p>
+<a id="f7dfd5eae273f31a915c36505be2a1d7"></a>
+<div class="pre_wrapper lang-console-result">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console-result">"index_settings": {
+    ".ml-anomalies-shared": [
+      {
+        "level": "critical",
+        "message": "Index created before 8.0",
+        "url": "https://ela.st/es-deprecation-8-reindex",
+        "details": "This index was created with version 7.8.23 and is not compatible with 9.0. Reindex or remove the index before upgrading.",
+        "resolve_during_rolling_upgrade": false
+      }
+    ]
+  }</pre>
+</div>
+</div>
+</details>
+<details id="reindex_anomaly_result_index">
+<summary class="title">Reindexing anomaly result indices</summary>
+<div class="content">
+<p>For an index with less than 10GB that contains results from multiple jobs that are still required, we recommend reindexing into a new format using UI.
+You can use the <a class="xref" href="cat-indices.html" title="cat indices API">cat indices</a> to obtain the size of an index:</p>
+<a id="a46f566ca031375658c22f89b87dc6d2"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET _cat/indices/.ml-anomalies-custom-example?v&amp;h=index,store.size</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3718.console"></div>
+<p>The reindexing can be initiated in the Kibana Upgrade Assistant.</p>
+<p>If an index size is greater than 10 GB it is recommended to use the Reindex API.
+Reindexing consists of the following steps:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Set the original index to read-only.</p>
+<a id="12adea5d76f73d94d80d42f53f67563f"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT .ml-anomalies-custom-example/_block/read_only</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3719.console"></div>
+</li>
+<li class="listitem">
+<p>Create a new index from the legacy index.</p>
+<a id="ec135f0cc0d3f526df68000b2a95c65b"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">POST _create_from/.ml-anomalies-custom-example/.reindexed-v9-ml-anomalies-custom-example</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3720.console"></div>
+</li>
+<li class="listitem">
+<p>Reindex documents.
+To accelerate the reindexing process, it is recommended that the number of replicas be set to <code class="literal">0</code> before the reindexing and then set back to the original number once it is completed.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Get the number of replicas.</p>
+<a id="59aa5216630f80c5dc298fc5bba4a819"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET /.reindexed-v9-ml-anomalies-custom-example/_settings</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3721.console"></div>
+<p>Note the number of replicas in the response. For example:</p>
+<a id="33056a50d7ba5c0dedc068476c7c8b1d"></a>
+<div class="pre_wrapper lang-console-result">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console-result">{
+  ".reindexed-v9-ml-anomalies-custom-example": {
+    "settings": {
+      "index": {
+        "number_of_replicas": "1",
+        "number_of_shards": "1"
+      }
+    }
+  }
+}</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Set the number of replicas to <code class="literal">0</code>.</p>
+<a id="8621c05cc7cf3880bde751f6670a0c3a"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT /.reindexed-v9-ml-anomalies-custom-example/_settings
+{
+  "index": {
+    "number_of_replicas": 0
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3722.console"></div>
+</li>
+<li class="listitem">
+<p>Start the reindexing process in asynchronous mode.</p>
+<a id="6e498b9dc753b94abf2618c407fa5cd8"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">POST _reindex?wait_for_completion=false
+{
+  "source": {
+    "index": ".ml-anomalies-custom-example"
+  },
+  "dest": {
+    "index": ".reindexed-v9-ml-anomalies-custom-example"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3723.console"></div>
+<p>The response will contain a task_id. You can check when the task is completed using the following command:</p>
+<div class="pre_wrapper lang-python alternative">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-python alternative">resp = client.tasks.get(
+    task_id="&lt;task_id&gt;",
+)
+print(resp)</pre>
+</div>
+<div class="pre_wrapper lang-js alternative">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-js alternative">const response = await client.tasks.get({
+  task_id: "&lt;task_id&gt;",
+});
+console.log(response);</pre>
+</div>
+<a id="8a1b6eae4893c5dd27b3d81fd8d70f5b"></a>
+<div class="pre_wrapper lang-console default has-python has-js">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console default has-python has-js">GET _tasks/&lt;task_id&gt;</pre>
+</div>
+<div class="console_widget has-python has-js" data-snippet="snippets/3724.console"></div>
+</li>
+<li class="listitem">
+<p>Set the number of replicas to the original number when the reindexing is finished.</p>
+<a id="0f028f71f04c1d569fab402869565a84"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT /.reindexed-v9-ml-anomalies-custom-example/_settings
+{
+  "index": {
+    "number_of_replicas": "&lt;original_number_of_replicas&gt;"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3725.console"></div>
+</li>
+</ol>
+</div>
+</li>
+<li class="listitem">
+<p>Get the aliases the original index is pointing to.</p>
+<a id="8c47c80139f40f25db44f5781ca2dfbe"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET .ml-anomalies-custom-example/_alias</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3726.console"></div>
+<p>The response may contain multiple aliases if the results of multiple jobs are stored in the same index.</p>
+<a id="e2cae200679cfc793941a38c8dbf610c"></a>
+<div class="pre_wrapper lang-console-result">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console-result">{
+  ".ml-anomalies-custom-example": {
+    "aliases": {
+      ".ml-anomalies-example1": {
+        "filter": {
+          "term": {
+            "job_id": {
+              "value": "example1"
+            }
+          }
+        },
+        "is_hidden": true
+      },
+      ".ml-anomalies-example2": {
+        "filter": {
+          "term": {
+            "job_id": {
+              "value": "example2"
+            }
+          }
+        },
+        "is_hidden": true
+      }
+    }
+  }
+}</pre>
+</div>
+</li>
+<li class="listitem">
+<p>Now you can reassign the aliases to the new index and delete the original index in one step.
+Note that when adding the new index to the aliases, you must use the same filter and is_hidden parameters as for the original index.</p>
+<a id="dd16c9c981551c9da47ebb5ef5105fa0"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">POST _aliases
+{
+  "actions": [
+    {
+      "add": {
+        "index": ".reindexed-v9-ml-anomalies-custom-example",
+        "alias": ".ml-anomalies-example1",
+        "filter": {
+          "term": {
+            "job_id": {
+              "value": "example1"
+            }
+          }
+        },
+        "is_hidden": true
+      }
+    },
+    {
+      "add": {
+        "index": ".reindexed-v9-ml-anomalies-custom-example",
+        "alias": ".ml-anomalies-example2",
+        "filter": {
+          "term": {
+            "job_id": {
+              "value": "example2"
+            }
+          }
+        },
+        "is_hidden": true
+      }
+    },
+    {
+      "remove": {
+        "index": ".ml-anomalies-custom-example",
+        "aliases": ".ml-anomalies-*"
+      }
+    },
+    {
+      "remove_index": {
+        "index": ".ml-anomalies-custom-example"
+      }
+    },
+    {
+      "add": {
+        "index": ".reindexed-v9-ml-anomalies-custom-example",
+        "alias": ".ml-anomalies-custom-example",
+        "is_hidden": true
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3727.console"></div>
+</li>
+</ol>
+</div>
+</div>
+</details>
+<details id="mark_anomaly_result_index_read_only">
+<summary class="title">Marking anomaly result indices as read-only</summary>
+<div class="content">
+<p>Legacy indexes created in Elasticsearch 7.x can be made read-only and supported in Elasticsearch 9.x.
+Making an index with a large amount of historical results read-only allows for a quick migration to the next major release, since you don&#8217;t have to wait for the data to be reindexed into the new format.
+However, it has the limitation that even after deleting an anomaly detection job, the historical results associated with this job are not completely deleted.
+Therefore, the system will prevent you from creating a new job with the same name.</p>
+<p>To set the index as read-only, add the <code class="literal">write</code> block to the index:</p>
+<a id="272e27bf1fcc4fe5dbd4092679dd0342"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT .ml-anomalies-custom-example/_block/write</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3728.console"></div>
+<p>Indices created in Elasticsearch 7.x that have a <code class="literal">write</code> block will not raise a critical deprecation warning.</p>
+</div>
+</details>
+<details id="delete_anomaly_result_index">
+<summary class="title">Deleting anomaly result indices</summary>
+<div class="content">
+<p>If an index contains results of the jobs that are no longer required.
+To list all jobs that stored results in an index, use the terms aggregation:</p>
+<a id="3a204b57072a104d9b50f3a9e064a8f6"></a>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET .ml-anomalies-custom-example/_search
+{
+  "size": 0,
+  "aggs": {
+    "job_ids": {
+      "terms": {
+        "field": "job_id",
+        "size": 100
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/3729.console"></div>
+<p>The jobs can be deleted in the UI.
+After the last job is deleted, the index will be deleted as well.</p>
+</div>
+</details>
 </div>
 </div>
 </div><div class="navfooter">
