@@ -197,7 +197,7 @@ You can use <code class="literal">to_datetime</code> to cast to millisecond date
 <code class="literal">ip</code>
 </li>
 <li class="listitem">
-<code class="literal">keyword</code> family including <code class="literal">keyword</code>, <code class="literal">constant_keyword</code>, and <code class="literal">wildcard</code>
+<code class="literal">keyword</code> <a class="xref" href="keyword.html" title="Keyword type family">family</a> including <code class="literal">keyword</code>, <code class="literal">constant_keyword</code>, and <code class="literal">wildcard</code>
 </li>
 <li class="listitem">
 <code class="literal">int</code> (<code class="literal">short</code> and <code class="literal">byte</code> are represented as <code class="literal">int</code>)
@@ -209,7 +209,7 @@ You can use <code class="literal">to_datetime</code> to cast to millisecond date
 <code class="literal">null</code>
 </li>
 <li class="listitem">
-<code class="literal">text</code>
+<code class="literal">text</code> <a class="xref" href="text.html" title="Text type family">family</a> including <code class="literal">text</code>, <code class="literal">semantic_text</code> and <code class="literal">match_only_text</code>
 </li>
 <li class="listitem">
 <span class="Admonishment Admonishment--preview">
@@ -380,10 +380,70 @@ it is necessary to use the search function, like <a class="xref" href="esql-func
 directly after the <a class="xref" href="esql-commands.html#esql-from" title="FROM"><code class="literal">FROM</code></a> source command, or close enough to it.
 Otherwise, the query will fail with a validation error.
 Another limitation is that any <a class="xref" href="esql-commands.html#esql-where" title="WHERE"><code class="literal">WHERE</code></a> command containing a full-text search function
-cannot also use disjunctions (<code class="literal">OR</code>).</p>
-<p>Because of <a class="xref" href="esql-limitations.html#esql-limitations-text-fields" title="text fields behave like keyword fields">the way ES|QL treats <code class="literal">text</code> values</a>,
-queries on <code class="literal">text</code> fields are like queries on <code class="literal">keyword</code> fields: they are
-case-sensitive and need to match the full string.</p>
+cannot use disjunctions (<code class="literal">OR</code>), unless:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+All functions used in the OR clauses are full-text functions themselves, or scoring is not used
+</li>
+</ul>
+</div>
+<p>For example, this query is valid:</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM books
+| WHERE MATCH(author, "Faulkner") AND MATCH(author, "Tolkien")</pre>
+</div>
+<p>But this query will fail due to the <a class="xref" href="esql-commands.html#esql-stats-by" title="STATS">STATS</a> command:</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM books
+| STATS AVG(price) BY author
+| WHERE MATCH(author, "Faulkner")</pre>
+</div>
+<p>And this query that uses a disjunction will succeed:</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM books
+| WHERE MATCH(author, "Faulkner") OR QSTR("author: Hemingway")</pre>
+</div>
+<p>However using scoring will fail because it uses a non full text function as part of the disjunction:</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM books METADATA _score
+| WHERE MATCH(author, "Faulkner") OR author LIKE "Hemingway"</pre>
+</div>
+<p>Scoring will work in the following query, as it uses full text functions on both <code class="literal">OR</code> clauses:</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">FROM books METADATA _score
+| WHERE MATCH(author, "Faulkner") OR QSTR("author: Hemingway")</pre>
+</div>
+<p>Note that, because of <a class="xref" href="esql-limitations.html#esql-limitations-text-fields" title="text fields behave like keyword fields">the way ES|QL treats <code class="literal">text</code> values</a>,
+any queries on <code class="literal">text</code> fields that do not explicitly use the full-text functions,
+<a class="xref" href="esql-functions-operators.html#esql-match" title="MATCH"><code class="literal">MATCH</code></a>, <a class="xref" href="esql-functions-operators.html#esql-qstr" title="QSTR"><code class="literal">QSTR</code></a> or <a class="xref" href="esql-functions-operators.html#esql-kql" title="KQL"><code class="literal">KQL</code></a>, will behave as if the fields are actually <code class="literal">keyword</code> fields:
+they are case-sensitive and need to match the full string.</p>
+<div class="position-relative"><h3><a id="esql-limitations-text-fields"></a><code class="literal">text</code> fields behave like <code class="literal">keyword</code> fields</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/esql/esql-limitations.asciidoc">edit</a></div>
+<p>While ES|QL supports <a class="xref" href="text.html" title="Text type family"><code class="literal">text</code></a> fields, ES|QL does not treat these fields
+like the Search API does. ES|QL queries do not query or aggregate the
+<a class="xref" href="analysis.html" title="Text analysis">analyzed string</a>. Instead, an ES|QL query will try to get a <code class="literal">text</code>
+field&#8217;s subfield of the <a class="xref" href="keyword.html" title="Keyword type family">keyword family type</a> and query/aggregate
+that. If it&#8217;s not possible to retrieve a <code class="literal">keyword</code> subfield, ES|QL will get the
+string from a document&#8217;s <code class="literal">_source</code>. If the <code class="literal">_source</code> cannot be retrieved, for
+example when using synthetic source, <code class="literal">null</code> is returned.</p>
+<p>Once a <code class="literal">text</code> field is retrieved, if the query touches it in any way, for example passing
+it into a function, the type will be converted to <code class="literal">keyword</code>. In fact, functions that operate on both
+<code class="literal">text</code> and <code class="literal">keyword</code> fields will perform as if the <code class="literal">text</code> field was a <code class="literal">keyword</code> field all along.</p>
+<p>For example, the following query will return a column <code class="literal">greatest</code> of type <code class="literal">keyword</code> no matter
+whether any or all of <code class="literal">field1</code>, <code class="literal">field2</code>, and <code class="literal">field3</code> are of type <code class="literal">text</code>:</p>
+<div class="pre_wrapper lang-esql">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-esql">| FROM index
+| EVAL greatest = GREATEST(field1, field2, field3)</pre>
+</div>
+<p>Note that ES|QL&#8217;s retrieval of <code class="literal">keyword</code> subfields may have unexpected
+consequences. Other than when explicitly using the full-text functions, <a class="xref" href="esql-functions-operators.html#esql-match" title="MATCH"><code class="literal">MATCH</code></a> and <a class="xref" href="esql-functions-operators.html#esql-qstr" title="QSTR"><code class="literal">QSTR</code></a>,
+any ES|QL query on a <code class="literal">text</code> field is case-sensitive.</p>
 <p>For example, after indexing a field of type <code class="literal">text</code> with the value <code class="literal">Elasticsearch
 query language</code>, the following <code class="literal">WHERE</code> clause does not match because the <code class="literal">LIKE</code>
 operator is case-sensitive:</p>
@@ -402,22 +462,33 @@ tries to match the whole string:</p>
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-esql">| WHERE field RLIKE "[Ee]lasticsearch.*"</pre>
 </div>
-<div class="position-relative"><h3><a id="esql-limitations-text-fields"></a><code class="literal">text</code> fields behave like <code class="literal">keyword</code> fields</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/esql/esql-limitations.asciidoc">edit</a></div>
-<p>While ES|QL supports <a class="xref" href="text.html" title="Text type family"><code class="literal">text</code></a> fields, ES|QL does not treat these fields
-like the Search API does. ES|QL queries do not query or aggregate the
-<a class="xref" href="analysis.html" title="Text analysis">analyzed string</a>. Instead, an ES|QL query will try to get a <code class="literal">text</code>
-field&#8217;s subfield of the <a class="xref" href="keyword.html" title="Keyword type family">keyword family type</a> and query/aggregate
-that. If it&#8217;s not possible to retrieve a <code class="literal">keyword</code> subfield, ES|QL will get the
-string from a document&#8217;s <code class="literal">_source</code>. If the <code class="literal">_source</code> cannot be retrieved, for
-example when using synthetic source, <code class="literal">null</code> is returned.</p>
-<p>Note that ES|QL&#8217;s retrieval of <code class="literal">keyword</code> subfields may have unexpected
-consequences. An ES|QL query on a <code class="literal">text</code> field is case-sensitive. Furthermore,
-a subfield may have been mapped with a <a class="xref" href="normalizer.html" title="normalizer">normalizer</a>, which can
+<p>Furthermore, a subfield may have been mapped with a <a class="xref" href="normalizer.html" title="normalizer">normalizer</a>, which can
 transform the original string. Or it may have been mapped with <a class="xref" href="ignore-above.html" title="ignore_above"><code class="literal">ignore_above</code></a>,
 which can truncate the string. None of these mapping operations are applied to
 an ES|QL query, which may lead to false positives or negatives.</p>
 <p>To avoid these issues, a best practice is to be explicit about the field that
-you query, and query <code class="literal">keyword</code> sub-fields instead of <code class="literal">text</code> fields.</p>
+you query, and query <code class="literal">keyword</code> sub-fields instead of <code class="literal">text</code> fields.
+Or consider using one of the <a class="xref" href="esql-functions-operators.html#esql-search-functions" title="ES|QL Full-text search functions">full-text search</a> functions.</p>
+<div class="position-relative"><h3><a id="esql-multi-index-limitations"></a>Using ES|QL to query multiple indices</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/esql/esql-limitations.asciidoc">edit</a></div>
+<p>As discussed in more detail in <a class="xref" href="esql-multi-index.html" title="Using ES|QL to query multiple indices">Using ES|QL to query multiple indices</a>, ES|QL can execute a single query across multiple indices,
+data streams, or aliases. However, there are some limitations to be aware of:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+All underlying indexes and shards must be active. Using admin commands or UI,
+it is possible to pause an index or shard, for example by disabling a frozen tier instance,
+but then any ES|QL query that includes that index or shard will fail, even if the query uses
+<a class="xref" href="esql-commands.html#esql-where" title="WHERE"><code class="literal">WHERE</code></a> to filter out the results from the paused index.
+If you see an error of type <code class="literal">search_phase_execution_exception</code>,
+with the message <code class="literal">Search rejected due to missing shards</code>, you likely have an index or shard in <code class="literal">UNASSIGNED</code> state.
+</li>
+<li class="listitem">
+The same field must have the same type across all indexes. If the same field is mapped to different types
+it is still possible to query the indexes,
+but the field must be <a class="xref" href="esql-multi-index.html#esql-multi-index-union-types" title="Union types">explicitly converted to a single type</a>.
+</li>
+</ul>
+</div>
 <div class="position-relative"><h3><a id="esql-tsdb"></a>Time series data streams are not supported</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/esql/esql-limitations.asciidoc">edit</a></div>
 <p>ES|QL does not support querying time series data streams (TSDS).</p>
 <div class="position-relative"><h3><a id="esql-limitations-date-math"></a>Date math limitations</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/elasticsearch/edit/8.x/docs/reference/esql/esql-limitations.asciidoc">edit</a></div>
