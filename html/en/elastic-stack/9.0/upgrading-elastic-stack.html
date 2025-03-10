@@ -597,6 +597,442 @@ If you use a separate <a href="/guide/en/elasticsearch/reference/current/monitor
 <p>The jobs can be deleted in the UI. After the last job is deleted, the index will be deleted as well.</p>
 </div>
 </details>
+<div class="position-relative"><h3><a id="breaking_90_transform_destination_index"></a>Transform destination indices migration</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/stack-docs/edit/9.0/docs/en/install-upgrade/upgrading-stack.asciidoc">edit</a></div>
+<p>The transform destination indices created in Elasticsearch 7.x must be either reset, reindexed, or deleted before upgrading to 9.x.</p>
+<p><span class="strong strong"><strong>Resetting</strong></span>: You can reset the transform to delete all state, checkpoints, and the destination index (if it was created by the transform). The next time you start the transform, it will reprocess all data from the source index, creating a new destination index in Elasticsearch 8.x compatible with 9.x. However, if data had been deleted from the source index, you will lose all previously computed results that had been stored in the destination index.</p>
+<p><span class="strong strong"><strong>Reindexing</strong></span>: You can reindex the destination index and then update the transform to write to the new destination index. This is useful if there are results that you want to retain that may not exist in the source index. To prevent the transform and reindex tasks from conflicting with one another, you can either pause the transform while the reindex runs, or you can write to the new destination index while the reindex backfills old results.</p>
+<p><span class="strong strong"><strong>Deleting</strong></span>: You can delete any transform that are no longer being used. Once the transform is deleted, you can either delete the destination index or make it read-only.</p>
+<details>
+<summary class="title">Which indices require attention?</summary>
+<div class="content">
+<p>To identify indices that require action, use the <a href="/docs/api/doc/elasticsearch/operation/operation-migration-deprecations-1" class="ulink" target="_top">Deprecation info API</a>:</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET /_migration/deprecations</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/17.console"></div>
+<p>The response contains the list of critical deprecation warnings in the <code class="literal">index_settings</code> section:</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">"index_settings": {
+    "my-destination-index": [
+      {
+        "level": "critical",
+        "message": "One or more Transforms write to this index with a compatibility version &lt; 9.0",
+        "url": "https://www.elastic.co/guide/en/elasticsearch/reference/master/migrating-9.0.html#breaking_90_transform_destination_index",
+        "details": "Transforms [my-transform] write to this index with version [7.8.23].",
+        "resolve_during_rolling_upgrade": false
+      }
+    ]
+  }</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/18.console"></div>
+</div>
+</details>
+<details>
+<summary class="title">Resetting the transform</summary>
+<div class="content">
+<p>If the index was created by the transform, you can use the <a href="/docs/api/doc/elasticsearch/operation/operation-transform-reset-transform" class="ulink" target="_top">Transform Reset API</a> to delete the destination index and recreate it the next time the transform runs.</p>
+<p>If the index was not created by the transform, and you still want to reset it, you can manually delete and recreate the index, then call the Reset API.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">POST _transform/my-transform/_reset</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/19.console"></div>
+</div>
+</details>
+<details>
+<summary class="title">Reindexing the transform&#8217;s destination index while the transform is paused</summary>
+<div class="content">
+<p>When Kibana Upgrade Assistant reindexes the documents, Kibana will put a write block on the old destination index, copy the results to a new index, delete the old index, and create an alias to the new index. During this time, the transform will pause and wait for the destination to become writable again.  If you do not want the transform to pause, continue to <a class="xref" href="upgrading-elastic-stack.html#reindexing-transform-running" title="Reindexing the transform&#8217;s destination index while the transform is running">reindexing the transform&#8217;s destination index while the transform is running</a>.</p>
+<p>If an index is less than 10GB of size, we recommend using Kibana&#8217;s Upgrade Assistant to automatically migrate the index.</p>
+<p>If an index size is greater than 10 GB it is recommended to use the Reindex API. Reindexing consists of the following steps:</p>
+<p>You can use the <a href="/docs/api/doc/elasticsearch/operation/operation-cat-indices-1" class="ulink" target="_top">Get index information API</a> to obtain the size of an index:</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET _cat/indices/.transform-destination-example?v&amp;h=index,store.size</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/20.console"></div>
+<p>The reindexing can be initiated in the Kibana Upgrade Assistant.</p>
+<p>If an index size is greater than 10 GB, it is recommended to use the Reindex API. Reindexing consists of the following steps:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Set the original index to read-only.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT .transform-destination-example/_block/read_only</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/21.console"></div>
+</li>
+<li class="listitem">
+<p>Create a new index from the legacy index.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">POST _create_from/.transform-destination-example/.reindexed-v9-transform-destination-example</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/22.console"></div>
+</li>
+<li class="listitem">
+<p>Reindex documents. To accelerate the reindexing process, it is recommended that the number of replicas be set to <code class="literal">0</code> before the reindexing and then set back to the original number once it is completed.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Get the number of replicas.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET /.reindexed-v9-transform-destination-example/_settings</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/23.console"></div>
+<p>Note the number of replicas in the response. For example:</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">{
+  ".reindexed-v9-transform-destination-example": {
+    "settings": {
+      "index": {
+        "number_of_replicas": "1",
+        "number_of_shards": "1"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/24.console"></div>
+</li>
+<li class="listitem">
+<p>Set the number of replicas to <code class="literal">0.</code></p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT /.reindexed-v9-transform-destination-example/_settings
+{
+  "index": {
+    "number_of_replicas": 0
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/25.console"></div>
+</li>
+<li class="listitem">
+<p>Start the reindexing process in asynchronous mode.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">POST _reindex?wait_for_completion=false
+{
+  "source": {
+    "index": ".transform-destination-example"
+  },
+  "dest": {
+    "index": ".reindexed-v9-transform-destination-example"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/26.console"></div>
+<p>The response will contain a <code class="literal">task_id</code>. You can check when the task is completed using the following command:</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET _tasks/&lt;task_id&gt;</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/27.console"></div>
+</li>
+<li class="listitem">
+<p>Set the number of replicas to the original number when the reindexing is finished.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT /.reindexed-v9-transform-destination-example/_settings
+{
+  "index": {
+    "number_of_replicas": "&lt;original_number_of_replicas&gt;"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/28.console"></div>
+</li>
+</ol>
+</div>
+</li>
+<li class="listitem">
+<p>Get the aliases the original index is pointing to.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET .transform-destination-example/_alias</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/29.console"></div>
+<p>The response may contain multiple aliases if the results of multiple jobs are stored in the same index.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">{
+  ".transform-destination-example": {
+    "aliases": {
+      ".transform-destination-example1": {
+        "filter": {
+          "term": {
+            "job_id": {
+              "value": "example1"
+            }
+          }
+        },
+        "is_hidden": true
+      },
+      ".transform-destination-example2": {
+        "filter": {
+          "term": {
+            "job_id": {
+              "value": "example2"
+            }
+          }
+        },
+        "is_hidden": true
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/30.console"></div>
+</li>
+<li class="listitem">
+<p>Now you can reassign the aliases to the new index and delete the original index in one step. Note that when adding the new index to the aliases, you must use the same <code class="literal">filter</code> and <code class="literal">is_hidden</code> parameters as for the original index.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">POST _aliases
+{
+  "actions": [
+    {
+      "add": {
+        "index": ".reindexed-v9-transform-destination-example",
+        "alias": ".transform-destination-example1",
+        "filter": {
+          "term": {
+            "job_id": {
+              "value": "example1"
+            }
+          }
+        },
+        "is_hidden": true
+      }
+    },
+    {
+      "add": {
+        "index": ".reindexed-v9-transform-destination-example",
+        "alias": ".transform-destination-example2",
+        "filter": {
+          "term": {
+            "job_id": {
+              "value": "example2"
+            }
+          }
+        },
+        "is_hidden": true
+      }
+    },
+    {
+      "remove": {
+        "index": ".transform-destination-example",
+        "aliases": ".transform-destination-*"
+      }
+    },
+    {
+      "remove_index": {
+        "index": ".transform-destination-example"
+      }
+    },
+    {
+      "add": {
+        "index": ".reindexed-v9-transform-destination-example",
+        "alias": ".transform-destination-example",
+        "is_hidden": true
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/31.console"></div>
+</li>
+</ol>
+</div>
+</div>
+</details>
+<details id="reindexing-transform-running">
+<summary class="title">Reindexing the transform&#8217;s destination index while the transform is running</summary>
+<div class="content">
+<p>If you want the transform and the reindex task to write documents to the new destination index at the same time:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Set the original index to read-only.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">POST _create_from/my-destination-index/my-new-destination-index</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/32.console"></div>
+</li>
+<li class="listitem">
+<p>Update the transform to write to the new destination index:</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">POST _transform/my-transform/_update
+{
+ "dest": {
+   "index": "my-new-destination-index"
+ }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/33.console"></div>
+</li>
+<li class="listitem">
+<p>Reindex documents. To accelerate the reindexing process, it is recommended that the number of replicas be set to 0 before the reindexing and then set back to the original number once it is completed.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Get the number of replicas.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET /my-destination-index/_settings</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/34.console"></div>
+</li>
+<li class="listitem">
+<p>Note the number of replicas in the response. For example:</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">{
+  "my-destination-index": {
+    "settings": {
+      "index": {
+        "number_of_replicas": "1",
+        "number_of_shards": "1"
+      }
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/35.console"></div>
+</li>
+<li class="listitem">
+<p>Set the number of replicas to <code class="literal">0.</code></p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT /my-destination-index/_settings
+{
+  "index": {
+    "number_of_replicas": 0
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/36.console"></div>
+</li>
+<li class="listitem">
+Start the reindexing process in asynchronous mode. Set the <code class="literal">op_type</code> to <code class="literal">create</code> so the reindex does not overwrite work that the transform is doing.
+</li>
+</ol>
+</div>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">POST _reindex
+{
+ "conflicts": "proceed",
+ "source": {
+   "index": "my-destination-index"
+ },
+ "dest": {
+   "index": "my-new-destination-index",
+   "op_type": "create"
+ }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/37.console"></div>
+<p>+
+The response will contain a <code class="literal">task_id</code>. You can check when the task is completed using the following command:</p>
+<p>+</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET _tasks/&lt;task_id&gt;</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/38.console"></div>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Set the number of replicas to the original number when the reindexing is finished.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">PUT /my-new-destination-index/_settings
+{
+  "index": {
+    "number_of_replicas": "&lt;original_number_of_replicas&gt;"
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/39.console"></div>
+</li>
+<li class="listitem">
+<p>Get the aliases the original index is pointing to.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">GET my-destination-index/_alias
+
+{
+  "my-destination-index": {
+    "aliases": {
+      "my-destination-alias": {},
+    }
+  }
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/40.console"></div>
+</li>
+<li class="listitem">
+<p>Now you can reassign the aliases to the new index and delete the original index in one step. Note that when adding the new index to the aliases, you must use the same <code class="literal">filter</code> and <code class="literal">is_hidden</code> parameters as for the original index.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">POST _aliases
+{
+  "actions": [
+    {
+      "add": {
+        "index": "my-new-destination-index",
+        "alias": "my-destination-alias"
+      }
+    },
+    {
+      "remove": {
+        "index": "my-destination-index",
+        "aliases": "my-destination-alias"
+      }
+    },
+    {
+      "remove_index": {
+        "index": "my-destination-index"
+      }
+    }
+  ]
+}</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/41.console"></div>
+</li>
+</ol>
+</div>
+</li>
+</ol>
+</div>
+</div>
+</details>
+<details>
+<summary class="title">Deleting the transform</summary>
+<div class="content">
+<p>You can use the <a href="/docs/api/doc/elasticsearch/operation/operation-transform-delete-transform" class="ulink" target="_top">Transform Delete API</a> to delete the transform and stop it from writing to the destination index.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">DELETE _transform/my-transform</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/42.console"></div>
+<p>If the destination index is no longer needed, it can be deleted alongside the transform.</p>
+<div class="pre_wrapper lang-console">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-console">DELETE _transform/my-transform?delete_dest_index</pre>
+</div>
+<div class="console_widget" data-snippet="snippets/43.console"></div>
+</div>
+</details>
 </div>
 </div>
 
