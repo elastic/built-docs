@@ -165,7 +165,7 @@ Data Source: PowerShell Logs
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 1</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 2</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -177,7 +177,7 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_488"></a>Setup</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.16/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-special-character-overuse.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_495"></a>Setup</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.16/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-special-character-overuse.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
 <p>The <em>PowerShell Script Block Logging</em> logging policy must be enabled.
@@ -192,27 +192,30 @@ Turn on PowerShell Script Block Logging (Enable)</pre>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_820"></a>Rule query</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.16/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-special-character-overuse.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_831"></a>Rule query</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.16/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-special-character-overuse.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-js">FROM logs-windows.powershell_operational* metadata _id, _version, _index
 | WHERE event.code == "4104"
 
+// Replace repeated spaces used for formatting after a new line with a single space to reduce FPs
+| EVAL dedup_space_script_block = REPLACE(powershell.file.script_block_text, """\n\s+""", "\n ")
+
 // Look for scripts with more than 1000 chars that contain a related keyword
-| EVAL script_len = LENGTH(powershell.file.script_block_text)
+| EVAL script_len = LENGTH(dedup_space_script_block)
 | WHERE script_len &gt; 1000
 
 // Replace string format expressions with 🔥 to enable counting the occurrence of the patterns we are looking for
 // The emoji is used because it's unlikely to appear in scripts and has a consistent character length of 1
-| EVAL replaced_with_fire = REPLACE(powershell.file.script_block_text, """[\s\$\{\}\+\@\=\(\)\^\\\"~\[\]\?\.]""", "🔥")
+| EVAL replaced_with_fire = REPLACE(dedup_space_script_block, """[\s\$\{\}\+\@\=\(\)\^\\\"~\[\]\?\.]""", "🔥")
 
 // Count the occurrence of numbers and their proportion to the total chars in the script
 | EVAL special_count = script_len - LENGTH(REPLACE(replaced_with_fire, "🔥", ""))
 | EVAL proportion = special_count::double / script_len::double
 
 // Keep the fields relevant to the query, although this is not needed as the alert is populated using _id
-| KEEP special_count, script_len, proportion, replaced_with_fire, powershell.file.script_block_text, powershell.file.script_block_id, file.path, powershell.sequence, powershell.total, _id, _index, host.name, agent.id, user.id
+| KEEP special_count, script_len, proportion, dedup_space_script_block, replaced_with_fire, powershell.file.script_block_text, powershell.file.script_block_id, file.path, powershell.sequence, powershell.total, _id, _index, host.name, agent.id, user.id
 
 // Filter for scripts with a 75%+ proportion of numbers
 | WHERE proportion &gt; 0.75</pre>
