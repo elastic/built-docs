@@ -96,7 +96,7 @@ but is not responsible for the LLM&#8217;s responses.</p>
 <div class="important admon">
 <div class="icon"></div>
 <div class="admon_content">
-<p>Also, the data you provide to the Observability AI assistant is <em>not</em> anonymized, and is stored and processed by the third-party AI provider. This includes any data used in conversations for analysis or context, such as alert or event data, detection rule configurations, and queries. Therefore, be careful about sharing any confidential or sensitive details while using this feature.</p>
+<p>Also, the data you provide to the Observability AI assistant is <em>not</em> anonymized, and is stored and processed by the third-party AI provider. This includes any data used in conversations for analysis or context, such as alert or event data, detection rule configurations, and queries. Therefore, be careful about sharing any confidential or sensitive details while using this feature. If you need to anonymize data, use the <a class="xref" href="obs-ai-assistant.html#obs-ai-anonymization" title="Anonymization">anonymization pipeline</a>.</p>
 </div>
 </div>
 <div class="position-relative"><h3><a id="obs-ai-requirements"></a>Requirements</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.19/docs/en/observability/observability-ai-assistant.asciidoc">edit</a></div>
@@ -767,6 +767,102 @@ its efficiency and accuracy in answering questions related to the Elastic stack 
 <p>Installing the product documentation in air gapped environments requires specific installation and configuration instructions,
 which are available in the <a href="/guide/en/kibana/8.19/ai-assistant-settings-kb.html" class="ulink" target="_top">Kibana Kibana AI Assistants settings documentation</a>.</p>
 </div>
+</div>
+<div class="position-relative"><h3><a id="obs-ai-anonymization"></a>Anonymization</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.19/docs/en/observability/observability-ai-assistant.asciidoc">edit</a></div>
+<p>Anonymization masks personally identifiable or otherwise sensitive information before chat messages leave Kibana for a third-party LLM.
+Enabled rules substitute deterministic tokens (for example <code class="literal">EMAIL_ee4587…</code>) so the model can keep context without ever seeing the real value.
+When all rules are disabled (the default), data is forwarded unchanged.</p>
+<div class="position-relative"><h4><a id="obs-ai-anonymization-how-it-works"></a>How it works</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.19/docs/en/observability/observability-ai-assistant.asciidoc">edit</a></div>
+<p>When an anonymization rule is enabled in the <a class="xref" href="obs-ai-assistant.html#obs-ai-settings" title="AI Assistant Settings">AI Assistant Settings</a>, every message in the request (system prompt, message content, function call arguments/responses) is run through an <span class="strong strong"><strong>anonymization pipeline</strong></span> before it leaves Kibana:</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+Each enabled <span class="strong strong"><strong>rule</strong></span> scans the text and replaces any match with a deterministic token such as
+<code class="literal">EMAIL_ee4587b4ba681e38996a1b716facbf375786bff7</code>.
+The prefix (<code class="literal">EMAIL</code>, <code class="literal">PER</code>, <code class="literal">LOC</code>, …) is the <span class="strong strong"><strong>entity class</strong></span>; the suffix is a deterministic hash of the original value.
+</li>
+<li class="listitem">
+The fully masked conversation is sent to the LLM.
+</li>
+<li class="listitem">
+After the LLM responds, the original values are restored so the user sees deanonymized text and any persisted conversation history stores the original content. Deanonymization information is stored with the conversation messages to enable the UI to highlight anonymized content.
+</li>
+</ol>
+</div>
+<div class="position-relative"><h4><a id="obs-ai-anonymization-rule-types"></a>Rule types</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.19/docs/en/observability/observability-ai-assistant.asciidoc">edit</a></div>
+<p><span class="strong strong"><strong>RegExp</strong></span>: Runs a JavaScript‑style regular expression. Use for fixed patterns such as email addresses, host names, etc.</p>
+<div class="pre_wrapper lang-json">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-json">{
+  "type": "RegExp",
+  "pattern": "([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})",
+  "entityClass": "EMAIL",
+  "enabled": true
+}</pre>
+</div>
+<p><span class="strong strong"><strong>NER</strong></span>: Runs a named entity recognition (NER) model on free text.</p>
+<div class="pre_wrapper lang-json">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-json">{
+  "type": "NER",
+  "modelId": "elastic__distilbert-base-uncased-finetuned-conll03-english",
+  "allowedEntityClasses": ["PER", "ORG", "LOC"],
+  "enabled": true
+}</pre>
+</div>
+<p>Rules are evaluated top-to-bottom with <code class="literal">RegExp</code> rules processed first, then <code class="literal">NER</code> rules; the first rule that captures a given entity wins. Rules can be configured in the <a class="xref" href="obs-ai-assistant.html#obs-ai-settings" title="AI Assistant Settings">AI Assistant Settings</a> page.</p>
+<div class="position-relative"><h4><a id="obs-ai-anonymization-examples"></a>Examples</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.19/docs/en/observability/observability-ai-assistant.asciidoc">edit</a></div>
+<p>The following example shows the anonymized content highlighted in the chat window using a <code class="literal">RegExp</code> rule to mask GKE hostnames:</p>
+<div class="pre_wrapper lang-json">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-json">{
+  "entityClass": "GKE_HOST",
+  "type": "RegExp",
+  "pattern": "(gke-[a-zA-Z0-9-]+-[a-f0-9]{8}-[a-zA-Z0-9]+)",
+  "enabled": true
+}
+{
+  "entityClass": "GKE_HOST",
+  "type": "RegExp",
+  "pattern": "(gke-[a-zA-Z0-9-]+-[a-f0-9]{8}-[a-zA-Z0-9]+)",
+  "enabled": true
+}</pre>
+</div>
+<div class="imageblock screenshot">
+<div class="content">
+<img src="images/observability-obs-ai-assistant-anonymization.png" alt="Anonymization example" width="60%">
+</div>
+</div>
+<div class="position-relative"><h4><a id="obs-ai-anonymization-requirements"></a>Requirements</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.19/docs/en/observability/observability-ai-assistant.asciidoc">edit</a></div>
+<p>Anonymization requires the following:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong>Advanced Settings privilege</strong></span>: Necessary to edit the configuration and enable rules.
+Once saved, <span class="strong strong"><strong>all</strong></span> users in the same <span class="strong strong"><strong>Space</strong></span> benefit from the anonymization the setting is space-awar.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>ML privilege and resources</strong></span>: If you enable a rule of type NER, you must first <a href="/guide/en/machine-learning/8.19/ml-nlp-ner-example.html" class="ulink" target="_top">deploy and start an NER model</a> and have sufficient ML capacity.
+</li>
+</ul>
+</div>
+<div class="position-relative"><h4><a id="obs-ai-anonymization-limitations"></a>Limitations</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.19/docs/en/observability/observability-ai-assistant.asciidoc">edit</a></div>
+<p>Anonymization has the following limitations:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong>Performance (NER)</strong></span>: Running an NER model can add latency depending on the request. To improve performance of the model, consider scaling up your ML nodes by adjusting deployment parameters: increase <code class="literal">number_of_allocations</code> for better throughput and <code class="literal">threads_per_allocation</code> for faster individual requests. For details, refer to <a href="/docs/api/doc/elasticsearch/operation/operation-ml-start-trained-model-deployment" class="ulink" target="_top">start trained model deployment API</a>.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Structured JSON</strong></span>: The NER model we validated (<code class="literal">elastic/distilbert-base-uncased-finetuned-conll03-english</code>) is trained on natural English text and often misses entities inside JSON or other structured data. If thorough masking is required, prefer regex rules and craft them to account for JSON syntax.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>False negatives / positives</strong></span>: No model or pattern is perfect. Model accuracy may vary depending on model and input.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>JSON malformation risk</strong></span>: Both NER inference and regex rules can potentially create malformed JSON when anonymizing JSON data such as function responses. This can occur by replacing text across character boundaries, which may break JSON structure causing the whole request to fail. If this occurs, you may need to adjust your regex pattern or disable the NER rule.
+</li>
+</ul>
 </div>
 <div class="position-relative"><h3><a id="obs-ai-known-issues"></a>Known issues</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.19/docs/en/observability/observability-ai-assistant.asciidoc">edit</a></div>
 <div class="position-relative"><h4><a id="obs-ai-token-limits"></a>Token limits</h4><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/observability-docs/edit/8.19/docs/en/observability/observability-ai-assistant.asciidoc">edit</a></div>
