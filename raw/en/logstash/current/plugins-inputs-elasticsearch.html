@@ -49,13 +49,13 @@
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Plugin version: v4.20.5
+Plugin version: v4.23.0
 </li>
 <li class="listitem">
-Released on: 2024-12-05
+Released on: 2025-06-06
 </li>
 <li class="listitem">
-<a href="https://github.com/logstash-plugins/logstash-input-elasticsearch/blob/v4.20.5/CHANGELOG.md" class="ulink" target="_top">Changelog</a>
+<a href="https://github.com/logstash-plugins/logstash-input-elasticsearch/blob/v4.23.0/CHANGELOG.md" class="ulink" target="_top">Changelog</a>
 </li>
 </ul>
 </div>
@@ -105,7 +105,7 @@ data into Logstash.</p>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_scheduling"></a>Scheduling</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="plugins-inputs-elasticsearch-scheduling"></a>Scheduling</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
 </div></div></div>
 <p>Input from this plugin can be scheduled to run periodically according to a specific
 schedule. This scheduling syntax is powered by <a href="https://github.com/jmettraux/rufus-scheduler" class="ulink" target="_top">rufus-scheduler</a>.
@@ -182,6 +182,348 @@ uses a naming convention <code class="literal">"[@metadata][input][elasticsearch
 
 <div class="section">
 <div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="plugins-inputs-elasticsearch-failure-handling"></a>Failure handling</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
+</div></div></div>
+<p>When this input plugin cannot create a structured <code class="literal">Event</code> from a hit result, it will instead create an <code class="literal">Event</code> that is tagged with <code class="literal">_elasticsearch_input_failure</code> whose <code class="literal">[event][original]</code> is a JSON-encoded string representation of the entire hit.</p>
+<p>Common causes are:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+When the hit result contains top-level fields that are <a href="/guide/en/logstash/8.19/processing.html#reserved-fields" class="ulink" target="_top">reserved in Logstash</a> but do not have the expected shape. Use the <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-target" title="target"><code class="literal">target</code></a> directive to avoid conflicts with the top-level namespace.
+</li>
+<li class="listitem">
+When <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-docinfo" title="docinfo"><code class="literal">docinfo</code></a> is enabled and the docinfo fields cannot be merged into the hit result. Combine <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-target" title="target"><code class="literal">target</code></a> and <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-docinfo_target" title="docinfo_target"><code class="literal">docinfo_target</code></a> to avoid conflict.
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="plugins-inputs-elasticsearch-cursor"></a>Tracking a field&#8217;s value across runs</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
+</div></div></div>
+<div class="sidebar">
+<div class="titlepage"><div><div>
+<p class="title"><strong>Technical Preview: Tracking a field&#8217;s value</strong></p>
+</div></div></div>
+<p>The feature that allows tracking a field&#8217;s value across runs is in <em>Technical Preview</em>.
+Configuration options and implementation details are subject to change in minor releases without being preceded by deprecation warnings.</p>
+</div>
+<p>Some uses cases require tracking the value of a particular field between two jobs.
+Examples include:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+avoiding the need to re-process the entire result set of a long query after an unplanned restart
+</li>
+<li class="listitem">
+grabbing only new data from an index instead of processing the entire set on each job.
+</li>
+</ul>
+</div>
+<p>The Elasticsearch input plugin provides the <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-tracking_field" title="tracking_field"><code class="literal">tracking_field</code></a> and <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-tracking_field_seed" title="tracking_field_seed"><code class="literal">tracking_field_seed</code></a> options.
+When <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-tracking_field" title="tracking_field"><code class="literal">tracking_field</code></a> is set, the plugin records the value of that field for the last document retrieved in a run into
+a file.
+(The file location defaults to <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-last_run_metadata_path" title="last_run_metadata_path"><code class="literal">last_run_metadata_path</code></a>.)</p>
+<p>You can then inject this value in the query using the placeholder <code class="literal">:last_value</code>.
+The value will be injected into the query before execution, and then updated after the query completes if new data was found.</p>
+<p>This feature works best when:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+the query sorts by the tracking field,
+</li>
+<li class="listitem">
+the timestamp field is added by Elasticsearch, and
+</li>
+<li class="listitem">
+the field type has enough resolution so that two events are unlikely to have the same value.
+</li>
+</ul>
+</div>
+<p>Consider using a tracking field whose type is <a href="/guide/en/elasticsearch/reference/current/date_nanos.html" class="ulink" target="_top">date nanoseconds</a>.
+If the tracking field is of this data type, you can use an extra placeholder called <code class="literal">:present</code> to inject the nano-second based value of "now-30s".
+This placeholder is useful as the right-hand side of a range filter, allowing the collection of
+new data but leaving partially-searchable bulk request data to the next scheduled job.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h4 class="title"><a id="plugins-inputs-elasticsearch-tracking-sample"></a>Sample configuration: Track field value across runs</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
+</div></div></div>
+<p>This section contains a series of steps to help you set up the "tailing" of data being written to a set of indices, using a date nanosecond field added by an Elasticsearch ingest pipeline and the <code class="literal">tracking_field</code> capability of this plugin.</p>
+<div class="olist orderedlist">
+<ol class="orderedlist">
+<li class="listitem">
+<p>Create ingest pipeline that adds Elasticsearch&#8217;s <code class="literal">_ingest.timestamp</code> field to the documents as <code class="literal">event.ingested</code>:</p>
+<div class="pre_wrapper lang-json">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-json">    PUT _ingest/pipeline/my-pipeline
+    {
+      "processors": [
+              {
+            "script": {
+              "lang": "painless",
+              "source": "ctx.putIfAbsent(\"event\", [:]); ctx.event.ingested = metadata().now.format(DateTimeFormatter.ISO_INSTANT);"
+            }
+          }
+      ]
+    }</pre>
+</div>
+</li>
+</ol>
+</div>
+<div class="olist orderedlist">
+<ol class="orderedlist" start="2">
+<li class="listitem">
+<p>Create an index mapping where the tracking field is of date nanosecond type and invokes the defined pipeline:</p>
+<div class="pre_wrapper lang-json">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-json">    PUT /_template/my_template
+    {
+      "index_patterns": ["test-*"],
+      "settings": {
+        "index.default_pipeline": "my-pipeline",
+      },
+      "mappings": {
+        "properties": {
+          "event": {
+            "properties": {
+              "ingested": {
+                "type": "date_nanos",
+                "format": "strict_date_optional_time_nanos"
+              }
+            }
+          }
+        }
+      }
+    }</pre>
+</div>
+</li>
+</ol>
+</div>
+<div class="olist orderedlist">
+<ol class="orderedlist" start="3">
+<li class="listitem">
+<p>Define a query that looks at all data of the indices, sorted by the tracking field, and with a range filter since the last value seen until present:</p>
+<div class="pre_wrapper lang-json">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-json">{
+  "query": {
+    "range": {
+      "event.ingested": {
+        "gt": ":last_value",
+        "lt": ":present"
+      }
+    }
+  },
+  "sort": [
+    {
+      "event.ingested": {
+        "order": "asc",
+        "format": "strict_date_optional_time_nanos",
+        "numeric_type": "date_nanos"
+      }
+    }
+  ]
+}</pre>
+</div>
+</li>
+</ol>
+</div>
+<div class="olist orderedlist">
+<ol class="orderedlist" start="4">
+<li class="listitem">
+<p>Configure the Elasticsearch input to query the indices with the query defined above, every minute, and track the <code class="literal">event.ingested</code> field:</p>
+<div class="pre_wrapper lang-ruby">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-ruby">    input {
+      elasticsearch {
+        id =&gt; tail_test_index
+        hosts =&gt; [ 'https://..']
+        api_key =&gt; '....'
+        index =&gt; 'test-*'
+        query =&gt; '{ "query": { "range": { "event.ingested": { "gt": ":last_value", "lt": ":present"}}}, "sort": [ { "event.ingested": {"order": "asc", "format": "strict_date_optional_time_nanos", "numeric_type" : "date_nanos" } } ] }'
+        tracking_field =&gt; "[event][ingested]"
+        slices =&gt; 5 # optional use of slices to speed data processing, should be equal to or less than number of primary shards
+        schedule =&gt; '* * * * *' # every minute
+        schedule_overlap =&gt; false # don't accumulate jobs if one takes longer than 1 minute
+      }
+    }</pre>
+</div>
+</li>
+</ol>
+</div>
+<p>With this sample setup, new documents are indexed into a <code class="literal">test-*</code> index.
+The next scheduled run:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+selects all new documents since the last observed value of the tracking field,
+</li>
+<li class="listitem">
+uses <a href="/guide/en/elasticsearch/reference/8.19/point-in-time-api.html#point-in-time-api" class="ulink" target="_top">Point in time (PIT)</a> + <a href="/guide/en/elasticsearch/reference/8.19/paginate-search-results.html#search-after" class="ulink" target="_top">Search after</a> to paginate through all the data, and
+</li>
+<li class="listitem">
+updates the value of the field at the end of the pagination.
+</li>
+</ul>
+</div>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="plugins-inputs-elasticsearch-esql"></a>ES|QL support</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
+</div></div></div>
+<div class="sidebar">
+<div class="titlepage"><div><div>
+<p class="title"><strong>Technical Preview</strong></p>
+</div></div></div>
+<p>The ES|QL feature that allows using ES|QL queries with this plugin is in Technical Preview.
+Configuration options and implementation details are subject to change in minor releases without being preceded by deprecation warnings.</p>
+</div>
+<p>Elasticsearch Query Language (ES|QL) provides a SQL-like interface for querying your Elasticsearch data.</p>
+<p>To use ES|QL, this plugin needs to be installed in Logstash 8.17.4 or newer, and must be connected to Elasticsearch 8.11 or newer.</p>
+<p>To configure ES|QL query in the plugin, set the <code class="literal">query_type</code> to <code class="literal">esql</code> and provide your ES|QL query in the <code class="literal">query</code> parameter.</p>
+<div class="important admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>ES|QL is evolving and may still have limitations with regard to result size or supported field types. We recommend understanding <a href="/guide/en/elasticsearch/reference/current/esql-limitations.html" class="ulink" target="_top">ES|QL current limitations</a> before using it in production environments.</p>
+</div>
+</div>
+<p>The following is a basic scheduled ES|QL query that runs hourly:</p>
+<div class="pre_wrapper lang-ruby">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-ruby">    input {
+      elasticsearch {
+        id =&gt; hourly_cron_job
+        hosts =&gt; [ 'https://..']
+        api_key =&gt; '....'
+        query_type =&gt; 'esql'
+        query =&gt; '
+          FROM food-index
+            | WHERE spicy_level = "hot" AND @timestamp &gt; NOW() - 1 hour
+            | LIMIT 500
+        '
+        schedule =&gt; '0 * * * *' # every hour at min 0
+      }
+    }</pre>
+</div>
+<p>Set <code class="literal">config.support_escapes: true</code> in <code class="literal">logstash.yml</code> if you need to escape special chars in the query.</p>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>With ES|QL query, Logstash doesn&#8217;t generate <code class="literal">event.original</code>.</p>
+</div>
+</div>
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h4 class="title"><a id="plugins-inputs-elasticsearch-esql-event-mapping"></a>Mapping ES|QL result to Logstash event</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
+</div></div></div>
+<p>ES|QL returns query results in a structured tabular format, where data is organized into <em>columns</em> (fields) and <em>values</em> (entries).
+The plugin maps each value entry to an event, populating corresponding fields.
+For example, a query might produce a table like:</p>
+<div class="informaltable">
+<table border="1" cellpadding="4px">
+<colgroup>
+<col class="col_1"/>
+<col class="col_2"/>
+<col class="col_3"/>
+<col class="col_4"/>
+<col class="col_5"/>
+</colgroup>
+<thead>
+<tr>
+<th align="left" valign="top"><code class="literal">timestamp</code></th>
+<th align="left" valign="top"><code class="literal">user_id</code></th>
+<th align="left" valign="top"><code class="literal">action</code></th>
+<th align="left" valign="top"><code class="literal">status.code</code></th>
+<th align="left" valign="top"><code class="literal">status.desc</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left" valign="top"><p>2025-04-10T12:00:00</p></td>
+<td align="left" valign="top"><p>123</p></td>
+<td align="left" valign="top"><p>login</p></td>
+<td align="left" valign="top"><p>200</p></td>
+<td align="left" valign="top"><p>Success</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p>2025-04-10T12:05:00</p></td>
+<td align="left" valign="top"><p>456</p></td>
+<td align="left" valign="top"><p>purchase</p></td>
+<td align="left" valign="top"><p>403</p></td>
+<td align="left" valign="top"><p>Forbidden (unauthorized user)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>For this case, the plugin emits two events look like</p>
+<div class="pre_wrapper lang-json">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-json">[
+  {
+    "timestamp": "2025-04-10T12:00:00",
+    "user_id": 123,
+    "action": "login",
+    "status": {
+        "code": 200,
+        "desc": "Success"
+    }
+  },
+  {
+    "timestamp": "2025-04-10T12:05:00",
+    "user_id": 456,
+    "action": "purchase",
+    "status": {
+        "code": 403,
+        "desc": "Forbidden (unauthorized user)"
+    }
+  }
+]</pre>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>If your index has a mapping with sub-objects where <code class="literal">status.code</code> and <code class="literal">status.desc</code> actually dotted fields, they appear in Logstash events as a nested structure.</p>
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h4 class="title"><a id="plugins-inputs-elasticsearch-esql-multifields"></a>Conflict on multi-fields</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
+</div></div></div>
+<p>ES|QL query fetches all parent and sub-fields fields if your Elasticsearch index has <a href="/docs/reference/elasticsearch/mapping-reference/multi-fields" class="ulink" target="_top">multi-fields</a> or <a href="/docs/reference/elasticsearch/mapping-reference/subobjects" class="ulink" target="_top">subobjects</a>.
+Since Logstash events cannot contain parent field&#8217;s concrete value and sub-field values together, the plugin ignores sub-fields with warning and includes parent.
+We recommend using the <code class="literal">RENAME</code> (or <code class="literal">DROP</code> to avoid warnings) keyword in your ES|QL query explicitly rename the fields to include sub-fields into the event.</p>
+<p>This a common occurrence if your template or mapping follows the pattern of always indexing strings as "text" (<code class="literal">field</code>) + " keyword" (<code class="literal">field.keyword</code>) multi-field.
+In this case it&#8217;s recommended to do <code class="literal">KEEP field</code> if the string is identical and there is only one subfield as the engine will optimize and retrieve the keyword, otherwise you can do <code class="literal">KEEP field.keyword | RENAME field.keyword as field</code>.</p>
+<p>To illustrate the situation with example, assuming your mapping has a time <code class="literal">time</code> field with <code class="literal">time.min</code> and <code class="literal">time.max</code> sub-fields as following:</p>
+<div class="pre_wrapper lang-ruby">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-ruby">    "properties": {
+        "time": { "type": "long" },
+        "time.min": { "type": "long" },
+        "time.max": { "type": "long" }
+    }</pre>
+</div>
+<p>The ES|QL result will contain all three fields but the plugin cannot map them into Logstash event.
+To avoid this, you can use the <code class="literal">RENAME</code> keyword to rename the <code class="literal">time</code> parent field to get all three fields with unique fields.</p>
+<div class="pre_wrapper lang-ruby">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-ruby">    ...
+    query =&gt; 'FROM my-index | RENAME time AS time.current'
+    ...</pre>
+</div>
+<p>For comprehensive ES|QL syntax reference and best practices, see the <a href="/guide/en/elasticsearch/reference/current/esql-syntax.html" class="ulink" target="_top">ES|QL documentation</a>.</p>
+</div>
+
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
 <div class="position-relative"><h3 class="title"><a id="plugins-inputs-elasticsearch-options"></a>Elasticsearch Input configuration options</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
 </div></div></div>
 <p>This plugin supports the following configuration options plus the <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-common-options" title="Common options">Common options</a> and the <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-deprecated-options" title="Elasticsearch Input deprecated configuration options">Elasticsearch Input deprecated configuration options</a> described later.</p>
@@ -226,6 +568,11 @@ uses a naming convention <code class="literal">"[@metadata][input][elasticsearch
 <td align="left" valign="top"><p>No</p></td>
 </tr>
 <tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-custom_headers" title="custom_headers"><code class="literal">custom_headers</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#hash" title="Hash">hash</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
 <td align="left" valign="top"><p><a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-docinfo" title="docinfo"><code class="literal">docinfo</code></a></p></td>
 <td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#boolean" title="Boolean">boolean</a></p></td>
 <td align="left" valign="top"><p>No</p></td>
@@ -256,6 +603,11 @@ uses a naming convention <code class="literal">"[@metadata][input][elasticsearch
 <td align="left" valign="top"><p>No</p></td>
 </tr>
 <tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-last_run_metadata_path" title="last_run_metadata_path"><code class="literal">last_run_metadata_path</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#string" title="String">string</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
 <td align="left" valign="top"><p><a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-password" title="password"><code class="literal">password</code></a></p></td>
 <td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#password" title="Password">password</a></p></td>
 <td align="left" valign="top"><p>No</p></td>
@@ -271,6 +623,11 @@ uses a naming convention <code class="literal">"[@metadata][input][elasticsearch
 <td align="left" valign="top"><p>No</p></td>
 </tr>
 <tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-query_type" title="query_type"><code class="literal">query_type</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#string" title="String">string</a>, one of <code class="literal">["dsl","esql"]</code></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
 <td align="left" valign="top"><p><a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-response_type" title="response_type"><code class="literal">response_type</code></a></p></td>
 <td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#string" title="String">string</a>, one of <code class="literal">["hits","aggregations"]</code></p></td>
 <td align="left" valign="top"><p>No</p></td>
@@ -283,6 +640,11 @@ uses a naming convention <code class="literal">"[@metadata][input][elasticsearch
 <tr>
 <td align="left" valign="top"><p><a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-schedule" title="schedule"><code class="literal">schedule</code></a></p></td>
 <td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#string" title="String">string</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-schedule_overlap" title="schedule_overlap"><code class="literal">schedule_overlap</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#boolean" title="Boolean">boolean</a></p></td>
 <td align="left" valign="top"><p>No</p></td>
 </tr>
 <tr>
@@ -378,6 +740,16 @@ uses a naming convention <code class="literal">"[@metadata][input][elasticsearch
 <tr>
 <td align="left" valign="top"><p><a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-target" title="target"><code class="literal">target</code></a></p></td>
 <td align="left" valign="top"><p><a href="/guide/en/logstash/8.19/field-references-deepdive.html" class="ulink" target="_top">field reference</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-tracking_field" title="tracking_field"><code class="literal">tracking_field</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#string" title="String">string</a></p></td>
+<td align="left" valign="top"><p>No</p></td>
+</tr>
+<tr>
+<td align="left" valign="top"><p><a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-tracking_field_seed" title="tracking_field_seed"><code class="literal">tracking_field_seed</code></a></p></td>
+<td align="left" valign="top"><p><a class="xref" href="configuration-file-structure.html#string" title="String">string</a></p></td>
 <td align="left" valign="top"><p>No</p></td>
 </tr>
 <tr>
@@ -491,6 +863,25 @@ Default value is <code class="literal">10</code>
 </div>
 <p>The maximum amount of time, in seconds, to wait while establishing a connection to Elasticsearch.
 Connect timeouts tend to occur when Elasticsearch or an intermediate proxy is overloaded with requests and has exhausted its connection pool.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h4 class="title"><a id="plugins-inputs-elasticsearch-custom_headers"></a><code class="literal">custom_headers</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#hash" title="Hash">hash</a>
+</li>
+<li class="listitem">
+Default value is empty
+</li>
+</ul>
+</div>
+<p>Pass a set of key value pairs as the headers sent in each request to an elasticsearch node.
+The headers will be used for any kind of request.
+These custom headers will override any headers previously set by the plugin such as the User Agent or Authorization headers.</p>
 </div>
 
 <div class="section">
@@ -681,6 +1072,25 @@ referencing multiple indices.</p>
 
 <div class="section">
 <div class="titlepage"><div><div>
+<div class="position-relative"><h4 class="title"><a id="plugins-inputs-elasticsearch-last_run_metadata_path"></a><code class="literal">last_run_metadata_path</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#string" title="String">string</a>
+</li>
+<li class="listitem">
+There is no default value for this setting.
+</li>
+</ul>
+</div>
+<p>The path to store the last observed value of the tracking field, when used.
+By default this file is stored as <code class="literal">&lt;path.data&gt;/plugins/inputs/elasticsearch/&lt;pipeline_id&gt;/last_run_value</code>.</p>
+<p>This setting should point to file, not a directory, and Logstash must have read+write access to this file.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
 <div class="position-relative"><h4 class="title"><a id="plugins-inputs-elasticsearch-password"></a><code class="literal">password</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
 </div></div></div>
 <div class="ulist itemizedlist">
@@ -731,10 +1141,30 @@ Default value is <code class="literal">'{ "sort": [ "_doc" ] }'</code>
 </li>
 </ul>
 </div>
-<p>The query to be executed. Read the <a href="/guide/en/elasticsearch/reference/8.19/query-dsl.html" class="ulink" target="_top">Elasticsearch query DSL
-documentation</a> for more information.</p>
+<p>The query to be executed.
+Accepted query shape is DSL or ES|QL (when <code class="literal">query_type =&gt; 'esql'</code>).
+Read the <a href="/guide/en/elasticsearch/reference/8.19/query-dsl.html" class="ulink" target="_top">Elasticsearch query DSL documentation</a> or <a href="/guide/en/elasticsearch/reference/8.19/esql.html" class="ulink" target="_top">ES|QL documentation</a> for more information.</p>
 <p>When <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-search_api" title="search_api"><code class="literal">search_api</code></a> resolves to <code class="literal">search_after</code> and the query does not specify <code class="literal">sort</code>,
 the default sort <code class="literal">'{ "sort": { "_shard_doc": "asc" } }'</code> will be added to the query. Please refer to the <a href="/guide/en/elasticsearch/reference/8.19/paginate-search-results.html#search-after" class="ulink" target="_top">Elasticsearch search_after</a> parameter to know more.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h4 class="title"><a id="plugins-inputs-elasticsearch-query_type"></a><code class="literal">query_type</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value can be <code class="literal">dsl</code> or <code class="literal">esql</code>
+</li>
+<li class="listitem">
+Default value is <code class="literal">dsl</code>
+</li>
+</ul>
+</div>
+<p>Defines the <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-query" title="query"><code class="literal">query</code></a> shape.
+When <code class="literal">dsl</code>, the query shape must be valid Elasticsearch JSON-style string.
+When <code class="literal">esql</code>, the query shape must be a valid ES|QL string and <code class="literal">index</code>, <code class="literal">size</code>, <code class="literal">slices</code>, <code class="literal">search_api</code>, <code class="literal">docinfo</code>, <code class="literal">docinfo_target</code>, <code class="literal">docinfo_fields</code>, <code class="literal">response_type</code> and <code class="literal">tracking_field</code> parameters are not allowed.</p>
 </div>
 
 <div class="section">
@@ -744,7 +1174,7 @@ the default sort <code class="literal">'{ "sort": { "_shard_doc": "asc" } }'</co
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Value can be any of: <code class="literal">hits</code>, <code class="literal">aggregations</code>
+Value can be any of: <code class="literal">hits</code>, <code class="literal">aggregations</code>, <code class="literal">esql</code>
 </li>
 <li class="listitem">
 Default value is <code class="literal">hits</code>
@@ -752,9 +1182,9 @@ Default value is <code class="literal">hits</code>
 </ul>
 </div>
 <p>Which part of the result to transform into Logstash events when processing the
-response from the query.
-The default <code class="literal">hits</code> will generate one event per returned document (i.e. "hit").
-When set to <code class="literal">aggregations</code>, a single Logstash event will be generated with the
+response from the query.</p>
+<p>The default <code class="literal">hits</code> will generate one event per returned document (i.e. "hit").</p>
+<p>When set to <code class="literal">aggregations</code>, a single Logstash event will be generated with the
 contents of the <code class="literal">aggregations</code> object of the query&#8217;s response. In this case the
 <code class="literal">hits</code> object will be ignored. The parameter <code class="literal">size</code> will be always be set to
 0 regardless of the default or user-defined value set in this plugin.</p>
@@ -821,6 +1251,27 @@ There is no default value for this setting.
 for example: "* * * * *" (execute query every minute, on the minute)</p>
 <p>There is no schedule by default. If no schedule is given, then the statement is run
 exactly once.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h4 class="title"><a id="plugins-inputs-elasticsearch-schedule_overlap"></a><code class="literal">schedule_overlap</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#boolean" title="Boolean">boolean</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">true</code>
+</li>
+</ul>
+</div>
+<p>Whether to allow queuing of a scheduled run if a run is occurring.
+While this is ideal for ensuring a new run happens immediately after the previous on finishes if there
+is a lot of work to do, but given the queue is unbounded it may lead to an out of memory over long periods of time
+if the queue grows continuously.</p>
+<p>When in doubt, set <code class="literal">schedule_overlap</code> to false (it may become the default value in the future).</p>
 </div>
 
 <div class="section">
@@ -1232,6 +1683,46 @@ There is no default value for this setting.
 When the <code class="literal">target</code> is set to a field reference, the <code class="literal">_source</code> of the hit is placed in the target field instead.</p>
 <p>This option can be useful to avoid populating unknown fields when a downstream schema such as ECS is enforced.
 It is also possible to target an entry in the event&#8217;s metadata, which will be available during event processing but not exported to your outputs (e.g., <code class="literal">target \=&gt; "[@metadata][_source]"</code>).</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h4 class="title"><a id="plugins-inputs-elasticsearch-tracking_field"></a><code class="literal">tracking_field</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#string" title="String">string</a>
+</li>
+<li class="listitem">
+There is no default value for this setting.
+</li>
+</ul>
+</div>
+<p>Which field from the last event of a previous run will be used a cursor value for the following run.
+The value of this field is injected into each query if the query uses the placeholder <code class="literal">:last_value</code>.
+For the first query after a pipeline is started, the value used is either read from <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-last_run_metadata_path" title="last_run_metadata_path"><code class="literal">last_run_metadata_path</code></a> file,
+or taken from <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-tracking_field_seed" title="tracking_field_seed"><code class="literal">tracking_field_seed</code></a> setting.</p>
+<p>Note: The tracking value is updated after each page is read and at the end of each Point in Time. In case of a crash the last saved value will be used so some duplication of data can occur. For this reason the use of unique document IDs for each event is recommended in the downstream destination.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h4 class="title"><a id="plugins-inputs-elasticsearch-tracking_field_seed"></a><code class="literal">tracking_field_seed</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-elasticsearch/edit/main/docs/index.asciidoc">edit</a></div>
+</div></div></div>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Value type is <a class="xref" href="configuration-file-structure.html#string" title="String">string</a>
+</li>
+<li class="listitem">
+Default value is <code class="literal">"1970-01-01T00:00:00.000000000Z"</code>
+</li>
+</ul>
+</div>
+<p>The starting value for the <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-tracking_field" title="tracking_field"><code class="literal">tracking_field</code></a> if there is no <a class="xref" href="plugins-inputs-elasticsearch.html#plugins-inputs-elasticsearch-last_run_metadata_path" title="last_run_metadata_path"><code class="literal">last_run_metadata_path</code></a> already.
+This field defaults to the nanosecond precision ISO8601 representation of <code class="literal">epoch</code>, or "1970-01-01T00:00:00.000000000Z", given nano-second precision timestamps are the
+most reliable data format to use for this feature.</p>
 </div>
 
 <div class="section">
