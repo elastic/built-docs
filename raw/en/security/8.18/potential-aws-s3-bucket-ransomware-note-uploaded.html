@@ -100,7 +100,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 5</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 6</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -112,7 +112,7 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_708"></a>Investigation guide</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.18/docs/detections/prebuilt-rules/rule-details/potential-aws-s3-bucket-ransomware-note-uploaded.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_707"></a>Investigation guide</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.18/docs/detections/prebuilt-rules/rule-details/potential-aws-s3-bucket-ransomware-note-uploaded.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Potential AWS S3 Bucket Ransomware Note Uploaded</strong></span></p>
@@ -193,33 +193,43 @@ Elastic
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_748"></a>Rule query</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.18/docs/detections/prebuilt-rules/rule-details/potential-aws-s3-bucket-ransomware-note-uploaded.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_747"></a>Rule query</h3><a class="edit_me edit_me_private" rel="nofollow" title="Editing on GitHub is available to Elastic" href="https://github.com/elastic/security-docs/edit/8.18/docs/detections/prebuilt-rules/rule-details/potential-aws-s3-bucket-ransomware-note-uploaded.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-js">from logs-aws.cloudtrail-*
 
 // any successful uploads via S3 API requests
-| where event.dataset == "aws.cloudtrail"
-    and event.provider == "s3.amazonaws.com"
-    and event.action == "PutObject"
-    and event.outcome == "success"
+| where
+  event.dataset == "aws.cloudtrail"
+  and event.provider == "s3.amazonaws.com"
+  and event.action == "PutObject"
+  and event.outcome == "success"
 
-// abstract object name from API request parameters
-| dissect aws.cloudtrail.request_parameters "%{?ignore_values}key=%{object_name}}"
+// extract object key from API request parameters
+| dissect aws.cloudtrail.request_parameters "%{?ignore_values}key=%{Esql.aws_cloudtrail_request_parameters_object_key}}"
 
-// regex on common ransomware note extensions
-| where object_name rlike "(.*)(ransom|lock|crypt|enc|readme|how_to_decrypt|decrypt_instructions|recovery|datarescue)(.*)"
-    and not object_name rlike "(.*)(AWSLogs|CloudTrail|access-logs)(.*)"
+// regex match against common ransomware naming patterns
+| where
+  Esql.aws_cloudtrail_request_parameters_object_key rlike "(.*)(ransom|lock|crypt|enc|readme|how_to_decrypt|decrypt_instructions|recovery|datarescue)(.*)"
+  and not Esql.aws_cloudtrail_request_parameters_object_key rlike "(.*)(AWSLogs|CloudTrail|access-logs)(.*)"
 
-// keep relevant fields
-| keep tls.client.server_name, aws.cloudtrail.user_identity.arn, object_name
+// keep relevant ECS and derived fields
+| keep
+  tls.client.server_name,
+  aws.cloudtrail.user_identity.arn,
+  Esql.aws_cloudtrail_request_parameters_object_key
 
-// aggregate by S3 bucket, resource and object name
-| stats note_upload_count = count(*) by tls.client.server_name, aws.cloudtrail.user_identity.arn, object_name
+// aggregate by server name, actor, and object key
+| stats
+    Esql.event_count = count(*)
+  by
+    tls.client.server_name,
+    aws.cloudtrail.user_identity.arn,
+    Esql.aws_cloudtrail_request_parameters_object_key
 
-// filter for single occurrence to eliminate common upload operations
-| where note_upload_count == 1</pre>
+// filter for rare single uploads (likely test/detonation)
+| where Esql.event_count == 1</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
