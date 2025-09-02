@@ -9,7 +9,7 @@
 <link rel="home" href="index.html" title="Elastic Security [8.19]"/>
 <link rel="up" href="prebuilt-rules.html" title="Prebuilt rule reference"/>
 <link rel="prev" href="suspicious-microsoft-365-userloggedin-via-oauth-code.html" title="Suspicious Microsoft 365 UserLoggedIn via OAuth Code"/>
-<link rel="next" href="suspicious-microsoft-oauth-flow-via-auth-broker-to-drs.html" title="Suspicious Microsoft OAuth Flow via Auth Broker to DRS"/>
+<link rel="next" href="suspicious-microsoft-html-application-child-process.html" title="Suspicious Microsoft HTML Application Child Process"/>
 <meta class="elastic" name="product_version" content="8.19"/>
 <meta class="elastic" name="product_name" content="Security"/>
 <meta class="elastic" name="website_area" content="documentation"/>
@@ -106,7 +106,7 @@
 <a href="suspicious-microsoft-365-userloggedin-via-oauth-code.html">« Suspicious Microsoft 365 UserLoggedIn via OAuth Code</a>
 </span>
 <span class="next">
-<a href="suspicious-microsoft-oauth-flow-via-auth-broker-to-drs.html">Suspicious Microsoft OAuth Flow via Auth Broker to DRS »</a>
+<a href="suspicious-microsoft-html-application-child-process.html">Suspicious Microsoft HTML Application Child Process »</a>
 </span>
 </div>
 <div class="book" lang="en">
@@ -149,6 +149,12 @@ endgame-*
 </li>
 <li class="listitem">
 logs-m365_defender.event-*
+</li>
+<li class="listitem">
+logs-crowdstrike.fdr*
+</li>
+<li class="listitem">
+logs-sentinel_one_cloud_funnel.*
 </li>
 </ul>
 </div>
@@ -196,11 +202,17 @@ Data Source: Microsoft Defender for Endpoint
 Data Source: Sysmon
 </li>
 <li class="listitem">
+Data Source: Crowdstrike
+</li>
+<li class="listitem">
+Data Source: SentinelOne
+</li>
+<li class="listitem">
 Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 213</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 214</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -212,7 +224,7 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1126"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-microsoft-diagnostics-wizard-execution.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1144"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-microsoft-diagnostics-wizard-execution.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <div class="quoteblock">
@@ -296,23 +308,34 @@ Implement enhanced monitoring and logging for msdt.exe and related processes to 
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1162"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-microsoft-diagnostics-wizard-execution.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1182"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-microsoft-diagnostics-wizard-execution.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-js">process where host.os.type == "windows" and event.type == "start" and
-   (process.pe.original_file_name == "msdt.exe" or process.name : "msdt.exe") and
-   (
+  (?process.pe.original_file_name == "msdt.exe" or process.name : "msdt.exe") and
+  (
     process.args : ("IT_RebrowseForFile=*", "ms-msdt:/id", "ms-msdt:-id", "*FromBase64*") or
 
-    (process.args : "-af" and process.args : "/skip" and
-     process.parent.name : ("explorer.exe", "cmd.exe", "powershell.exe", "cscript.exe", "wscript.exe", "mshta.exe", "rundll32.exe", "regsvr32.exe") and
-     process.args : ("?:\\WINDOWS\\diagnostics\\index\\PCWDiagnostic.xml", "PCWDiagnostic.xml", "?:\\Users\\Public\\*", "?:\\Windows\\Temp\\*")) or
+    (
+      process.args : "-af" and process.args : "/skip" and
+      process.parent.name : ("explorer.exe", "cmd.exe", "powershell.exe", "cscript.exe", "wscript.exe", "mshta.exe", "rundll32.exe", "regsvr32.exe") and
+      process.args : ("?:\\WINDOWS\\diagnostics\\index\\PCWDiagnostic.xml", "PCWDiagnostic.xml", "?:\\Users\\Public\\*", "?:\\Windows\\Temp\\*")
+    ) or
 
     (process.pe.original_file_name == "msdt.exe" and not process.name : "msdt.exe" and process.name != null) or
 
-    (process.pe.original_file_name == "msdt.exe" and not process.executable : ("?:\\Windows\\system32\\msdt.exe", "?:\\Windows\\SysWOW64\\msdt.exe"))
-    )</pre>
+    (
+      ?process.pe.original_file_name == "msdt.exe" and
+      not process.executable : (
+        "?:\\Windows\\system32\\msdt.exe",
+        "?:\\Windows\\SysWOW64\\msdt.exe",
+        /* Crowdstrike specific exclusion as it uses NT Object paths */
+        "\\Device\\HarddiskVolume*\\Windows\\system32\\msdt.exe",
+        "\\Device\\HarddiskVolume*\\Windows\\SysWOW64\\msdt.exe"
+      )
+    )
+  )</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
@@ -360,7 +383,7 @@ Reference URL: <a href="https://attack.mitre.org/techniques/T1218/" class="ulink
 <a href="suspicious-microsoft-365-userloggedin-via-oauth-code.html">« Suspicious Microsoft 365 UserLoggedIn via OAuth Code</a>
 </span>
 <span class="next">
-<a href="suspicious-microsoft-oauth-flow-via-auth-broker-to-drs.html">Suspicious Microsoft OAuth Flow via Auth Broker to DRS »</a>
+<a href="suspicious-microsoft-html-application-child-process.html">Suspicious Microsoft HTML Application Child Process »</a>
 </span>
 </div>
 
