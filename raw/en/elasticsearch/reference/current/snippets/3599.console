@@ -1,46 +1,45 @@
-POST my-data-stream/_async_search
+PUT _watcher/watch/my-watch
 {
-  "runtime_mappings": {
-    "source.ip": {
-      "type": "ip",
-      "script": """
-        String sourceip=grok('%{IPORHOST:sourceip} .*').extract(doc[ "message" ].value)?.sourceip;
-        if (sourceip != null) emit(sourceip);
-      """
-    }
+  "trigger" : {
+    "schedule" : { "cron" : "0 0/1 * * * ?" }
   },
-  "query": {
-    "bool": {
-      "filter": [
-        {
-          "range": {
-            "@timestamp": {
-              "gte": "now-2y/d",
-              "lt": "now/d"
-            }
-          }
-        },
-        {
-          "range": {
-            "source.ip": {
-              "gte": "192.0.2.0",
-              "lte": "192.0.2.255"
+  "input" : {
+    "search" : {
+      "request" : {
+        "indices" : [
+          "logstash*"
+        ],
+        "body" : {
+          "query" : {
+            "bool" : {
+              "must" : {
+                "match": {
+                   "response": 404
+                }
+              },
+              "filter" : {
+                "range": {
+                  "@timestamp": {
+                    "from": "{{ctx.trigger.scheduled_time}}||-5m",
+                    "to": "{{ctx.trigger.triggered_time}}"
+                  }
+                }
+              }
             }
           }
         }
-      ]
+      }
     }
   },
-  "fields": [
-    "*"
-  ],
-  "_source": false,
-  "sort": [
-    {
-      "@timestamp": "desc"
-    },
-    {
-      "source.ip": "desc"
+  "condition" : {
+    "compare" : { "ctx.payload.hits.total" : { "gt" : 0 }}
+  },
+  "actions" : {
+    "email_admin" : {
+      "email" : {
+        "to" : "admin@domain.host.com",
+        "subject" : "404 recently encountered"
+      }
     }
-  ]
+  }
 }
