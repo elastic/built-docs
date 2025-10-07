@@ -130,9 +130,16 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="aws-s3-bucket-enumeration-or-brute-force"></a>AWS S3 Bucket Enumeration or Brute Force</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-s3-bucket-enumeration-or-brute-force.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies a high number of failed S3 operations from a single source and account (or anonymous account) within a short timeframe. This activity can be indicative of attempting to cause an increase in billing to an account for excessive random operations, cause resource exhaustion, or enumerating bucket names for discovery.</p>
-<p><span class="strong strong"><strong>Rule type</strong></span>: esql</p>
-<p><span class="strong strong"><strong>Rule indices</strong></span>: None</p>
+<p>Identifies a high number of failed S3 operations against a single bucket from a single source address within a short timeframe. This activity can indicate attempts to collect bucket objects or cause an increase in billing to an account via internal "AccessDenied" errors.</p>
+<p><span class="strong strong"><strong>Rule type</strong></span>: threshold</p>
+<p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+logs-aws.cloudtrail-*
+</li>
+</ul>
+</div>
 <p><span class="strong strong"><strong>Severity</strong></span>: low</p>
 <p><span class="strong strong"><strong>Risk score</strong></span>: 21</p>
 <p><span class="strong strong"><strong>Runs every</strong></span>: 5m</p>
@@ -145,7 +152,7 @@
 <a href="https://medium.com/@maciej.pocwierz/how-an-empty-s3-bucket-can-make-your-aws-bill-explode-934a383cb8b1" class="ulink" target="_top">https://medium.com/@maciej.pocwierz/how-an-empty-s3-bucket-can-make-your-aws-bill-explode-934a383cb8b1</a>
 </li>
 <li class="listitem">
-<a href="https://docs.aws.amazon.com/cli/latest/reference/s3api/" class="ulink" target="_top">https://docs.aws.amazon.com/cli/latest/reference/s3api/</a>
+<a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/ErrorCodeBilling.html" class="ulink" target="_top">https://docs.aws.amazon.com/AmazonS3/latest/userguide/ErrorCodeBilling.html</a>
 </li>
 </ul>
 </div>
@@ -173,9 +180,15 @@ Use Case: Log Auditing
 <li class="listitem">
 Tactic: Impact
 </li>
+<li class="listitem">
+Tactic: Discovery
+</li>
+<li class="listitem">
+Tactic: Collection
+</li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 5</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 6</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -190,53 +203,40 @@ Elastic
 <div class="position-relative"><h3 class="title"><a id="_investigation_guide_92"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-s3-bucket-enumeration-or-brute-force.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
+</blockquote>
+</div>
 <p><span class="strong strong"><strong>Investigating AWS S3 Bucket Enumeration or Brute Force</strong></span></p>
-<p>AWS S3 buckets can be be brute forced to cause financial impact against the resource owner. What makes this even riskier is that even private, locked down buckets can still trigger a potential cost, even with an "Access Denied", while also being accessible from unauthenticated, anonymous accounts. This also appears to work on several or all <a href="https://docs.aws.amazon.com/cli/latest/reference/s3api/" class="ulink" target="_top">operations</a> (GET, PUT, list-objects, etc.). Additionally, buckets are trivially discoverable by default as long as the bucket name is known, making it vulnerable to enumeration for discovery.</p>
-<p>Attackers may attempt to enumerate names until a valid bucket is discovered and then pivot to cause financial impact, enumerate for more information, or brute force in other ways to attempt to exfil data.</p>
+<p>This rule detects when many failed S3 operations (HTTP 403 AccessDenied) hit a single bucket from a single source address in a short window. This can indicate bucket name enumeration, object/key guessing, or brute-force style traffic intended to drive cost or probe for misconfigurations. 403 requests from outside the bucket owner’s account/organization are not billed, but 4XX from inside the owner’s account/org can still incur charges. Prioritize confirming who is making the calls and where they originate.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Examine the history of the operation requests from the same <code class="literal">source.address</code> and <code class="literal">cloud.account.id</code> to determine if there is other suspicious activity.
+<span class="strong strong"><strong>Investigate in Timeline.</strong></span> Investigate the alert in timeline (Take action &#8594; Investigate in timeline) to retrieve and review all of the raw CloudTrail events that contributed to the threshold alert. Threshold alerts only display the grouped fields; Timeline provides a way to see individual event details such as request parameters, full error messages, and additional user context.
 </li>
 <li class="listitem">
-Review similar requests and look at the <code class="literal">user.agent</code> info to ascertain the source of the requests (though do not overly rely on this since it is controlled by the requestor).
+<span class="strong strong"><strong>Confirm entity &amp; target.</strong></span> Note the rule’s threshold and window. Identify the target bucket (<code class="literal">tls.client.server_name</code>) and the source (<code class="literal">source.address</code>). Verify the caller identity details via any available <code class="literal">aws.cloudtrail.user_identity</code> fields.
 </li>
 <li class="listitem">
-Review other requests to the same <code class="literal">aws.s3.object.key</code> as well as other <code class="literal">aws.s3.object.key</code> accessed by the same <code class="literal">cloud.account.id</code> or <code class="literal">source.address</code>.
+<span class="strong strong"><strong>Actor &amp; session context.</strong></span> In CloudTrail events, pivot 15–30 minutes around the spike for the same <code class="literal">source.address</code> or principal. Determine if the source is:
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user account during the past 48 hours.
+<span class="strong strong"><strong>External</strong></span> to your account/organization (recon/cost DDoS risk is lower for you due to 2024 billing change).
 </li>
 <li class="listitem">
-Validate the activity is not related to planned patches, updates, or network administrator activity.
+<span class="strong strong"><strong>Internal</strong></span> (same account/org)—higher cost risk and possible misuse of internal automation.
 </li>
 <li class="listitem">
-Examine the request parameters. These may indicate the source of the program or the nature of the task being performed when the error occurred.
+<span class="strong strong"><strong>Bucket posture snapshot.</strong></span> Record S3 Block Public Access, Bucket Policy, ACLs, and whether Versioning/Object Lock are enabled. Capture any recent <code class="literal">PutBucketPolicy</code>, <code class="literal">PutPublicAccessBlock</code>, <code class="literal">PutBucketVersioning</code>, or lifecycle changes.
 </li>
 <li class="listitem">
-Check whether the error is related to unsuccessful attempts to enumerate or access objects, data, or secrets.
+<span class="strong strong"><strong>Blast radius.</strong></span> Check for similar spikes to other buckets/regions, or parallel spikes from the same source. Review any GuardDuty S3 findings and AWS Config drift related to the bucket or principal.
 </li>
 <li class="listitem">
-Considering the source IP address and geolocation of the user who issued the command:
-</li>
-<li class="listitem">
-Do they look normal for the calling user?
-</li>
-<li class="listitem">
-If the source is an EC2 IP address, is it associated with an EC2 instance in one of your accounts or is the source IP from an EC2 instance that&#8217;s not under your control?
-</li>
-<li class="listitem">
-If it is an authorized EC2 instance, is the activity associated with normal behavior for the instance role or roles? Are there any other alerts or signs of suspicious activity involving this instance?
-</li>
-<li class="listitem">
-Consider the time of day. If the user is a human (not a program or script), did the activity take place during a normal time of day?
-</li>
-<li class="listitem">
-Contact the account owner and confirm whether they are aware of this activity if suspicious.
-</li>
-<li class="listitem">
-If you suspect the account has been compromised, scope potentially compromised assets by tracking servers, services, and data accessed by the account in the last 24 hours.
+<span class="strong strong"><strong>Business context.</strong></span> Contact the bucket/app owner. Validate whether a migration, scanner, or broken job could legitimately cause bursts.
 </li>
 </ul>
 </div>
@@ -244,63 +244,41 @@ If you suspect the account has been compromised, scope potentially compromised a
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Verify the <code class="literal">source.address</code> and <code class="literal">cloud.account.id</code> - there are some valid operations from within AWS directly that can cause failures and false positives. Additionally, failed automation can also caeuse false positives, but should be identifiable by reviewing the <code class="literal">source.address</code> and <code class="literal">cloud.account.id</code>.
+<span class="strong strong"><strong>Expected jobs / broken automation.</strong></span> Data movers, posture scanners, or failed credentials can generate 403 storms. Validate with <code class="literal">userAgent</code>, ARNs, change windows, and environment (dev/stage vs prod).
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>External probing.</strong></span> Internet-origin enumeration often looks like uniform 403s from transient or cloud-provider IPs and typically has no business impact and no billing if outside your account/org. Tune thresholds or allowlist known scanners if appropriate.
 </li>
 </ul>
 </div>
 <p><span class="strong strong"><strong>Response and remediation</strong></span></p>
+<p><span class="strong strong"><strong>1. Immediate, low-risk actions</strong></span>
+- <span class="strong strong"><strong>Preserve evidence.</strong></span> Export CloudTrail records (±30 minutes) for the bucket and source address into an evidence bucket with restricted access.
+- <span class="strong strong"><strong>Notify owners.</strong></span> Inform the bucket/application owner and security lead; confirm any maintenance windows.</p>
+<p><span class="strong strong"><strong>2. Containment options</strong></span>
+- <span class="strong strong"><strong>External-origin spikes:</strong></span> Verify Block Public Access is enforced and bucket policies are locked down. Optionally apply a temporary deny-all bucket policy allowing only IR/admin roles while scoping.
+- <span class="strong strong"><strong>Internal-origin spikes:</strong></span> Identify the principal. Rotate access keys for IAM users, or restrict involved roles (temporary deny/SCP, remove risky policies). Pause broken jobs/pipelines until validated.</p>
+<p><span class="strong strong"><strong>3. Scope &amp; hunting</strong></span>
+- Review Timeline and CloudTrail for related events: <code class="literal">PutBucketPolicy</code>, <code class="literal">PutPublicAccessBlock</code>, <code class="literal">PutBucketVersioning</code>, lifecycle changes, unusual <code class="literal">PutObject</code>/<code class="literal">DeleteObject</code> volumes, or cross-account access.
+- Check GuardDuty S3 and Config drift findings for signs of tampering or lateral movement.</p>
+<p><span class="strong strong"><strong>4. Recovery &amp; hardening</strong></span>
+- If data impact suspected: with Versioning, restore known-good versions; otherwise, recover from backups/replicas.
+- Enable Versioning on critical buckets going forward; evaluate Object Lock legal hold if enabled.
+- Ensure Block Public Access, least-privilege IAM policies, CloudTrail data events for S3, and GuardDuty protections are consistently enforced.</p>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+<a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/ErrorCodeBilling.html" class="ulink" target="_top">AWS S3 billing for error responses</a>: see latest AWS docs on which error codes are billed.
 </li>
 <li class="listitem">
-Disable or limit the account during the investigation and response.
+<a href="https://aws.amazon.com/about-aws/whats-new/2024/05/amazon-s3-no-charge-http-error-codes/" class="ulink" target="_top">AWS announcement (Aug 2024)</a>: 403s from outside the account/org are not billed.
 </li>
 <li class="listitem">
-Identify the possible impact of the incident and prioritize accordingly; the following actions can help you gain context:
+<a href="https://github.com/aws-samples/aws-incident-response-playbooks/" class="ulink" target="_top">AWS IR Playbooks</a>: NIST-aligned template for evidence, containment, eradication, recovery, post-incident.
 </li>
 <li class="listitem">
-Identify the account role in the cloud environment.
-</li>
-<li class="listitem">
-Assess the criticality of affected services and servers.
-</li>
-<li class="listitem">
-Work with your IT team to identify and minimize the impact on users.
-</li>
-<li class="listitem">
-Identify if the attacker is moving laterally and compromising other accounts, servers, or services.
-</li>
-<li class="listitem">
-Identify any regulatory or legal ramifications related to this activity.
-</li>
-<li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords or delete API keys as needed to revoke the attacker&#8217;s access to the environment. Work with your IT teams to minimize the impact on business operations during these actions.
-</li>
-<li class="listitem">
-Check if unauthorized new users were created, remove unauthorized new accounts, and request password resets for other IAM users.
-</li>
-<li class="listitem">
-Consider enabling multi-factor authentication for users.
-</li>
-<li class="listitem">
-Review the permissions assigned to the implicated user to ensure that the least privilege principle is being followed.
-</li>
-<li class="listitem">
-Implement security best practices <a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">outlined</a> by AWS.
-</li>
-<li class="listitem">
-Take the actions needed to return affected systems, data, or services to their normal operational levels.
-</li>
-<li class="listitem">
-Identify the initial vector abused by the attacker and take action to prevent reinfection via the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
-</li>
-<li class="listitem">
-Check for PutBucketPolicy event actions as well to see if they have been tampered with. While we monitor for denied, a single successful action to add a backdoor into the bucket via policy updates (however they got permissions) may be critical to identify during TDIR.
+<a href="https://github.com/aws-samples/aws-customer-playbook-framework/" class="ulink" target="_top">AWS Customer Playbook Framework</a>: Practical response steps for account and bucket-level abuse.
 </li>
 </ul>
 </div>
@@ -312,30 +290,10 @@ Check for PutBucketPolicy event actions as well to see if they have been tampere
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">from logs-aws.cloudtrail*
-
-| where
-  event.provider == "s3.amazonaws.com"
-  and aws.cloudtrail.error_code == "AccessDenied"
-  and tls.client.server_name is not null
-  and cloud.account.id is not null
-
-// keep only relevant ECS fields
-| keep
-  tls.client.server_name,
-  source.address,
-  cloud.account.id
-
-// count access denied requests per server_name, source, and account
-| stats
-    Esql.event_count = count(*)
-  by
-    tls.client.server_name,
-    source.address,
-    cloud.account.id
-
-// Threshold: more than 40 denied requests
-| where Esql.event_count &gt; 40</pre>
+<pre class="programlisting prettyprint lang-js">  event.dataset: "aws.cloudtrail" and
+  event.provider : "s3.amazonaws.com" and
+  aws.cloudtrail.error_code : "AccessDenied" and
+  tls.client.server_name : *</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
@@ -393,13 +351,13 @@ Reference URL: <a href="https://attack.mitre.org/tactics/TA0007/" class="ulink" 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Name: Cloud Infrastructure Discovery
+Name: Cloud Storage Object Discovery
 </li>
 <li class="listitem">
-ID: T1580
+ID: T1619
 </li>
 <li class="listitem">
-Reference URL: <a href="https://attack.mitre.org/techniques/T1580/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1580/</a>
+Reference URL: <a href="https://attack.mitre.org/techniques/T1619/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1619/</a>
 </li>
 </ul>
 </div>
