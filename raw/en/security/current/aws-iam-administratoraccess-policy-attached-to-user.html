@@ -46,9 +46,19 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="aws-iam-administratoraccess-policy-attached-to-user"></a>AWS IAM AdministratorAccess Policy Attached to User</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-administratoraccess-policy-attached-to-user.asciidoc">edit</a></div>
 </div></div></div>
-<p>An adversary with access to a set of compromised credentials may attempt to persist or escalate privileges by attaching additional permissions to compromised user accounts. This rule looks for use of the IAM <code class="literal">AttachUserPolicy</code> API operation to attach the highly permissive <code class="literal">AdministratorAccess</code> AWS managed policy to an existing IAM user.</p>
-<p><span class="strong strong"><strong>Rule type</strong></span>: esql</p>
-<p><span class="strong strong"><strong>Rule indices</strong></span>: None</p>
+<p>An adversary with access to a set of compromised credentials may attempt to persist or escalate privileges by attaching additional permissions to compromised user accounts. This rule looks for use of the IAM AttachUserPolicy API operation to attach the highly permissive AdministratorAccess AWS managed policy to an existing IAM user.</p>
+<p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
+<p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+filebeat-*
+</li>
+<li class="listitem">
+logs-aws.cloudtrail-*
+</li>
+</ul>
+</div>
 <p><span class="strong strong"><strong>Severity</strong></span>: medium</p>
 <p><span class="strong strong"><strong>Risk score</strong></span>: 47</p>
 <p><span class="strong strong"><strong>Runs every</strong></span>: 5m</p>
@@ -97,7 +107,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 7</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 8</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -112,52 +122,42 @@ Elastic
 <div class="position-relative"><h3 class="title"><a id="_investigation_guide_52"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-administratoraccess-policy-attached-to-user.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
+</blockquote>
+</div>
 <p><span class="strong strong"><strong>Investigating AWS IAM AdministratorAccess Policy Attached to User</strong></span></p>
-<p>The AWS IAM <code class="literal">AdministratorAccess</code> managed policy provides full access to all AWS services and resources.
-With access to the <code class="literal">iam:AttachUserPolicy</code> permission, a set of compromised credentials could be used to attach
-this policy to the current user for privilege escalation or another user as a means of persistence. This rule uses <a href="/guide/en/security/current/rules-ui-create.html#create-esql-rule" class="ulink" target="_top">ESQL</a>
-to look for use of the <code class="literal">AttachUserPolicy</code> operation along with request_parameters where the policyName is <code class="literal">AdministratorAccess</code>.</p>
+<p>The AWS-managed <code class="literal">AdministratorAccess</code> policy grants full access to all AWS services and resources.
+When attached to a user, it effectively elevates that user to full administrative privileges.
+An adversary with <code class="literal">iam:AttachUserPolicy</code> permissions can abuse this operation to escalate privileges or maintain persistence.
+This rule detects <code class="literal">AttachUserPolicy</code> events where the attached policy name is <code class="literal">AdministratorAccess</code>.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Identify the account and its role in the environment.
+<span class="strong strong"><strong>Validate intent and context.</strong></span>
+Identify the calling user (<code class="literal">aws.cloudtrail.user_identity.arn</code>) and the target IAM user (<code class="literal">aws.cloudtrail.request_parameters.userName</code>).
+Confirm whether this was an intentional administrative action, part of provisioning automation, or a potential privilege escalation.
 </li>
 <li class="listitem">
-Review IAM permission policies for the user identity.
+<span class="strong strong"><strong>Review CloudTrail event details.</strong></span>
+Check <code class="literal">source.ip</code>, <code class="literal">user_agent.original</code>, and <code class="literal">source.geo</code> fields.
+Compare to historical login or automation behavior. Unrecognized IPs, non-SDK user agents, or new regions may indicate misuse.
 </li>
 <li class="listitem">
-Identify the applications or users that should use this account.
+<span class="strong strong"><strong>Correlate with related IAM activity.</strong></span>
+Search CloudTrail for additional IAM events around the same time (<code class="literal">CreateUser</code>, <code class="literal">CreateAccessKey</code>, <code class="literal">AttachGroupPolicy</code>, <code class="literal">PutUserPolicy</code>, etc.) that could indicate lateral movement or persistence attempts.
 </li>
 <li class="listitem">
-Investigate other alerts associated with the account during the past 48 hours.
+<span class="strong strong"><strong>Review the target user’s permissions.</strong></span>
+Determine if the target user already had elevated privileges or if this represents a meaningful privilege increase.
+Check for new API calls from the target user post-attachment, especially <code class="literal">CreateAccessKey</code>, <code class="literal">UpdateAssumeRolePolicy</code>, or S3 access attempts.
 </li>
 <li class="listitem">
-Investigate abnormal values in the <code class="literal">user_agent.original</code> field by comparing them with the intended and authorized usage and historical data. Suspicious user agent values include non-SDK, AWS CLI, custom user agents, etc.
-</li>
-<li class="listitem">
-Contact the account owner and confirm whether they are aware of this activity.
-</li>
-<li class="listitem">
-Considering the source IP address and geolocation of the user who issued the command:
-</li>
-<li class="listitem">
-Do they look normal for the calling user?
-</li>
-<li class="listitem">
-If the source is an EC2 IP address, is it associated with an EC2 instance in one of your accounts or is the source IP from an EC2 instance that&#8217;s not under your control?
-</li>
-<li class="listitem">
-If it is an authorized EC2 instance, is the activity associated with normal behavior for the instance role or roles? Are there any other alerts or signs of suspicious activity involving this instance?
-</li>
-<li class="listitem">
-If you suspect the account has been compromised, scope potentially compromised assets by tracking servers, services, and data accessed by the account in the last 24 hours.
-</li>
-<li class="listitem">
-Determine what other API calls were made by the user.
-</li>
-<li class="listitem">
-Assess whether this behavior is prevalent in the environment by looking for similar occurrences involving other users.
+<span class="strong strong"><strong>Investigate associated entities.</strong></span>
+Look for other alerts tied to the same caller or target within the past 48 hours to identify potential correlated activity.
 </li>
 </ul>
 </div>
@@ -165,72 +165,56 @@ Assess whether this behavior is prevalent in the environment by looking for simi
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-False positives may occur due to the intended usage of the IAM <code class="literal">AdministratorAccess</code> managed policy. Verify the <code class="literal">aws.cloudtrail.user_identity.arn</code> should have the <code class="literal">iam:AttachUserPolicy</code> permission and that the <code class="literal">target.userName</code> should be given full administrative access.
+<span class="strong strong"><strong>Legitimate administrative change.</strong></span>
+Policy attachments may be expected during provisioning or troubleshooting. Validate through change management records.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Authorized automation.</strong></span>
+Some CI/CD pipelines or identity automation systems temporarily attach this policy. Review automation logs and intended IAM behavior.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Delegated admin scenarios.</strong></span>
+Verify if the calling user or role is part of a delegated IAM administration group.
 </li>
 </ul>
 </div>
 <p><span class="strong strong"><strong>Response and remediation</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p>Per AWS IR Playbooks, unauthorized administrative policy attachment represents a Privilege Escalation event.</p>
+</blockquote>
+</div>
+<p><span class="strong strong"><strong>1. Immediate containment</strong></span>
+- Detach the policy. Remove the <code class="literal">AdministratorAccess</code> policy from the affected IAM user immediately (<code class="literal">aws iam detach-user-policy</code>).
+- Rotate credentials. Rotate passwords and access keys for both the caller and target users.
+- Restrict IAM permissions. Temporarily remove <code class="literal">iam:AttachUserPolicy</code> privileges from non-administrative roles during scoping.
+- Enable or confirm MFA for affected accounts.</p>
+<p><span class="strong strong"><strong>2. Evidence preservation</strong></span>
+- Export related <code class="literal">AttachUserPolicy</code> CloudTrail events ±30 minutes from the alert to a secure evidence bucket.
+- Preserve GuardDuty findings and AWS Config snapshots for correlation.</p>
+<p><span class="strong strong"><strong>3. Scoping and investigation</strong></span>
+- Search CloudTrail for subsequent use of the affected user’s credentials.
+  Look for newly created keys, S3 access, or changes to IAM trust policies.
+- Review other accounts for similar policy attachment attempts from the same user or IP.</p>
+<p><span class="strong strong"><strong>4. Recovery and hardening</strong></span>
+- Reinforce least privilege by granting only role-based admin access instead of direct user-level AdministratorAccess.
+- Implement IAM service control policies (SCPs) to prevent attachment of <code class="literal">AdministratorAccess</code> except for trusted roles.
+- Enable CloudTrail, GuardDuty, and Security Hub across all regions.
+- Regularly audit IAM policy attachments through AWS Config or CloudFormation drift detection.</p>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+**https://github.com/aws-samples/aws-incident-response-playbooks/blob/c151b0dc091755fffd4d662a8f29e2f6794da52c/playbooks/[AWS IR Playbooks]: response steps related to IAM policy modification and unauthorized privilege escalation.
 </li>
 <li class="listitem">
-Disable or limit the account during the investigation and response.
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-customer-playbook-framework/" class="ulink" target="_top">AWS Customer Playbook Framework</a>:</strong></span> for containment, analysis, and recovery guidance.
 </li>
 <li class="listitem">
-Rotate user credentials
+<span class="strong strong"><strong>AWS Documentation:</strong></span> <a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_job-functions.html#jf_administrator" class="ulink" target="_top">AdministratorAccess Policy</a>.
 </li>
 <li class="listitem">
-Remove the <code class="literal">AdministratorAccess</code> policy from the affected user(s)
-</li>
-<li class="listitem">
-Identify the possible impact of the incident and prioritize accordingly; the following actions can help you gain context:
-</li>
-<li class="listitem">
-Identify the account role in the cloud environment.
-</li>
-<li class="listitem">
-Assess the criticality of affected services and servers.
-</li>
-<li class="listitem">
-Work with your IT team to identify and minimize the impact on users.
-</li>
-<li class="listitem">
-Identify if the attacker is moving laterally and compromising other accounts, servers, or services.
-</li>
-<li class="listitem">
-Identify any regulatory or legal ramifications related to this activity.
-</li>
-<li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified.
-</li>
-<li class="listitem">
-Rotate secrets or delete API keys as needed to revoke the attacker&#8217;s access to the environment.
-</li>
-<li class="listitem">
-Work with your IT teams to minimize the impact on business operations during these actions.
-</li>
-<li class="listitem">
-Check if unauthorized new users were created, remove unauthorized new accounts, and request password resets for other IAM users.
-</li>
-<li class="listitem">
-Consider enabling multi-factor authentication for users.
-</li>
-<li class="listitem">
-Review the permissions assigned to the implicated user to ensure that the least privilege principle is being followed.
-</li>
-<li class="listitem">
-Implement security best practices <a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">outlined</a> by AWS.
-</li>
-<li class="listitem">
-Take the actions needed to return affected systems, data, or services to their normal operational levels.
-</li>
-<li class="listitem">
-Identify the initial vector abused by the attacker and take action to prevent reinfection via the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+<span class="strong strong"><strong>Security Best Practices:</strong></span> <a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">AWS Knowledge Center – Security Best Practices</a>.
 </li>
 </ul>
 </div>
@@ -242,35 +226,11 @@ Using the incident response data, update logging and audit policies to improve t
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">from logs-aws.cloudtrail-* metadata _id, _version, _index
-
-| where
-  event.provider == "iam.amazonaws.com"
-  and event.action == "AttachUserPolicy"
-  and event.outcome == "success"
-
-// Extract policy name and user name from request parameters
-| dissect aws.cloudtrail.request_parameters
-    "{%{?policyArn}=%{?arn}:%{?aws}:%{?iam}::%{?aws}:%{?policy}/%{Esql.aws_cloudtrail_request_parameters_policy_name},%{?userName}=%{Esql_priv.aws_cloudtrail_request_parameters_target_user_name}}"
-
-// Filter for AdministratorAccess policy
-| where Esql.aws_cloudtrail_request_parameters_policy_name == "AdministratorAccess"
-
-// keep ECS and parsed fields
-| keep
-    @timestamp,
-    cloud.region,
-    event.provider,
-    event.action,
-    event.outcome,
-    Esql.aws_cloudtrail_request_parameters_policy_name,
-    Esql_priv.aws_cloudtrail_request_parameters_target_user_name,
-    aws.cloudtrail.request_parameters,
-    aws.cloudtrail.user_identity.arn,
-    related.user,
-    user_agent.original,
-    user.name,
-    source.address</pre>
+<pre class="programlisting prettyprint lang-js">iam where event.dataset == "aws.cloudtrail"
+   and event.provider == "iam.amazonaws.com"
+   and event.action == "AttachUserPolicy"
+   and event.outcome == "success"
+   and stringContains(aws.cloudtrail.request_parameters, "policyArn=arn:aws:iam::aws:policy/AdministratorAccess")</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

@@ -146,7 +146,7 @@ logs-aws.cloudtrail-*
 <p><span class="strong strong"><strong>Severity</strong></span>: high</p>
 <p><span class="strong strong"><strong>Risk score</strong></span>: 73</p>
 <p><span class="strong strong"><strong>Runs every</strong></span>: 5m</p>
-<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-20m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
+<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-6m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
 <p><span class="strong strong"><strong>Maximum alerts per execution</strong></span>: 100</p>
 <p><span class="strong strong"><strong>References</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -169,6 +169,9 @@ Data Source: AWS
 Data Source: Amazon Web Services
 </li>
 <li class="listitem">
+Data Source: AWS Sign-In
+</li>
+<li class="listitem">
 Use Case: Identity and Access Audit
 </li>
 <li class="listitem">
@@ -179,7 +182,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 210</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 211</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -191,7 +194,7 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_72"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-management-console-brute-force-of-root-user-identity.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_71"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-management-console-brute-force-of-root-user-identity.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <div class="quoteblock">
@@ -201,27 +204,43 @@ This investigation guide was created using generative AI technology and has been
 </blockquote>
 </div>
 <p><span class="strong strong"><strong>Investigating AWS Management Console Brute Force of Root User Identity</strong></span></p>
-<p>The AWS Management Console is a web-based interface for accessing and managing AWS services. The root user identity has unrestricted access, making it a prime target for adversaries seeking unauthorized control. Attackers may attempt brute force attacks to guess the root password. The detection rule identifies such attempts by monitoring failed login events specifically for the root user, flagging potential credential access threats.</p>
+<p>The AWS Management Console provides a web interface for managing AWS resources. Because the root user has unrestricted privileges, repeated failed console login attempts targeting this identity represent a high-risk credential access event. Even if no login succeeded, this activity may indicate reconnaissance, password spraying, or credential stuffing attempts targeting the root user.</p>
+<p>This rule uses a threshold rule that detects a high number of failed <code class="literal">ConsoleLogin</code> events (<code class="literal">event.outcom: failure</code> with <code class="literal">userIdentity.type: Root</code>) within a short timeframe from the same IP address or user agent.
+Threshold rules only summarize grouped field values, so analysts must use timeline to review the actual events that triggered the alert.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the CloudTrail logs for the specific time frame of the failed login attempts to identify patterns or anomalies in the source IP addresses or user agents.
+<span class="strong strong"><strong>Review in Timeline.</strong></span>
+Open the alert and <span class="strong strong"><strong>Investigate in timeline</strong></span> to view the individual CloudTrail events contributing to the threshold alert. Review:
 </li>
 <li class="listitem">
-Check the geographical location of the IP addresses involved in the failed login attempts to determine if they are consistent with known or expected locations for legitimate access.
+<code class="literal">source.ip</code>, <code class="literal">user_agent.original</code>, <code class="literal">geo fields</code> and <code class="literal">@timestamp</code> for each failure.
 </li>
 <li class="listitem">
-Investigate any successful login attempts from the same IP addresses or user agents to assess if the brute force attempt was successful at any point.
+Look for patterns such as distributed sources or repeated retries at consistent intervals.
 </li>
 <li class="listitem">
-Analyze the frequency and timing of the failed login attempts to determine if they align with typical brute force attack patterns, such as rapid or sequential attempts.
+Look for any corresponding successful <code class="literal">ConsoleLogin</code> events around the same timeframe from the same IP or agent.
 </li>
 <li class="listitem">
-Correlate the failed login events with other security events or alerts in the AWS environment to identify any concurrent suspicious activities that may indicate a broader attack campaign.
+<span class="strong strong"><strong>Assess IP reputation and geolocation.</strong></span>
+Use IP intelligence tools to evaluate whether the source addresses belong to known cloud providers, TOR nodes, or foreign regions outside your normal operations.
 </li>
 <li class="listitem">
-Review AWS CloudTrail logs for any changes in IAM policies or unusual activity following the failed login attempts to ensure no unauthorized access was gained.
+Correlate against <code class="literal">cloud.region</code> and <code class="literal">geo fields</code> and compare with expected login locations for your organization.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Check for related activity.</strong></span>
+Review CloudTrail for other API calls from the same source IP (for example, <code class="literal">GetSessionToken</code>, <code class="literal">AssumeRole</code>, or <code class="literal">ListUsers</code>) that may indicate scripted credential testing or discovery.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Correlate with GuardDuty findings.</strong></span>
+GuardDuty may raise complementary findings for anomalous console login behavior or brute force attempts. Review recent GuardDuty and AWS Config alerts for the same timeframe.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Determine business context.</strong></span>
+Confirm whether the source IPs are internal (for example, corporate VPN, IT admin network) or part of legitimate red-team or third-party testing. If uncertain, treat as suspicious.
 </li>
 </ul>
 </div>
@@ -229,42 +248,64 @@ Review AWS CloudTrail logs for any changes in IAM policies or unusual activity f
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate users may forget their password and repeatedly attempt to log in, triggering the rule. To manage this, monitor for patterns of failed logins followed by successful ones and consider excluding these from alerts if they originate from known IP addresses.
+<span class="strong strong"><strong>Forgotten or mistyped credentials.</strong></span>
+Repeated failed logins from known internal IPs could indicate a legitimate user typing errors. Validate by checking if a successful root login followed soon after.
 </li>
 <li class="listitem">
-Automated scripts or applications using outdated credentials can cause repeated failed login attempts. Identify and update these credentials or exclude the associated IP addresses from the rule.
+<span class="strong strong"><strong>Automation or scanners.</strong></span>
+Misconfigured monitoring tools or old browser sessions attempting to reuse cached credentials may trigger this rule.
 </li>
 <li class="listitem">
-Security testing or penetration testing activities might simulate brute force attacks. Coordinate with your security team to whitelist IP addresses or timeframes associated with these activities to prevent false positives.
-</li>
-<li class="listitem">
-Shared accounts or environments where multiple users attempt to access the root account can lead to multiple failed attempts. Implement stricter access controls and consider excluding known internal IP ranges from the rule.
+<span class="strong strong"><strong>Planned penetration testing.</strong></span>
+Red-team or security testing activities can generate deliberate brute force attempts. Verify via ticketing or testing schedules.
 </li>
 </ul>
 </div>
 <p><span class="strong strong"><strong>Response and remediation</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p>The AWS Incident Response Playbooks classify root login attempts as Priority-1 credential compromise events.
+Follow these steps whether or not your organization has a formal IR team.</p>
+</blockquote>
+</div>
+<p><span class="strong strong"><strong>1. Immediate containment</strong></span>
+- <span class="strong strong"><strong>Check for success.</strong></span>
+  After pivoting to Timeline, confirm whether any <code class="literal">ConsoleLogin</code> events from the same IP or user agent show <code class="literal">event.oucome: success</code>.
+  - If a successful login occurred, immediately follow the <span class="strong strong"><strong>AWS Management Console Root Login</strong></span> rule investigation guide.
+- <span class="strong strong"><strong>Rotate the root password.</strong></span>
+  Use AWS’s password reset function to set a strong, unique password stored in an offline vault.
+- <span class="strong strong"><strong>Enable or verify Multi-Factor Authentication (MFA)</strong></span> on the root account. If MFA was already configured, review the device registration for changes or suspicious resets.
+- <span class="strong strong"><strong>Block offending IPs or networks.</strong></span>
+  Use AWS WAF, VPC network ACLs, or Security Groups to temporarily block the IPs used in the failed attempts.
+- <span class="strong strong"><strong>Alert internal teams.</strong></span>
+  Notify your security operations or cloud governance teams of the brute force pattern and actions taken.</p>
+<p><span class="strong strong"><strong>2. Evidence preservation</strong></span>
+- Export all failed <code class="literal">ConsoleLogin</code> events visible in Timeline (±30 minutes around the alert window) to a restricted evidence bucket.
+- Preserve GuardDuty findings, AWS Config history, and CloudTrail logs for the same timeframe for further analysis.</p>
+<p><span class="strong strong"><strong>3. Scoping and investigation</strong></span>
+- Query CloudTrail across other AWS accounts and regions for additional failed or successful <code class="literal">ConsoleLogin</code> events from the same IPs.
+- Check IAM activity for simultaneous key creation, role modifications, or new users — signs of lateral or parallel intrusion attempts.
+- Review network telemetry (VPC Flow Logs, CloudFront, WAF) to determine whether the activity originated from a distributed or scripted attack pattern.</p>
+<p><span class="strong strong"><strong>4. Recovery and hardening</strong></span>
+- Confirm MFA is enabled and enforced on the root account.
+- Remove any root access keys (none should exist under normal security posture).
+- Enable organization-wide CloudTrail, GuardDuty, and Security Hub across all regions.
+- Set up real-time alerts for any future <code class="literal">ConsoleLogin</code> failures from the root user exceeding expected baselines.
+- Store root credentials offline with dual-custody and document controlled access procedures.</p>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately disable the root user account to prevent further unauthorized access attempts. This can be done through the AWS Management Console by navigating to the IAM section and selecting the root user account.
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-incident-response-playbooks/tree/c151b0dc091755fffd4d662a8f29e2f6794da52c/playbooks" class="ulink" target="_top">AWS IR Playbooks</a>:</strong></span> See “Credential Compromise” and “Account Compromise” for investigation, containment, and escalation guidance.
 </li>
 <li class="listitem">
-Review the CloudTrail logs to identify the source IP addresses of the failed login attempts. Block these IP addresses using AWS security groups or network ACLs to prevent further access attempts from these locations.
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-customer-playbook-framework/tree/a8c7b313636b406a375952ac00b2d68e89a991f2/docs" class="ulink" target="_top">AWS Customer Playbook Framework</a>:</strong></span> Reference runbooks for failed-login response, evidence preservation, and MFA enforcement.
 </li>
 <li class="listitem">
-Reset the root user password and ensure it is strong and unique. Use a password manager to generate and store the new password securely.
+<span class="strong strong"><strong>AWS Documentation:</strong></span> <a href="https://docs.aws.amazon.com/general/latest/gr/root-vs-iam.html#aws_tasks-that-require-root" class="ulink" target="_top">Tasks that require the root user</a>.
 </li>
 <li class="listitem">
-Enable multi-factor authentication (MFA) for the root user account to add an additional layer of security. This can be configured in the AWS Management Console under the IAM section.
-</li>
-<li class="listitem">
-Conduct a thorough audit of recent account activity to ensure no unauthorized changes have been made. Pay special attention to IAM roles, policies, and permissions.
-</li>
-<li class="listitem">
-Notify the security team and relevant stakeholders about the incident for awareness and further investigation. Provide them with details of the attempted breach and actions taken.
-</li>
-<li class="listitem">
-Implement additional monitoring and alerting for unusual login patterns or failed login attempts to the root account to enhance early detection of similar threats in the future.
+<span class="strong strong"><strong>Security Best Practices:</strong></span> <a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">AWS Knowledge Center – Security Best Practices</a>.
 </li>
 </ul>
 </div>
@@ -272,18 +313,15 @@ Implement additional monitoring and alerting for unusual login patterns or faile
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_39"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-management-console-brute-force-of-root-user-identity.asciidoc">edit</a></div>
-</div></div></div>
-<p>The AWS Fleet integration, Filebeat module, or similarly structured data is required to be compatible with this rule.</p>
-</div>
-
-<div class="section">
-<div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_75"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-management-console-brute-force-of-root-user-identity.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_74"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-management-console-brute-force-of-root-user-identity.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">event.dataset:aws.cloudtrail and event.provider:signin.amazonaws.com and event.action:ConsoleLogin and aws.cloudtrail.user_identity.type:Root and event.outcome:failure</pre>
+<pre class="programlisting prettyprint lang-js">event.dataset:aws.cloudtrail and
+event.provider:signin.amazonaws.com and
+event.action:ConsoleLogin and
+aws.cloudtrail.user_identity.type:Root and
+event.outcome:failure</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
