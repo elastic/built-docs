@@ -101,7 +101,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 4</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 5</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -113,88 +113,86 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_94"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-s3-bucket-server-access-logging-disabled.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_95"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-s3-bucket-server-access-logging-disabled.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating AWS S3 Bucket Server Access Logging Disabled</strong></span></p>
-<p>This rule detects when server access logging is disabled for an S3 bucket in AWS. Such configurations could potentially hide evidence of unauthorized access or malicious activity by preventing the recording of those requests.</p>
-<p><span class="strong strong"><strong>Detailed Investigation Steps</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
+</blockquote>
+</div>
+<p>This detection alerts when the server-access logging configuration for an S3 bucket is changed so that logging is disabled.
+Because detailed request logs are central to tracking object access, modifications here are significant from a visibility and forensics standpoint. They can signal that an adversary is preparing to act (exfiltrate, delete, or manipulate data) while minimizing audit evidence.</p>
+<p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
+<p><span class="strong strong"><strong>Identify the actor and context</strong></span>
+   - Review <code class="literal">aws.cloudtrail.user_identity.arn</code>, <code class="literal">aws.cloudtrail.user_identity.type</code>, and <code class="literal">aws.cloudtrail.user_identity.access_key_id</code> to determine the who/what of the change.
+   - Inspect <code class="literal">user_agent.original</code>, <code class="literal">source.ip</code>, <code class="literal">@timestamp</code>, <code class="literal">cloud.account.id</code>, <code class="literal">cloud.region</code> for unusual or non-standard access patterns (e.g., new user, external IP, off-hours).
+   - Check the bucket resource (via <code class="literal">aws.cloudtrail.resources.arn</code>, <code class="literal">aws.cloudtrail.resources.type</code>) to determine the bucket’s business role (e.g., logs, backups, sensitive data store).
+        - Consider whether the bucket houses audit logs or access logs; if so, disabling logging is especially suspicious and a higher risk.</p>
+<p><span class="strong strong"><strong>Correlate with related activities</strong></span>
+   - Search for preceding or subsequent events by the same principal or for the same bucket:
+     - <code class="literal">DeleteObject</code>, <code class="literal">PutBucketAcl</code>, <code class="literal">PutBucketPolicy</code>, <code class="literal">RemoveBucketAccessPoint</code>, or other permissions changes (e.g., <code class="literal">PutBucketLifecycle</code>).
+     - <code class="literal">ListBucket</code>, <code class="literal">GetObject</code>, <code class="literal">CopyObject</code>, or large <code class="literal">GetObject</code> operations, especially from unusual IPs or cross-account.
+     - IAM changes in proximity: <code class="literal">AttachUserPolicy</code>, <code class="literal">CreateAccessKey</code>, <code class="literal">AssumeRole</code> by same principal or against the same principal.
+   - Review AWS Config or Audit logs to see if the bucket’s logging was previously enabled and how long it has been disabled.</p>
+<p><span class="strong strong"><strong>Evaluate intent and risk</strong></span>
+   - If the bucket was being used to collect access logs or audit data, disabling logging significantly degrades forensic capability.
+   - Determine whether the actor has a legitimate business reason for modifying logging (ticket, change request, known automation).
+   - If not justified, treat this as a high-priority visibility compromise and proceed through escalation.</p>
+<p><span class="strong strong"><strong>False positive analysis</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Review the Affected S3 Bucket</strong></span>: Check the bucket details (<code class="literal">bucketName</code>) where server access logging has been disabled.
+Storage teams may disable logging temporarily during migration or cost-optimisation exercises.
 </li>
 <li class="listitem">
-Determine the contents and importance of the data stored in this bucket to assess the impact of disabled logging.
+Test or development buckets may routinely toggle logging for experimentation—document such buckets and roles.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Review User Identity and Activity</strong></span>:
-</li>
-<li class="listitem">
-Investigate the user (<code class="literal">user_identity.arn</code>) who made the change. Determine whether this user&#8217;s role typically involves managing S3 bucket configurations.
-</li>
-<li class="listitem">
-Examine the authentication method and whether the access key used (<code class="literal">access_key_id</code>) is routinely used for such configurations or if it has deviated from normal usage patterns.
-</li>
-<li class="listitem">
-Contact the account owner and confirm whether they are aware of this activity.
-</li>
-<li class="listitem">
-Considering the source IP address and geolocation of the user who issued the command:
-</li>
-<li class="listitem">
-Do they look normal for the calling user?
-</li>
-<li class="listitem">
-If the source is an EC2 IP address, is it associated with an EC2 instance in one of your accounts or is the source IP from an EC2 instance that&#8217;s not under your control?
-</li>
-<li class="listitem">
-If it is an authorized EC2 instance, is the activity associated with normal behavior for the instance role or roles? Are there any other alerts or signs of suspicious activity involving this instance?
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Contextualize with Recent Changes</strong></span>: Compare this event against recent changes in S3 configurations. Look for any other recent permissions changes or unusual administrative actions.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Correlate with Other Activities</strong></span>: Search for related CloudTrail events before and after this change to see if the same actor or IP address engaged in other potentially suspicious activities.
-</li>
-<li class="listitem">
-Assess whether this behavior is prevalent in the environment by looking for similar occurrences involving other users.
+Trusted automation (tagged, known user-agent, internal IPs) may adjust logging. Consider allow-listing such automation while preserving watch-points for changes to high-sensitivity buckets.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>False Positive Analysis</strong></span></p>
+<p><span class="strong strong"><strong>Response and remediation</strong></span></p>
+<p><span class="strong strong"><strong>1. Contain &amp; restore visibility</strong></span>
+   - Immediately re-enable server‐access logging for the affected bucket (ensure <code class="literal">LoggingEnabled=true</code> and correct <code class="literal">TargetBucket/Prefix</code>).
+   - If you suspect activity while logging was disabled, preserve any remaining object versions, cross-account access logs, or S3 Inventory data.</p>
+<p><span class="strong strong"><strong>2. Investigate scope and impact</strong></span>
+   - Use CloudTrail Lake or Athena to query access to the bucket and objects for the timeframe when logging was disabled.
+   - Identify external IP addresses, unusual principals, or rapid object transfers or deletions.</p>
+<p><span class="strong strong"><strong>3. Recover &amp; harden</strong></span>
+   - Apply bucket-policy or SCP restrictions to prevent unauthorized modifications of <code class="literal">PutBucketLogging</code> for audit/logging buckets.
+   - Enable AWS Config rule (e.g., <code class="literal">cloudtrail-s3-bucket-access-logging</code>) to alert if logging is disabled.
+   - Ensure logging target buckets are configured with retention, versioning, and immutability (S3 Object Lock) to prevent tampering.</p>
+<p><span class="strong strong"><strong>4. Improve &amp; monitor</strong></span>
+   - Update your incident response playbook to include this scenario (see AWS IR + Customer Playbook Framework).
+   - Educate stakeholders (storage, DevOps, security) that any change to logging configuration on buckets — especially audit/log buckets should be treated as a security event and ticketed.</p>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Verify the operational requirements that might necessitate disabling access logging, especially in environments where data retention policies are strictly governed for compliance and cost-saving reasons.
+AWS documentation on <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerLogs.html" class="ulink" target="_top">S3 Server Access Logging</a>
+</li>
+<li class="listitem">
+<a href="https://github.com/aws-samples/aws-incident-response-playbooks/tree/c151b0dc091755fffd4d662a8f29e2f6794da52c/playbooks" class="ulink" target="_top">AWS Incident Response Playbooks</a>
+</li>
+<li class="listitem">
+<a href="https://github.com/aws-samples/aws-customer-playbook-framework/tree/a8c7b313636b406a375952ac00b2d68e89a991f2/docs" class="ulink" target="_top">AWS Customer Playbook Framework</a>
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Response and Remediation</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-<span class="strong strong"><strong>Immediate Review</strong></span>: If the change was unauthorized, consider reverting the change immediately to prevent potential data loss.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Enhance Monitoring</strong></span>: Implement monitoring to alert on changes to logging configurations across your S3 environments.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>User Education</strong></span>: Ensure that users with access to critical resources like S3 buckets are aware of the best practices and company policies regarding data retention and security.
-</li>
-</ul>
-</div>
-<p><span class="strong strong"><strong>Additional Information</strong></span></p>
-<p>For further guidance on monitoring Amazon S3 and ensuring compliance with organizational data retention and security policies, refer to the AWS official documentation on <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/monitoring-overview.html" class="ulink" target="_top">Monitoring Amazon S3</a>.</p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_98"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-s3-bucket-server-access-logging-disabled.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_99"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-s3-bucket-server-access-logging-disabled.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">any where event.dataset == "aws.cloudtrail"
+<pre class="programlisting prettyprint lang-js">info where event.dataset == "aws.cloudtrail"
+   and event.provider == "s3.amazonaws.com"
    and event.action == "PutBucketLogging"
    and event.outcome == "success"
    and not stringContains(aws.cloudtrail.request_parameters, "LoggingEnabled")</pre>
