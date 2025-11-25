@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="aws-ec2-instance-console-login-via-assumed-role"></a>AWS EC2 Instance Console Login via Assumed Role</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-ec2-instance-console-login-via-assumed-role.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies a successful console login activity by an EC2 instance profile using an assumed role. This is uncommon behavior and could indicate an attacker using compromised credentials to further exploit an environment. An EC2 instance assumes a role using their EC2 ID as the session name. This rule looks for the pattern "i-" which is the beginning pattern for assumed role sessions started by an EC2 instance and a successful <code class="literal">ConsoleLogin</code> or <code class="literal">GetSigninToken</code> API call.</p>
+<p>Detects successful AWS Management Console or federation login activity performed using an EC2 instance’s assumed role credentials. EC2 instances typically use temporary credentials to make API calls, not to authenticate interactively via the console. A successful "ConsoleLogin" or "GetSigninToken" event using a session pattern that includes "i-" (the EC2 instance ID) is highly anomalous and may indicate that an adversary obtained the instance’s temporary credentials from the instance metadata service (IMDS) and used them to access the console. Such activity can enable lateral movement, privilege escalation, or persistence within the AWS account.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -94,6 +94,9 @@ Data Source: AWS EC2
 Data Source: AWS STS
 </li>
 <li class="listitem">
+Data Source: AWS Sign-In
+</li>
+<li class="listitem">
 Use Case: Identity and Access Audit
 </li>
 <li class="listitem">
@@ -103,11 +106,14 @@ Tactic: Lateral Movement
 Tactic: Credential Access
 </li>
 <li class="listitem">
+Tactic: Persistence
+</li>
+<li class="listitem">
 Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 4</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 5</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -129,76 +135,123 @@ This investigation guide was created using generative AI technology and has been
 </blockquote>
 </div>
 <p><span class="strong strong"><strong>Investigating AWS EC2 Instance Console Login via Assumed Role</strong></span></p>
-<p>AWS EC2 instances can assume roles to access resources securely, using temporary credentials. This mechanism, while essential for legitimate operations, can be exploited by adversaries who gain access to EC2 credentials, allowing them to assume roles and perform unauthorized actions. The detection rule identifies unusual console login activities by EC2 instances, flagging potential misuse by checking for specific session patterns and successful login events, thus helping to uncover lateral movement or credential access attempts.</p>
+<p>This rule detects successful AWS console or federation logins using temporary credentials tied to EC2 instance profiles. Under normal conditions, EC2 instances use their temporary credentials for programmatic API access — <span class="strong strong"><strong>not</strong></span> for interactive console sessions. When an attacker gains access to an instance’s IMDS (Instance Metadata Service) or its environment variables, they may retrieve temporary STS credentials and attempt console logins to gain full access to the AWS account. A successful login of this type is rare and high-risk, as it strongly suggests credential theft or unauthorized session hijacking.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the CloudTrail logs for the specific event where event.dataset is "aws.cloudtrail" and event.provider is "signin.amazonaws.com" to gather more details about the login event.
+<span class="strong strong"><strong>Identify the source and actor</strong></span>
 </li>
 <li class="listitem">
-Identify the EC2 instance associated with the session by examining the user.id field for the pattern ":i-" and correlate it with known EC2 instance IDs in your environment.
+Review <code class="literal">aws.cloudtrail.user_identity.arn</code>, <code class="literal">user.id</code>, and <code class="literal">user_agent.original</code> fields to confirm the session originated from an EC2 instance (<code class="literal">:i-</code> pattern).
 </li>
 <li class="listitem">
-Check the AWS CloudTrail logs for any other activities performed by the same assumed role session to identify any unauthorized actions or lateral movement attempts.
+Correlate the instance ID (<code class="literal">i-xxxxxx</code>) with the specific EC2 instance in your environment to identify its owner, purpose, and running applications.
 </li>
 <li class="listitem">
-Investigate the source IP address and geolocation of the login event to determine if it aligns with expected access patterns for your organization.
+Check <code class="literal">source.ip</code> and <code class="literal">cloud.region</code> to determine if the login originated from within AWS infrastructure (expected) or an external location (suspicious).
 </li>
 <li class="listitem">
-Verify the IAM role policies and permissions associated with the assumed role to assess the potential impact of the unauthorized access.
+<span class="strong strong"><strong>Correlate surrounding activity</strong></span>
 </li>
 <li class="listitem">
-Review recent changes to the IAM roles and policies to identify any unauthorized modifications that could have facilitated the assumed role access.
+Pivot in Timeline to view the sequence of events leading up to the login, including:
 </li>
 <li class="listitem">
-Contact the instance owner or relevant team to confirm if the login activity was expected or authorized, and take appropriate action if it was not.
+STS token retrievals (<code class="literal">GetSessionToken</code>, <code class="literal">AssumeRole</code>, <code class="literal">GetCallerIdentity</code>)
+</li>
+<li class="listitem">
+Calls to the IMDS endpoint or local credential exfiltration attempts from the instance.
+</li>
+<li class="listitem">
+Investigate whether the same role or credentials were used for API actions following the login (e.g., <code class="literal">CreateUser</code>, <code class="literal">AttachRolePolicy</code>, or <code class="literal">ListBuckets</code>).
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Assess IAM role exposure</strong></span>
+</li>
+<li class="listitem">
+Determine which IAM role was associated with the instance at the time of the event and review its attached permissions.
+</li>
+<li class="listitem">
+Evaluate whether the role grants console access or permissions beyond what that workload normally requires.
+</li>
+<li class="listitem">
+Check for any recent changes to that role’s trust policy or attached policies.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Validate authorization</strong></span>
+</li>
+<li class="listitem">
+Contact the EC2 instance owner or service team to confirm if any legitimate process should be logging in to the console.
+</li>
+<li class="listitem">
+If no legitimate activity can explain the login, treat the credentials as compromised.
 </li>
 </ul>
 </div>
 <p><span class="strong strong"><strong>False positive analysis</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-Routine administrative tasks: EC2 instances may assume roles for legitimate administrative purposes, such as automated deployments or maintenance tasks. To manage this, identify and whitelist known administrative session patterns or specific instance IDs that regularly perform these tasks.
-</li>
-<li class="listitem">
-Monitoring and logging services: Some monitoring or logging services might use assumed roles to access AWS resources for data collection. Review and exclude these services by identifying their specific session patterns or instance IDs.
-</li>
-<li class="listitem">
-Scheduled jobs or scripts: Automated scripts or scheduled jobs running on EC2 instances might assume roles for resource access. Document these jobs and create exceptions for their session patterns to prevent false alerts.
-</li>
-<li class="listitem">
-Development and testing environments: Instances in development or testing environments might frequently assume roles for testing purposes. Consider excluding these environments from the rule or creating specific exceptions for known testing activities.
-</li>
-<li class="listitem">
-Third-party integrations: Some third-party tools or integrations might require EC2 instances to assume roles for functionality. Verify these integrations and exclude their session patterns or instance IDs from triggering alerts.
-</li>
-</ul>
-</div>
+<p>This is very uncommon behavior.
+Known legitimate causes include:
+- AWS or internal security automation that programmatically initiates console sessions for validation or testing.
+- Forensic or incident-response automation that logs in using temporary credentials from a compromised instance.
+- Red-team or penetration-testing activity designed to validate IMDS exposure or lateral movement scenarios.</p>
+<p>For any other occurrence, treat the alert as potentially malicious.
+Validate through:
+- The originating instance’s purpose and owner.
+- Known automation patterns in <code class="literal">user_agent.original</code>.
+- The timestamp alignment with planned testing or security validation.</p>
 <p><span class="strong strong"><strong>Response and remediation</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately revoke the temporary credentials associated with the compromised EC2 instance to prevent further unauthorized access.
+<span class="strong strong"><strong>Immediate containment</strong></span>
 </li>
 <li class="listitem">
-Isolate the affected EC2 instance from the network to contain any potential lateral movement by the attacker.
+Revoke the temporary credentials for the affected role (<code class="literal">aws sts revoke-session-token</code> or rotate the role credentials).
 </li>
 <li class="listitem">
-Conduct a thorough review of CloudTrail logs to identify any unauthorized actions performed using the assumed role and assess the extent of the compromise.
+Isolate the associated EC2 instance (e.g., detach it from the VPC or security groups) to prevent further credential misuse.
 </li>
 <li class="listitem">
-Reset and rotate all credentials and access keys associated with the compromised EC2 instance and any other potentially affected resources.
+Invalidate active console sessions via AWS CLI or the AWS Console.
 </li>
 <li class="listitem">
-Implement stricter IAM policies and role permissions to limit the scope of access for EC2 instances, ensuring the principle of least privilege is enforced.
+<span class="strong strong"><strong>Investigation and scoping</strong></span>
 </li>
 <li class="listitem">
-Notify the security operations team and relevant stakeholders about the incident for further investigation and to initiate any necessary legal or compliance procedures.
+Review CloudTrail logs for all actions associated with the compromised role in the preceding 24 hours.
 </li>
 <li class="listitem">
-Enhance monitoring and alerting mechanisms to detect similar patterns of unusual console login activities in the future, ensuring rapid response to potential threats.
+Determine if additional roles or instances show similar <code class="literal">ConsoleLogin</code> patterns.
+</li>
+<li class="listitem">
+Search for network indicators of IMDS exploitation (e.g., requests to <code class="literal">169.254.169.254</code> from unauthorized binaries or users).
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Recovery and hardening</strong></span>
+</li>
+<li class="listitem">
+Rotate all credentials for affected roles and users.
+</li>
+<li class="listitem">
+Apply IMDSv2 enforcement to prevent credential harvesting from EC2 metadata.
+</li>
+<li class="listitem">
+Implement restrictive IAM policies: deny console access (<code class="literal">iam:PassRole</code>, <code class="literal">sts:GetFederationToken</code>) for non-human roles.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-incident-response-playbooks/blob/c151b0dc091755fffd4d662a8f29e2f6794da52c/playbooks/" class="ulink" target="_top">AWS IR Playbooks</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-customer-playbook-framework/tree/a8c7b313636b406a375952ac00b2d68e89a991f2/docs" class="ulink" target="_top">AWS Customer Playbook Framework</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Security Best Practices:</strong></span> <a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">AWS Knowledge Center – Security Best Practices</a>.
 </li>
 </ul>
 </div>
@@ -210,7 +263,7 @@ Enhance monitoring and alerting mechanisms to detect similar patterns of unusual
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">any where event.dataset == "aws.cloudtrail"
+<pre class="programlisting prettyprint lang-js">info where event.dataset == "aws.cloudtrail"
    and event.provider == "signin.amazonaws.com"
    and event.action in ("ConsoleLogin", "GetSigninToken")
    and event.outcome == "success"
@@ -305,6 +358,54 @@ Reference URL: <a href="https://attack.mitre.org/techniques/T1550/001/" class="u
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
+Name: Persistence
+</li>
+<li class="listitem">
+ID: TA0003
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/tactics/TA0003/" class="ulink" target="_top">https://attack.mitre.org/tactics/TA0003/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Technique:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Name: Valid Accounts
+</li>
+<li class="listitem">
+ID: T1078
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/techniques/T1078/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1078/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Sub-technique:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Name: Cloud Accounts
+</li>
+<li class="listitem">
+ID: T1078.004
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/techniques/T1078/004/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1078/004/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Tactic:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
 Name: Credential Access
 </li>
 <li class="listitem">
@@ -312,6 +413,38 @@ ID: TA0006
 </li>
 <li class="listitem">
 Reference URL: <a href="https://attack.mitre.org/tactics/TA0006/" class="ulink" target="_top">https://attack.mitre.org/tactics/TA0006/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Technique:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Name: Unsecured Credentials
+</li>
+<li class="listitem">
+ID: T1552
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/techniques/T1552/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1552/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Sub-technique:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Name: Cloud Instance Metadata API
+</li>
+<li class="listitem">
+ID: T1552.005
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/techniques/T1552/005/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1552/005/</a>
 </li>
 </ul>
 </div>

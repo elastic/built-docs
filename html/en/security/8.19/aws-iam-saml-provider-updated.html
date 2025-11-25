@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="aws-iam-saml-provider-updated"></a>AWS IAM SAML Provider Updated</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-saml-provider-updated.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies when a user has updated a SAML provider in AWS. SAML providers are used to enable federated access to the AWS Management Console. This activity could be an indication of an attacker attempting to escalate privileges.</p>
+<p>Detects when an AWS IAM SAML provider is updated, which manages federated authentication between AWS and external identity providers (IdPs). Adversaries with administrative access may modify a SAML provider’s metadata or certificate to redirect authentication flows, enable unauthorized federation, or escalate privileges through identity trust manipulation. Because SAML providers underpin single sign-on (SSO) access for users and applications, unauthorized modifications may allow persistent or covert access even after credentials are revoked. Monitoring  "UpdateSAMLProvider" API activity is critical to detect potential compromise of federated trust relationships.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -131,7 +131,7 @@ logs-aws.cloudtrail-*
 <p><span class="strong strong"><strong>Severity</strong></span>: medium</p>
 <p><span class="strong strong"><strong>Risk score</strong></span>: 47</p>
 <p><span class="strong strong"><strong>Runs every</strong></span>: 5m</p>
-<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-9m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
+<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-6m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
 <p><span class="strong strong"><strong>Maximum alerts per execution</strong></span>: 100</p>
 <p><span class="strong strong"><strong>References</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -167,7 +167,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 210</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 211</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -182,7 +182,7 @@ Austin Songer
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_64"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-saml-provider-updated.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_62"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-saml-provider-updated.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <div class="quoteblock">
@@ -192,27 +192,60 @@ This investigation guide was created using generative AI technology and has been
 </blockquote>
 </div>
 <p><span class="strong strong"><strong>Investigating AWS IAM SAML Provider Updated</strong></span></p>
-<p>AWS IAM SAML providers facilitate federated access, allowing users to authenticate via external identity providers. Adversaries may exploit this by updating SAML providers to gain unauthorized access or escalate privileges. The detection rule monitors successful updates to SAML providers, flagging potential privilege escalation attempts by correlating specific AWS CloudTrail events.</p>
+<p>AWS IAM SAML providers enable federated authentication between AWS and external identity providers (IdPs),
+allowing users from trusted domains to access AWS resources without separate credentials.
+Updating a SAML provider can modify the trust relationship — including the signing certificate or metadata document —
+and, if abused, may allow an attacker to redirect authentication flows or gain access through a malicious or compromised IdP.</p>
+<p>This rule detects successful <code class="literal">UpdateSAMLProvider</code> API calls that do not originate from AWS Single Sign-On (SSO),
+as normal SSO operations are filtered out. These changes can be significant because a single unauthorized update
+can affect all federated authentication in the account.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the AWS CloudTrail logs to identify the user or role associated with the UpdateSAMLProvider event. Check for any unusual or unauthorized users making changes.
+<span class="strong strong"><strong>Validate the actor and context</strong></span>
 </li>
 <li class="listitem">
-Examine the context of the UpdateSAMLProvider event, including the time of the event and any associated IP addresses or locations, to identify any anomalies or suspicious patterns.
+Review <code class="literal">aws.cloudtrail.user_identity.arn</code>, <code class="literal">user.name</code>, and <code class="literal">user_agent.original</code> to determine who performed the update.
 </li>
 <li class="listitem">
-Investigate the history of changes to the specific SAML provider to determine if there have been any recent unauthorized or unexpected modifications.
+Confirm if the actor is part of an authorized identity management or platform engineering group.
 </li>
 <li class="listitem">
-Check for any other related AWS CloudTrail events around the same timeframe, such as changes to IAM roles or policies, which might indicate a broader privilege escalation attempt.
+Review <code class="literal">source.ip</code> and <code class="literal">cloud.region</code> fields for unexpected geolocations, IP ranges, or service origins.
 </li>
 <li class="listitem">
-Assess the permissions and access levels of the user or role that performed the update to ensure they align with expected privileges and responsibilities.
+<span class="strong strong"><strong>Assess the scope of the modification</strong></span>
 </li>
 <li class="listitem">
-If suspicious activity is confirmed, consider revoking or limiting access for the involved user or role and review the security posture of the AWS environment to prevent future incidents.
+Parse the <code class="literal">aws.cloudtrail.request_parameters</code> for updates to <code class="literal">SAMLMetadataDocument</code> or <code class="literal">Certificate</code> attributes.
+</li>
+<li class="listitem">
+Compare the new metadata with previous versions (available via AWS CLI or AWS Config) to detect unauthorized IdP URLs,
+certificates, or assertion endpoints.
+</li>
+<li class="listitem">
+Identify whether the change replaced a valid trusted certificate with an unknown or self-signed one.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Correlate related IAM and authentication events</strong></span>
+</li>
+<li class="listitem">
+Look for preceding <code class="literal">CreateSAMLProvider</code> or <code class="literal">DeleteSAMLProvider</code> activity, as attackers may replace existing trust entities.
+</li>
+<li class="listitem">
+Search for follow-up logins (<code class="literal">AssumeRoleWithSAML</code>) or STS tokens issued shortly after the update — this could indicate
+immediate exploitation of the new configuration.
+</li>
+<li class="listitem">
+Check for concurrent changes to IAM roles associated with SAML federated access.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Confirm authorization</strong></span>
+</li>
+<li class="listitem">
+Coordinate with your identity management team to confirm whether the SAML provider update aligns with
+planned IdP maintenance or certificate rotation.
 </li>
 </ul>
 </div>
@@ -220,16 +253,24 @@ If suspicious activity is confirmed, consider revoking or limiting access for th
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Routine administrative updates to SAML providers by authorized personnel can trigger alerts. To manage this, maintain a list of known administrators and their expected activities, and create exceptions for these users in the detection rule.
+<span class="strong strong"><strong>Planned SSO certificate rotation</strong></span>
 </li>
 <li class="listitem">
-Scheduled updates or maintenance activities involving SAML providers may also result in false positives. Document these activities and adjust the detection rule to exclude events occurring during these scheduled times.
+Most legitimate SAML provider updates occur during routine certificate renewals by authorized IdP admins.
+Validate that the update timing aligns with planned identity provider operations.
 </li>
 <li class="listitem">
-Automated scripts or tools used for managing SAML providers can generate alerts if they perform updates. Identify these scripts and their expected behavior, then configure the detection rule to recognize and exclude these specific actions.
+<span class="strong strong"><strong>Automated infrastructure processes</strong></span>
 </li>
 <li class="listitem">
-Changes made by trusted third-party services integrated with AWS IAM might be flagged. Verify the legitimacy of these services and consider adding them to an allowlist to prevent unnecessary alerts.
+CI/CD or configuration-as-code pipelines may automatically update SAML metadata as part of deployment.
+Verify whether this activity matches known automation patterns.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Third-party IdP integrations</strong></span>
+</li>
+<li class="listitem">
+Some integrated SaaS applications update SAML providers programmatically. Confirm the vendor and the originating credentials before closing as benign.
 </li>
 </ul>
 </div>
@@ -237,25 +278,56 @@ Changes made by trusted third-party services integrated with AWS IAM might be fl
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately revoke any unauthorized changes to the SAML provider by restoring the previous configuration from backups or logs.
+<span class="strong strong"><strong>Immediate review and containment</strong></span>
 </li>
 <li class="listitem">
-Conduct a thorough review of recent IAM activity logs to identify any unauthorized access or privilege escalation attempts associated with the updated SAML provider.
+Retrieve the current SAML provider configuration using the AWS CLI (<code class="literal">aws iam get-saml-provider</code>)
+and compare it with the previous known-good state.
 </li>
 <li class="listitem">
-Temporarily disable the affected SAML provider to prevent further unauthorized access while the investigation is ongoing.
+If unauthorized changes are confirmed, restore the previous configuration or delete the compromised provider.
 </li>
 <li class="listitem">
-Notify the security team and relevant stakeholders about the incident for awareness and further investigation.
+Temporarily disable federated login access for affected roles or accounts until validation is complete.
 </li>
 <li class="listitem">
-Implement additional monitoring and alerting for any future changes to SAML providers to ensure rapid detection of unauthorized modifications.
+<span class="strong strong"><strong>Investigation and scoping</strong></span>
 </li>
 <li class="listitem">
-Review and tighten IAM policies and permissions to ensure that only authorized personnel can update SAML providers.
+Review CloudTrail logs for related IAM configuration changes, including <code class="literal">CreateRole</code>, <code class="literal">AttachRolePolicy</code>, or
+<code class="literal">UpdateAssumeRolePolicy</code> events that may expand federated trust scope.
 </li>
 <li class="listitem">
-Consider implementing multi-factor authentication (MFA) for all users with permissions to modify IAM configurations to enhance security.
+Identify any <code class="literal">AssumeRoleWithSAML</code> or <code class="literal">GetFederationToken</code> events following the update, indicating possible exploitation.
+</li>
+<li class="listitem">
+Cross-check logs from your external IdP to verify if unauthorized assertions or logins were attempted post-update.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Recovery and hardening</strong></span>
+</li>
+<li class="listitem">
+Limit permissions to modify SAML providers (<code class="literal">iam:UpdateSAMLProvider</code>) to a dedicated identity management role.
+</li>
+<li class="listitem">
+Enforce change control documentation and peer review for all federation configuration changes.
+</li>
+<li class="listitem">
+Enable AWS Config to monitor and record SAML provider resource configuration history.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-incident-response-playbooks/blob/c151b0dc091755fffd4d662a8f29e2f6794da52c/playbooks/" class="ulink" target="_top">AWS IR Playbooks</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-customer-playbook-framework/tree/a8c7b313636b406a375952ac00b2d68e89a991f2/docs" class="ulink" target="_top">AWS Customer Playbook Framework</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Security Best Practices:</strong></span> <a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">AWS Knowledge Center – Security Best Practices</a>.
 </li>
 </ul>
 </div>
@@ -263,21 +335,15 @@ Consider implementing multi-factor authentication (MFA) for all users with permi
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_32"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-saml-provider-updated.asciidoc">edit</a></div>
-</div></div></div>
-<p>The AWS Fleet integration, Filebeat module, or similarly structured data is required to be compatible with this rule.</p>
-</div>
-
-<div class="section">
-<div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_66"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-saml-provider-updated.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_64"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-saml-provider-updated.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">event.dataset:aws.cloudtrail
-    and event.provider: iam.amazonaws.com
-    and event.action: UpdateSAMLProvider
-    and event.outcome:success</pre>
+<pre class="programlisting prettyprint lang-js">event.dataset: "aws.cloudtrail"
+    and event.provider: "iam.amazonaws.com"
+    and event.action: "UpdateSAMLProvider"
+    and event.outcome: "success"
+    and not (source.address: "sso.amazonaws.com" and user_agent.original: "sso.amazonaws.com")</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

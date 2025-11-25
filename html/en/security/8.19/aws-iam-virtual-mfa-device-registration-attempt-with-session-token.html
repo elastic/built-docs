@@ -115,8 +115,8 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="aws-iam-virtual-mfa-device-registration-attempt-with-session-token"></a>AWS IAM Virtual MFA Device Registration Attempt with Session Token</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-virtual-mfa-device-registration-attempt-with-session-token.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies attempts to register or enable an IAM Virtual MFA device using temporary credentials (access keys starting with <em>ASIA</em>). This may indicate an adversary attempting to escalate privileges or establish persistence using stolen session tokens.</p>
-<p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
+<p>Detects attempts to create or enable a Virtual MFA device (CreateVirtualMFADevice, EnableMFADevice) using temporary AWS credentials (access keys beginning with ASIA). Session credentials are short-lived and tied to existing authenticated sessions, so using them to register or enable MFA devices is unusual. Adversaries who compromise temporary credentials may abuse this behavior to establish persistence by attaching new MFA devices to maintain access to high-privilege accounts despite key rotation or password resets.</p>
+<p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -131,7 +131,7 @@ logs-aws.cloudtrail-*
 <p><span class="strong strong"><strong>Severity</strong></span>: medium</p>
 <p><span class="strong strong"><strong>Risk score</strong></span>: 47</p>
 <p><span class="strong strong"><strong>Runs every</strong></span>: 5m</p>
-<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-9m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
+<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-6m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
 <p><span class="strong strong"><strong>Maximum alerts per execution</strong></span>: 100</p>
 <p><span class="strong strong"><strong>References</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -170,7 +170,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 2</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 3</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -182,53 +182,146 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_67"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-virtual-mfa-device-registration-attempt-with-session-token.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_65"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-virtual-mfa-device-registration-attempt-with-session-token.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and Analysis</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This investigation guide was created using generative AI technology and validated for accuracy and relevance. Always
+tailor the steps to your organization&#8217;s environment and operational context.</p>
+</blockquote>
+</div>
 <p><span class="strong strong"><strong>Investigating AWS IAM Virtual MFA Device Registration Attempt with Session Token</strong></span></p>
-<p>AWS temporary security credentials that begin with <code class="literal">ASIA</code> indicate they are session tokens. An attempt to create or enable a Virtual MFA device using such credentials is uncommon and may indicate malicious activity.</p>
-<p><span class="strong strong"><strong>Possible Investigation Steps</strong></span></p>
+<p>Temporary credentials that start with the prefix <code class="literal">ASIA</code> are generated by the AWS Security Token Service (STS). These
+session tokens are used for short-lived operations and should not be used to modify or register IAM
+authentication mechanisms. This rule detects cases where an IAM user or role uses such temporary credentials to invoke either <code class="literal">CreateVirtualMFADevice</code> or <code class="literal">EnableMFADevice</code>.</p>
+<p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Identify the User</strong></span>: Check <code class="literal">user.name</code>, <code class="literal">user.arn</code>, and <code class="literal">aws.cloudtrail.user_identity.*</code> fields to determine which IAM entity made the request.
+<span class="strong strong"><strong>Identify the actor and session context</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Check for Prior Reconnaissance or Access</strong></span>: Correlate this event with any prior calls to <code class="literal">GetSessionToken</code>, <code class="literal">GetCallerIdentity</code>, or <code class="literal">ListUsers</code> to see if an adversary was enumerating IAM users.
+Review <code class="literal">aws.cloudtrail.user_identity.arn</code> and <code class="literal">aws.cloudtrail.user_identity.access_key_id</code> to determine the identity and confirm the <code class="literal">ASIA</code> prefix.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Source Context</strong></span>: Review <code class="literal">source.ip</code>, <code class="literal">user_agent</code>, and <code class="literal">event.origin</code> to determine whether this came from a legitimate device or a suspicious endpoint (e.g., Kali, Mythic, unknown VPN).
+If you ingest <code class="literal">event.original</code>, look for <code class="literal">sessionCredentialFromConsole: true</code> to determine if the temporary token is from a console login session (which uses temporary session tokens in the backend) rather than compromised session tokens.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Validate MFA Setup</strong></span>: Look for follow-up attempts to call <code class="literal">sts:get-session-token</code> or <code class="literal">iam:EnableMFADevice</code> using this same session.
+Check <code class="literal">user_agent.original</code>, <code class="literal">source.ip</code>, and <code class="literal">cloud.region</code> to determine if this activity originated from an expected host, VPN, or location.
+</li>
+<li class="listitem">
+Cross-reference with prior activity by this identity—especially <code class="literal">GetSessionToken</code>, <code class="literal">AssumeRole</code>, or <code class="literal">GetCallerIdentity</code> calls.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Correlate related IAM events</strong></span>
+</li>
+<li class="listitem">
+Search for subsequent or preceding calls to:
+</li>
+<li class="listitem">
+<code class="literal">EnableMFADevice</code> (after <code class="literal">CreateVirtualMFADevice</code>)
+</li>
+<li class="listitem">
+<code class="literal">DeactivateMFADevice</code> or <code class="literal">DeleteVirtualMFADevice</code>
+</li>
+<li class="listitem">
+<code class="literal">ListMFADevices</code>, <code class="literal">ListUsers</code>, or <code class="literal">UpdateLoginProfile</code>
+</li>
+<li class="listitem">
+Review whether new MFA devices were successfully enabled (<code class="literal">event.outcome:success</code>).
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Assess session scope and privileges</strong></span>
+</li>
+<li class="listitem">
+Identify what IAM policies are attached to the user or role that issued this request.
+</li>
+<li class="listitem">
+If the temporary credentials were created via <code class="literal">AssumeRole</code> or <code class="literal">GetSessionToken</code>, check the originating principal’s permissions.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Investigate possible persistence</strong></span>
+</li>
+<li class="listitem">
+Look for new MFA devices listed for privileged users (e.g., account root or admin roles).
+</li>
+<li class="listitem">
+Review login history for those accounts following the MFA change.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>False Positive Analysis</strong></span></p>
+<p><span class="strong strong"><strong>False positive analysis</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This may occur if an admin or automation tool is legitimately setting up a new MFA device using temporary credentials.
+<span class="strong strong"><strong>Legitimate Administrative or Automated Actions</strong></span>
+Certain IAM administrative workflows or CI/CD automation tools may register or enable MFA devices using temporary
+session credentials. Confirm whether the calling principal is part of an authorized automation process or a known
+identity performing account configuration tasks.
 </li>
 <li class="listitem">
-Review the IP, agent, and context to differentiate expected automation from unauthorized access.
+<span class="strong strong"><strong>Expected Console Behavior</strong></span>
+When users create or enable Virtual MFA devices through the <span class="strong strong"><strong>AWS Management Console</strong></span>, AWS automatically issues
+temporary STS credentials (with access key IDs beginning with <code class="literal">ASIA</code>) for that session. As a result, these events will
+appear identical to programmatic usage of session tokens in CloudTrail logs.
+This is expected and does not indicate compromise.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Response and Remediation</strong></span></p>
+<p><span class="strong strong"><strong>Response and remediation</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Revoke Credentials</strong></span>: If unauthorized, revoke the access keys or terminate the session.
+<span class="strong strong"><strong>Immediate containment</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Reset MFA and Passwords</strong></span>: Rotate credentials for the affected IAM user.
+Revoke or expire the temporary credentials (<code class="literal">aws sts revoke-session</code> if applicable).
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Review IAM Policies</strong></span>: Limit permissions to register MFA devices to trusted roles only.
+Disable or delete any newly created virtual MFA devices using <code class="literal">DeleteVirtualMFADevice</code>.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Enable CloudTrail Alerts</strong></span>: Monitor IAM changes more broadly with CloudTrail-based alerts.
+Rotate passwords and long-term access keys for the associated IAM users.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Investigation and scoping</strong></span>
+</li>
+<li class="listitem">
+Review CloudTrail logs for related IAM modifications (<code class="literal">UpdateLoginProfile</code>, <code class="literal">AttachUserPolicy</code>, <code class="literal">CreateAccessKey</code>).
+</li>
+<li class="listitem">
+Identify any new API keys or tokens created after the MFA registration.
+</li>
+<li class="listitem">
+Cross-check whether the attacker leveraged the new MFA binding for session persistence or login.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Recovery and hardening</strong></span>
+</li>
+<li class="listitem">
+Enforce the <code class="literal">iam:EnableMFADevice</code> and <code class="literal">iam:CreateVirtualMFADevice</code> permissions only for trusted admin roles.
+</li>
+<li class="listitem">
+Implement <code class="literal">aws:MultiFactorAuthPresent</code> conditions in IAM policies.
+</li>
+<li class="listitem">
+Monitor for any future <code class="literal">ASIA</code> credential–based IAM configuration changes.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-incident-response-playbooks/blob/c151b0dc091755fffd4d662a8f29e2f6794da52c/playbooks/" class="ulink" target="_top">AWS IR Playbooks</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-customer-playbook-framework/tree/a8c7b313636b406a375952ac00b2d68e89a991f2/docs" class="ulink" target="_top">AWS Customer Playbook Framework</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa.html" class="ulink" target="_top">Managing MFA Devices in IAM</a></strong></span>
 </li>
 </ul>
 </div>
@@ -236,14 +329,15 @@ Review the IP, agent, and context to differentiate expected automation from unau
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_69"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-virtual-mfa-device-registration-attempt-with-session-token.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_67"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-virtual-mfa-device-registration-attempt-with-session-token.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">event.dataset: "aws.cloudtrail"
-  and event.provider: "iam.amazonaws.com"
-  and event.action: ("CreateVirtualMFADevice" or "EnableMFADevice")
-  and aws.cloudtrail.user_identity.access_key_id: ASIA*</pre>
+<pre class="programlisting prettyprint lang-js">iam where event.dataset == "aws.cloudtrail"
+  and event.provider == "iam.amazonaws.com"
+  and event.outcome == "success"
+  and event.action in ("CreateVirtualMFADevice", "EnableMFADevice")
+  and startsWith (aws.cloudtrail.user_identity.access_key_id, "ASIA")</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
@@ -292,6 +386,38 @@ ID: T1098.005
 </li>
 <li class="listitem">
 Reference URL: <a href="https://attack.mitre.org/techniques/T1098/005/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1098/005/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Technique:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Name: Modify Authentication Process
+</li>
+<li class="listitem">
+ID: T1556
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/techniques/T1556/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1556/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Sub-technique:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Name: Multi-Factor Authentication
+</li>
+<li class="listitem">
+ID: T1556.006
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/techniques/T1556/006/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1556/006/</a>
 </li>
 </ul>
 </div>

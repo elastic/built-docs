@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="aws-iam-group-deletion"></a>AWS IAM Group Deletion</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-group-deletion.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies the deletion of a specified AWS Identity and Access Management (IAM) resource group. Deleting a resource group does not delete resources that are members of the group; it only deletes the group structure.</p>
+<p>Detects when an IAM group is deleted using the DeleteGroup API call. Deletion of an IAM group may represent a malicious attempt to remove audit trails, disrupt operations, or hide adversary activity (for example after using the group briefly for privileged access). This can be an indicator of impact or cleanup in an attack lifecycle.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -61,8 +61,8 @@ logs-aws.cloudtrail-*
 </div>
 <p><span class="strong strong"><strong>Severity</strong></span>: low</p>
 <p><span class="strong strong"><strong>Risk score</strong></span>: 21</p>
-<p><span class="strong strong"><strong>Runs every</strong></span>: 10m</p>
-<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-60m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
+<p><span class="strong strong"><strong>Runs every</strong></span>: 5m</p>
+<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-6m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
 <p><span class="strong strong"><strong>Maximum alerts per execution</strong></span>: 100</p>
 <p><span class="strong strong"><strong>References</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -98,7 +98,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 209</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 210</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -110,7 +110,7 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_60"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-group-deletion.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_58"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-group-deletion.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <div class="quoteblock">
@@ -120,27 +120,39 @@ This investigation guide was created using generative AI technology and has been
 </blockquote>
 </div>
 <p><span class="strong strong"><strong>Investigating AWS IAM Group Deletion</strong></span></p>
-<p>AWS IAM groups facilitate user management by organizing users with similar permissions. Adversaries might exploit group deletion to disrupt access controls, potentially leading to unauthorized access or service disruption. The detection rule monitors successful group deletions via AWS CloudTrail, flagging potential misuse by correlating specific IAM actions and outcomes, thus aiding in timely threat identification.</p>
+<p>Attackers sometimes remove groups to erase evidence, disrupt operations, or prevent users from receiving needed permissions (Impact). Deletion can also follow malicious cleanup after attaching policies and using the group briefly. This alert fires on <code class="literal">DeleteGroup</code> API call. Consider intentional disruption or covering tracks, particularly if the group was privileged or recently modified.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the AWS CloudTrail logs to identify the user or role that performed the DeleteGroup action by examining the userIdentity field.
+<span class="strong strong"><strong>Identify the actor and environment</strong></span>
 </li>
 <li class="listitem">
-Check the event time to determine when the group deletion occurred and correlate it with any other suspicious activities around the same timeframe.
+Review <code class="literal">aws.cloudtrail.user_identity.arn</code>, <code class="literal">aws.cloudtrail.user_identity.access_key_id</code>.
 </li>
 <li class="listitem">
-Investigate the specific IAM group that was deleted to understand its purpose and the permissions it granted by reviewing historical IAM policies and group membership.
+Check <code class="literal">source.ip</code>, <code class="literal">user_agent.original</code>, <code class="literal">cloud.account.id</code>, <code class="literal">cloud.region</code> for atypical activity.
 </li>
 <li class="listitem">
-Assess the impact of the group deletion by identifying any users or services that might have been affected due to the loss of group-based permissions.
+<span class="strong strong"><strong>Determine what was lost</strong></span>
 </li>
 <li class="listitem">
-Verify if the group deletion was authorized by cross-referencing with change management records or contacting the responsible team or individual.
+From <code class="literal">aws.cloudtrail.request_parameters</code>, capture <code class="literal">groupName</code>.
 </li>
 <li class="listitem">
-Look for any patterns or repeated occurrences of similar actions in the logs to identify potential malicious behavior or misconfigurations.
+Use history or logs to identify existing members and attached policies prior to deletion (ex: <code class="literal">GetGroup</code>, <code class="literal">ListAttachedGroupPolicies</code>).
+</li>
+<li class="listitem">
+Determine if the group contained privileged roles/policies that could have been weaponized.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Correlate with related activity</strong></span>
+</li>
+<li class="listitem">
+Look in the prior 1–24h for <code class="literal">DetachGroupPolicy</code>, <code class="literal">RemoveUserFromGroup</code>, <code class="literal">DeleteGroupPolicy</code>, which often precede deletion in adversary cleanup workflows.
+</li>
+<li class="listitem">
+After deletion, monitor for creation of new similarly-named groups, or re-attachment of policies to other groups/roles.
 </li>
 </ul>
 </div>
@@ -148,16 +160,10 @@ Look for any patterns or repeated occurrences of similar actions in the logs to 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Routine administrative tasks may trigger alerts when IAM groups are deleted as part of regular maintenance or restructuring. To manage this, create exceptions for known maintenance periods or specific administrative accounts.
+Projects &amp; services that are being decommissioned often require group deletion. Confirm through internal inventory and change control.
 </li>
 <li class="listitem">
-Automated scripts or tools that manage IAM resources might delete groups as part of their normal operation. Identify these scripts and exclude their actions from triggering alerts by using specific user or role identifiers.
-</li>
-<li class="listitem">
-Temporary groups created for short-term projects or testing purposes might be deleted frequently. Document these groups and exclude their deletion from monitoring by using naming conventions or tags.
-</li>
-<li class="listitem">
-Changes in organizational structure or policy might necessitate the deletion of certain groups. Coordinate with relevant teams to anticipate these changes and adjust monitoring rules accordingly.
+Sandbox or dev accounts frequently create and delete groups; ensure the environment context is understood.
 </li>
 </ul>
 </div>
@@ -165,44 +171,30 @@ Changes in organizational structure or policy might necessitate the deletion of 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately revoke any active sessions and access keys for users who were part of the deleted IAM group to prevent unauthorized access.
+<span class="strong strong"><strong>Containment</strong></span>: If deletion was unauthorized, restrict the actor’s IAM privileges and block further configuration changes.
 </li>
 <li class="listitem">
-Restore the deleted IAM group from a backup or recreate it with the same permissions to ensure continuity of access for legitimate users.
+<span class="strong strong"><strong>Investigation and scoping</strong></span>: Recover details of the deleted group (members, policies) from logs or AWS Config, and determine the impact of the deletion (which users lost membership, service account disruption).
 </li>
 <li class="listitem">
-Conduct a review of recent IAM activity logs to identify any unauthorized or suspicious actions that may have preceded the group deletion.
-</li>
-<li class="listitem">
-Notify the security team and relevant stakeholders about the incident for awareness and further investigation.
-</li>
-<li class="listitem">
-Implement additional monitoring on IAM activities, especially focusing on group management actions, to detect similar threats in the future.
-</li>
-<li class="listitem">
-Review and tighten IAM policies and permissions to ensure that only authorized personnel can delete IAM groups.
-</li>
-<li class="listitem">
-If malicious intent is suspected, escalate the incident to the incident response team for a comprehensive investigation and potential legal action.
+<span class="strong strong"><strong>Recovery and hardening</strong></span>: Recreate the group if necessary, restore intended policies and memberships, enforce change-control for group deletions, restrict <code class="literal">iam:DeleteGroup</code> privileges, and create alerts for destructive IAM operations.
 </li>
 </ul>
 </div>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
+<p><a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">AWS Security Best Practices</a></p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_31"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-group-deletion.asciidoc">edit</a></div>
-</div></div></div>
-<p>The AWS Fleet integration, Filebeat module, or similarly structured data is required to be compatible with this rule.</p>
-</div>
-
-<div class="section">
-<div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_61"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-group-deletion.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_59"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-group-deletion.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">event.dataset:aws.cloudtrail and event.provider:iam.amazonaws.com and event.action:DeleteGroup and event.outcome:success</pre>
+<pre class="programlisting prettyprint lang-js">event.dataset: aws.cloudtrail and
+    event.provider: iam.amazonaws.com and
+    event.action: DeleteGroup and
+    event.outcome: success</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

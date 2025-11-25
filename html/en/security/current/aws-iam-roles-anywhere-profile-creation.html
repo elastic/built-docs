@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="aws-iam-roles-anywhere-profile-creation"></a>AWS IAM Roles Anywhere Profile Creation</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-roles-anywhere-profile-creation.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies the creation of an AWS Roles Anywhere profile. AWS Roles Anywhere is a feature that allows you to use AWS Identity and Access Management (IAM) profiles to manage access to your AWS resources from any location via trusted anchors. This rule detects the creation of a profile that can be assumed from any service. Adversaries may create profiles tied to overly permissive roles to maintain access to AWS resources. Ensure that the profile creation is expected and that the trust policy is configured securely.</p>
+<p>Detects the creation of a new AWS IAM Roles Anywhere profile. Roles Anywhere allows workloads or external systems to assume IAM roles from outside AWS by authenticating via trusted certificate authorities (trust anchors). Adversaries who have established persistence through a rogue trust anchor may create or modify profiles to link them with highly privileged roles, enabling long-term external access to the AWS environment. This rule identifies successful "CreateProfile" API calls and helps detect potentially unauthorized or risky external access configurations.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -130,8 +130,8 @@ logs-aws.cloudtrail-*
 </div>
 <p><span class="strong strong"><strong>Severity</strong></span>: low</p>
 <p><span class="strong strong"><strong>Risk score</strong></span>: 21</p>
-<p><span class="strong strong"><strong>Runs every</strong></span>: 10m</p>
-<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-30m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
+<p><span class="strong strong"><strong>Runs every</strong></span>: 5m</p>
+<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-6m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
 <p><span class="strong strong"><strong>Maximum alerts per execution</strong></span>: 100</p>
 <p><span class="strong strong"><strong>References</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -176,7 +176,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 5</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 6</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -188,78 +188,183 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_62"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-roles-anywhere-profile-creation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_60"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-roles-anywhere-profile-creation.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance.
+While every effort has been made to ensure its quality, validate and adapt it to suit your operational needs.</p>
+</blockquote>
+</div>
 <p><span class="strong strong"><strong>Investigating AWS IAM Roles Anywhere Profile Creation</strong></span></p>
-<p>This rule detects the creation of an AWS Roles Anywhere profile. AWS Roles Anywhere allows you to use AWS Identity and Access Management (IAM) profiles to manage access to your AWS resources from any location via trusted anchors. Adversaries may create profiles tied to overly permissive roles to maintain access to AWS resources. It is crucial to ensure that the profile creation is expected and that the trust policy is configured securely.</p>
-<p><span class="strong strong"><strong>Possible Investigation Steps:</strong></span></p>
+<p>AWS IAM Roles Anywhere allows external workloads — such as CI/CD runners, on-premises systems, or third-party services —
+to assume IAM roles securely by presenting a certificate from a trusted anchor. A profile defines the IAM roles that
+can be assumed, the trust anchor they are associated with, and session duration limits.</p>
+<p>This rule detects when a new Roles Anywhere profile is created using the <code class="literal">CreateProfile</code> API call. Unauthorized profile
+creation can enable persistent external access if tied to over-privileged roles or to trust anchors associated with
+unauthorized certificate authorities (CAs). Monitoring profile creation is crucial to ensuring that only approved roles
+and anchors are in use.</p>
+<p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Identify the Actor</strong></span>: Review the <code class="literal">aws.cloudtrail.user_identity.arn</code> and <code class="literal">aws.cloudtrail.user_identity.access_key_id</code> fields to identify who created the profile. Verify if this actor typically performs such actions and if they have the necessary permissions.
+<span class="strong strong"><strong>Identify the actor</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Review the Request Details</strong></span>: Examine the <code class="literal">aws.cloudtrail.request_parameters</code> to understand the specific details of the profile creation. Look for any unusual parameters or overly permissive roles that could suggest unauthorized or malicious activity.
+Review <code class="literal">aws.cloudtrail.user_identity.arn</code> and <code class="literal">aws.cloudtrail.user_identity.access_key_id</code> to determine
+which IAM user, role, or principal created the profile.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Analyze the Source of the Request</strong></span>: Investigate the <code class="literal">source.ip</code> and <code class="literal">source.geo</code> fields to determine the location and origin of the request. Ensure the request originated from a known and trusted location.
+Check whether this identity normally manages Roles Anywhere configurations.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Check the Created Profile’s Permissions</strong></span>: Review the <code class="literal">roleArns</code> associated with the created profile. Verify that the roles are appropriate for the user&#8217;s intended actions and do not grant excessive permissions.
+<span class="strong strong"><strong>Review profile configuration</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Verify the Profile’s Configuration</strong></span>: Ensure that the profile&#8217;s <code class="literal">durationSeconds</code>, <code class="literal">enabled</code>, and <code class="literal">tags</code> are configured according to your organization&#8217;s security policies. Pay particular attention to any configuration that might allow prolonged access or concealment of activity.
+Inspect <code class="literal">aws.cloudtrail.request_parameters</code> for key values such as:
+</li>
+<li class="listitem">
+<code class="literal">profileName</code>
+</li>
+<li class="listitem">
+<code class="literal">roleArns</code> – confirm that the listed IAM roles are expected and not overly permissive.
+</li>
+<li class="listitem">
+<code class="literal">trustAnchorArn</code> – verify the trust anchor is valid and authorized.
+</li>
+<li class="listitem">
+<code class="literal">durationSeconds</code> – check for unusually long session durations.
+</li>
+<li class="listitem">
+Determine if multiple roles were attached, which may indicate excessive privilege aggregation.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Correlate related activity</strong></span>
+</li>
+<li class="listitem">
+Check for prior or concurrent events by the same actor, including:
+</li>
+<li class="listitem">
+<code class="literal">CreateTrustAnchor</code> with external or unauthorized certificate authorities.
+</li>
+<li class="listitem">
+<code class="literal">CreateRole</code>, <code class="literal">PutRolePolicy</code>, or <code class="literal">AttachRolePolicy</code> for privilege escalation paths.
+</li>
+<li class="listitem">
+Review whether subsequent <code class="literal">AssumeRoleWithCertificate</code> events occurred, indicating use of the new profile.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Assess the source context</strong></span>
+</li>
+<li class="listitem">
+Investigate <code class="literal">source.ip</code>, <code class="literal">user_agent.original</code>, and <code class="literal">source.geo</code> fields to identify if this request originated from an unfamiliar host, region, or automation client (e.g., <code class="literal">boto3</code>, <code class="literal">curl</code>, custom SDKs).
+</li>
+<li class="listitem">
+Compare to baseline patterns of legitimate IAM or infrastructure automation.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Validate legitimacy</strong></span>
+</li>
+<li class="listitem">
+Contact the responsible team (e.g., platform, PKI, or IAM administration) to confirm whether this profile creation
+aligns with approved change management or onboarding activities.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>False Positive Analysis:</strong></span></p>
+<p><span class="strong strong"><strong>False positive analysis:</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Legitimate Administrative Actions</strong></span>: Confirm if the profile creation aligns with scheduled updates, development activities, or legitimate administrative tasks documented in change management systems.
+<span class="strong strong"><strong>Legitimate administrative actions</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Consistency Check</strong></span>: Compare the action against historical data of similar actions performed by the user or within the organization. If the action is consistent with past legitimate activities, it might indicate a false alarm.
+IAM or PKI engineers may legitimately create profiles during setup of new external integrations or workloads.
+Validate against change control records and deployment logs.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Verify through Outcomes</strong></span>: Check the <code class="literal">aws.cloudtrail.response_elements</code> and the <code class="literal">event.outcome</code> to confirm if the profile creation was successful and intended according to policy.
+<span class="strong strong"><strong>Authorized automation</strong></span>
+</li>
+<li class="listitem">
+Infrastructure-as-code (IaC) pipelines (Terraform, CloudFormation, etc.) may automatically create profiles.
+Confirm these operations are sourced from known automation accounts or IP ranges.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Development and testing</strong></span>
+</li>
+<li class="listitem">
+Lab or sandbox accounts may test Roles Anywhere configurations with less restrictive controls.
+Ensure alerts from non-production accounts are tuned accordingly.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Response and Remediation:</strong></span></p>
+<p><span class="strong strong"><strong>Response and remediation:</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Immediate Review and Reversal if Necessary</strong></span>: If the profile creation was unauthorized, disable or delete the created profile and review the associated roles and permissions for any potential misuse.
+<span class="strong strong"><strong>Immediate review and containment</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Enhance Monitoring and Alerts</strong></span>: Adjust monitoring systems to alert on similar actions, especially those involving sensitive roles or unexpected locations.
+If unauthorized, disable or delete the created profile (<code class="literal">aws rolesanywhere delete-profile</code>) and review all
+associated IAM roles for misuse.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Educate and Train</strong></span>: Provide additional training to users with administrative rights on the importance of security best practices concerning profile and role management and the risks of unauthorized profile creation.
+Rotate any credentials or revoke certificates issued from unapproved trust anchors.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Audit IAM Policies and Permissions</strong></span>: Conduct a comprehensive audit of all IAM policies and associated permissions to ensure they adhere to the principle of least privilege.
+<span class="strong strong"><strong>Investigation</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Incident Response</strong></span>: If there&#8217;s an indication of malicious intent or a security breach, initiate the incident response protocol to mitigate any damage and prevent future occurrences.
+Search CloudTrail for additional related actions by the same identity, such as
+<code class="literal">CreateTrustAnchor</code>, <code class="literal">AssumeRoleWithCertificate</code>, or cross-account access attempts.
+</li>
+<li class="listitem">
+Verify whether any sessions have been initiated using the new profile and identify
+which roles were assumed.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Recovery and hardening</strong></span>
+</li>
+<li class="listitem">
+Restrict <code class="literal">rolesanywhere:CreateProfile</code> to a small set of administrative roles.
+</li>
+<li class="listitem">
+Implement AWS Config or Security Hub controls to alert on unauthorized or overly
+permissive Roles Anywhere profiles.
+</li>
+<li class="listitem">
+Audit IAM role trust policies linked to external anchors and ensure adherence to the
+principle of least privilege.
+</li>
+<li class="listitem">
+Review and document all approved Roles Anywhere profiles and their corresponding trust anchors.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Additional Information:</strong></span></p>
-<p>For further guidance on managing AWS IAM Roles Anywhere profiles and securing AWS environments, refer to the <a href="https://docs.aws.amazon.com/rolesanywhere/latest/userguide/introduction.html" class="ulink" target="_top">AWS Roles Anywhere documentation</a> and AWS best practices for security. Additionally, consult the following resources for specific details on profile management and potential abuse:
-- <a href="https://docs.aws.amazon.com/rolesanywhere/latest/APIReference/API_CreateProfile.html" class="ulink" target="_top">AWS IAM Roles Anywhere Profile Creation API Reference</a>
-- <a href="https://ermetic.com/blog/aws/keep-your-iam-users-close-keep-your-third-parties-even-closer-part-1/" class="ulink" target="_top">Ermetic Blog - Managing Third Party Access</a></p>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-incident-response-playbooks/blob/c151b0dc091755fffd4d662a8f29e2f6794da52c/playbooks/" class="ulink" target="_top">AWS IR Playbooks</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-customer-playbook-framework/tree/a8c7b313636b406a375952ac00b2d68e89a991f2/docs" class="ulink" target="_top">AWS Customer Playbook Framework</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Security Best Practices:</strong></span> <a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">AWS Knowledge Center – Security Best Practices</a>.
+</li>
+</ul>
+</div>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_64"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-roles-anywhere-profile-creation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_62"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-iam-roles-anywhere-profile-creation.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">event.dataset:aws.cloudtrail
+<pre class="programlisting prettyprint lang-js">event.dataset: aws.cloudtrail
     and event.provider: rolesanywhere.amazonaws.com
     and event.action: CreateProfile
     and event.outcome: success</pre>
