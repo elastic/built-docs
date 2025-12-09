@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="aws-s3-bucket-replicated-to-another-account"></a>AWS S3 Bucket Replicated to Another Account</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-s3-bucket-replicated-to-another-account.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies when the <code class="literal">PutBucketReplication</code> operation is used to replicate S3 objects to a bucket in another AWS account. Adversaries may use bucket replication to exfiltrate sensitive data to an environment they control.</p>
+<p>Identifies the creation or modification of an S3 bucket replication configuration that sends data to a bucket in a different AWS account. Cross-account replication can be used legitimately for backup, disaster recovery, and multi-account architectures, but adversaries with write access to an S3 bucket may abuse replication rules to silently exfiltrate large volumes of data to attacker-controlled accounts. This rule detects "PutBucketReplication" events where the configured destination account differs from the source bucket&#8217;s account, indicating potential unauthorized cross-account data movement.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -101,7 +101,7 @@ Tactic: Exfiltration
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 4</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 5</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -117,66 +117,84 @@ Elastic
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating AWS S3 Bucket Replicated to Another Account</strong></span></p>
-<p>This rule identifies when an S3 bucket is replicated to another AWS account. While sharing bucket replication is a common practice, adversaries may exploit this feature to exfiltrate data by replicating objects to external accounts under their control.</p>
-<p><span class="strong strong"><strong>Possible Investigation Steps</strong></span></p>
+<p>Cross-account S3 replication enables automated copying of S3 objects into a different AWS bucket. While useful for backup and organizational data flows, adversaries may exploit it as a covert exfiltration channel. Once replication is configured, any future writes to the bucket are silently copied to the destination bucket—even if object-level access controls block the attacker’s direct downloads. For this reason, unauthorized replication configuration should be considered high-risk.</p>
+<p>This rule detects successful <code class="literal">PutBucketReplication</code> events and flags cases where the replication configuration specifies a destination AWS account different from the source.</p>
+<p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
+<p><span class="strong strong"><strong>Understand who initiated the replication change</strong></span>
+- Inspect <code class="literal">aws.cloudtrail.user_identity.arn</code> and <code class="literal">aws.cloudtrail.user_identity.access_key_id</code> to identify the actor.
+- Review authentication patterns such as federated session names, role chaining via STS, or unfamiliar IAM roles.
+- Examine <code class="literal">source.ip</code>, <code class="literal">source.geo</code> fields, and <code class="literal">user_agent.original</code> for unusual locations, automation tools, or anomalous access paths.</p>
+<p><span class="strong strong"><strong>Examine the replication rule details</strong></span>
+- Inspect <code class="literal">aws.cloudtrail.request_parameters</code> for:
+  - The <span class="strong strong"><strong>destination account ID</strong></span> (<code class="literal">Account=</code>).
+  - The <span class="strong strong"><strong>IAM role ARN</strong></span> used for replication. (<code class="literal">Role=</code>)
+  - Any filtering rules (prefixes, tags) that narrow or broaden what will be replicated.</p>
+<p><span class="strong strong"><strong>Determine whether the destination account is authorized</strong></span>
+- Validate whether the destination AWS account belongs to your AWS Organization.
+- Check internal documentation, IaC templates, or tagging standards to confirm whether replication to this account is expected.
+- Look for prior legitimate infrastructure workflows such as:
+  - Centralized logging
+  - Backup/DR accounts
+  - Cross-region compliance replicas</p>
+<p>Unrecognized accounts should be treated as a strong exfiltration signal.</p>
+<p><span class="strong strong"><strong>Assess the scope of potential data exposure</strong></span>
+- Determine whether the bucket contains sensitive or regulated data (PII, financial records, secrets, logs, etc.).
+- Identify whether object versioning, lifecycle rules, or access logging were modified recently.
+- Check for preceding or subsequent actions such as:
+  - <code class="literal">PutBucketPolicy</code> updates granting new principals access
+  - Creation or modification of IAM roles tied to replication
+  - <code class="literal">DeleteObject</code> or <code class="literal">PutObjectRetention</code> attempts that might pair with exfiltration</p>
+<p><span class="strong strong"><strong>Correlate with other suspicious activity</strong></span>
+Pivot in CloudTrail on the same principal or same bucket:
+- Prior reconnaissance such as <code class="literal">ListBuckets</code>, <code class="literal">GetBucketReplication</code>, or <code class="literal">GetBucketPolicy</code>
+- Modification of KMS policies or unexpected encryption key usage
+- New access patterns from external IP addresses or unusual automation</p>
+<p><span class="strong strong"><strong>False positive analysis</strong></span></p>
+<p><span class="strong strong"><strong>Legitimate cross-account replication</strong></span>
+Validate:
+- The destination account belongs to a known OU or business unit
+- The replication role ARN matches expected automation
+- The change aligns with documented deployment or maintenance schedules</p>
+<p><span class="strong strong"><strong>Temporary migrations or transitions</strong></span>
+During account restructuring or workload migration, administrators may temporarily redirect replication to new accounts.</p>
+<p>Tuning options:
+- Exception lists based on IAM role ARNs
+- Tag-based environment scoping
+- Change-window-based suppression</p>
+<p><span class="strong strong"><strong>Response and remediation</strong></span></p>
+<p><span class="strong strong"><strong>Contain potential exfiltration</strong></span>
+- Remove or update replication rules to eliminate unauthorized destinations.
+- Disable or restrict the replication IAM role until the investigation is complete.
+- Review S3 object access logs to determine whether data has begun replicating to the external account.</p>
+<p><span class="strong strong"><strong>Investigate scope and impact</strong></span>
+- Identify the volume and types of data at risk of replication.
+- Determine whether the external bucket shows successful replication traffic (if logs or access are available).
+- Assess whether the actor also modified bucket policies, encryption settings, or KMS keys.</p>
+<p><span class="strong strong"><strong>Credential and role hygiene</strong></span>
+- Rotate credentials for the initiating user or role if compromise is suspected.
+- Review IAM role trust policies, especially if STS sessions or EC2 role assumptions were involved.
+- Enable MFA and tighten conditions for administrative roles capable of modifying replication.</p>
+<p><span class="strong strong"><strong>Hardening and preventive controls</strong></span>
+- Enforce SCPs that restrict cross-account replication except for explicitly approved destinations.
+- Require approval workflows before modifying replication or retention settings.
+- Use AWS Config and Security Hub controls to detect:
+  - Buckets with unexpected replication rules
+  - Newly added cross-account permissions
+  - Changes to bucket policies, block-public-access settings, or KMS key policies</p>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Identify the Actor</strong></span>: Review the <code class="literal">aws.cloudtrail.user_identity.arn</code> and <code class="literal">aws.cloudtrail.user_identity.access_key_id</code> fields to identify who made the change. Verify if this actor typically performs such actions and if they have the necessary permissions.
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-incident-response-playbooks/blob/c151b0dc091755fffd4d662a8f29e2f6794da52c/playbooks/" class="ulink" target="_top">AWS IR Playbooks</a></strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Review the Sharing Event</strong></span>: Identify the S3 bucket involved and review the event details. Look for <code class="literal">PutBucketReplication</code> actions where an <code class="literal">Account</code> key-value pair is included signifying replication to an external account.
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-customer-playbook-framework/tree/a8c7b313636b406a375952ac00b2d68e89a991f2/docs" class="ulink" target="_top">AWS Customer Playbook Framework</a></strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Request and Response Parameters</strong></span>: Check the <code class="literal">aws.cloudtrail.request_parameters</code> and <code class="literal">aws.cloudtrail.response_elements</code> fields in the CloudTrail event to identify the role used and account ID where the bucket was replicated.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Verify the Shared Bucket</strong></span>: Check the S3 bucket that was replicated and its contents to determine the sensitivity of the data stored within it.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Validate External Account</strong></span>: Examine the AWS account to which the bucket was replicated. Determine whether this account is known and previously authorized to access such resources.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Contextualize with Recent Changes</strong></span>: Compare this sharing event against recent changes in S3 configurations. Look for any other recent permissions changes or unusual administrative actions.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Correlate with Other Activities</strong></span>: Search for related CloudTrail events before and after this change to see if the same actor or IP address engaged in other potentially suspicious activities.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Interview Relevant Personnel</strong></span>: If the share was initiated by a user, verify the intent and authorization for this action with the person or team responsible for managing DB backups and snapshots.
+<span class="strong strong"><strong>Security Best Practices:</strong></span> <a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">AWS Knowledge Center – Security Best Practices</a>.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>False Positive Analysis</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-<span class="strong strong"><strong>Legitimate Backup Actions</strong></span>: Confirm if the S3 bucket replication aligns with scheduled backups or legitimate automation tasks.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Consistency Check</strong></span>: Compare the action against historical data of similar actions performed by the user or within the organization. If the action is consistent with past legitimate activities, it might indicate a false alarm.
-</li>
-</ul>
-</div>
-<p><span class="strong strong"><strong>Response and Remediation</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-<span class="strong strong"><strong>Immediate Review and Reversal</strong></span>: If the change was unauthorized, update the S3 configurations to remove any unauthorized replication rules.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Enhance Monitoring and Alerts</strong></span>: Adjust monitoring systems to alert on similar actions, especially those involving sensitive data or permissions.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Policy Update</strong></span>: Review and possibly update your organization’s policies on S3 bucket/object sharing to tighten control and prevent unauthorized access.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Incident Response</strong></span>: If malicious intent is confirmed, consider it a data breach incident and initiate the incident response protocol. This includes further investigation, containment, and recovery.
-</li>
-</ul>
-</div>
-<p><span class="strong strong"><strong>Additional Information:</strong></span></p>
-<p>For further guidance on managing and securing S3 buckets in AWS environments, refer to the <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/security.html/" class="ulink" target="_top">AWS S3 documentation</a> and AWS best practices for security.</p>
 </div>
 
 <div class="section">
@@ -185,10 +203,10 @@ Elastic
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">any where event.dataset == "aws.cloudtrail"
+<pre class="programlisting prettyprint lang-js">info where event.dataset == "aws.cloudtrail"
    and event.action == "PutBucketReplication"
    and event.outcome == "success"
-   and stringContains(aws.cloudtrail.request_parameters, "Account")</pre>
+   and stringContains(aws.cloudtrail.request_parameters, "Account=")</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

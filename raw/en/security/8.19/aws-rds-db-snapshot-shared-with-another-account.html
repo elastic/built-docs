@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="aws-rds-db-snapshot-shared-with-another-account"></a>AWS RDS DB Snapshot Shared with Another Account</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-rds-db-snapshot-shared-with-another-account.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies an AWS RDS DB snapshot being shared with another AWS account. DB snapshots contain a full backup of an entire DB instance including sensitive data that can be abused if shared with unauthorized accounts or made public. Adversaries may use snapshots to restore a DB Instance in an environment they control as a means of data exfiltration.</p>
+<p>Identifies when an AWS RDS DB snapshot is shared with another AWS account or made public. DB snapshots contain complete backups of database instances, including schemas, table data, and sensitive application content. When shared externally, snapshots can be restored in another AWS environment, enabling unauthorized access, offline analysis, or data exfiltration. Adversaries who obtain valid credentials or exploit misconfigurations may modify snapshot attributes to grant access to accounts they control, bypassing network, IAM, and monitoring controls.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -104,7 +104,7 @@ Tactic: Exfiltration
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 5</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 6</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -116,85 +116,210 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_75"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-rds-db-snapshot-shared-with-another-account.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_76"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-rds-db-snapshot-shared-with-another-account.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
+</blockquote>
+</div>
 <p><span class="strong strong"><strong>Investigating AWS RDS DB Snapshot Shared with Another Account</strong></span></p>
-<p>This rule identifies when an RDS DB snapshot is shared with another AWS account. While sharing DB snapshots is a common practice, adversaries may exploit this feature to exfiltrate data by sharing snapshots with external accounts under their control.</p>
-<p><span class="strong strong"><strong>Possible Investigation Steps</strong></span></p>
+<p>Amazon RDS DB snapshots capture full backups of database instances and clusters. Modifying a snapshot’s restore
+attributes to include external AWS accounts allows those accounts to restore and fully access the underlying data.
+While cross-account snapshot sharing is widely used for migrations and disaster-recovery workflows, adversaries may
+abuse this mechanism for stealthy data exfiltration, restoring the snapshot in infrastructure they control, outside of your monitoring boundary.</p>
+<p>This rule detects successful modifications to snapshot attributes where one or more additional AWS accounts are added to the snapshot’s restore permissions.</p>
+<p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Identify the Actor</strong></span>: Review the <code class="literal">aws.cloudtrail.user_identity.arn</code> and <code class="literal">aws.cloudtrail.user_identity.access_key_id</code> fields to identify who made the change. Verify if this actor typically performs such actions and if they have the necessary permissions.
+<span class="strong strong"><strong>Identify the actor and context</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Review the Sharing Event</strong></span>: Identify the DB snapshot involved and review the event details. Look for <code class="literal">ModifyDBSnapshotAttribute</code> or <code class="literal">ModifyDBClusterSnapshotAttribute</code> actions where the snapshot attributes were changed to include additional user accounts.
+Review <code class="literal">aws.cloudtrail.user_identity.arn</code> and <code class="literal">aws.cloudtrail.user_identity.access_key_id</code>.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Request and Response Parameters</strong></span>: Check the <code class="literal">aws.cloudtrail.request_parameters</code> and <code class="literal">aws.cloudtrail.response_elements</code> fields in the CloudTrail event to identify the DB Snapshot Identifier and account ID with which the snapshot was shared.
+Determine whether the caller is an automation role, interactive user, CI/CD pipeline, or previously unseen principal.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Verify the Shared Snapshot</strong></span>: Check the DB snapshot that was shared and its contents to determine the sensitivity of the data stored within it.
+Check <code class="literal">source.ip</code> and <code class="literal">user_agent.original</code> for signs of unauthorized access or atypical tooling.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Validate External Account</strong></span>: Examine the AWS account to which the snapshot was shared. Determine whether this account is known and previously authorized to access such resources.
+<span class="strong strong"><strong>Understand what snapshot was shared</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Contextualize with Recent Changes</strong></span>: Compare this sharing event against recent changes in RDS DB or Cluster configurations and deployments. Look for any other recent permissions changes or unusual administrative actions.
+From <code class="literal">aws.cloudtrail.request_parameters</code>, extract:
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Correlate with Other Activities</strong></span>: Search for related CloudTrail events before and after this change to see if the same actor or IP address engaged in other potentially suspicious activities.
+The snapshot or cluster snapshot identifier.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Interview Relevant Personnel</strong></span>: If the share was initiated by a user, verify the intent and authorization for this action with the person or team responsible for managing DB backups and snapshots.
+The list of <code class="literal">valuesToAdd</code> accounts added to <code class="literal">attributeName=restore</code>.
+</li>
+<li class="listitem">
+Identify the associated database instance or cluster and evaluate:
+</li>
+<li class="listitem">
+Data classification level (PII, customer data, secrets, credentials, financials, etc.)
+</li>
+<li class="listitem">
+Application ownership and business impact.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Validate the external account</strong></span>
+</li>
+<li class="listitem">
+Determine whether the recipient account:
+</li>
+<li class="listitem">
+Belongs to your AWS Organization.
+</li>
+<li class="listitem">
+Has previously been authorized for snapshot restore operations.
+</li>
+<li class="listitem">
+Represents a new or unexpected dependency.
+</li>
+<li class="listitem">
+Cross-reference with known partner accounts or migration plans.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Correlate with related activity</strong></span>
+</li>
+<li class="listitem">
+Pivot in CloudTrail on the same user identity or account to identify:
+</li>
+<li class="listitem">
+Prior reconnaissance actions (<code class="literal">DescribeDBSnapshots</code>, <code class="literal">DescribeDBInstances</code>).
+</li>
+<li class="listitem">
+Snapshot copying or creation of manual snapshots just before sharing.
+</li>
+<li class="listitem">
+IAM privilege escalation (<code class="literal">AttachRolePolicy</code>, <code class="literal">PutUserPolicy</code>, <code class="literal">AssumeRole</code> patterns).
+</li>
+<li class="listitem">
+Unusual RDS configuration changes (backup retention decrease, deletion protection toggles).
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Assess for exfiltration indicators</strong></span>
+</li>
+<li class="listitem">
+Look for:
+</li>
+<li class="listitem">
+Subsequent <code class="literal">CopyDBSnapshot</code> or <code class="literal">StartExportTask</code> events.
+</li>
+<li class="listitem">
+Snapshot downloads, exports, or restoration from the external account.
+</li>
+<li class="listitem">
+Snapshot attributes set to <code class="literal">all</code> (public sharing), which is extremely dangerous.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Validate operational intent</strong></span>
+</li>
+<li class="listitem">
+Contact application owners, DBAs, or platform teams to confirm:
+</li>
+<li class="listitem">
+Whether migration, replication, or DR workflows explain the share.
+</li>
+<li class="listitem">
+Whether new accounts were intentionally onboarded.
+</li>
+<li class="listitem">
+Whether the timing aligns with approved change windows.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>False Positive Analysis</strong></span></p>
+<p><span class="strong strong"><strong>False positive analysis</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Legitimate Backup Actions</strong></span>: Confirm if the Db snapshot sharing aligns with scheduled backups or legitimate automation tasks.
+<span class="strong strong"><strong>Legitimate migration or DR workflows</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Consistency Check</strong></span>: Compare the action against historical data of similar actions performed by the user or within the organization. If the action is consistent with past legitimate activities, it might indicate a false alarm.
+Many organizations routinely share snapshots with other accounts for staging, analytics, or DR replication.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Automation roles</strong></span>
+</li>
+<li class="listitem">
+Infrastructure-as-code pipelines and backup automation tools may modify snapshot permissions as part of normal behavior.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Response and Remediation</strong></span></p>
+<p>If behavior is expected and consistently performed by a known principal, tune the rule using exceptional user identities, service roles, or controlled organizational accounts.</p>
+<p><span class="strong strong"><strong>Response and remediation</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Immediate Review and Reversal</strong></span>: If the change was unauthorized, update the snapshot permissions to remove any unauthorized accounts and restore it to its previous state.
+<span class="strong strong"><strong>Revoke unauthorized sharing</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Enhance Monitoring and Alerts</strong></span>: Adjust monitoring systems to alert on similar actions, especially those involving sensitive data or permissions.
+Immediately remove unauthorized accounts from snapshot restore attributes.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Audit Snapshots and Policies</strong></span>: Conduct a comprehensive audit of all snapshots and associated policies to ensure they adhere to the principle of least privilege.
+Ensure the snapshot is not publicly shared.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Policy Update</strong></span>: Review and possibly update your organization’s policies on DB snapshot sharing to tighten control and prevent unauthorized access.
+<span class="strong strong"><strong>Contain potential compromise</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Incident Response</strong></span>: If malicious intent is confirmed, consider it a data breach incident and initiate the incident response protocol. This includes further investigation, containment, and recovery.
+Rotate access keys or credentials for the principal that performed the modification.
+</li>
+<li class="listitem">
+Review IAM permissions to ensure only approved roles can share snapshots.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Assess impact</strong></span>
+</li>
+<li class="listitem">
+Determine whether the external account restored the snapshot and accessed data.
+</li>
+<li class="listitem">
+If data exposure is likely, notify compliance, legal, and incident response teams.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Hardening and preventive controls</strong></span>
+</li>
+<li class="listitem">
+Restrict snapshot sharing via IAM condition keys (<code class="literal">kms:ViaService</code>, <code class="literal">rds:dbSnapshotArn</code>, <code class="literal">aws:PrincipalArn</code>).
+</li>
+<li class="listitem">
+Use AWS Organizations SCPs to block cross-account snapshot sharing in production accounts.
+</li>
+<li class="listitem">
+Enable Config rules and Security Hub controls for public or cross-account snapshot access.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Additional Information:</strong></span></p>
-<p>For further guidance on managing DB backups and securing AWS environments, refer to the <a href="https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_CommonTasks.BackupRestore.html" class="ulink" target="_top">AWS RDS documentation</a> and AWS best practices for security. Additionally, consult the following resources for specific details on DB snapshot security:
-- <a href="https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ShareSnapshot.html" class="ulink" target="_top">AWS RDS DB Snapshot Sharing</a>
-- <a href="https://docs.aws.amazon.com/AmazonRDS/latest/APIReference/API_ModifyDBSnapshotAttribute.html" class="ulink" target="_top">AWS RDS ModifyDBSnapshotAttribute</a>
-- <a href="https://cloud.hacktricks.xyz/pentesting-cloud/aws-security/aws-post-exploitation/aws-rds-post-exploitation#rds-modifydbsnapshotattribute-rds-createdbsnapshot" class="ulink" target="_top">AWS RDS Snapshot Dump</a></p>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-incident-response-playbooks/blob/c151b0dc091755fffd4d662a8f29e2f6794da52c/playbooks/" class="ulink" target="_top">AWS IR Playbooks</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-customer-playbook-framework/tree/a8c7b313636b406a375952ac00b2d68e89a991f2/docs" class="ulink" target="_top">AWS Customer Playbook Framework</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Security Best Practices:</strong></span> <a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">AWS Knowledge Center – Security Best Practices</a>.
+</li>
+</ul>
+</div>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_79"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-rds-db-snapshot-shared-with-another-account.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_80"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-rds-db-snapshot-shared-with-another-account.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">any where event.dataset == "aws.cloudtrail"
+<pre class="programlisting prettyprint lang-js">info where event.dataset == "aws.cloudtrail"
     and event.provider == "rds.amazonaws.com"
     and event.outcome == "success"
     and event.action in ("ModifyDBSnapshotAttribute", "ModifyDBClusterSnapshotAttribute")

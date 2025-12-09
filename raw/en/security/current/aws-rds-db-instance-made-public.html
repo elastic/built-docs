@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="aws-rds-db-instance-made-public"></a>AWS RDS DB Instance Made Public</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-rds-db-instance-made-public.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies the creation or modification of an AWS RDS DB instance to enable public access. DB instances may contain sensitive data that can be abused if shared with unauthorized accounts or made public. Adversaries may enable public access on a DB instance to maintain persistence or evade defenses by bypassing access controls.</p>
+<p>Identifies the creation or modification of an Amazon RDS DB instance or cluster where the "publiclyAccessible" attribute is set to "true". Publicly accessible RDS instances expose a network endpoint on the public internet, which may allow unauthorized access if combined with overly permissive security groups, weak authentication, or misconfigured IAM policies. Adversaries may enable public access on an existing instance, or create a new publicly accessible instance, to establish persistence, move data outside of controlled network boundaries, or bypass internal access controls.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -110,7 +110,7 @@ Tactic: Defense Evasion
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 5</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 6</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -125,31 +125,108 @@ Elastic
 <div class="position-relative"><h3 class="title"><a id="_investigation_guide_71"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-rds-db-instance-made-public.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance.
+While every effort has been made to ensure its quality, validate and adapt it to suit your operational needs.</p>
+</blockquote>
+</div>
 <p><span class="strong strong"><strong>Investigating AWS RDS DB Instance Made Public</strong></span></p>
-<p>This rule identifies when an RDS DB instance is created or modified to enable public access. While publicly accessible DB instances are a common practice, adversaries may exploit this feature to maintain persistence or evade defenses in a compromised environment.</p>
+<p>This rule detects when an Amazon RDS DB instance or cluster is created or modified with
+<code class="literal">publiclyAccessible=true</code>. While some environments operate publicly accessible RDS instances,
+unexpected exposure of a database to the internet is a meaningful security risk. Adversaries who
+gain access to AWS credentials may modify a DB instance’s public accessibility to exfiltrate data,
+establish persistence, or bypass internal network restrictions.</p>
 <p><span class="strong strong"><strong>Possible Investigation Steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Identify the Actor</strong></span>: Review the <code class="literal">aws.cloudtrail.user_identity.arn</code> and <code class="literal">aws.cloudtrail.user_identity.access_key_id</code> fields to identify who made the change. Verify if this actor typically performs such actions and if they have the necessary permissions.
+<span class="strong strong"><strong>Identify the actor</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Review the Creation/Modification Event</strong></span>: Identify the DB instance involved and review the event details. Look for <code class="literal">ModifyDBInstance</code>, <code class="literal">CreateDBInstance</code> or <code class="literal">CreateDBCluster</code> actions where the publiclyAccessible parameter was set to true.
+Review <code class="literal">aws.cloudtrail.user_identity.arn</code>, <code class="literal">aws.cloudtrail.user_identity.type</code>, and <code class="literal">access_key_id</code> to determine which IAM principal made the change.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Request and Response Parameters</strong></span>: Check the <code class="literal">aws.cloudtrail.request_parameters</code> field in the CloudTrail event to identify the DB Instance Identifier and any other modifications made to the instance.
+Determine whether the user, role, or automation service typically manages RDS configurations.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Verify the Created/Modified Instance</strong></span>: Check the DB instance that was created or modified and its contents to determine the sensitivity of the data stored within it.
+<span class="strong strong"><strong>Examine the request parameters</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Contextualize with Recent Changes</strong></span>: Compare this event against recent changes in RDS DB or Cluster configurations and deployments. Look for any other recent permissions changes or unusual administrative actions.
+Review <code class="literal">aws.cloudtrail.request_parameters</code> for:
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Correlate with Other Activities</strong></span>: Search for related CloudTrail events before and after this event to see if the same actor or IP address engaged in other potentially suspicious activities.
+<code class="literal">publiclyAccessible=true</code>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Interview Relevant Personnel</strong></span>: If the modification was initiated by a user, verify the intent and authorization for this action with the person or team responsible for managing DB instances.
+DBInstanceIdentifier / DBClusterIdentifier
+</li>
+<li class="listitem">
+Additional changes included in the same modification request (e.g., master user changes, security group updates)
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Validate the target resource</strong></span>
+</li>
+<li class="listitem">
+Determine the sensitivity of the instance (<code class="literal">target.entity.id</code>):
+</li>
+<li class="listitem">
+What data does it store?
+</li>
+<li class="listitem">
+Is it production, staging, dev, or ephemeral?
+</li>
+<li class="listitem">
+Confirm whether the instance was previously private.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Assess network exposure</strong></span>
+</li>
+<li class="listitem">
+Check associated security groups for:
+</li>
+<li class="listitem">
+<code class="literal">0.0.0.0/0</code> (unrestricted ingress)
+</li>
+<li class="listitem">
+Unexpected IP ranges
+</li>
+<li class="listitem">
+Review VPC/subnet placement to determine if the instance is reachable externally.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Correlate with other recent CloudTrail activity</strong></span>
+</li>
+<li class="listitem">
+Look for related events performed by the same actor:
+</li>
+<li class="listitem">
+<code class="literal">AuthorizeSecurityGroupIngress</code>
+</li>
+<li class="listitem">
+<code class="literal">ModifyDBInstance</code>
+</li>
+<li class="listitem">
+IAM policy modifications enabling broader DB access
+</li>
+<li class="listitem">
+Look for indicators of credential misuse:
+</li>
+<li class="listitem">
+unusual <code class="literal">source.ip</code>
+</li>
+<li class="listitem">
+unusual <code class="literal">user_agent.original</code>
+</li>
+<li class="listitem">
+MFA not used (<code class="literal">session_context.mfa_authenticated=false</code>)
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Validate intent with owners</strong></span>
+</li>
+<li class="listitem">
+Contact the service or database owner to confirm whether the change was an approved part of a deployment or migration.
 </li>
 </ul>
 </div>
@@ -157,10 +234,13 @@ Elastic
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Legitimate Instance Configuration</strong></span>: Confirm if the DB instance creation or modification aligns with legitimate tasks.
+<span class="strong strong"><strong>Expected public-access configuration</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Consistency Check</strong></span>: Compare the action against historical data of similar actions performed by the user or within the organization. If the action is consistent with past legitimate activities, it might indicate a false alarm.
+Some workloads intentionally require public access (e.g., internet-facing reporting tools).
+</li>
+<li class="listitem">
+Validate against change management tickets, deployment pipelines, or Terraform/IaC automation logs.
 </li>
 </ul>
 </div>
@@ -168,25 +248,78 @@ Elastic
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Immediate Review and Reversal</strong></span>: If the change was unauthorized, update the instance attributes to remove public access and restore it to its previous state. Determine whether attached security groups have been modified to allow additional access and revert any unauthorized changes.
+<span class="strong strong"><strong>Containment</strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Enhance Monitoring and Alerts</strong></span>: Adjust monitoring systems to alert on similar actions, especially those involving sensitive data or permissions.
+If exposure is unauthorized:
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Audit Instances and Policies</strong></span>: Conduct a comprehensive audit of all instances and associated policies to ensure they adhere to the principle of least privilege.
+Modify the instance to disable public access (<code class="literal">publiclyAccessible=false</code>).
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Policy Update</strong></span>: Review and possibly update your organization’s policies on DB instance access to tighten control and prevent unauthorized access.
+Restrict the security group inbound rules immediately.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Incident Response</strong></span>: If malicious intent is confirmed, consider it a data breach incident and initiate the incident response protocol. This includes further investigation, containment, and recovery.
+Snapshot the instance to preserve state if compromise is suspected.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Investigation</strong></span>
+</li>
+<li class="listitem">
+Review all recent actions from the same IAM principal.
+</li>
+<li class="listitem">
+Check for data access patterns (CloudWatch, RDS Enhanced Monitoring, VPC Flow Logs).
+</li>
+<li class="listitem">
+Identify whether this exposure correlates with suspicious outbound network activity.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Hardening</strong></span>
+</li>
+<li class="listitem">
+Require private-only RDS instances unless explicitly documented.
+</li>
+<li class="listitem">
+Enforce security group least privilege and block public DB access via:
+</li>
+<li class="listitem">
+AWS Config rules (<code class="literal">rds-instance-public-access-check</code>)
+</li>
+<li class="listitem">
+Service Control Policies (SCPs) preventing public RDS settings
+</li>
+<li class="listitem">
+Implement continuous monitoring for network or configuration drift.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Recovery</strong></span>
+</li>
+<li class="listitem">
+Restore the database to a private subnet if necessary.
+</li>
+<li class="listitem">
+Rotate credentials used by the DB instance and associated applications.
+</li>
+<li class="listitem">
+Document the incident and update policies or IaC templates to prevent recurrence.
 </li>
 </ul>
 </div>
 <p><span class="strong strong"><strong>Additional Information:</strong></span></p>
-<p>For further guidance on managing DB instances and securing AWS environments, refer to the <a href="https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_RDS_Managing.html" class="ulink" target="_top">AWS RDS documentation</a> and AWS best practices for security. Additionally, consult the following resources for specific details on DB instance security:
-- <a href="https://docs.aws.amazon.com/AmazonRDS/latest/APIReference/API_ModifyDBInstance.html" class="ulink" target="_top">AWS RDS ModifyDBInstance</a></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-incident-response-playbooks/blob/c151b0dc091755fffd4d662a8f29e2f6794da52c/playbooks/" class="ulink" target="_top">AWS IR Playbooks</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-customer-playbook-framework/tree/a8c7b313636b406a375952ac00b2d68e89a991f2/docs" class="ulink" target="_top">AWS Customer Playbook Framework</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Security Best Practices:</strong></span> <a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">AWS Knowledge Center – Security Best Practices</a>.
+</li>
+</ul>
+</div>
 </div>
 
 <div class="section">

@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="aws-kms-customer-managed-key-disabled-or-scheduled-for-deletion"></a>AWS KMS Customer Managed Key Disabled or Scheduled for Deletion</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-kms-customer-managed-key-disabled-or-scheduled-for-deletion.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies attempts to disable or schedule the deletion of an AWS KMS Customer Managed Key (CMK). Deleting an AWS KMS key is destructive and potentially dangerous. It deletes the key material and all metadata associated with the KMS key and is irreversible. After a KMS key is deleted, the data that was encrypted under that KMS key can no longer be decrypted, which means that data becomes unrecoverable.</p>
+<p>Identifies attempts to disable or schedule the deletion of an AWS customer managed KMS Key. Disabling or scheduling a KMS key for deletion removes the ability to decrypt data encrypted under that key and can permanently destroy access to critical resources. Adversaries may use these operations to cause irreversible data loss, disrupt business operations, impede incident response, or hide evidence of prior activity. Because KMS keys often protect sensitive or regulated data, any modification to their lifecycle should be considered highly sensitive and investigated promptly.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -61,8 +61,8 @@ logs-aws.cloudtrail-*
 </div>
 <p><span class="strong strong"><strong>Severity</strong></span>: medium</p>
 <p><span class="strong strong"><strong>Risk score</strong></span>: 47</p>
-<p><span class="strong strong"><strong>Runs every</strong></span>: 10m</p>
-<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-60m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
+<p><span class="strong strong"><strong>Runs every</strong></span>: 5m</p>
+<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-6m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
 <p><span class="strong strong"><strong>Maximum alerts per execution</strong></span>: 100</p>
 <p><span class="strong strong"><strong>References</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -101,7 +101,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 109</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 110</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -119,31 +119,90 @@ Xavier Pich
 <div class="quoteblock">
 <blockquote>
 <p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance.
+While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
 </blockquote>
 </div>
 <p><span class="strong strong"><strong>Investigating AWS KMS Customer Managed Key Disabled or Scheduled for Deletion</strong></span></p>
-<p>AWS Key Management Service (KMS) allows users to create and manage cryptographic keys for data encryption. Customer Managed Keys (CMKs) are crucial for securing sensitive data. Adversaries may disable or schedule deletion of CMKs to render encrypted data inaccessible, causing data loss. The detection rule monitors successful disablement or deletion attempts, alerting analysts to potential data destruction activities.</p>
+<p>AWS KMS keys underpin encryption for S3, EBS, RDS, Secrets Manager, Lambda, and numerous other AWS services. Disabling a KMS key or scheduling its deletion immediately disrupts encryption and decryption workflows, and, once deleted, renders all data encrypted with that key unrecoverable.</p>
+<p>Because these operations are rare, highly privileged, and tightly controlled in mature environments, they should be treated as high-risk, destructive actions when performed unexpectedly. Adversaries may disable or delete KMS keys to sabotage recovery, impede forensic analysis, or destroy evidence after exfiltration.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the CloudTrail logs for the specific event.dataset:aws.cloudtrail entries to identify the user or role that initiated the DisableKey or ScheduleKeyDeletion action.
+<span class="strong strong"><strong>Identify the actor and authentication context</strong></span>
 </li>
 <li class="listitem">
-Check the event.provider:kms.amazonaws.com logs to gather additional context about the KMS key involved, including its key ID and any associated metadata.
+Review <code class="literal">aws.cloudtrail.user_identity.arn</code> and <code class="literal">aws.cloudtrail.user_identity.access_key_id</code> to determine the caller.
 </li>
 <li class="listitem">
-Investigate the event.action:("DisableKey" or "ScheduleKeyDeletion") to determine if the action was authorized and aligns with recent changes or requests within the organization.
+Check <code class="literal">source.ip</code>, <code class="literal">source.geo</code> fields, and <code class="literal">user_agent.original</code> to determine whether the action originated from an expected network path or automation platform.
 </li>
 <li class="listitem">
-Analyze the event.outcome:success to confirm the success of the action and assess the potential impact on encrypted data.
+Compare the actor and access key to historical usage patterns.
 </li>
 <li class="listitem">
-Cross-reference the timing of the event with any known incidents or maintenance activities to rule out false positives or expected behavior.
+<span class="strong strong"><strong>Determine what key was affected and its criticality</strong></span>
 </li>
 <li class="listitem">
-Contact the user or team responsible for the action to verify the intent and ensure it was a legitimate operation.
+Inspect <code class="literal">aws.cloudtrail.resources.arn</code> to identify the KMS key.
+</li>
+<li class="listitem">
+Determine:
+</li>
+<li class="listitem">
+The services and data protected by the key (e.g., RDS, EBS, S3, Secrets Manager).
+</li>
+<li class="listitem">
+The environment (prod vs. dev).
+</li>
+<li class="listitem">
+Owner or application team.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Understand the scope and intent of the change</strong></span>
+</li>
+<li class="listitem">
+For <code class="literal">DisableKey</code>, determine whether a dependent service immediately began failing or experienced decryption errors.
+</li>
+<li class="listitem">
+For <code class="literal">ScheduleKeyDeletion</code>, examine the <code class="literal">PendingWindowInDays</code> value within <code class="literal">aws.cloudtrail.request_parameters</code>.
+</li>
+<li class="listitem">
+Check whether the key was previously rotated, enabled/disabled, or had its policy recently modified.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Correlate with surrounding events</strong></span>
+</li>
+<li class="listitem">
+Look for:
+</li>
+<li class="listitem">
+IAM policy changes granting new KMS privileges.
+</li>
+<li class="listitem">
+Access anomalies involving the same principal.
+</li>
+<li class="listitem">
+File system, database, or backup deletions near the same timeframe.
+</li>
+<li class="listitem">
+S3, EBS, or RDS resources showing encryption failures.
+</li>
+<li class="listitem">
+Determine whether other keys were modified in the same window (possible broader sabotage attempt).
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Validate intent with owners</strong></span>
+</li>
+<li class="listitem">
+Confirm with the application, data, or security owners:
+</li>
+<li class="listitem">
+Whether deactivation or scheduled deletion was requested.
+</li>
+<li class="listitem">
+Whether the key was being replaced, migrated, or retired.
 </li>
 </ul>
 </div>
@@ -151,55 +210,123 @@ Contact the user or team responsible for the action to verify the intent and ens
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Routine key management activities by authorized personnel can trigger alerts. Regularly review and document key management procedures to differentiate between legitimate and suspicious activities.
+<span class="strong strong"><strong>Planned key lifecycle activities</strong></span>
 </li>
 <li class="listitem">
-Automated scripts or tools used for key rotation or lifecycle management might disable or schedule deletion of keys as part of their process. Identify and whitelist these scripts or tools to prevent unnecessary alerts.
+Some organizations disable KMS keys before rotation, migration, or decommissioning.
 </li>
 <li class="listitem">
-Testing environments where keys are frequently created and deleted for development purposes can generate false positives. Exclude these environments from monitoring or adjust the rule to focus on production environments.
+Scheduled deletion during infrastructure teardown may be expected in CI/CD-driven ephemeral environments.
 </li>
 <li class="listitem">
-Scheduled maintenance or compliance audits may involve disabling keys temporarily. Coordinate with relevant teams to schedule these activities and temporarily adjust monitoring rules to avoid false alerts.
+<span class="strong strong"><strong>Configuration errors</strong></span>
 </li>
 <li class="listitem">
-Misconfigured alerts due to incorrect tagging or categorization of keys can lead to false positives. Ensure that all keys are correctly tagged and categorized to align with monitoring rules.
+Misapplied tags or incorrect CloudFormation teardown workflows can unintentionally disable or schedule deletion of KMS keys.
 </li>
 </ul>
 </div>
+<p>If any of the above conditions apply, consider adjusting rule exceptions based on IAM principal, environment tag, or automation role.</p>
 <p><span class="strong strong"><strong>Response and remediation</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately verify the legitimacy of the disablement or deletion action by contacting the key owner or relevant stakeholders to confirm if the action was intentional.
+<span class="strong strong"><strong>Contain and validate</strong></span>
 </li>
 <li class="listitem">
-If the action was unauthorized, revoke any access credentials or permissions associated with the user or service that performed the action to prevent further unauthorized activities.
+Immediately confirm whether the key disablement or deletion schedule was intentional.
 </li>
 <li class="listitem">
-Restore access to encrypted data by identifying any backup keys or data recovery options available, and initiate data recovery procedures if possible.
+If unauthorized, cancel scheduled deletion (<code class="literal">CancelKeyDeletion</code>) and re-enable the key (<code class="literal">EnableKey</code>) as appropriate.
 </li>
 <li class="listitem">
-Escalate the incident to the security operations team and relevant management to assess the impact and coordinate a broader response if necessary.
+Rotate credentials or access keys used by the actor if compromise is suspected.
 </li>
 <li class="listitem">
-Implement additional monitoring and alerting for any further attempts to disable or delete KMS keys, ensuring that alerts are sent to the appropriate personnel for rapid response.
+<span class="strong strong"><strong>Assess impact</strong></span>
 </li>
 <li class="listitem">
-Review and tighten IAM policies and permissions related to KMS key management to ensure that only authorized personnel have the ability to disable or delete keys.
+Identify all AWS services and data encrypted with the affected KMS key.
 </li>
 <li class="listitem">
-Conduct a post-incident review to identify any gaps in the current security posture and update incident response plans to address similar threats in the future.
+Review logs and service metrics for failures involving:
+</li>
+<li class="listitem">
+EBS volume attachments
+</li>
+<li class="listitem">
+RDS instance decryption
+</li>
+<li class="listitem">
+S3 object access
+</li>
+<li class="listitem">
+Secrets Manager retrieval
+</li>
+<li class="listitem">
+Lambda environment variable decryption
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Investigate for compromise</strong></span>
+</li>
+<li class="listitem">
+Review CloudTrail activity for the principal:
+</li>
+<li class="listitem">
+Permission escalations
+</li>
+<li class="listitem">
+Unusual STS role assumptions
+</li>
+<li class="listitem">
+S3, EC2, RDS destructive behavior
+</li>
+<li class="listitem">
+Look for preceding data access or exfiltration attempts.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Strengthen controls</strong></span>
+</li>
+<li class="listitem">
+Restrict AWS KMS lifecycle permissions (<code class="literal">kms:DisableKey</code>, <code class="literal">kms:ScheduleKeyDeletion</code>) to a very small privileged set.
+</li>
+<li class="listitem">
+Use AWS Organizations SCPs to prevent KMS key deletion in production accounts.
+</li>
+<li class="listitem">
+Enable AWS Config rules for KMS key state monitoring.
+</li>
+<li class="listitem">
+Require MFA for administrators capable of key management.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Post-incident improvement</strong></span>
+</li>
+<li class="listitem">
+Update runbooks to include KMS lifecycle change approvals.
+</li>
+<li class="listitem">
+Implement tagging standards to designate high-risk keys.
+</li>
+<li class="listitem">
+Enhance monitoring for key policy modifications or changes to principal permissions.
 </li>
 </ul>
 </div>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-incident-response-playbooks/blob/c151b0dc091755fffd4d662a8f29e2f6794da52c/playbooks/" class="ulink" target="_top">AWS IR Playbooks</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-customer-playbook-framework/tree/a8c7b313636b406a375952ac00b2d68e89a991f2/docs" class="ulink" target="_top">AWS Customer Playbook Framework</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Security Best Practices:</strong></span> <a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">AWS Knowledge Center – Security Best Practices</a>.
+</li>
+</ul>
 </div>
-
-<div class="section">
-<div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_19"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-kms-customer-managed-key-disabled-or-scheduled-for-deletion.asciidoc">edit</a></div>
-</div></div></div>
-<p>The AWS Fleet integration, Filebeat module, or similarly structured data is required to be compatible with this rule.</p>
 </div>
 
 <div class="section">
@@ -208,7 +335,10 @@ Conduct a post-incident review to identify any gaps in the current security post
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">event.dataset:aws.cloudtrail and event.provider:kms.amazonaws.com and event.action:("DisableKey" or "ScheduleKeyDeletion") and event.outcome:success</pre>
+<pre class="programlisting prettyprint lang-js">event.dataset: "aws.cloudtrail"
+    and event.provider: "kms.amazonaws.com"
+    and event.action: ("DisableKey" or "ScheduleKeyDeletion")
+    and event.outcome: "success"</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="aws-rds-snapshot-deleted"></a>AWS RDS Snapshot Deleted</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-rds-snapshot-deleted.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies the deletion of an AWS RDS DB snapshot. Snapshots contain a full backup of an entire DB instance. Unauthorized deletion of snapshots can make it impossible to recover critical or sensitive data. This rule detects deleted snapshots and instances modified so that backupRetentionPeriod is set to 0 which disables automated backups and is functionally similar to deleting the system snapshot.</p>
+<p>Identifies the deletion of an AWS RDS DB snapshot or configuration changes that effectively remove backup coverage for a DB instance. RDS snapshots contain full backups of database instances, and disabling automated backups by setting "backupRetentionPeriod=0" has a similar impact by preventing future restore points. Adversaries with the appropriate permissions may delete snapshots or disable backups to inhibit recovery, destroy forensic evidence, or prepare for follow-on destructive actions such as instance or cluster deletion.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -170,7 +170,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 5</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 6</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -182,37 +182,105 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_76"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-rds-snapshot-deleted.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_77"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-rds-snapshot-deleted.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <div class="quoteblock">
 <blockquote>
 <p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance.
+While every effort has been made to ensure its quality, validate and adapt it to suit your operational needs.</p>
 </blockquote>
 </div>
 <p><span class="strong strong"><strong>Investigating AWS RDS Snapshot Deleted</strong></span></p>
-<p>AWS RDS snapshots are critical for data recovery, capturing full backups of database instances. Adversaries may delete these snapshots to prevent data restoration, effectively causing data loss. The detection rule monitors AWS CloudTrail logs for successful deletion actions or modifications that disable automated backups, signaling potential malicious activity aimed at data destruction.</p>
+<p>AWS RDS snapshots (manual or automated) and backup retention settings are core to database recovery and incident response. Deleting snapshots or disabling automated backups (<code class="literal">backupRetentionPeriod=0</code>) can prevent restoration to a known-good state and destroy forensic evidence of attacker actions.</p>
+<p>This rule detects successful snapshot deletions and configuration changes that disable automated backups. Activity that matches this pattern may indicate destructive actions, ransomware preparation, cleanup after data theft, or an operator misconfiguration that materially weakens recovery options.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the AWS CloudTrail logs to identify the user or role associated with the event.action values "DeleteDBSnapshot" or "DeleteDBClusterSnapshot" to determine if the action was authorized or expected.
+<span class="strong strong"><strong>Identify the actor and context</strong></span>
 </li>
 <li class="listitem">
-Check the timestamp of the deletion event to correlate with any known maintenance activities or incidents that might explain the snapshot deletion.
+Review <code class="literal">aws.cloudtrail.user_identity.arn</code>, <code class="literal">aws.cloudtrail.user_identity.type</code>, and <code class="literal">aws.cloudtrail.user_identity.access_key_id</code> to determine who performed the action.
 </li>
 <li class="listitem">
-Investigate the source IP address and location from which the deletion request was made to identify any anomalies or unauthorized access patterns.
+Check <code class="literal">user.name</code>, <code class="literal">source.ip</code>, and <code class="literal">user_agent.original</code> to understand where and how the change was made (console, CLI, SDK, automation).
 </li>
 <li class="listitem">
-Examine the AWS IAM policies and permissions associated with the user or role to ensure they have the appropriate level of access and to identify any potential over-permissioning.
+<span class="strong strong"><strong>Determine what was affected</strong></span>
 </li>
 <li class="listitem">
-Look for any recent changes in the AWS environment, such as modifications to IAM roles or policies, that could have allowed unauthorized snapshot deletions.
+Inspect <code class="literal">aws.cloudtrail.request_parameters</code> to identify:
 </li>
 <li class="listitem">
-If the event.action is "ModifyDBInstance" with "backupRetentionPeriod=0", verify if there was a legitimate reason for disabling automated backups and assess the impact on data recovery capabilities.
+The snapshot or cluster snapshot identifier (<code class="literal">DeleteDBSnapshot</code> / <code class="literal">DeleteDBClusterSnapshot</code>).
+</li>
+<li class="listitem">
+The DB instance identifier and the new <code class="literal">backupRetentionPeriod</code> value for <code class="literal">ModifyDBInstance</code>.
+</li>
+<li class="listitem">
+Map the snapshot/instance to:
+</li>
+<li class="listitem">
+Application/owner team.
+</li>
+<li class="listitem">
+Environment (prod, staging, dev).
+</li>
+<li class="listitem">
+Data sensitivity or criticality.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Reconstruct intent and timing</strong></span>
+</li>
+<li class="listitem">
+Use <code class="literal">@timestamp</code> to correlate the event with:
+</li>
+<li class="listitem">
+Recent <code class="literal">ModifyDBInstance</code>, <code class="literal">ModifyDBCluster</code>, <code class="literal">DeleteDBInstance</code>, or <code class="literal">DeleteDBCluster</code> events.
+</li>
+<li class="listitem">
+Other data-impacting changes (e.g., <code class="literal">deletionProtection=false</code>, security group changes, public accessibility, or RDS parameter modifications).
+</li>
+<li class="listitem">
+Compare the timing against approved maintenance/change windows and deployment pipelines.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Correlate with broader activity</strong></span>
+</li>
+<li class="listitem">
+In CloudTrail, pivot on:
+</li>
+<li class="listitem">
+The same <code class="literal">aws.cloudtrail.user_identity.arn</code> or access key ID.
+</li>
+<li class="listitem">
+The same DB instance/cluster identifiers.
+</li>
+<li class="listitem">
+Look for:
+</li>
+<li class="listitem">
+Suspicious reads or exports before deletion (<code class="literal">DescribeDBSnapshots</code>, <code class="literal">CopyDBSnapshot</code>, data export, or large <code class="literal">SELECT</code> / dump activity visible via other telemetry).
+</li>
+<li class="listitem">
+Follow-on destructive actions (DB instance deletion, subnet/security group changes that isolate monitoring tools, or IAM policy changes).
+</li>
+<li class="listitem">
+Verify whether other snapshots for the same instance or account were deleted in the same time window.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Validate intent with owners</strong></span>
+</li>
+<li class="listitem">
+Confirm with the DB/application owner and platform/DBA teams whether:
+</li>
+<li class="listitem">
+The snapshot deletion or backup change was requested and approved.
+</li>
+<li class="listitem">
+There are parallel infrastructure changes (migrations, environment teardown, or cost-optimization tasks) that explain the activity.
 </li>
 </ul>
 </div>
@@ -220,16 +288,22 @@ If the event.action is "ModifyDBInstance" with "backupRetentionPeriod=0", verify
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Routine maintenance activities by database administrators may involve deleting old or unnecessary snapshots. To manage this, create exceptions for specific user accounts or roles known to perform these tasks regularly.
+<span class="strong strong"><strong>Planned lifecycle and cost optimization</strong></span>
 </li>
 <li class="listitem">
-Automated scripts or tools used for database management might delete snapshots as part of their normal operation. Identify these scripts and exclude their actions from triggering alerts by whitelisting their associated IAM roles or user accounts.
+Many environments routinely prune old snapshots or adjust backup retention for non-production workloads.
 </li>
 <li class="listitem">
-Testing environments often involve frequent creation and deletion of snapshots. Consider excluding specific RDS instances or environments used solely for testing purposes to reduce noise in alerts.
+<span class="strong strong"><strong>Automated backup and housekeeping tools</strong></span>
 </li>
 <li class="listitem">
-Scheduled cleanup jobs that remove outdated snapshots to manage storage costs can trigger false positives. Document these jobs and adjust the detection rule to ignore actions performed by these jobs' IAM roles.
+Backup or housekeeping services may manage snapshots and retention. This rule already excludes typical <code class="literal">backup.amazonaws.com</code> events, but you should:
+</li>
+<li class="listitem">
+Identify any additional in-house or third-party automation roles.
+</li>
+<li class="listitem">
+Tune the rule with exceptions based on <code class="literal">user_agent.original</code>, <code class="literal">aws.cloudtrail.user_identity.arn</code>, or known service roles.
 </li>
 </ul>
 </div>
@@ -237,25 +311,102 @@ Scheduled cleanup jobs that remove outdated snapshots to manage storage costs ca
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately revoke access to AWS accounts or roles suspected of unauthorized activity to prevent further malicious actions.
+<span class="strong strong"><strong>Contain and restore protection</strong></span>
 </li>
 <li class="listitem">
-Restore the deleted RDS snapshots from any available backups or replicas to ensure data recovery and continuity.
+If activity appears unauthorized:
 </li>
 <li class="listitem">
-Enable and configure automated backups for the affected RDS instances to prevent future data loss, ensuring the backupRetentionPeriod is set to a non-zero value.
+Immediately review the affected DB instances and clusters and restore <code class="literal">backupRetentionPeriod</code> to an appropriate value.
 </li>
 <li class="listitem">
-Conduct a thorough review of AWS CloudTrail logs to identify any unauthorized access patterns or anomalies leading up to the snapshot deletion.
+Verify that deletion protection and other guardrails are enabled where applicable.
 </li>
 <li class="listitem">
-Escalate the incident to the security operations team for further investigation and to determine if additional AWS resources were compromised.
+For snapshot deletions, assess:
 </li>
 <li class="listitem">
-Implement stricter IAM policies and multi-factor authentication for accessing AWS RDS resources to enhance security and prevent unauthorized deletions.
+Whether alternate snapshots (manual or automated) are still available.
 </li>
 <li class="listitem">
-Update and test the incident response plan to include specific procedures for handling AWS RDS snapshot deletions, ensuring rapid response in future incidents.
+Whether point-in-time recovery is still possible based on transaction logs and remaining backups.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Investigate scope and impact</strong></span>
+</li>
+<li class="listitem">
+Use CloudTrail to:
+</li>
+<li class="listitem">
+Enumerate all recent snapshot deletions and backup configuration changes by the same actor or from the same <code class="literal">source.ip</code>.
+</li>
+<li class="listitem">
+Identify any subsequent <code class="literal">DeleteDBInstance</code>, <code class="literal">DeleteDBCluster</code>, or public exposure (<code class="literal">publiclyAccessible=true</code>) events.
+</li>
+<li class="listitem">
+Engage the application and data owners to:
+</li>
+<li class="listitem">
+Evaluate potential data loss, downtime impact, and regulatory implications.
+</li>
+<li class="listitem">
+Determine if any sensitive or compliance-bound data may be unrecoverable.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Hardening and preventive controls</strong></span>
+</li>
+<li class="listitem">
+Restrict RDS administration:
+</li>
+<li class="listitem">
+Limit <code class="literal">rds:DeleteDBSnapshot</code>, <code class="literal">rds:DeleteDBClusterSnapshot</code>, and <code class="literal">rds:ModifyDBInstance</code> (especially backup and deletion-related parameters) to a small set of privileged roles.
+</li>
+<li class="listitem">
+Use IAM conditions (e.g., <code class="literal">aws:PrincipalArn</code>, <code class="literal">aws:RequestedRegion</code>) to constrain where and by whom destructive actions can be performed.
+</li>
+<li class="listitem">
+Add guardrails:
+</li>
+<li class="listitem">
+Use AWS Config rules and/or Security Hub controls to detect:
+</li>
+<li class="listitem">
+Instances with <code class="literal">backupRetentionPeriod=0</code>.
+</li>
+<li class="listitem">
+Instances lacking deletion protection or cross-region/cross-AZ backup strategy.
+</li>
+<li class="listitem">
+Consider SCPs in AWS Organizations to block or tightly control destructive RDS APIs in production accounts.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Post-incident improvements</strong></span>
+</li>
+<li class="listitem">
+If malicious or unsafe behavior is confirmed:
+</li>
+<li class="listitem">
+Rotate credentials for the involved principals and review STS session usage.
+</li>
+<li class="listitem">
+Update runbooks and change management to explicitly track snapshot and backup policy changes.
+</li>
+<li class="listitem">
+Refine this rule’s exceptions, tags, or severity to better align with your environment while preserving coverage for truly risky events.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-incident-response-playbooks/blob/c151b0dc091755fffd4d662a8f29e2f6794da52c/playbooks/" class="ulink" target="_top">AWS IR Playbooks</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-customer-playbook-framework/tree/a8c7b313636b406a375952ac00b2d68e89a991f2/docs" class="ulink" target="_top">AWS Customer Playbook Framework</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Security Best Practices:</strong></span> <a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">AWS Knowledge Center – Security Best Practices</a>.
 </li>
 </ul>
 </div>
@@ -263,7 +414,7 @@ Update and test the incident response plan to include specific procedures for ha
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_80"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-rds-snapshot-deleted.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_81"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-rds-snapshot-deleted.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -273,6 +424,10 @@ Update and test the incident response plan to include specific procedures for ha
     and (
         event.action in ("DeleteDBSnapshot", "DeleteDBClusterSnapshot") or
         (event.action == "ModifyDBInstance" and stringContains(aws.cloudtrail.request_parameters, "backupRetentionPeriod=0"))
+    )
+    and not (
+        user_agent.original == "backup.amazonaws.com"
+        and source.address == "backup.amazonaws.com"
     )</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>

@@ -9,7 +9,7 @@
 <link rel="home" href="index.html" title="Elastic Security [8.19]"/>
 <link rel="up" href="prebuilt-rules.html" title="Prebuilt rule reference"/>
 <link rel="prev" href="aws-rds-db-instance-made-public.html" title="AWS RDS DB Instance Made Public"/>
-<link rel="next" href="aws-rds-db-instance-or-cluster-deletion-protection-disabled.html" title="AWS RDS DB Instance or Cluster Deletion Protection Disabled"/>
+<link rel="next" href="aws-rds-db-instance-or-cluster-deleted.html" title="AWS RDS DB Instance or Cluster Deleted"/>
 <meta class="elastic" name="product_version" content="8.19"/>
 <meta class="elastic" name="product_name" content="Security"/>
 <meta class="elastic" name="website_area" content="documentation"/>
@@ -91,7 +91,7 @@
 <a href="aws-rds-db-instance-made-public.html">« AWS RDS DB Instance Made Public</a>
 </span>
 <span class="next">
-<a href="aws-rds-db-instance-or-cluster-deletion-protection-disabled.html">AWS RDS DB Instance or Cluster Deletion Protection Disabled »</a>
+<a href="aws-rds-db-instance-or-cluster-deleted.html">AWS RDS DB Instance or Cluster Deleted »</a>
 </span>
 </div>
 <div class="book" lang="en">
@@ -115,8 +115,8 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="aws-rds-db-instance-restored"></a>AWS RDS DB Instance Restored</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-rds-db-instance-restored.asciidoc">edit</a></div>
 </div></div></div>
-<p>An adversary with a set of compromised credentials may attempt to make copies of running or deleted RDS databases in order to evade defense mechanisms or access data. This rule identifies successful attempts to restore a DB instance using the RDS <code class="literal">RestoreDBInstanceFromDBSnapshot</code> or <code class="literal">RestoreDBInstanceFromS3</code> API operations.</p>
-<p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
+<p>Identifies the restoration of an AWS RDS database instance from a snapshot or S3 backup. Adversaries with access to valid credentials may restore copies of existing databases to bypass logging and monitoring controls or to exfiltrate sensitive data from a duplicated environment. This rule detects successful restoration operations using "RestoreDBInstanceFromDBSnapshot" or "RestoreDBInstanceFromS3", which may indicate unauthorized data access or post-compromise defense evasion.</p>
+<p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -176,7 +176,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 210</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 211</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -197,31 +197,114 @@ Elastic
 <div class="quoteblock">
 <blockquote>
 <p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance.
+While every effort has been made to ensure its quality, validate and adapt it to suit your operational needs.</p>
 </blockquote>
 </div>
 <p><span class="strong strong"><strong>Investigating AWS RDS DB Instance Restored</strong></span></p>
-<p>Amazon RDS (Relational Database Service) allows users to set up, operate, and scale databases in the cloud. Adversaries may exploit RDS by restoring DB instances from snapshots or S3 to access sensitive data or bypass security controls. The detection rule identifies successful restoration attempts, signaling potential unauthorized access or data exfiltration activities, by monitoring specific API operations and outcomes.</p>
+<p>Restoring an RDS DB instance from a snapshot or from S3 is a powerful operation that recreates a full database environment. While legitimate for recovery, migrations, or cloning, adversaries may use restore actions to access historical data, duplicate sensitive environments, evade guardrails, or prepare for data exfiltration.</p>
+<p>This rule detects successful invocation of <code class="literal">RestoreDBInstanceFromDBSnapshot</code> and <code class="literal">RestoreDBInstanceFromS3</code>, both of which may indicate attempts to rehydrate old datasets, bypass deletion protection, or establish a shadow environment for further malicious actions.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the CloudTrail logs to identify the user or role associated with the successful <code class="literal">RestoreDBInstanceFromDBSnapshot</code> or <code class="literal">RestoreDBInstanceFromS3</code> API call by examining the <code class="literal">user.identity</code> field.
+<span class="strong strong"><strong>Identify the actor and execution context</strong></span>
 </li>
 <li class="listitem">
-Check the source IP address and location from which the API call was made using the <code class="literal">sourceIPAddress</code> field to determine if it aligns with expected or known locations.
+Review <code class="literal">aws.cloudtrail.user_identity.arn</code>, <code class="literal">aws.cloudtrail.user_identity.type</code>, and <code class="literal">aws.cloudtrail.user_identity.access_key_id</code>.
 </li>
 <li class="listitem">
-Investigate the timing of the restoration event by looking at the <code class="literal">@timestamp</code> field to see if it coincides with any other suspicious activities or anomalies in the environment.
+Check <code class="literal">user.name</code>, <code class="literal">source.ip</code>, and <code class="literal">user_agent.original</code> to determine how the restore was executed (console, CLI, automation, SDK).
 </li>
 <li class="listitem">
-Examine the specific DB instance details restored, such as the DB instance identifier, to assess the sensitivity of the data involved and potential impact.
+<span class="strong strong"><strong>Understand what was restored and why</strong></span>
 </li>
 <li class="listitem">
-Verify if there are any associated alerts or logs indicating unauthorized access or data exfiltration attempts around the same time frame.
+Inspect <code class="literal">aws.cloudtrail.request_parameters</code> to identify:
 </li>
 <li class="listitem">
-Contact the user or team responsible for the credentials used, if legitimate, to confirm whether the restoration was authorized and intended.
+Snapshot identifier or S3 location used as the restore source.
+</li>
+<li class="listitem">
+The new DB instance identifier and configuration parameters.
+</li>
+<li class="listitem">
+Determine:
+</li>
+<li class="listitem">
+Whether the snapshot/backup used for the restore contains sensitive or high-value data.
+</li>
+<li class="listitem">
+Whether this restore created a publicly accessible instance, changed security groups, or used unusual storage/instance classes.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Reconstruct the activity flow</strong></span>
+</li>
+<li class="listitem">
+Use <code class="literal">@timestamp</code> to correlate the restore event with:
+</li>
+<li class="listitem">
+Snapshot creation, copy, or export events.
+</li>
+<li class="listitem">
+IAM policy changes or privilege escalations.
+</li>
+<li class="listitem">
+Deletion or modification of the original database.
+</li>
+<li class="listitem">
+Other RDS lifecycle actions such as <code class="literal">ModifyDBInstance</code>, <code class="literal">DeleteDBInstance</code>, or backup configuration changes.
+</li>
+<li class="listitem">
+Look for signs of attacker staging:
+</li>
+<li class="listitem">
+Prior enumeration activity (<code class="literal">DescribeDBSnapshots</code>, <code class="literal">DescribeDBInstances</code>).
+</li>
+<li class="listitem">
+Recent logins from unusual IPs or federated sessions without MFA.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Correlate with broader behavior</strong></span>
+</li>
+<li class="listitem">
+Pivot in CloudTrail on:
+</li>
+<li class="listitem">
+The same snapshot identifier.
+</li>
+<li class="listitem">
+The same actor or access key ID.
+</li>
+<li class="listitem">
+The newly created DB instance identifier.
+</li>
+<li class="listitem">
+Examine:
+</li>
+<li class="listitem">
+Whether the restored DB was modified immediately after (e.g., security groups opened, deletion protection disabled).
+</li>
+<li class="listitem">
+Whether there were large-volume read operations or export actions following the restore.
+</li>
+<li class="listitem">
+Whether the restore is part of a pattern of parallel suspicious activity (snapshot copying, S3 backups, cross-account actions).
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Validate intent with owners</strong></span>
+</li>
+<li class="listitem">
+Confirm with the application/database/platform teams:
+</li>
+<li class="listitem">
+Whether the restore was requested or part of an authorized operational workflow.
+</li>
+<li class="listitem">
+Whether this restore corresponds to migration, testing, DR drill, or another planned activity.
+</li>
+<li class="listitem">
+Whether the restored environment should exist (and for how long).
 </li>
 </ul>
 </div>
@@ -229,19 +312,22 @@ Contact the user or team responsible for the credentials used, if legitimate, to
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Routine database maintenance or testing activities may trigger the rule. Organizations should identify and document regular restoration activities performed by authorized personnel and exclude these from alerts.
+<span class="strong strong"><strong>Legitimate maintenance and DR workflows</strong></span>
 </li>
 <li class="listitem">
-Automated backup and restore processes used for disaster recovery or data migration can result in false positives. Users should configure exceptions for known automated processes by filtering based on specific user accounts or roles.
+Many teams restore databases for patch testing, DR validation, schema testing, or migration.
 </li>
 <li class="listitem">
-Development and staging environments often involve frequent restoration of databases for testing purposes. Exclude these environments by identifying and filtering out specific instance identifiers or tags associated with non-production environments.
+<span class="strong strong"><strong>Automated restore workflows</strong></span>
 </li>
 <li class="listitem">
-Scheduled tasks or scripts that restore databases as part of regular operations can be mistaken for unauthorized activity. Ensure these tasks are well-documented and create exceptions based on the source IP or IAM role used for these operations.
+CI/CD pipelines or internal automation may restore DBs to generate staging or dev environments.
 </li>
 <li class="listitem">
-Third-party services or integrations that require database restoration for functionality may trigger alerts. Verify these services and exclude their associated actions by identifying their unique user agents or API keys.
+<span class="strong strong"><strong>Third-party tooling</strong></span>
+</li>
+<li class="listitem">
+Backup/DR solutions, migration tools, or observability platforms may restore DB instances for operational reasons. Tune based on <code class="literal">user_agent.original</code> or known service roles.
 </li>
 </ul>
 </div>
@@ -249,25 +335,99 @@ Third-party services or integrations that require database restoration for funct
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the restored RDS instance to prevent unauthorized access. This can be done by modifying the security group rules to restrict inbound and outbound traffic.
+<span class="strong strong"><strong>Contain the restored environment</strong></span>
 </li>
 <li class="listitem">
-Conduct a thorough review of CloudTrail logs to identify the source of the compromised credentials and any other suspicious activities associated with the same user or account.
+If unauthorized:
 </li>
 <li class="listitem">
-Revoke the compromised credentials and issue new credentials for the affected user or service account. Ensure that multi-factor authentication (MFA) is enabled for all accounts.
+Apply restrictive security groups to block access.
 </li>
 <li class="listitem">
-Notify the security team and relevant stakeholders about the incident, providing details of the unauthorized restoration and any potential data exposure.
+Disable public accessibility if enabled.
 </li>
 <li class="listitem">
-Perform a security assessment of the restored RDS instance to identify any unauthorized changes or data exfiltration. This includes checking for unusual queries or data exports.
+Evaluate whether deletion protection or backup retention is misconfigured.
 </li>
 <li class="listitem">
-Implement additional monitoring and alerting for similar API operations to detect future unauthorized restoration attempts promptly.
+<span class="strong strong"><strong>Assess data exposure and intent</strong></span>
 </li>
 <li class="listitem">
-Review and update IAM policies to ensure that only authorized users have the necessary permissions to restore RDS instances, reducing the risk of future incidents.
+Work with data owners to evaluate:
+</li>
+<li class="listitem">
+The sensitivity of the restored environment.
+</li>
+<li class="listitem">
+Whether any reads, dumps, or exports occurred post-restore.
+</li>
+<li class="listitem">
+Whether the restore enabled the attacker to access older or deleted data.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Investigate scope and related activity</strong></span>
+</li>
+<li class="listitem">
+Review CloudTrail for:
+</li>
+<li class="listitem">
+Additional restores, exports, or copies.
+</li>
+<li class="listitem">
+IAM changes allowing expanded privileges.
+</li>
+<li class="listitem">
+Unusual authentication events or federated sessions without MFA.
+</li>
+<li class="listitem">
+Related destructive actions (snapshot deletion, backup disabled, instance deletion).
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Hardening and preventive controls</strong></span>
+</li>
+<li class="listitem">
+Enforce least privilege for <code class="literal">rds:RestoreDBInstanceFromDBSnapshot</code> and <code class="literal">rds:RestoreDBInstanceFromS3</code>.
+</li>
+<li class="listitem">
+Use IAM conditions to restrict restore actions by network, principal, or region.
+</li>
+<li class="listitem">
+Add AWS Config and Security Hub controls for monitoring:
+</li>
+<li class="listitem">
+Unapproved restores.
+</li>
+<li class="listitem">
+Public or misconfigured restored instances.
+</li>
+<li class="listitem">
+Consider SCPs that prevent RDS restores in production accounts except through controlled roles.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Post-incident improvements</strong></span>
+</li>
+<li class="listitem">
+Rotate credentials for affected IAM users/roles.
+</li>
+<li class="listitem">
+Update change management processes to ensure restore actions are tracked and approved.
+</li>
+<li class="listitem">
+Adjust rule exceptions sparingly and ensure high-risk restores continue to generate alerts.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-incident-response-playbooks/blob/c151b0dc091755fffd4d662a8f29e2f6794da52c/playbooks/" class="ulink" target="_top">AWS IR Playbooks</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-customer-playbook-framework/tree/a8c7b313636b406a375952ac00b2d68e89a991f2/docs" class="ulink" target="_top">AWS Customer Playbook Framework</a></strong></span>
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Security Best Practices:</strong></span> <a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">AWS Knowledge Center – Security Best Practices</a>.
 </li>
 </ul>
 </div>
@@ -279,10 +439,10 @@ Review and update IAM policies to ensure that only authorized users have the nec
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">any where event.dataset == "aws.cloudtrail"
-    and event.provider == "rds.amazonaws.com"
-    and event.action in ("RestoreDBInstanceFromDBSnapshot", "RestoreDBInstanceFromS3")
-    and event.outcome == "success"</pre>
+<pre class="programlisting prettyprint lang-js">event.dataset: "aws.cloudtrail"
+    and event.provider: "rds.amazonaws.com"
+    and event.action: ("RestoreDBInstanceFromDBSnapshot" or "RestoreDBInstanceFromS3")
+    and event.outcome: "success"</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
@@ -362,7 +522,7 @@ Reference URL: <a href="https://attack.mitre.org/techniques/T1578/004/" class="u
 <a href="aws-rds-db-instance-made-public.html">« AWS RDS DB Instance Made Public</a>
 </span>
 <span class="next">
-<a href="aws-rds-db-instance-or-cluster-deletion-protection-disabled.html">AWS RDS DB Instance or Cluster Deletion Protection Disabled »</a>
+<a href="aws-rds-db-instance-or-cluster-deleted.html">AWS RDS DB Instance or Cluster Deleted »</a>
 </span>
 </div>
 

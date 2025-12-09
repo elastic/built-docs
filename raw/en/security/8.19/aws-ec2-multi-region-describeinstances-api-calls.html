@@ -7,7 +7,7 @@
 
 <link rel="home" href="index.html" title="Elastic Security [8.19]"/>
 <link rel="up" href="prebuilt-rules.html" title="Prebuilt rule reference"/>
-<link rel="prev" href="aws-ec2-instance-interaction-with-iam-service.html" title="AWS EC2 Instance Interaction with IAM Service"/>
+<link rel="prev" href="aws-ec2-lolbin-execution-via-ssm-sendcommand.html" title="AWS EC2 LOLBin Execution via SSM SendCommand"/>
 <link rel="next" href="aws-ec2-network-access-control-list-creation.html" title="AWS EC2 Network Access Control List Creation"/>
 <meta class="elastic" name="product_version" content="8.19"/>
 <meta class="elastic" name="product_name" content="Security"/>
@@ -19,7 +19,7 @@
 <body>
 <div class="navheader">
 <span class="prev">
-<a href="aws-ec2-instance-interaction-with-iam-service.html">« AWS EC2 Instance Interaction with IAM Service</a>
+<a href="aws-ec2-lolbin-execution-via-ssm-sendcommand.html">« AWS EC2 LOLBin Execution via SSM SendCommand</a>
 </span>
 <span class="next">
 <a href="aws-ec2-network-access-control-list-creation.html">AWS EC2 Network Access Control List Creation »</a>
@@ -52,14 +52,11 @@
 <p><span class="strong strong"><strong>Severity</strong></span>: low</p>
 <p><span class="strong strong"><strong>Risk score</strong></span>: 21</p>
 <p><span class="strong strong"><strong>Runs every</strong></span>: 5m</p>
-<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-9m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
+<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-6m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
 <p><span class="strong strong"><strong>Maximum alerts per execution</strong></span>: 100</p>
 <p><span class="strong strong"><strong>References</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
-<li class="listitem">
-<a href="https://www.sentinelone.com/labs/exploring-fbot-python-based-malware-targeting-cloud-and-payment-services/" class="ulink" target="_top">https://www.sentinelone.com/labs/exploring-fbot-python-based-malware-targeting-cloud-and-payment-services/</a>
-</li>
 <li class="listitem">
 <a href="https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeInstances.html" class="ulink" target="_top">https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeInstances.html</a>
 </li>
@@ -81,6 +78,9 @@ Data Source: AWS EC2
 Resources: Investigation Guide
 </li>
 <li class="listitem">
+Rule Type: BBR
+</li>
+<li class="listitem">
 Use Case: Threat Detection
 </li>
 <li class="listitem">
@@ -88,7 +88,7 @@ Tactic: Discovery
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 7</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 8</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -104,86 +104,126 @@ Elastic
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating AWS EC2 Multi-Region DescribeInstances API Calls</strong></span></p>
-<p>This rule detects instances where a single AWS resource makes <code class="literal">DescribeInstances</code> API calls in over 10 regions within a 30-second window. This could indicate an adversary using compromised credentials or an exploited resource to enumerate AWS infrastructure across multiple regions. Attackers often leverage multi-region enumeration to assess the overall cloud environment and find potential targets for further exploitation.</p>
-<p><span class="strong strong"><strong>Possible Investigation Steps</strong></span></p>
+<p>This rule flags when the <code class="literal">DescribeInstances</code> API is executed across multiple AWS regions within a short timeframe. While benign in some cases (e.g., asset inventory, legitimate multi-region management), this pattern can indicate a reconnaissance phase in which an adversary enumerates EC2 instances in all regions to identify potential targets across the environment.</p>
+<p>Because the signal can generate significant noise in dynamic or large AWS environments, this rule should be treated as a Building Block Rule (BBR), not a stand-alone alert requiring immediate incident response. Instead, it is best used for hunting, enrichment, correlation, and escalation when combined with other signals.</p>
+<p><span class="strong strong"><strong>How to use this rule (hunting &amp; correlation guide)</strong></span></p>
+<p>This rule is most effective when paired with other detection rules or data sources. Use it to answer questions such as:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Identify the Resource and Actor</strong></span>:
+Did a newly created or unknown principal call <code class="literal">DescribeInstances</code> across many regions? Pair this with a new terms or first-time principal rule (e.g., <code class="literal">GetCallerIdentity</code>, <code class="literal">AssumeRole</code>, or <code class="literal">aws.cloudtrail.user_identity.session_context.session_issuer.arn</code>).
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Actor ARN</strong></span>: Check <code class="literal">aws.cloudtrail.user_identity.arn</code> to determine the exact identity performing the enumeration. Validate if the user is expected to perform region-wide <code class="literal">DescribeInstances</code> actions across multiple regions or if it seems unusual.
+Was the same principal also observed making other discovery or enumeration calls (e.g., <code class="literal">DescribeSnapshots</code>, <code class="literal">DescribeVolumes</code>, <code class="literal">DescribeImages</code>, <code class="literal">DescribeSecurityGroups</code>) in a short timeframe?
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Account and Role Details</strong></span>: Examine <code class="literal">cloud.account.id</code> and <code class="literal">aws.cloudtrail.user_identity.session_context.session_issuer</code> for information about the AWS account and specific role associated with the action.
+Did the multi-region calls precede or coincide with higher-risk actions such as:
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Analyze API Call Patterns</strong></span>:
+Snapshot creation or shared snapshot modifications (<code class="literal">CreateSnapshot</code>, <code class="literal">ModifySnapshotAttribute</code>)
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Frequency and Scope</strong></span>: Review <code class="literal">cloud.region</code> field and confirm if this specific resource commonly performs <code class="literal">DescribeInstances</code> calls across multiple regions.
+AMI export/copy operations (<code class="literal">ExportImage</code>, <code class="literal">CopyImage</code>)
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Time Window Context</strong></span>: Compare the timing of the API calls within the <code class="literal">target_time_window</code> to determine if this burst pattern aligns with expected system usage or is potentially malicious.
+Access key creation, role assumption, or IAM permission changes
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Check User Agent and Tooling</strong></span>:
+Unexpected S3 bucket or data transfer activity (e.g., large data egress, new S3 bucket writes)
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Source and User Agent</strong></span>: Verify <code class="literal">user_agent.original</code> to determine if the request was made through expected tooling (e.g., AWS CLI or SDK) or a third-party tool that might indicate non-standard access.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Source IP Address</strong></span>: Look into <code class="literal">source.address</code> to identify the origin of the calls. Unusual IP addresses, especially those outside expected ranges, may indicate compromised access.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Evaluate for Potential Reconnaissance Behavior</strong></span>:
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Account and Region Enumeration</strong></span>: Adversaries may use region-wide <code class="literal">DescribeInstances</code> requests to discover resources within an account across different regions. Confirm if this access aligns with operational practices or represents excessive access.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Permissions and Roles</strong></span>: Investigate the permissions associated with the user role. Excessive permissions on a compromised role may allow broader enumeration, which should be restricted.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Review Related CloudTrail Events</strong></span>:
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Additional Describe or List Actions</strong></span>: Identify any associated <code class="literal">Describe</code> or <code class="literal">List</code> API calls that may indicate further enumeration of other AWS services within the same timeframe.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Potential Preceding Events</strong></span>: Look for preceding login or access events from the same actor, as these may indicate potential credential compromise or unauthorized escalation of privileges.
+Did the activity span regions normally unused or outside the organization&#8217;s typical operational footprint?
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>False Positive Analysis</strong></span></p>
+<p><span class="strong strong"><strong>Possible investigation steps:</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Expected Enumeration</strong></span>: Certain administrative or automation scripts may conduct broad <code class="literal">DescribeInstances</code> API calls for inventory purposes. Review usage patterns or consult relevant teams to validate the purpose.
+<span class="strong strong"><strong>Review the principal and session trace</strong></span>:
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Automated Cloud Management</strong></span>: Some automated services may perform regional checks for compliance or backup operations. If this rule is triggered repeatedly by a known service, consider whitelisting or tuning accordingly.
+Identify <code class="literal">aws.cloudtrail.user_identity.arn</code>, <code class="literal">aws.cloudtrail.user_identity.access_key_id</code>, and determine whether the principal is known, recently onboarded, or unusual (e.g., a service role used in rare cases).
+</li>
+<li class="listitem">
+Examine <code class="literal">user_agent.original</code> and <code class="literal">source.ip</code> for anomalies (e.g., new CLI/SDK versions, IAM roles from unexpected hosts, geolocation outside expected range).
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Evaluate region distribution and timing</strong></span>:
+</li>
+<li class="listitem">
+Inspect the regions contacted by <code class="literal">DescribeInstances</code> within the alert window. Are some regions rarely used in your org?
+</li>
+<li class="listitem">
+Look at the timeline: did the calls occur in rapid succession or spread out? A burst suggests automated reconnaissance rather than manual usage.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Correlate with other detection signals &amp; data access patterns</strong></span>:
+</li>
+<li class="listitem">
+Query for other CloudTrail events by the same principal in the ±30 minutes window: enumeration APIs (<code class="literal">Describe*</code>), snapshot/AMI events, <code class="literal">CopySnapshot</code>, <code class="literal">ExportImage</code>, <code class="literal">StartInstances</code>, etc.
+</li>
+<li class="listitem">
+Cross-validate with SIEM or data egress logs: did large volumes of data leave the environment after the enumeration?
+</li>
+<li class="listitem">
+Review IAM activity for privilege elevation, new access keys, or role chaining that could support the enumeration action.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Assess intent and operational context</strong></span>:
+</li>
+<li class="listitem">
+Determine whether the enumeration aligns with known asset-inventory or management tasks (Recurring scans, DevOps automation, IT health checks).
+</li>
+<li class="listitem">
+If this principal is known for asset management, verify the timing, region list, and audit logs for existing tickets/change-records.
+</li>
+<li class="listitem">
+If the activity is unexpected, low legitimacy, or tied to other suspicious events, escalate.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Response and Remediation</strong></span></p>
+<p><span class="strong strong"><strong>False positive analysis:</strong></span></p>
+<p>Because many organizations have legitimate multi-region cloud operations, this rule may generate false positives. Common benign scenarios include:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Review IAM Policies and Role Permissions</strong></span>: Limit the permissions of roles associated with this resource, restricting unnecessary multi-region enumeration access.
+DevOps or cloud-ops automation that inventories EC2 instances across all regions (for cost, compliance, or multi-region deployment verification).
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Enforce Least Privilege Access</strong></span>: Ensure that permissions for DescribeInstances are tightly controlled and restricted to specific roles or accounts that require multi-region access.
+Large-scale migrations or disaster-recovery tests that touch many regions in a short time.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Increase Monitoring and Alerts</strong></span>: Set up additional monitoring on this role or account for further signs of unauthorized activity or lateral movement attempts.
+Security or audit team enumeration of the environment (e.g., internal red-team, internal asset scanning).
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Access Review</strong></span>: Conduct a review of users and entities with <code class="literal">DescribeInstances</code> permissions, especially for multi-region capabilities, and ensure these permissions are necessary for their functions.
+Cross-account management tools in AWS Organizations that routinely query multiple regions.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Additional Information</strong></span></p>
+<p>To manage these, consider:
+- Whitelisting known automation roles/principals (with caution).
+- Tagging and excluding known “inventory scan” sessions (based on user agent, IP range, timing).
+- Using this rule only as a correlation trigger and not as a direct alert.</p>
+<p><span class="strong strong"><strong>Response and escalation:</strong></span></p>
+<p>Because this rule is a BBR, its detection alone does not usually warrant full incident response. Instead:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong>Document the finding</strong></span> in your hunt log, noting principal, regions, timestamp, and correlation flags (other events).
+</li>
+<li class="listitem">
+If correlation reveals additional suspicious activity (e.g., snapshot share, data export, IAM privilege change) escalate to full incident response.
+</li>
+<li class="listitem">
+If the enumeration is determined benign (e.g., approved internal scan), add context (ticket number, owner, justification) and suppress/annotate this principal in future hunts for a defined interval.
+</li>
+<li class="listitem">
+Update your detection playbooks to reflect this rule’s role as a recon-indicator, and train analysts to use it as a pivot point.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
 <p>For further information on AWS <code class="literal">DescribeInstances</code> permissions and best practices, refer to the <a href="https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeInstances.html" class="ulink" target="_top">AWS DescribeInstances API documentation</a>.</p>
 </div>
 
@@ -193,7 +233,7 @@ Elastic
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">from logs-aws.cloudtrail-*
+<pre class="programlisting prettyprint lang-js">from logs-aws.cloudtrail-* metadata _id, _version, _index
 
 // filter for DescribeInstances API calls
 | where event.dataset == "aws.cloudtrail"
@@ -204,19 +244,36 @@ Elastic
 | eval Esql.time_window_date_trunc = date_trunc(30 seconds, @timestamp)
 
 // keep only the relevant raw fields
-| keep Esql.time_window_date_trunc, aws.cloudtrail.user_identity.arn, cloud.region
+| keep
+    Esql.time_window_date_trunc,
+    aws.cloudtrail.user_identity.arn,
+    cloud.region,
+    cloud.account.id,
+    aws.cloudtrail.user_identity.access_key_id,
+    aws.cloudtrail.user_identity.type,
+    user_agent.original,
+    source.as.organization.name,
+    source.ip,
+    @timestamp,
+    data_stream.namespace
 
 // count the number of unique regions and total API calls within the 30-second window
 | stats
     Esql.cloud_region_count_distinct = count_distinct(cloud.region),
-    Esql.event_count = count(*)
+    Esql.event_count = count(*),
+    Esql.event_timestamp_values = VALUES(@timestamp),
+    Esql.aws_cloudtrail_user_identity_type_values = VALUES(aws.cloudtrail.user_identity.type),
+    Esql.aws_cloudtrail_user_identity_access_key_id_values = VALUES(aws.cloudtrail.user_identity.access_key_id),
+    Esql.source_ip_values = VALUES(source.ip),
+    Esql.user_agent_original_values = VALUES(user_agent.original),
+    Esql.source_as_organization_name_values = VALUES(source.as.organization.name),
+    Esql.cloud_account_id_values = VALUES(cloud.account.id),
+    Esql.cloud_region_values = VALUES(cloud.region),
+    Esql.data_stream_namespace_values = VALUES(data_stream.namespace)
   by Esql.time_window_date_trunc, aws.cloudtrail.user_identity.arn
 
 // filter for resources making DescribeInstances API calls in more than 10 regions within the 30-second window
-| where Esql.cloud_region_count_distinct &gt;= 10 and Esql.event_count &gt;= 10
-
-// sort the results by time window in descending order
-| sort Esql.time_window_date_trunc desc</pre>
+| where Esql.cloud_region_count_distinct &gt;= 10 and Esql.event_count &gt;= 10</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
@@ -261,7 +318,7 @@ Reference URL: <a href="https://attack.mitre.org/techniques/T1580/" class="ulink
 </div>
 </div><div class="navfooter">
 <span class="prev">
-<a href="aws-ec2-instance-interaction-with-iam-service.html">« AWS EC2 Instance Interaction with IAM Service</a>
+<a href="aws-ec2-lolbin-execution-via-ssm-sendcommand.html">« AWS EC2 LOLBin Execution via SSM SendCommand</a>
 </span>
 <span class="next">
 <a href="aws-ec2-network-access-control-list-creation.html">AWS EC2 Network Access Control List Creation »</a>
