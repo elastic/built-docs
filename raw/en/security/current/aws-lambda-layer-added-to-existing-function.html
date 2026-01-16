@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="aws-lambda-layer-added-to-existing-function"></a>AWS Lambda Layer Added to Existing Function</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-lambda-layer-added-to-existing-function.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies when an Lambda Layer is added to an existing Lambda function. AWS layers are a way to share code and data across multiple functions. By adding a layer to an existing function, an attacker can persist or execute code in the context of the function.</p>
+<p>Identifies when a Lambda layer is added to an existing AWS Lambda function. Lambda layers allow shared code, dependencies, or runtime modifications to be injected into a function’s execution environment. Adversaries with the ability to update function configurations may add a malicious layer to establish persistence, run unauthorized code, or intercept data handled by the function. This activity should be reviewed to ensure the modification is expected and authorized.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -61,8 +61,8 @@ logs-aws.cloudtrail-*
 </div>
 <p><span class="strong strong"><strong>Severity</strong></span>: low</p>
 <p><span class="strong strong"><strong>Risk score</strong></span>: 21</p>
-<p><span class="strong strong"><strong>Runs every</strong></span>: 10m</p>
-<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-60m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
+<p><span class="strong strong"><strong>Runs every</strong></span>: 5m</p>
+<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-6m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
 <p><span class="strong strong"><strong>Maximum alerts per execution</strong></span>: 100</p>
 <p><span class="strong strong"><strong>References</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -104,7 +104,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 5</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 6</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -119,67 +119,83 @@ Elastic
 <div class="position-relative"><h3 class="title"><a id="_investigation_guide_68"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-lambda-layer-added-to-existing-function.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance.
+While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
+</blockquote>
+</div>
 <p><span class="strong strong"><strong>Investigating AWS Lambda Layer Added to Existing Function</strong></span></p>
-<p>This rule detects when a Lambda layer is added to an existing Lambda function. AWS Lambda layers are a mechanism for sharing code and data across multiple functions. By adding a layer to an existing function, an attacker can persist or execute code in the context of the function. Understanding the context and legitimacy of such changes is crucial to determine if the action is benign or malicious.</p>
-<p><span class="strong strong"><strong>Possible Investigation Steps:</strong></span></p>
+<p>Lambda layers introduce external code artifacts into a function’s runtime. Adding a layer to an existing Lambda function
+modifies its execution environment and may allow an adversary to run arbitrary code, intercept data, or maintain
+persistence without altering the function source itself. This detection highlights successful configuration updates using
+<code class="literal">PublishLayerVersion*</code> or <code class="literal">UpdateFunctionConfiguration*</code>.</p>
+<p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
+<p><span class="strong strong"><strong>Identify the actor</strong></span>
+- Review <code class="literal">aws.cloudtrail.user_identity.arn</code> and the <code class="literal">access_key_id</code>. Determine whether the actor normally administers Lambda or has recently exhibited unusual behavior.</p>
+<p><span class="strong strong"><strong>Review what was modified</strong></span>
+- Inspect <code class="literal">aws.cloudtrail.request_parameters</code> to identify which layer ARN was added, the function name and region, whether multiple layers were applied at once or in rapid succession.
+- Compare the added layer version against known and approved layer catalogs.</p>
+<p><span class="strong strong"><strong>Validate the operational context</strong></span>
+- Check the time of the update (<code class="literal">@timestamp</code>) to see if it aligns with known release pipelines or deployment windows and Normal working hours for the responsible team.
+- Determine whether a CI/CD pipeline or IaC tool was expected to update this function.</p>
+<p><span class="strong strong"><strong>Assess where the change came from</strong></span>
+- Review <code class="literal">source.ip</code> and <code class="literal">user_agent.original</code> for signs of console access from unusual locations, access via previously unused automation tools, suspicious programmatic access consistent with compromised keys.</p>
+<p><span class="strong strong"><strong>Correlate with additional activity</strong></span>
+- Look for preceding or subsequent events such as:
+  - Creation of new Lambda layers (<code class="literal">PublishLayerVersion</code>).
+  - IAM role modifications affecting the Lambda function.
+  - Increased invocation volume or unusual invocation patterns after the layer addition.
+- Search for other functions modified by the same actor or from the same IP.</p>
+<p><span class="strong strong"><strong>False positive analysis</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Identify the Actor</strong></span>: Review the <code class="literal">aws.cloudtrail.user_identity.arn</code> and <code class="literal">aws.cloudtrail.user_identity.access_key_id</code> fields to identify who made the change. Verify if this actor typically performs such actions and if they have the necessary permissions.
+Confirm whether the change aligns with a planned deployment, application update, or dependency upgrade.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Review the Request Details</strong></span>: Examine the <code class="literal">aws.cloudtrail.request_parameters</code> to understand the specific layer added to the Lambda function. Look for any unusual parameters that could suggest unauthorized or malicious modifications.
+Determine whether the user or automation role commonly modifies Lambda function configurations.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Analyze the Source of the Request</strong></span>: Investigate the <code class="literal">source.ip</code> and <code class="literal">source.geo</code> fields to determine the geographical origin of the request. An external or unexpected location might indicate compromised credentials or unauthorized access.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Contextualize with Timestamp</strong></span>: Use the <code class="literal">@timestamp</code> field to check when the change occurred. Modifications during non-business hours or outside regular maintenance windows might require further scrutiny.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Correlate with Other Activities</strong></span>: Search for related CloudTrail events before and after this change to see if the same actor or IP address engaged in other potentially suspicious activities.
+Validate the legitimacy of the added layer by checking internal documentation or release notes.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>False Positive Analysis:</strong></span></p>
+<p><span class="strong strong"><strong>Response and remediation</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Legitimate Administrative Actions</strong></span>: Confirm if the addition of the Lambda layer aligns with scheduled updates, development activities, or legitimate administrative tasks documented in change management systems.
+Remove or roll back the added layer if the modification appears unauthorized or suspicious.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Consistency Check</strong></span>: Compare the action against historical data of similar actions performed by the user or within the organization. If the action is consistent with past legitimate activities, it might indicate a false alarm.
+Review the layer contents, especially for newly published layers, to verify integrity and legitimacy.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Verify through Outcomes</strong></span>: Check the <code class="literal">aws.cloudtrail.response_elements</code> and the <code class="literal">event.outcome</code> to confirm if the change was successful and intended according to policy.
+Investigate the IAM role or user responsible for the change and rotate compromised credentials if necessary.
+</li>
+<li class="listitem">
+Tighten permissions by ensuring only approved roles can modify Lambda configurations or publish new layers.
+</li>
+<li class="listitem">
+Implement monitoring for subsequent Lambda configuration changes, invocation anomalies caused by the injected layer, additional persistence techniques targeting serverless infrastructure.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Response and Remediation:</strong></span></p>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>Immediate Review and Reversal if Necessary</strong></span>: If the change was unauthorized, remove the added layer from the Lambda function to mitigate any unintended code execution or persistence.
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-incident-response-playbooks/blob/c151b0dc091755fffd4d662a8f29e2f6794da52c/playbooks/" class="ulink" target="_top">AWS IR Playbooks</a></strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Enhance Monitoring and Alerts</strong></span>: Adjust monitoring systems to alert on similar actions, especially those involving sensitive functions or layers.
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-customer-playbook-framework/tree/a8c7b313636b406a375952ac00b2d68e89a991f2/docs" class="ulink" target="_top">AWS Customer Playbook Framework</a></strong></span>
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Educate and Train</strong></span>: Provide additional training to users with administrative rights on the importance of security best practices concerning Lambda function management and the use of layers.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Audit Lambda Functions and Policies</strong></span>: Conduct a comprehensive audit of all Lambda functions and associated policies to ensure they adhere to the principle of least privilege.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Incident Response</strong></span>: If there&#8217;s an indication of malicious intent or a security breach, initiate the incident response protocol to mitigate any damage and prevent future occurrences.
+<span class="strong strong"><strong><a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">AWS Knowledge Center – Security Best Practices</a></strong></span>
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Additional Information:</strong></span></p>
-<p>For further guidance on managing Lambda functions and securing AWS environments, refer to the <a href="https://docs.aws.amazon.com/lambda/latest/dg/welcome.html" class="ulink" target="_top">AWS Lambda documentation</a> and AWS best practices for security. Additionally, consult the following resources for specific details on Lambda layers and persistence techniques:
-- <a href="https://cloud.hacktricks.xyz/pentesting-cloud/aws-security/aws-persistence/aws-lambda-persistence/aws-lambda-layers-persistence" class="ulink" target="_top">AWS Lambda Layers Persistence</a>
-- <a href="https://docs.aws.amazon.com/lambda/latest/api/API_PublishLayerVersion.html" class="ulink" target="_top">AWS API PublishLayerVersion</a>
-- <a href="https://docs.aws.amazon.com/lambda/latest/api/API_UpdateFunctionConfiguration.html" class="ulink" target="_top">AWS API UpdateFunctionConfiguration</a></p>
 </div>
 
 <div class="section">
@@ -191,7 +207,7 @@ Elastic
 <pre class="programlisting prettyprint lang-js">event.dataset: aws.cloudtrail
     and event.provider: lambda.amazonaws.com
     and event.outcome: success
-    and event.action: (PublishLayerVersion* or UpdateFunctionConfiguration)</pre>
+    and event.action: (PublishLayerVersion* or UpdateFunctionConfiguration*)</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

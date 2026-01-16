@@ -116,21 +116,8 @@
 <div class="position-relative"><h2 class="title"><a id="privileged-account-brute-force"></a>Privileged Account Brute Force</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privileged-account-brute-force.asciidoc">edit</a></div>
 </div></div></div>
 <p>Identifies multiple consecutive logon failures targeting an Admin account from the same source address and within a short time interval. Adversaries will often brute force login attempts across multiple users with a common or known password, in an attempt to gain access to accounts.</p>
-<p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
-<p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-logs-system.security*
-</li>
-<li class="listitem">
-logs-windows.forwarded*
-</li>
-<li class="listitem">
-winlogbeat-*
-</li>
-</ul>
-</div>
+<p><span class="strong strong"><strong>Rule type</strong></span>: esql</p>
+<p><span class="strong strong"><strong>Rule indices</strong></span>: None</p>
 <p><span class="strong strong"><strong>Severity</strong></span>: medium</p>
 <p><span class="strong strong"><strong>Risk score</strong></span>: 47</p>
 <p><span class="strong strong"><strong>Runs every</strong></span>: 5m</p>
@@ -167,7 +154,7 @@ Data Source: Windows Security Event Logs
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 115</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 117</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -179,7 +166,7 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_982"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privileged-account-brute-force.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1019"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privileged-account-brute-force.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Privileged Account Brute Force</strong></span></p>
@@ -297,17 +284,29 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1041"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privileged-account-brute-force.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1081"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privileged-account-brute-force.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">sequence by winlog.computer_name, source.ip with maxspan=10s
-  [authentication where host.os.type == "windows" and
-    event.action == "logon-failed" and winlog.logon.type : "Network" and
-    source.ip != null and source.ip != "127.0.0.1" and source.ip != "::1" and user.name : "*admin*" and
-
-    /* noisy failure status codes often associated to authentication misconfiguration */
-    not winlog.event_data.Status : ("0xC000015B", "0XC000005E", "0XC0000133", "0XC0000192")] with runs=5</pre>
+<pre class="programlisting prettyprint lang-js">from logs-system.security*, logs-windows.forwarded*, winlogbeat-* metadata _id, _version, _index
+| where event.category == "authentication" and host.os.type == "windows" and event.action == "logon-failed" and
+  winlog.logon.type == "Network" and source.ip is not null and winlog.computer_name is not null and
+  not cidr_match(TO_IP(source.ip), "127.0.0.0/8", "::1") and
+  to_lower(winlog.event_data.TargetUserName) like "*admin*"  and
+  /*
+    noisy failure status codes often associated to authentication misconfiguration
+     0xC000015B - The user has not been granted the requested logon type (also called the logon right) at this machine.
+     0XC000005E - There are currently no logon servers available to service the logon request.
+     0XC0000133 - Clocks between DC and other computer too far out of sync.
+     0XC0000192 An attempt was made to logon, but the Netlogon service was not started.
+     0xc00000dc - DC is in shutdown phase, it will normally tell current clients to use another DC for authentication.
+  */
+  not winlog.event_data.Status in ("0xc000015b", "0xc000005e", "0xc0000133", "0xc0000192", "0xc00000dc")
+// truncate the timestamp to a 60-second window
+| eval Esql.time_window = date_trunc(60 seconds, @timestamp)
+| stats Esql.failed_auth_count = COUNT(*), Esql.target_user_name_values = VALUES(winlog.event_data.TargetUserName), Esql.user_domain_values = VALUES(user.domain), Esql.error_codes = VALUES(winlog.event_data.Status), Esql.data_stream_namespace.values = VALUES(data_stream.namespace) by winlog.computer_name, source.ip, Esql.time_window, winlog.logon.type
+| where Esql.failed_auth_count &gt;= 50
+| KEEP winlog.computer_name, source.ip, Esql.time_window, winlog.logon.type, Esql.*</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

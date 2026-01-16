@@ -115,8 +115,8 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="aws-cli-with-kali-linux-fingerprint-identified"></a>AWS CLI with Kali Linux Fingerprint Identified</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/aws-cli-with-kali-linux-fingerprint-identified.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies the usage of the AWS CLI with a user agent string containing <code class="literal">distrib#kali</code>, which suggests the request was made from a Kali Linux distribution. This may indicate offensive security tooling or unauthorized use of the AWS CLI from a potentially adversarial environment.</p>
-<p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
+<p>Identifies usage of the AWS CLI from a client reporting a user agent string indicating the request was made from a Kali Linux distribution. Kali Linux is commonly used for offensive security testing and adversary tradecraft. While not inherently malicious, AWS CLI activity originating from Kali is uncommon in most production environments and may indicate compromised credentials, unauthorized access, or post-exploitation activity using valid cloud accounts.</p>
+<p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -128,7 +128,7 @@ logs-aws.cloudtrail-*
 <p><span class="strong strong"><strong>Severity</strong></span>: medium</p>
 <p><span class="strong strong"><strong>Risk score</strong></span>: 47</p>
 <p><span class="strong strong"><strong>Runs every</strong></span>: 5m</p>
-<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-9m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
+<p><span class="strong strong"><strong>Searches indices from</strong></span>: now-6m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
 <p><span class="strong strong"><strong>Maximum alerts per execution</strong></span>: 100</p>
 <p><span class="strong strong"><strong>References</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -167,7 +167,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 2</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 3</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -183,43 +183,76 @@ Elastic
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and Analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating AWS CLI with Kali Linux Fingerprint Identified</strong></span></p>
-<p>The <code class="literal">user_agent.original</code> field in AWS CloudTrail logs reveals the operating system and toolchain used to make API calls. The substring <code class="literal">distrib#kali</code> strongly implies the use of Kali Linux, a common OS used by offensive security professionals and adversaries.</p>
-<p><span class="strong strong"><strong>Possible Investigation Steps</strong></span></p>
+<p>AWS CloudTrail captures the user agent string for API requests, which can provide insight into the operating system and tooling used. The presence of <code class="literal">distrib#kali</code> strongly suggests the AWS CLI was executed from a Kali Linux environment. Kali is widely used for penetration testing, red teaming, and adversarial operations, making its appearance in AWS API telemetry noteworthy, especially when associated with sensitive actions or unexpected identities.</p>
+<p>This detection focuses on successful AWS CLI activity and should be evaluated in the context of who performed the action, what was accessed or modified, and where the request originated.</p>
+<p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
+<p><span class="strong strong"><strong>Identify the actor</strong></span>
+- Review <code class="literal">aws.cloudtrail.user_identity.arn</code> and <code class="literal">aws.cloudtrail.user_identity.access_key_id</code> to determine which IAM
+  principal was used.
+- Check whether this principal normally interacts with AWS via CLI tooling and whether Kali Linux usage is expected.</p>
+<p><span class="strong strong"><strong>Review access patterns and actions</strong></span>
+- Examine the API calls associated with this user agent for high-risk activity such as IAM changes, data access, snapshot
+  sharing, logging modification, or persistence-related actions.
+- Look for sequences indicating initial access or expansion, such as <code class="literal">GetSessionToken</code>, <code class="literal">AssumeRole</code>, or privilege
+  escalation attempts.
+- Determine whether the activity scope aligns with the role’s intended permissions and business function.</p>
+<p><span class="strong strong"><strong>Inspect source network and tooling context</strong></span>
+- Review <code class="literal">source.ip</code>, <code class="literal">source.geo</code> fields, and ASN to determine whether the request originated from an expected corporate
+  network, VPN, or known security testing infrastructure.
+- Analyze <code class="literal">user_agent.original</code> to confirm CLI usage and identify automation versus interactive usage.
+- Sudden shifts from console-based access to CLI usage from Kali may indicate credential compromise.</p>
+<p><span class="strong strong"><strong>Correlate with surrounding activity</strong></span>
+- Search for additional CloudTrail events tied to the same access key or session before and after this detection.
+- Look for evidence of follow-on actions such as resource creation, configuration changes, or attempts to disable logging and monitoring services.
+- Assess whether the activity represents a single isolated request or part of a broader behavioral chain.</p>
+<p><span class="strong strong"><strong>False positive analysis</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Identify the User: Check <code class="literal">user.name</code>, <code class="literal">user.arn</code>, and <code class="literal">aws.cloudtrail.user_identity.*</code> to determine which IAM identity was used.
+Internal red team or security testing activity may legitimately generate Kali-based AWS CLI traffic. Confirm scope,
+timing, and authorization with security leadership.
 </li>
 <li class="listitem">
-Review Access Pattern: Correlate API calls from this user agent with sensitive actions such as <code class="literal">PutObject</code>, <code class="literal">CreateUser</code>, <code class="literal">AttachUserPolicy</code>, etc.
-</li>
-<li class="listitem">
-Investigate Source IP: Examine whether the request originated from an expected network or a suspicious VPN or cloud provider address.
-</li>
-<li class="listitem">
-Check for Initial Access: Look for session tokens being issued (e.g., <code class="literal">GetSessionToken</code>) or reused (<code class="literal">AssumeRole</code>) prior to this event.
+Compare against historical behavior for the same IAM principal to determine whether Kali usage is a deviation from
+baseline access patterns.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>False Positive Analysis</strong></span></p>
+<p><span class="strong strong"><strong>Response and remediation</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Rare but possible in security assessments or internal red teaming. Validate the action context (user, IP, time of day, etc).
+If the activity is unauthorized, immediately revoke or rotate the affected access keys or invalidate the active
+session.
+</li>
+<li class="listitem">
+Review IAM permissions associated with the identity and reduce scope where possible to enforce least privilege.
+</li>
+<li class="listitem">
+Investigate for additional indicators of compromise, including unusual role assumptions, new credential creation, or
+data access from the same identity.
+</li>
+<li class="listitem">
+Notify security operations and incident response teams if the activity aligns with known adversary behaviors or appears
+part of a larger intrusion.
+</li>
+<li class="listitem">
+Consider adding guardrails or conditional access controls (such as source IP restrictions or MFA enforcement) for
+sensitive IAM principals.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Response and Remediation</strong></span></p>
+<p><span class="strong strong"><strong>Additional information</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Revoke Credentials: If unauthorized, revoke keys or sessions immediately.
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-incident-response-playbooks/blob/c151b0dc091755fffd4d662a8f29e2f6794da52c/playbooks/" class="ulink" target="_top">AWS IR Playbooks</a></strong></span>
 </li>
 <li class="listitem">
-Harden IAM Policies: Restrict sensitive IAM privileges, especially if used by CI/CD or automation roles.
+<span class="strong strong"><strong><a href="https://github.com/aws-samples/aws-customer-playbook-framework/tree/a8c7b313636b406a375952ac00b2d68e89a991f2/docs" class="ulink" target="_top">AWS Customer Playbook Framework</a></strong></span>
 </li>
 <li class="listitem">
-Alert on Repeat Usage: Add recurring monitoring for suspicious user agents including <code class="literal">kali</code>, <code class="literal">curl</code>, or known toolkits.
+<span class="strong strong"><strong><a href="https://aws.amazon.com/premiumsupport/knowledge-center/security-best-practices/" class="ulink" target="_top">AWS Knowledge Center – Security Best Practices</a></strong></span>
 </li>
 </ul>
 </div>
@@ -231,7 +264,10 @@ Alert on Repeat Usage: Add recurring monitoring for suspicious user agents inclu
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">event.dataset: "aws.cloudtrail" and user_agent.original: (aws-cli*distrib#kali* or Boto3*distrib#kali*)</pre>
+<pre class="programlisting prettyprint lang-js">any where event.dataset == "aws.cloudtrail"
+  and user_agent.name: ("aws-cli", "Boto3")
+  and stringContains (user_agent.original, "distrib#kali")
+  and event.outcome == "success"</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
