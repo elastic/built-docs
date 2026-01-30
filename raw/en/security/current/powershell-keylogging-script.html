@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="powershell-keylogging-script"></a>PowerShell Keylogging Script</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-keylogging-script.asciidoc">edit</a></div>
 </div></div></div>
-<p>Detects the use of Win32 API Functions that can be used to capture user keystrokes in PowerShell scripts. Attackers use this technique to capture user input, looking for credentials and/or other valuable data.</p>
+<p>Detects PowerShell script block content that references Win32 keylogging primitives such as key state polling or low-level input hooks. Adversaries use keylogging to capture credentials and other sensitive user input.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -98,7 +98,7 @@ Data Source: PowerShell Logs
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 217</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 218</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -110,38 +110,138 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_992"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-keylogging-script.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_998"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-keylogging-script.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
+</blockquote>
+</div>
 <p><span class="strong strong"><strong>Investigating PowerShell Keylogging Script</strong></span></p>
-<p>PowerShell is one of the main tools system administrators use for automation, report routines, and other tasks. This makes it available for use in various environments, and creates an attractive way for attackers to execute code.</p>
-<p>Attackers can abuse PowerShell capabilities to capture user keystrokes with the goal of stealing credentials and other valuable information as credit card data and confidential conversations.</p>
+<p>This alert indicates that PowerShell Script Block Logging recorded code referencing Win32 API functions commonly used to capture keystrokes or register low-level keyboard or mouse hooks. These primitives are frequently used by offensive tooling and custom implants to collect credentials and other sensitive input.</p>
+<p><span class="strong strong"><strong>Key alert fields to review</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">user.id</code>: Account execution context for correlation, prioritization, and scoping.
+</li>
+<li class="listitem">
+<code class="literal">host.name</code>, <code class="literal">host.id</code>: Host execution context for correlation, prioritization, and scoping.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_text</code>: Script block content that matched the detection logic.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, <code class="literal">powershell.total</code>: Script block metadata to pivot to other fragments or reconstruct full script content when split across multiple events.
+</li>
+<li class="listitem">
+<code class="literal">file.path</code>, <code class="literal">file.directory</code>, <code class="literal">file.name</code>: File-origin context when the script block is sourced from an on-disk file.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_length</code>: Script block length (size) context.
+</li>
+</ul>
+</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Examine the script content that triggered the detection; look for suspicious DLL imports, collection or exfiltration capabilities, suspicious functions, encoded or compressed data, and other potentially malicious characteristics.
+Identify the execution scope and prioritize response:
 </li>
 <li class="listitem">
-Investigate the script execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+Review <code class="literal">host.name</code> and <code class="literal">host.id</code> to understand where the activity occurred and whether the asset is high value.
 </li>
 <li class="listitem">
-Examine file or network events from the involved PowerShell process for suspicious behavior.
+Review <code class="literal">user.name</code>, <code class="literal">user.domain</code>, and <code class="literal">user.id</code> to determine the executing account and whether the activity is expected for that user.
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Use <code class="literal">@timestamp</code> to establish when the script block executed and to anchor a timeline for related activity on the same host.
 </li>
 <li class="listitem">
-Evaluate whether the user needs to use PowerShell to complete tasks.
+Analyze the script block content for intent and capability:
 </li>
 <li class="listitem">
-Determine whether the script stores the captured data locally.
+Review <code class="literal">powershell.file.script_block_text</code> and note which capability is present:
 </li>
 <li class="listitem">
-Investigate whether the script contains exfiltration capabilities and identify the exfiltration server.
+Key state polling: <code class="literal">GetAsyncKeyState</code>, <code class="literal">NtUserGetAsyncKeyState</code>, <code class="literal">GetKeyboardState</code>.
 </li>
 <li class="listitem">
-Assess network data to determine if the host communicated with the exfiltration server.
+Input hooking: <code class="literal">SetWindowsHookEx</code>, <code class="literal">SetWindowsHookExA</code>, <code class="literal">SetWindowsHookExW</code>, or <code class="literal">NtUserSetWindowsHookEx</code> with hook constants like <code class="literal">WM_KEYBOARD_LL</code>, <code class="literal">WH_KEYBOARD_LL</code>, or <code class="literal">WH_MOUSE_LL</code>, and hook flow indicators such as <code class="literal">LowLevelKeyboardProc</code> or <code class="literal">CallNextHookEx</code>.
+</li>
+<li class="listitem">
+Foreground window context capture often used to label keystrokes: <code class="literal">GetForegroundWindow</code>, <code class="literal">GetWindowTextA</code>, <code class="literal">GetWindowTextW</code>.
+</li>
+<li class="listitem">
+Commodity keylogging functions or modules: <code class="literal">Get-Keystrokes</code>.
+</li>
+<li class="listitem">
+Determine whether the script block only defines helper functions or actively invokes hook registration or polling loops (higher confidence of active collection).
+</li>
+<li class="listitem">
+Look for common interop patterns used to call Win32 APIs from PowerShell (for example, <code class="literal">Add-Type</code>, <code class="literal">DllImport</code>, or embedded C#) and for logic that maps virtual key codes to readable output.
+</li>
+<li class="listitem">
+Identify any referenced output handling within the script text (for example, file writes, buffering, encoding, or remote transmission routines) and capture those strings for scoping.
+</li>
+<li class="listitem">
+Reconstruct the full script when content is split across multiple events:
+</li>
+<li class="listitem">
+If <code class="literal">powershell.total</code> is greater than 1 or the content appears truncated, collect all events that share the same <code class="literal">powershell.file.script_block_id</code>.
+</li>
+<li class="listitem">
+Rebuild the script by ordering fragments using <code class="literal">powershell.sequence</code> until the expected <code class="literal">powershell.total</code> is reached.
+</li>
+<li class="listitem">
+If expected sequences are missing, widen the time range around <code class="literal">@timestamp</code> to account for ingestion delays or gaps before concluding reconstruction.
+</li>
+<li class="listitem">
+Preserve the fully reconstructed script text as evidence and for further scoping.
+</li>
+<li class="listitem">
+Determine the source of the script and how it was introduced:
+</li>
+<li class="listitem">
+If <code class="literal">file.path</code> and <code class="literal">file.name</code> are present, treat the script as file-backed and assess whether the location and name are consistent with approved tooling and change control.
+</li>
+<li class="listitem">
+Prioritize review when <code class="literal">file.path</code> suggests a user-writable or transient location, or when <code class="literal">file.name</code> is unusual for your environment.
+</li>
+<li class="listitem">
+If file origin fields are not present, treat the execution as inline or dynamically generated and focus on surrounding PowerShell activity from the same <code class="literal">user.id</code> and <code class="literal">host.id</code> around <code class="literal">@timestamp</code>.
+</li>
+<li class="listitem">
+Correlate the alert time on the same host with available process telemetry to identify the PowerShell host process and its parent process, then evaluate whether the execution chain aligns with expected administrative behavior.
+</li>
+<li class="listitem">
+Check for evidence of collection, staging, or downstream actions:
+</li>
+<li class="listitem">
+Within <code class="literal">powershell.file.script_block_text</code>, identify any referenced output locations, file names, or remote destinations that could indicate where captured input is stored or transmitted.
+</li>
+<li class="listitem">
+Review nearby endpoint file and network telemetry (if available) for unexpected file creation/modification in user-writable locations and unusual outbound connections following the alert time.
+</li>
+<li class="listitem">
+Review authentication telemetry around the alert time to understand which accounts may have been exposed on the affected host during the suspected collection window.
+</li>
+<li class="listitem">
+Look for repeated executions from the same <code class="literal">host.id</code> and <code class="literal">user.id</code> over time, which can indicate persistence or scheduled collection.
+</li>
+<li class="listitem">
+Scope for additional executions and impacted hosts:
+</li>
+<li class="listitem">
+Search for other alerts or script block events that match the same <code class="literal">powershell.file.script_block_id</code>, the same <code class="literal">file.name</code>, or distinctive substrings from <code class="literal">powershell.file.script_block_text</code> across the environment.
+</li>
+<li class="listitem">
+Identify whether the same <code class="literal">user.id</code> executed similar script blocks on multiple hosts or whether multiple users are affected on the same host, which may indicate broader compromise.
+</li>
+<li class="listitem">
+If multiple hosts show the same file-backed script (<code class="literal">file.name</code> and <code class="literal">file.path</code>), determine whether it is a legitimate deployment versus unauthorized propagation.
 </li>
 </ul>
 </div>
@@ -149,15 +249,13 @@ Assess network data to determine if the host communicated with the exfiltration 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Regular users do not have a business justification for using scripting utilities to capture keystrokes, making false positives unlikely. In the case of authorized benign true positives (B-TPs), exceptions can be added.
+Some legitimate PowerShell automation may reference low-level input or window APIs for specialized use cases such as accessibility utilities, kiosk or lab automation, macro/hotkey tooling, or authorized security testing.
 </li>
-</ul>
-</div>
-<p><span class="strong strong"><strong>Related rules</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
 <li class="listitem">
-PowerShell PSReflect Script - 56f2e9b5-4803-4e44-a0a4-a52dc79d57fe
+False positives are more likely when the script is part of a known internal toolkit with a documented business purpose, runs on a limited and expected host scope, and lacks evidence of sustained collection loops or output handling.
+</li>
+<li class="listitem">
+Treat as higher risk when the script content includes continuous polling or hook registration combined with logic that records, formats, stores, or prepares data for transmission, or when the activity occurs on user workstations outside of expected maintenance windows.
 </li>
 </ul>
 </div>
@@ -165,28 +263,31 @@ PowerShell PSReflect Script - 56f2e9b5-4803-4e44-a0a4-a52dc79d57fe
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If the activity is unauthorized or suspicious:
 </li>
 <li class="listitem">
-Isolate the involved hosts to prevent further post-compromise behavior.
+Contain the host to prevent further input collection and limit follow-on actions.
 </li>
 <li class="listitem">
-Prioritize the response if this alert involves key executives or potentially valuable targets for espionage.
+Preserve evidence from the alert, including the complete <code class="literal">powershell.file.script_block_text</code> reconstructed via <code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, and <code class="literal">powershell.total</code>, and any associated <code class="literal">file.path</code> and <code class="literal">file.name</code> values.
 </li>
 <li class="listitem">
-Restrict PowerShell usage outside of IT and engineering business units using GPOs, AppLocker, Intune, or similar software.
+Use the script content to extract any indicators (for example, output file names, remote destinations, or unique strings) and scope for related activity on other hosts.
 </li>
 <li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
+Assume potential credential exposure on the affected host and follow incident response procedures for credential reset, session revocation, and review of privileged access activity during the suspected collection window.
 </li>
 <li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
+Remediate the initial access path and remove any persistence or secondary payloads identified during correlation, including removing unauthorized scripts referenced by <code class="literal">file.path</code>.
 </li>
 <li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
+If the activity is confirmed benign:
 </li>
 <li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Document the legitimate script or tool, expected operators (<code class="literal">user.id</code>), and expected host scope (<code class="literal">host.id</code>).
+</li>
+<li class="listitem">
+Apply narrowly scoped tuning based on stable, repeatable identifiers (for example, specific <code class="literal">file.path</code> and expected accounts) to reduce recurring noise while maintaining coverage for unauthorized keylogging behavior.
 </li>
 </ul>
 </div>
@@ -194,34 +295,31 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_542"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-keylogging-script.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_537"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-keylogging-script.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
-<p>The <em>PowerShell Script Block Logging</em> logging policy must be enabled.
-Steps to implement the logging policy with Advanced Audit Configuration:</p>
-<pre class="screen">Computer Configuration &gt;
-Administrative Templates &gt;
-Windows PowerShell &gt;
-Turn on PowerShell Script Block Logging (Enable)</pre>
-<p>Steps to implement the logging policy via registry:</p>
-<pre class="screen">reg add "hklm\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" /v EnableScriptBlockLogging /t REG_DWORD /d 1</pre>
+<p>PowerShell Script Block Logging must be enabled to generate the events used by this rule (e.g., 4104).
+Setup instructions: <a href="https://ela.st/powershell-logging-setup" class="ulink" target="_top">https://ela.st/powershell-logging-setup</a></p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1049"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-keylogging-script.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1055"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-keylogging-script.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-js">event.category:process and host.os.type:windows and
   (
-   powershell.file.script_block_text : (GetAsyncKeyState or NtUserGetAsyncKeyState or GetKeyboardState or "Get-Keystrokes") or
-   powershell.file.script_block_text : (
-        (SetWindowsHookA or SetWindowsHookW or SetWindowsHookEx or SetWindowsHookExA or NtUserSetWindowsHookEx) and
-        (GetForegroundWindow or GetWindowTextA or GetWindowTextW or "WM_KEYBOARD_LL" or "WH_MOUSE_LL")
+    powershell.file.script_block_text : (GetAsyncKeyState or NtUserGetAsyncKeyState or GetKeyboardState or "Get-Keystrokes") or
+    powershell.file.script_block_text : (
+      (SetWindowsHookEx or SetWindowsHookExA or SetWindowsHookExW or NtUserSetWindowsHookEx) and
+      (
+        GetForegroundWindow or GetWindowTextA or GetWindowTextW or "WM_KEYBOARD_LL" or "WH_MOUSE_LL" or
+        "WH_KEYBOARD_LL" or "LowLevelKeyboardProc" or "CallNextHookEx"
+      )
    )
-   ) and not user.id : "S-1-5-18"
-  and not powershell.file.script_block_text : (
+  ) and not user.id : "S-1-5-18" and
+  not powershell.file.script_block_text : (
     "sentinelbreakpoints" and "Set-PSBreakpoint"
   )</pre>
 </div>

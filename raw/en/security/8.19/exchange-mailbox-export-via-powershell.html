@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="exchange-mailbox-export-via-powershell"></a>Exchange Mailbox Export via PowerShell</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/exchange-mailbox-export-via-powershell.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies the use of the Exchange PowerShell cmdlet, New-MailBoxExportRequest, to export the contents of a primary mailbox or archive to a .pst file. Adversaries may target user email to collect sensitive information.</p>
+<p>Detects PowerShell script block content that creates Exchange mailbox export requests via New-MailboxExportRequest, commonly writing PST files. Adversaries can abuse export requests to collect and stage email content for exfiltration.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -101,7 +101,7 @@ Data Source: PowerShell Logs
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 213</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 214</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -113,50 +113,114 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_395"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/exchange-mailbox-export-via-powershell.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_387"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/exchange-mailbox-export-via-powershell.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
+</blockquote>
+</div>
 <p><span class="strong strong"><strong>Investigating Exchange Mailbox Export via PowerShell</strong></span></p>
-<p>The <code class="literal">New-MailBoxExportRequest</code> cmdlet is used to begin the process of exporting contents of a primary mailbox or archive to a .pst file. Note that this is done on a per-mailbox basis and this cmdlet is available only in on-premises Exchange.
-Attackers can abuse this functionality in preparation for exfiltrating contents, which is likely to contain sensitive and strategic data.</p>
+<p>This alert indicates PowerShell script block content associated with creation of an Exchange mailbox export request. Mailbox exports can produce PST files and may represent sensitive email collection and staging for later access or exfiltration. Prioritize understanding who initiated the activity, which mailbox(es) were targeted, where the output was intended to be written, and whether the activity aligns with approved administrative workflows.</p>
+<p><span class="strong strong"><strong>Key alert fields to review</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">user.id</code>: Account execution context for correlation, prioritization, and scoping.
+</li>
+<li class="listitem">
+<code class="literal">host.name</code>, <code class="literal">host.id</code>: Host execution context for correlation, prioritization, and scoping.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_text</code>: Script block content that matched the detection logic.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, <code class="literal">powershell.total</code>: Script block metadata to pivot to other fragments or reconstruct full script content when split across multiple events.
+</li>
+<li class="listitem">
+<code class="literal">file.path</code>, <code class="literal">file.directory</code>, <code class="literal">file.name</code>: File-origin context when the script block is sourced from an on-disk file.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_length</code>: Script block length (size) context.
+</li>
+</ul>
+</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the process execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+Validate what the script block is attempting to do using <code class="literal">powershell.file.script_block_text</code>:
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Identify the mailbox target(s). Look for explicit <code class="literal">-Mailbox</code> values, mailbox identifiers, or mailbox enumeration logic (for example, use of <code class="literal">Get-Mailbox</code> as an input source).
 </li>
 <li class="listitem">
-Investigate the export operation:
+Identify the intended export destination from <code class="literal">-FilePath</code>. Note whether the path appears to be a local path or a network location, and whether the naming pattern suggests a single mailbox export or bulk export activity.
 </li>
 <li class="listitem">
-Identify the user account that performed the action and whether it should perform this kind of action.
+Note whether the content suggests automation (loops, iteration over multiple mailboxes, variable-driven file paths) versus a single interactive export request.
 </li>
 <li class="listitem">
-Contact the account owner and confirm whether they are aware of this activity.
+Reconstruct full script block content when fragmented:
 </li>
 <li class="listitem">
-Check if this operation was approved and performed according to the organization&#8217;s change management policy.
+If <code class="literal">powershell.file.script_block_text</code> appears truncated or incomplete, group related events by <code class="literal">powershell.file.script_block_id</code> and order by <code class="literal">powershell.sequence</code> up to <code class="literal">powershell.total</code> to rebuild the full script before assessing intent.
 </li>
 <li class="listitem">
-Retrieve the operation status and use the <code class="literal">Get-MailboxExportRequest</code> cmdlet to review previous requests.
+Pivot to other script blocks from the same <code class="literal">user.id</code> and <code class="literal">host.id</code> near <code class="literal">@timestamp</code> to capture supporting context (variable definitions, functions, or preceding logic that populates mailbox or file path parameters).
 </li>
 <li class="listitem">
-By default, no group in Exchange has the privilege to import or export mailboxes. Investigate administrators that assigned the "Mailbox Import Export" privilege for abnormal activity.
+Establish execution context and initiating source:
 </li>
 <li class="listitem">
-Investigate if there is a significant quantity of export requests in the alert timeframe. This operation is done on a per-mailbox basis and can be part of a mass export.
+Use <code class="literal">host.name</code> and <code class="literal">host.id</code> to determine whether the activity originated from an expected Exchange management host (for example, an Exchange server or approved administrative workstation) or from an unexpected endpoint.
 </li>
 <li class="listitem">
-If the operation was completed successfully:
+Use <code class="literal">user.domain</code>, <code class="literal">user.name</code>, and <code class="literal">user.id</code> to determine whether the initiating account is expected to perform mailbox export operations (administrator or approved automation account) and whether the timing aligns with known operational windows.
 </li>
 <li class="listitem">
-Check if the file is on the path specified in the command.
+Use <code class="literal">process.pid</code> and <code class="literal">host.id</code> to correlate with process execution telemetry and determine how PowerShell was launched (interactive session vs automated execution) and whether there is an unusual parent process lineage for administrative activity.
 </li>
 <li class="listitem">
-Investigate if the file was compressed, archived, or retrieved by the attacker for exfiltration.
+If <code class="literal">file.path</code> or <code class="literal">file.name</code> is present, treat the referenced script as a key artifact:
+</li>
+<li class="listitem">
+Determine whether the path and file name match known administrative tooling or expected automation locations.
+</li>
+<li class="listitem">
+If the script is not recognized, preserve it for analysis and assess whether it contains additional collection, staging, or cleanup logic beyond the export request.
+</li>
+<li class="listitem">
+Scope the activity across users, hosts, and time:
+</li>
+<li class="listitem">
+Identify other <code class="literal">powershell.file.script_block_id</code> values associated with the same <code class="literal">user.id</code> or <code class="literal">host.id</code> to determine whether the export activity is part of a larger PowerShell workflow.
+</li>
+<li class="listitem">
+Review whether multiple distinct <code class="literal">process.pid</code> values are associated with similar export activity for the same user, which may indicate multiple sessions or parallel execution.
+</li>
+<li class="listitem">
+Assess potential impact and staging indicators:
+</li>
+<li class="listitem">
+If an export destination path is identifiable in <code class="literal">powershell.file.script_block_text</code>, correlate with file activity on the relevant host(s) to determine whether a PST file was created, modified, accessed, moved, or archived after <code class="literal">@timestamp</code>.
+</li>
+<li class="listitem">
+Correlate with network telemetry for <code class="literal">host.id</code> around <code class="literal">@timestamp</code> to identify access to the export destination location and any subsequent outbound transfers that could indicate staging or exfiltration.
+</li>
+<li class="listitem">
+Review authentication activity associated with <code class="literal">user.id</code> and the involved <code class="literal">host.id</code> around <code class="literal">@timestamp</code> for anomalies such as unusual logon sources, new sessions, or activity outside normal administrative patterns.
+</li>
+<li class="listitem">
+Preserve evidence for follow-on analysis:
+</li>
+<li class="listitem">
+Record the reconstructed script content, <code class="literal">powershell.file.script_block_id</code>, and the full <code class="literal">powershell.sequence</code>/<code class="literal">powershell.total</code> range used for reconstruction.
+</li>
+<li class="listitem">
+Capture the specific mailbox identifiers and destination paths observed in <code class="literal">powershell.file.script_block_text</code> to support scoping and data exposure assessment.
 </li>
 </ul>
 </div>
@@ -164,7 +228,22 @@ Investigate if the file was compressed, archived, or retrieved by the attacker f
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This mechanism can be used legitimately. Analysts can dismiss the alert if the administrator is aware of the activity and it is done with proper approval.
+Legitimate mailbox exports may occur for compliance, eDiscovery, user support, migrations, or incident response. Validate the presence of an authorized business request, ticket, or approved workflow that matches the timing and the scope of the export.
+</li>
+<li class="listitem">
+Benign activity is more likely when:
+</li>
+<li class="listitem">
+The initiating <code class="literal">user.name</code> is a known Exchange administrator or authorized automation account in <code class="literal">user.domain</code>.
+</li>
+<li class="listitem">
+The <code class="literal">host.name</code> is an expected administrative host for Exchange management tasks.
+</li>
+<li class="listitem">
+The destination path referenced in <code class="literal">powershell.file.script_block_text</code> aligns with approved export storage locations and expected naming conventions.
+</li>
+<li class="listitem">
+Activity is higher risk when it originates from an unexpected <code class="literal">host.name</code>, uses an unusual <code class="literal">user.name</code>, targets many mailboxes, or writes to atypical destinations.
 </li>
 </ul>
 </div>
@@ -172,31 +251,40 @@ This mechanism can be used legitimately. Analysts can dismiss the alert if the a
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If the activity is unauthorized or cannot be validated:
 </li>
 <li class="listitem">
-If the involved host is not the Exchange server, isolate the host to prevent further post-compromise behavior.
+Contain the initiating account (<code class="literal">user.id</code>/<code class="literal">user.name</code>) by disabling the account or removing access to mailbox export capabilities, and rotate credentials as appropriate.
 </li>
 <li class="listitem">
-Use the <code class="literal">Remove-MailboxExportRequest</code> cmdlet to remove fully or partially completed export requests.
+Contain affected systems (<code class="literal">host.id</code>/<code class="literal">host.name</code>) based on scope and confidence. Isolate endpoints used for unexpected Exchange administrative actions to prevent further collection or staging.
 </li>
 <li class="listitem">
-Prioritize cases that involve personally identifiable information (PII) or other classified data.
+Identify and secure any exported PST output referenced in <code class="literal">powershell.file.script_block_text</code>. Treat recovered PST files and scripts as sensitive evidence; restrict access and preserve copies for investigation.
 </li>
 <li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
+Use approved administrative procedures to cancel or remove unauthorized export requests and prevent completion of in-progress exports.
 </li>
 <li class="listitem">
-Review the privileges of users with the "Mailbox Import Export" privilege to ensure that the least privilege principle is being followed.
+Conduct follow-on threat hunting and scoping:
 </li>
 <li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
+Search for additional mailbox export activity by the same <code class="literal">user.id</code> and <code class="literal">host.id</code>, including repeated or bulk export patterns.
 </li>
 <li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
+Review additional PowerShell script block activity for the same <code class="literal">powershell.file.script_block_id</code> and adjacent script blocks around <code class="literal">@timestamp</code> to identify related collection, staging, or cleanup actions.
 </li>
 <li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Reduce recurrence risk:
+</li>
+<li class="listitem">
+Apply least-privilege controls for accounts that can initiate mailbox exports and restrict where exports can be written.
+</li>
+<li class="listitem">
+Limit Exchange administrative actions to approved management hosts and monitored administrative workflows.
+</li>
+<li class="listitem">
+Enhance monitoring for repeated mailbox export requests, unusual export destinations, and suspicious PowerShell activity associated with the same users and hosts.
 </li>
 </ul>
 </div>
@@ -204,12 +292,25 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_411"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/exchange-mailbox-export-via-powershell.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_178"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/exchange-mailbox-export-via-powershell.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>PowerShell Script Block Logging must be enabled to generate the events used by this rule (e.g., 4104).
+Setup instructions: <a href="https://ela.st/powershell-logging-setup" class="ulink" target="_top">https://ela.st/powershell-logging-setup</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_403"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/exchange-mailbox-export-via-powershell.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-js">event.category:process and host.os.type:windows and
-  powershell.file.script_block_text : "New-MailboxExportRequest"</pre>
+powershell.file.script_block_text : "New-MailboxExportRequest" and
+(
+  powershell.file.script_block_text : ("-FilePath" or ".pst") and
+  powershell.file.script_block_text : ("-Mailbox" or "Get-Mailbox" or "ExportToPSTFile" or "-Identity")
+)</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

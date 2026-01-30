@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="powershell-suspicious-script-with-screenshot-capabilities"></a>PowerShell Suspicious Script with Screenshot Capabilities</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-suspicious-script-with-screenshot-capabilities.asciidoc">edit</a></div>
 </div></div></div>
-<p>Detects PowerShell scripts that can take screenshots, which is a common feature in post-exploitation kits and remote access tools (RATs).</p>
+<p>Detects PowerShell script block content that uses CopyFromScreen with .NET bitmap classes to capture screenshots. Attackers use screen capture to collect on-screen information and credentials.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -128,8 +128,8 @@ logs-windows.powershell*
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Severity</strong></span>: medium</p>
-<p><span class="strong strong"><strong>Risk score</strong></span>: 47</p>
+<p><span class="strong strong"><strong>Severity</strong></span>: high</p>
+<p><span class="strong strong"><strong>Risk score</strong></span>: 73</p>
 <p><span class="strong strong"><strong>Runs every</strong></span>: 5m</p>
 <p><span class="strong strong"><strong>Searches indices from</strong></span>: now-9m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
 <p><span class="strong strong"><strong>Maximum alerts per execution</strong></span>: 100</p>
@@ -164,7 +164,7 @@ Data Source: PowerShell Logs
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 212</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 213</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -176,38 +176,151 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1008"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-suspicious-script-with-screenshot-capabilities.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1014"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-suspicious-script-with-screenshot-capabilities.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
+</blockquote>
+</div>
 <p><span class="strong strong"><strong>Investigating PowerShell Suspicious Script with Screenshot Capabilities</strong></span></p>
-<p>PowerShell is one of the main tools system administrators use for automation, report routines, and other tasks, which makes it available for use in various environments and creates an attractive way for attackers to execute code.</p>
-<p>Attackers can abuse PowerShell capabilities and take screen captures of desktops to gather information over the course of an operation.</p>
+<p>This rule identifies PowerShell scripts that includes screenshot collection logic using <code class="literal">CopyFromScreen</code> together with bitmap classes. This pattern is commonly used to capture the interactive desktop and may indicate collection of sensitive on-screen data (for example, application content, authentication prompts, or remote session activity).</p>
+<p>Prioritize alerts on endpoints used for privileged administration or sensitive workflows, and alerts tied to accounts that do not typically run interactive PowerShell automation.</p>
+<p><span class="strong strong"><strong>Key alert fields to review</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">user.id</code>: Account execution context for correlation, prioritization, and scoping.
+</li>
+<li class="listitem">
+<code class="literal">host.name</code>, <code class="literal">host.id</code>: Host execution context for correlation, prioritization, and scoping.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_text</code>: Script block content that matched the detection logic.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, <code class="literal">powershell.total</code>: Script block metadata to pivot to other fragments or reconstruct full script content when split across multiple events.
+</li>
+<li class="listitem">
+<code class="literal">file.path</code>, <code class="literal">file.directory</code>, <code class="literal">file.name</code>: File-origin context when the script block is sourced from an on-disk file.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_length</code>: Script block length (size) context.
+</li>
+</ul>
+</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Examine the script content that triggered the detection; look for suspicious DLL imports, collection or exfiltration capabilities, suspicious functions, encoded or compressed data, and other potentially malicious characteristics.
+Establish alert scope and execution context:
 </li>
 <li class="listitem">
-Investigate the script execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+Identify the affected system using <code class="literal">host.name</code> and <code class="literal">host.id</code>. Determine if the host is expected to have an interactive desktop session for the associated user at the time of the alert.
 </li>
 <li class="listitem">
-Examine file or network events from the involved PowerShell process for suspicious behavior.
+Identify the initiating account using <code class="literal">user.name</code>, <code class="literal">user.domain</code>, and <code class="literal">user.id</code>. Assess whether the account is a typical interactive user for the host and whether the activity aligns with the user role.
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Review the alert time (<code class="literal">@timestamp</code>) and determine whether the timing aligns with normal business operations for the user and host.
 </li>
 <li class="listitem">
-Evaluate whether the user needs to use PowerShell to complete tasks.
+Review and interpret the script block content:
 </li>
 <li class="listitem">
-Determine whether the script stores the captured data locally.
+Examine <code class="literal">powershell.file.script_block_text</code> to understand what is being captured:
 </li>
 <li class="listitem">
-Investigate whether the script contains exfiltration capabilities and identify the exfiltration server.
+Identify whether the capture targets the full screen or a specific region (for example, use of coordinates and dimensions passed into <code class="literal">CopyFromScreen</code>).
 </li>
 <li class="listitem">
-Assess network data to determine if the host communicated with the exfiltration server.
+Identify whether capture is repeated (for example, loops, timers, repeated invocations) which may indicate ongoing collection.
+</li>
+<li class="listitem">
+Identify any logic that targets specific monitors, window bounds, or desktop layout.
+</li>
+<li class="listitem">
+Determine how captured images are handled:
+</li>
+<li class="listitem">
+Look for references indicating local image creation or saving (for example, image format usage such as PNG/JPEG/BMP, file extensions, or save routines).
+</li>
+<li class="listitem">
+Look for encoding/staging behavior (for example, Base64 conversion, compression, or in-memory serialization) that could facilitate transfer.
+</li>
+<li class="listitem">
+Note any referenced paths, filenames, or remote destinations embedded in the script, and capture unique strings for scoping and hunting.
+</li>
+<li class="listitem">
+Reconstruct full script logic when split across events:
+</li>
+<li class="listitem">
+Use <code class="literal">powershell.file.script_block_id</code> to collect all related fragments.
+</li>
+<li class="listitem">
+Order fragments using <code class="literal">powershell.sequence</code> and validate completeness using <code class="literal">powershell.total</code>.
+</li>
+<li class="listitem">
+Re-review the reconstructed script for supporting capabilities beyond capture (for example, environment checks, staging, cleanup, or transfer logic).
+</li>
+<li class="listitem">
+Use <code class="literal">powershell.file.script_block_length</code> to help identify unusually large or complex script blocks that may warrant deeper review.
+</li>
+<li class="listitem">
+Identify script source and provenance:
+</li>
+<li class="listitem">
+If <code class="literal">file.path</code>, <code class="literal">file.directory</code>, or <code class="literal">file.name</code> are present, treat the script as file-backed:
+</li>
+<li class="listitem">
+Validate whether the location is expected for administrative or support scripts in your environment.
+</li>
+<li class="listitem">
+Collect the referenced file for review and compare it to known-good versions or approved repositories where applicable.
+</li>
+<li class="listitem">
+If file fields are not present, treat the activity as potentially inline or dynamically generated:
+</li>
+<li class="listitem">
+Pay close attention to download, decode, or dynamic compilation patterns visible in <code class="literal">powershell.file.script_block_text</code>.
+</li>
+<li class="listitem">
+Scope for related PowerShell activity using available pivots:
+</li>
+<li class="listitem">
+On the same <code class="literal">host.id</code> and <code class="literal">user.id</code>, review surrounding script blocks near the alert time to identify related actions (for example, staging, transfer preparation, or artifact cleanup).
+</li>
+<li class="listitem">
+Search for similar <code class="literal">powershell.file.script_block_text</code> patterns across other hosts to determine prevalence and potential lateral spread.
+</li>
+<li class="listitem">
+If <code class="literal">file.name</code> or <code class="literal">file.path</code> are present, search for additional execution of the same script file across the environment.
+</li>
+<li class="listitem">
+Correlate with adjacent telemetry to determine initiation and outcomes:
+</li>
+<li class="listitem">
+Using <code class="literal">host.id</code>, <code class="literal">host.name</code>, <code class="literal">user.id</code>, and the alert time window, correlate with available endpoint and security telemetry to identify:
+</li>
+<li class="listitem">
+How PowerShell was initiated (interactive use vs. application-driven execution) and whether there is an unusual execution chain.
+</li>
+<li class="listitem">
+Evidence of screenshot artifacts being written, moved, archived, or deleted, especially in locations referenced in <code class="literal">powershell.file.script_block_text</code>.
+</li>
+<li class="listitem">
+Any outbound communication or data movement that could indicate transfer of captured images or related content.
+</li>
+<li class="listitem">
+Assess potential impact:
+</li>
+<li class="listitem">
+Determine whether the host and user context suggests access to sensitive information that could have been exposed via screenshots.
+</li>
+<li class="listitem">
+If screenshot artifacts are identified, preserve copies and metadata for exposure assessment and downstream response actions.
 </li>
 </ul>
 </div>
@@ -215,15 +328,13 @@ Assess network data to determine if the host communicated with the exfiltration 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Regular users do not have a business justification for using scripting utilities to take screenshots, which makes false positives unlikely. In the case of authorized benign true positives (B-TPs), exceptions can be added.
+Legitimate scenarios may include authorized troubleshooting, remote support workflows, UI testing, or automation that captures screenshots.
 </li>
-</ul>
-</div>
-<p><span class="strong strong"><strong>Related rules</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
 <li class="listitem">
-PowerShell Keylogging Script - bd2c86a0-8b61-4457-ab38-96943984e889
+Validate benign explanations by confirming that the involved <code class="literal">user.name</code>/<code class="literal">user.id</code> and <code class="literal">host.name</code>/<code class="literal">host.id</code> align with expected operational ownership and that the script content in <code class="literal">powershell.file.script_block_text</code> matches known, approved implementations.
+</li>
+<li class="listitem">
+File-backed scripts with stable, approved locations (<code class="literal">file.path</code>/<code class="literal">file.name</code>) and consistent content are more likely to be benign. Inline or frequently changing script content, especially with staging or transfer logic, should be treated as higher risk even if screenshot capture is a documented capability.
 </li>
 </ul>
 </div>
@@ -231,25 +342,49 @@ PowerShell Keylogging Script - bd2c86a0-8b61-4457-ab38-96943984e889
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If the activity is confirmed malicious or remains suspicious after triage:
 </li>
 <li class="listitem">
-Isolate the involved hosts to prevent further post-compromise behavior.
+Contain the affected host to limit further collection and potential data transfer.
 </li>
 <li class="listitem">
-Restrict PowerShell usage outside of IT and engineering business units using GPOs, AppLocker, Intune, or similar software.
+Preserve evidence:
 </li>
 <li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
+Export and retain all related script block fragments for the same <code class="literal">powershell.file.script_block_id</code> and reconstruct the full script using <code class="literal">powershell.sequence</code> and <code class="literal">powershell.total</code>.
 </li>
 <li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
+Collect any file-backed script referenced by <code class="literal">file.path</code>/<code class="literal">file.name</code>, along with any identified screenshot output paths from <code class="literal">powershell.file.script_block_text</code>.
 </li>
 <li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
+Scope and eradicate:
 </li>
 <li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Hunt for the same screenshot capture indicators across the environment using distinctive strings from <code class="literal">powershell.file.script_block_text</code>, as well as the involved <code class="literal">user.id</code> and <code class="literal">file.name</code> (if present).
+</li>
+<li class="listitem">
+Review correlated telemetry for signs of staging or transfer and identify any additional affected hosts or accounts.
+</li>
+<li class="listitem">
+Credential and access hygiene:
+</li>
+<li class="listitem">
+If screenshots may have captured credentials or privileged activity, follow your incident response process for credential reset and access review for the involved account(s).
+</li>
+<li class="listitem">
+Review access to sensitive systems from the affected host and user context during the relevant time window.
+</li>
+<li class="listitem">
+If the activity is confirmed benign:
+</li>
+<li class="listitem">
+Document the legitimate business process, script ownership, and expected execution scope (approved users, hosts, and typical timing).
+</li>
+<li class="listitem">
+Ensure the script source is controlled (when <code class="literal">file.path</code>/<code class="literal">file.name</code> are present) and that execution is limited to authorized accounts and systems.
+</li>
+<li class="listitem">
+Continue monitoring for deviations in script content or execution context using the same pivots (<code class="literal">host.id</code>, <code class="literal">user.id</code>, and distinctive content in <code class="literal">powershell.file.script_block_text</code>).
 </li>
 </ul>
 </div>
@@ -257,22 +392,16 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_561"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-suspicious-script-with-screenshot-capabilities.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_556"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-suspicious-script-with-screenshot-capabilities.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
-<p>The <em>PowerShell Script Block Logging</em> logging policy must be enabled.
-Steps to implement the logging policy with Advanced Audit Configuration:</p>
-<pre class="screen">Computer Configuration &gt;
-Administrative Templates &gt;
-Windows PowerShell &gt;
-Turn on PowerShell Script Block Logging (Enable)</pre>
-<p>Steps to implement the logging policy via registry:</p>
-<pre class="screen">reg add "hklm\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" /v EnableScriptBlockLogging /t REG_DWORD /d 1</pre>
+<p>PowerShell Script Block Logging must be enabled to generate the events used by this rule (e.g., 4104).
+Setup instructions: <a href="https://ela.st/powershell-logging-setup" class="ulink" target="_top">https://ela.st/powershell-logging-setup</a></p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1070"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-suspicious-script-with-screenshot-capabilities.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1076"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-suspicious-script-with-screenshot-capabilities.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
