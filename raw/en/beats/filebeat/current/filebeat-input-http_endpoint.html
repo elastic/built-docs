@@ -116,7 +116,7 @@ configurations.</p>
 <tr>
 <td align="left" valign="top"><p>503</p></td>
 <td align="left" valign="top"><p>Service Unavailable</p></td>
-<td align="left" valign="top"><p>Returned if the length of the request body would take the total number of in-flight bytes above the configured <code class="literal">max_in_flight_bytes</code> value.</p></td>
+<td align="left" valign="top"><p>Returned if the hard limit <code class="literal">max_in_flight_bytes</code> is exceeded during body reading, or if the total in-flight bytes are above the <code class="literal">high_water_in_flight_bytes</code> threshold. The response includes a <code class="literal">Retry-After</code> header.</p></td>
 </tr>
 <tr>
 <td align="left" valign="top"><p>504</p></td>
@@ -312,6 +312,20 @@ the common timestamp and request ID:</p>
   ]
 }</pre>
 </div>
+<p>In-flight byte limiting example:</p>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: http_endpoint
+  enabled: true
+  listen_address: 192.168.1.1
+  listen_port: 8080
+  max_in_flight_bytes: 10485760       # 10MB hard limit
+  high_water_in_flight_bytes: 5242880 # 5MB - reject new requests above this
+  low_water_in_flight_bytes: 4194304  # 4MB - accept requests again below this
+  retry_after: 5</pre>
+</div>
+<p>This configuration limits memory usage by tracking in-flight request bytes. When total in-flight bytes exceed 5MB, new requests receive a 503 response with a <code class="literal">Retry-After: 5</code> header. Once in-flight bytes drop below 4MB, new requests are accepted again. If a single request causes in-flight bytes to exceed the 10MB hard limit during reading, that request is terminated with a 500 error.</p>
 <div class="section">
 <div class="titlepage"><div><div>
 <div class="position-relative"><h3 class="title"><a id="_configuration_options_10"></a>Configuration options</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.19/x-pack/filebeat/docs/inputs/input-http-endpoint.asciidoc">edit</a></div>
@@ -341,11 +355,22 @@ HMAC signatures may be encoded as hex or base64.</p>
 <p>By default the input expects the incoming POST to include a Content-Type of <code class="literal">application/json</code> to try to enforce the incoming data to be valid JSON.
 In certain scenarios when the source of the request is not able to do that, it can be overwritten with another value or set to null.</p>
 <div class="position-relative"><h4><a id="_max_in_flight_bytes"></a><code class="literal">max_in_flight_bytes</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.19/x-pack/filebeat/docs/inputs/input-http-endpoint.asciidoc">edit</a></div>
-<p>The total sum of request body lengths that are allowed at any given time. If non-zero, the input will compare this value to the sum of in-flight request body lengths from requests that include a <code class="literal">wait_for_completion_timeout</code> request query and will return a 503 HTTP status code, along with a Retry-After header configured with the <code class="literal">retry_after</code> option. The default value for this option is zero, no limit.</p>
+<p>The hard limit on the total sum of request body bytes that are allowed to be in-flight at any given time. If this limit is exceeded during body reading, the request is terminated with a 503 Service Unavailable response and a <code class="literal">Retry-After</code> header. This serves as a safety valve to prevent memory exhaustion. The default value is zero, meaning no limit.</p>
+<p>In-flight bytes are tracked from the moment they are read from the request body until the event is acknowledged by the output (for requests with <code class="literal">wait_for_completion_timeout</code>) or until the request completes (for requests without the timeout parameter).</p>
+<p>Note that in-flight byte tracking uses the raw request body size as a heuristic proxy for memory consumption. For requests without <code class="literal">wait_for_completion_timeout</code>, the byte count is released when the HTTP request completes, even though published events may still be queued in the output pipeline. This means the in-flight count can underestimate actual memory use under sustained load from non-ACK requests. Using <code class="literal">wait_for_completion_timeout</code> provides tighter accounting because the byte count is held until the output acknowledges the events.</p>
+<p>This option works together with <code class="literal">high_water_in_flight_bytes</code> and <code class="literal">low_water_in_flight_bytes</code> to implement hysteresis-based admission control. See those options for details.</p>
+<div class="position-relative"><h4><a id="_high_water_in_flight_bytes"></a><code class="literal">high_water_in_flight_bytes</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.19/x-pack/filebeat/docs/inputs/input-http-endpoint.asciidoc">edit</a></div>
+<p>The soft limit threshold for in-flight bytes. When in-flight bytes exceed this value, new requests are rejected with a 503 Service Unavailable response (with a <code class="literal">Retry-After</code> header). Once in-flight bytes drop below <code class="literal">low_water_in_flight_bytes</code>, new requests are accepted again.</p>
+<p>This hysteresis mechanism prevents rapid oscillation between accepting and rejecting requests when the system is near capacity.</p>
+<p>If not specified and <code class="literal">max_in_flight_bytes</code> is set, this defaults to 50% of <code class="literal">max_in_flight_bytes</code>.</p>
+<div class="position-relative"><h4><a id="_low_water_in_flight_bytes"></a><code class="literal">low_water_in_flight_bytes</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.19/x-pack/filebeat/docs/inputs/input-http-endpoint.asciidoc">edit</a></div>
+<p>The threshold below which new requests are accepted again after being rejected due to exceeding <code class="literal">high_water_in_flight_bytes</code>. This creates a hysteresis band that prevents rapid state transitions.</p>
+<p>If not specified and <code class="literal">max_in_flight_bytes</code> is set, this defaults to the lesser of 80% of <code class="literal">high_water_in_flight_bytes</code> or <code class="literal">high_water_in_flight_bytes</code> minus 64kB.</p>
+<p>The relationship between the three limits must be: <code class="literal">low_water_in_flight_bytes</code> &lt; <code class="literal">high_water_in_flight_bytes</code> &lt; <code class="literal">max_in_flight_bytes</code>.</p>
 <div class="position-relative"><h4><a id="_max_body_bytes"></a><code class="literal">max_body_bytes</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.19/x-pack/filebeat/docs/inputs/input-http-endpoint.asciidoc">edit</a></div>
 <p>The maximum body length allowed for a single request. If present, the input will truncate request bodies at the configured limit. The default value for this option is unset, no limit.</p>
 <div class="position-relative"><h4><a id="_retry_after"></a><code class="literal">retry_after</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.19/x-pack/filebeat/docs/inputs/input-http-endpoint.asciidoc">edit</a></div>
-<p>If a request has exceeded the <code class="literal">max_in_flight_bytes</code> limit, the response to the client will include a Retry-After header specifying how many seconds the client should wait to retry again. The default value for this option is 10 seconds.</p>
+<p>When a request is rejected due to exceeding <code class="literal">high_water_in_flight_bytes</code> or <code class="literal">max_in_flight_bytes</code>, the response includes a <code class="literal">Retry-After</code> header specifying how many seconds the client should wait before retrying. For <code class="literal">high_water_in_flight_bytes</code> rejection the configured value is used directly; for <code class="literal">max_in_flight_bytes</code> rejection 2x the configured value is used. The default value is 10 seconds.</p>
 <div class="position-relative"><h4><a id="_program"></a><code class="literal">program</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.19/x-pack/filebeat/docs/inputs/input-http-endpoint.asciidoc">edit</a></div>
 <p>The normal operation of the input treats the body either as a single event when the body is an object, or as a set of events when the body is an array. If the body should be handled differently, for example a set of events in an array field of an object to be handled as a set of events, then a <a href="https://opensource.google.com/projects/cel" class="ulink" target="_top">Common Expression Language (CEL)</a> program can be provided through this configuration field. The name of the object in the CEL program is <code class="literal">obj</code>. No CEL extensions are provided beyond the function in the CEL <a href="https://github.com/google/cel-spec/blob/master/doc/langdef.md#standard" class="ulink" target="_top">standard library</a>. CEL <a href="https://pkg.go.dev/github.com/google/cel-go/cel#OptionalTypes" class="ulink" target="_top">optional types</a> are supported.</p>
 <p>Note that during evaluation, numbers that are not representable exactly within a double floating point value will be converted to a string to avoid data corruption.</p>
