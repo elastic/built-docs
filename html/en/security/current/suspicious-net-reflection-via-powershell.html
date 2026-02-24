@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="suspicious-net-reflection-via-powershell"></a>Suspicious .NET Reflection via PowerShell</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-net-reflection-via-powershell.asciidoc">edit</a></div>
 </div></div></div>
-<p>Detects the use of Reflection.Assembly to load PEs and DLLs in memory in PowerShell scripts. Attackers use this method to load executables and DLLs without writing to the disk, bypassing security solutions.</p>
+<p>Detects PowerShell scripts that invoke Reflection.Assembly or Assembly.Load to load .NET assemblies. Attackers use this method to load executables and DLLs without writing to the disk, bypassing security solutions.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -167,7 +167,7 @@ Data Source: PowerShell Logs
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 320</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 321</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -179,77 +179,123 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1207"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-net-reflection-via-powershell.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1230"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-net-reflection-via-powershell.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<p><span class="strong strong"><strong>Investigating Suspicious .NET Reflection via PowerShell</strong></span></p>
-<p>PowerShell is one of the main tools system administrators use for automation, report routines, and other tasks. This makes it available for use in various environments, and creates an attractive way for attackers to execute code.</p>
-<p>Attackers can use .NET reflection to load PEs and DLLs in memory. These payloads are commonly embedded in the script, which can circumvent file-based security protections.</p>
 <div class="quoteblock">
 <blockquote>
-<p><span class="strong strong"><strong>Note</strong></span>:
-This investigation guide uses the <a href="/guide/en/security/current/invest-guide-run-osquery.html" class="ulink" target="_top">Osquery Markdown Plugin</a> introduced in Elastic Stack version 8.5.0. Older Elastic Stack versions will display unrendered Markdown in this guide.</p>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This guide was created by humans with the assistance of generative AI. While its contents have been manually curated to include the most valuable information, always validate assumptions and adjust procedures to match your internal runbooks and incident triage and response policies.</p>
 </blockquote>
+</div>
+<p><span class="strong strong"><strong>Investigating Suspicious .NET Reflection via PowerShell</strong></span></p>
+<p>This alert indicates PowerShell script block content attempted to load a .NET assembly using reflection-based APIs (for example, <code class="literal">[System.Reflection.Assembly]::Load</code> or <code class="literal">Assembly.Load(...)</code>). While this can be used for legitimate extensibility, it is also commonly used to execute .NET payloads in memory and reduce file-based artifacts.</p>
+<p><span class="strong strong"><strong>Key alert fields to review</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">user.id</code>: Account execution context for correlation, prioritization, and scoping.
+</li>
+<li class="listitem">
+<code class="literal">host.name</code>, <code class="literal">host.id</code>: Host execution context for correlation, prioritization, and scoping.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_text</code>: Script block content that matched the detection logic.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, <code class="literal">powershell.total</code>: Script block metadata to pivot to other fragments or reconstruct full script content when split across multiple events.
+</li>
+<li class="listitem">
+<code class="literal">file.path</code>, <code class="literal">file.directory</code>, <code class="literal">file.name</code>: File-origin context when the script block is sourced from an on-disk file.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_length</code>: Script block length (size) context.
+</li>
+</ul>
 </div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Examine the script content that triggered the detection; look for suspicious DLL imports, collection or exfiltration capabilities, suspicious functions, encoded or compressed data, and other potentially malicious characteristics.
+Triage the execution context:
 </li>
 <li class="listitem">
-Investigate the script execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+Identify the affected host and user using <code class="literal">host.name</code>, <code class="literal">host.id</code>, <code class="literal">user.name</code>, <code class="literal">user.domain</code>, and <code class="literal">user.id</code>.
 </li>
 <li class="listitem">
-Examine file or network events from the involved PowerShell process for suspicious behavior.
+Prioritize alerts where the user is unexpected for the host role, or where the same user appears across multiple hosts in a short time window.
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Analyze the assembly load behavior in <code class="literal">powershell.file.script_block_text</code>:
 </li>
 <li class="listitem">
-Evaluate whether the user needs to use PowerShell to complete tasks.
+Identify what is being passed into the load call (assembly name vs. byte array or dynamically generated content).
 </li>
 <li class="listitem">
-Examine the host for derived artifacts that indicate suspicious activities:
+Check for indicators of staged content within the same script block, such as long encoded blobs, dynamic string construction, or multiple transformation steps (decoding, decompression, or concatenation) that produce the assembly bytes.
 </li>
 <li class="listitem">
-Analyze the script using a private sandboxed analysis system.
+Look for immediate follow-on actions suggesting the loaded assembly is executed (for example, accessing types/methods and invoking them after the load).
 </li>
 <li class="listitem">
-Observe and collect information about the following activities in both the sandbox and the alert subject host:
+Reconstruct the full script block when needed:
 </li>
 <li class="listitem">
-Attempts to contact external domains and addresses.
+If the content appears partial, group related events by <code class="literal">powershell.file.script_block_id</code> and order by <code class="literal">powershell.sequence</code> to <code class="literal">powershell.total</code> to rebuild the full script block before assessing intent.
 </li>
 <li class="listitem">
-Use the Elastic Defend network events to determine domains and addresses contacted by the subject process by filtering by the process' <code class="literal">process.entity_id</code>.
+Use <code class="literal">powershell.file.script_block_length</code> as a signal for embedded content (large or unusually variable sizes can indicate payload staging).
 </li>
 <li class="listitem">
-Examine the DNS cache for suspicious or anomalous entries.
+Determine script origin and persistence indicators:
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve DNS Cache","query":"SELECT * FROM dns_cache"}}
+If <code class="literal">file.path</code>/<code class="literal">file.name</code> are present, assess whether the script is stored in an expected location for the user and host role, or in a user-writable / temporary directory indicated by <code class="literal">file.directory</code>.
 </li>
 <li class="listitem">
-Use the Elastic Defend registry events to examine registry keys accessed, modified, or created by the related processes in the process tree.
+If <code class="literal">file.path</code> is present, retrieve and review the corresponding script file for additional context (embedded payloads, additional functions, or execution logic not visible in a single script block event).
 </li>
 <li class="listitem">
-Examine the host services for suspicious or anomalous entries.
+If <code class="literal">file.path</code> is not present, treat the activity as potentially interactive or remotely delivered and rely on <code class="literal">powershell.file.script_block_id</code> and time-based pivots to gather surrounding context.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve All Services","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services"}}
+Scope related PowerShell activity on the same host and user:
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Services Running on User Accounts","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services WHERE\nNOT (user_account LIKE <em>%LocalSystem</em> OR user_account LIKE <em>%LocalService</em> OR user_account LIKE <em>%NetworkService</em> OR\nuser_account == null)\n"}}
+Pivot on <code class="literal">host.id</code> and <code class="literal">user.id</code> to identify additional script blocks around the alert time that may show setup, staging, or follow-on actions.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Service Unsigned Executables with Virustotal Link","query":"SELECT concat(<em><a href="https://www.virustotal.com/gui/file/" class="ulink" target="_top">https://www.virustotal.com/gui/file/</a></em>, sha1) AS VtLink, name, description, start_type, status, pid,\nservices.path FROM services JOIN authenticode ON services.path = authenticode.path OR services.module_path =\nauthenticode.path JOIN hash ON services.path = hash.path WHERE authenticode.result != <em>trusted</em>\n"}}
+Check for repeated <code class="literal">Assembly.Load</code> usage across multiple <code class="literal">powershell.file.script_block_id</code> values, which may indicate iterative execution attempts or multiple payload stages.
 </li>
 <li class="listitem">
-Retrieve the files' SHA-256 hash values using the PowerShell <code class="literal">Get-FileHash</code> cmdlet and search for the existence and reputation of the hashes in resources like VirusTotal, Hybrid-Analysis, CISCO Talos, Any.run, etc.
+Scope across the environment:
 </li>
 <li class="listitem">
-Investigate potentially compromised accounts. Analysts can do this by searching for login events (for example, 4624) to the target host after the registry modification.
+Search for the same <code class="literal">file.path</code>/<code class="literal">file.name</code> and similar <code class="literal">powershell.file.script_block_text</code> patterns on other hosts to identify propagation or reuse.
+</li>
+<li class="listitem">
+Identify whether the same <code class="literal">user.id</code> is associated with similar script blocks across multiple <code class="literal">host.id</code> values to assess potential lateral movement or shared automation.
+</li>
+<li class="listitem">
+Correlate with adjacent telemetry (if available in your environment):
+</li>
+<li class="listitem">
+Process telemetry: Determine how PowerShell was launched and by what parent process around the alert time to understand delivery (interactive use, scheduled execution, service context, or another process).
+</li>
+<li class="listitem">
+Network telemetry: Review outbound activity near the alert time for signs of payload retrieval, staging infrastructure, or command-and-control.
+</li>
+<li class="listitem">
+File/registry telemetry: Look for newly created or modified scripts, DLLs, or persistence-related changes temporally aligned with the script block execution.
+</li>
+<li class="listitem">
+Authentication telemetry: Review logon patterns for the same user and host around the alert time to identify unusual access patterns that could explain the execution.
+</li>
+<li class="listitem">
+If response actions are available:
+</li>
+<li class="listitem">
+Collect host DNS cache and a snapshot of running/installed services to support scoping and to identify suspicious services or recent name resolution consistent with payload staging.
 </li>
 </ul>
 </div>
@@ -257,21 +303,31 @@ Investigate potentially compromised accounts. Analysts can do this by searching 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This activity is unlikely to happen legitimately outside engineering or IT business units. As long as the analyst did not identify malware or suspicious activity related to the user or host, this alert can be dismissed.
-</li>
-</ul>
-</div>
-<p><span class="strong strong"><strong>Related rules</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-PowerShell PSReflect Script - 56f2e9b5-4803-4e44-a0a4-a52dc79d57fe
+Legitimate scripts may load assemblies to support internal tooling, plugin models, packaged dependencies, or automation tasks that embed .NET functionality in PowerShell.
 </li>
 <li class="listitem">
-Potential Process Injection via PowerShell - 2e29e96a-b67c-455a-afe4-de6183431d0d
+Benign activity is more likely when:
 </li>
 <li class="listitem">
-PowerShell Suspicious Payload Encoded and Compressed - 81fe9dc6-a2d7-4192-a2d8-eed98afc766a
+<code class="literal">file.path</code>/<code class="literal">file.name</code> map to a known, owned script with a stable operational purpose.
+</li>
+<li class="listitem">
+The same <code class="literal">user.id</code> consistently runs the same script on the same <code class="literal">host.id</code> as part of normal operations.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_text</code> is readable and clearly loads expected assemblies without embedded blobs or multi-step content staging.
+</li>
+<li class="listitem">
+Suspicious activity is more likely when:
+</li>
+<li class="listitem">
+The assembly is loaded from dynamically generated bytes (encoded or transformed content) and is followed by reflection-based invocation.
+</li>
+<li class="listitem">
+The script originates from an unusual <code class="literal">file.directory</code> or the execution context (<code class="literal">user.name</code>/<code class="literal">host.name</code>) is inconsistent with expected administrative workflows.
+</li>
+<li class="listitem">
+If confirmed benign, document the owning team, expected execution pattern, and the specific script identity (<code class="literal">file.path</code>/<code class="literal">file.name</code>) to enable narrowly scoped tuning.
 </li>
 </ul>
 </div>
@@ -279,43 +335,52 @@ PowerShell Suspicious Payload Encoded and Compressed - 81fe9dc6-a2d7-4192-a2d8-e
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If the activity is confirmed or strongly suspected to be malicious:
 </li>
 <li class="listitem">
-Isolate the involved hosts to prevent further post-compromise behavior.
+Isolate the affected host to prevent further in-memory execution and follow-on activity.
 </li>
 <li class="listitem">
-If the triage identified malware, search the environment for additional compromised hosts.
+Preserve evidence from the alert:
 </li>
 <li class="listitem">
-Implement temporary network rules, procedures, and segmentation to contain the malware.
+Export the full reconstructed script block content using <code class="literal">powershell.file.script_block_id</code> with <code class="literal">powershell.sequence</code>/<code class="literal">powershell.total</code>.
 </li>
 <li class="listitem">
-Stop suspicious processes.
+Capture <code class="literal">host.id</code>, <code class="literal">host.name</code>, <code class="literal">user.id</code>, <code class="literal">user.name</code>, <code class="literal">user.domain</code>, and any associated <code class="literal">file.path</code>/<code class="literal">file.name</code> context.
 </li>
 <li class="listitem">
-Immediately block the identified indicators of compromise (IoCs).
+Identify and contain related activity:
 </li>
 <li class="listitem">
-Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
+Hunt for additional related script blocks on the same host/user and across other hosts for similar <code class="literal">powershell.file.script_block_text</code> patterns.
 </li>
 <li class="listitem">
-Remove and block malicious artifacts identified during triage.
+Contain any identified infrastructure or artifacts based on indicators found in the script content (for example, domains, IPs, or downloaded file names).
 </li>
 <li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
+Remediate:
 </li>
 <li class="listitem">
-Restrict PowerShell usage outside of IT and engineering business units using GPOs, AppLocker, Intune, or similar software.
+Remove persistence and stop any related malicious processes discovered during triage and correlation.
 </li>
 <li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
+Review the impacted account (<code class="literal">user.id</code>) for compromise and rotate credentials as appropriate, prioritizing privileged access.
 </li>
 <li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
+Validate the host is remediated and monitored for recurrence before returning it to service.
 </li>
 <li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+If the activity is benign but requires reduction in alert volume:
+</li>
+<li class="listitem">
+Record the approved use case and expected execution context (host role, user role, and script location).
+</li>
+<li class="listitem">
+Apply targeted tuning anchored to stable identifiers (for example, specific <code class="literal">file.path</code> and expected accounts) rather than broadly suppressing assembly load behavior.
+</li>
+<li class="listitem">
+Review PowerShell governance and monitoring to ensure in-memory loading is limited to approved workflows.
 </li>
 </ul>
 </div>
@@ -323,46 +388,31 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_641"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-net-reflection-via-powershell.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_650"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-net-reflection-via-powershell.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
-<p>The <em>PowerShell Script Block Logging</em> logging policy must be enabled.
-Steps to implement the logging policy with Advanced Audit Configuration:</p>
-<pre class="screen">Computer Configuration &gt;
-Administrative Templates &gt;
-Windows PowerShell &gt;
-Turn on PowerShell Script Block Logging (Enable)</pre>
-<p>Steps to implement the logging policy via registry:</p>
-<pre class="screen">reg add "hklm\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" /v EnableScriptBlockLogging /t REG_DWORD /d 1</pre>
+<p>PowerShell Script Block Logging must be enabled to generate the events used by this rule (e.g., 4104).
+Setup instructions: <a href="https://ela.st/powershell-logging-setup" class="ulink" target="_top">https://ela.st/powershell-logging-setup</a></p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1250"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-net-reflection-via-powershell.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1270"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-net-reflection-via-powershell.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-js">event.category:process and host.os.type:windows and
+(
   powershell.file.script_block_text : (
     "[System.Reflection.Assembly]::Load" or
     "[Reflection.Assembly]::Load" or
     "Assembly.Load("
   ) and
-  not powershell.file.script_block_text : (
-        ("CommonWorkflowParameters" or "RelatedLinksHelpInfo") and
-        "HelpDisplayStrings"
-  ) and
-  not (powershell.file.script_block_text :
-        ("Get-SolutionFiles" or "Get-VisualStudio" or "Select-MSBuildPath") and
-        file.name : "PathFunctions.ps1"
-  ) and
-  not powershell.file.script_block_text : (
-        "Microsoft.PowerShell.Workflow.ServiceCore" and "ExtractPluginProperties([string]$pluginDir"
-  ) and
-
-  not powershell.file.script_block_text : ("reflection.assembly]::Load('System." or "LoadWithPartialName('Microsoft." or "::Load(\"Microsoft." or "Microsoft.Build.Utilities.Core.dll") and
-
-  not user.id : "S-1-5-18"</pre>
+  powershell.file.script_block_text : (
+      "FromBase64String" or "GzipStream" or "DeflateStream" or "IO.Compression" or
+      "MemoryStream" or "DownloadData" or "WebClient" or "ReadAllBytes"
+  )
+)</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

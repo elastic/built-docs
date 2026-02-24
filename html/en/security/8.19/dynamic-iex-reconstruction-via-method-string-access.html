@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="dynamic-iex-reconstruction-via-method-string-access"></a>Dynamic IEX Reconstruction via Method String Access</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/dynamic-iex-reconstruction-via-method-string-access.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies PowerShell scripts that reconstruct the IEX (Invoke-Expression) command by accessing and indexing the string representation of method references. This obfuscation technique uses constructs like ''.IndexOf.ToString() to expose method metadata as a string, then extracts specific characters through indexed access and joins them to form IEX, bypassing static keyword detection and evading defenses such as AMSI.</p>
+<p>Detects PowerShell scripts that rebuilds IEX by converting method references to strings (for example, ''.IndexOf.ToString()) and extracting multiple indexed characters (for example, [n,n,n]). Attackers use method-string reconstruction to conceal dynamic execution and bypass static detections and AMSI.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: esql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>: None</p>
 <p><span class="strong strong"><strong>Severity</strong></span>: low</p>
@@ -147,7 +147,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 10</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 11</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -159,35 +159,138 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_306"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/dynamic-iex-reconstruction-via-method-string-access.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_322"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/dynamic-iex-reconstruction-via-method-string-access.asciidoc">edit</a></div>
 </div></div></div>
-<pre class="literallayout">## Triage and analysis</pre>
-
+<p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <div class="quoteblock">
 <blockquote>
 <p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
+This guide was created by humans with the assistance of generative AI. While its contents have been manually curated to include the most valuable information, always validate assumptions and adjust procedures to match your internal runbooks and incident triage and response policies.</p>
 </blockquote>
 </div>
 <p><span class="strong strong"><strong>Investigating Dynamic IEX Reconstruction via Method String Access</strong></span></p>
-<p>PowerShell&#8217;s flexibility allows dynamic command execution, which adversaries exploit by obfuscating commands like Invoke-Expression (IEX). They manipulate method strings to reconstruct IEX, evading static detection. The detection rule identifies scripts using this obfuscation by analyzing patterns in method string access, flagging suspicious activity for further investigation.</p>
+<p>This alert indicates PowerShell script block content that uses method-to-string conversion and indexed character extraction to assemble an execution primitive at runtime, commonly "IEX" (Invoke-Expression). This obfuscation technique can conceal dynamic execution intent and is often used to reduce obvious keywords in the script body.</p>
+<p><span class="strong strong"><strong>Key alert fields to review</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">user.id</code>: Account execution context for correlation, prioritization, and scoping.
+</li>
+<li class="listitem">
+<code class="literal">host.name</code>, <code class="literal">host.id</code>: Host execution context for correlation, prioritization, and scoping.
+</li>
+<li class="listitem">
+<code class="literal">file.path</code>, <code class="literal">file.directory</code>, <code class="literal">file.name</code>: File-origin context when the script block is sourced from an on-disk file.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_text</code>: Script block content that matched the detection logic.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, <code class="literal">powershell.total</code>: Script block metadata to pivot to other fragments or reconstruct full script content when split across multiple events.
+</li>
+<li class="listitem">
+<code class="literal">Esql.script_block_tmp</code>: Transformed script block where detection patterns replace original content with a marker to support scoring/counting and quickly spot match locations.
+</li>
+<li class="listitem">
+<code class="literal">Esql.script_block_pattern_count</code>: Count of matches for the detection pattern(s) observed in the script block content.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_entropy_bits</code>: Shannon entropy of the script block. Higher values may indicate obfuscation.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_surprisal_stdev</code>: Standard deviation of surprisal across the script block. Low values indicate uniform randomness. High values indicate mixed patterns and variability.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_unique_symbols</code>: Count of distinct characters present in the script block.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_length</code>: Script block length (size) context.
+</li>
+</ul>
+</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the powershell.file.script_block_text field to understand the content and intent of the script that triggered the alert. Look for any suspicious patterns or obfuscation techniques.
+Establish execution context and scope:
 </li>
 <li class="listitem">
-Examine the file.path field to determine the location of the script on the host system, which can provide context about its origin and potential legitimacy.
+Review <code class="literal">host.name</code> and <code class="literal">host.id</code> to identify the affected endpoint and its role/criticality.
 </li>
 <li class="listitem">
-Check the host.name and user.id fields to identify the machine and user account involved in executing the script, which can help assess whether the activity aligns with expected behavior.
+Review <code class="literal">user.name</code>, <code class="literal">user.domain</code>, and <code class="literal">user.id</code> to determine whether the activity aligns with expected administrative or automation usage.
 </li>
 <li class="listitem">
-Analyze the powershell.file.script_block_id and powershell.sequence fields to trace the execution sequence and correlate it with other PowerShell activities on the host, providing a broader view of the script&#8217;s execution context.
+Review <code class="literal">file.path</code>, <code class="literal">file.directory</code>, and <code class="literal">file.name</code> (when present) to understand whether the script originated from an on-disk file.
 </li>
 <li class="listitem">
-Investigate the agent.id field to verify the endpoint&#8217;s security posture and ensure that it is up-to-date with the latest security patches and configurations.
+Review <code class="literal">agent.id</code> to pivot to other telemetry from the same endpoint and timeframe.
+</li>
+<li class="listitem">
+Validate what matched and how extensively it appears:
+</li>
+<li class="listitem">
+Review <code class="literal">Esql.script_block_pattern_count</code> to gauge how often the technique appears within the script block (higher counts can indicate heavier obfuscation).
+</li>
+<li class="listitem">
+Use <code class="literal">Esql.script_block_tmp</code> to quickly locate the matched regions, then review the corresponding locations in <code class="literal">powershell.file.script_block_text</code> for the exact construct and nearby context.
+</li>
+<li class="listitem">
+Review <code class="literal">powershell.file.script_block_length</code> alongside <code class="literal">powershell.file.script_block_entropy_bits</code>, <code class="literal">powershell.file.script_block_surprisal_stdev</code>, and <code class="literal">powershell.file.script_block_unique_symbols</code> to help distinguish isolated string tricks from broader obfuscation.
+</li>
+<li class="listitem">
+Reconstruct the full script block when content is split:
+</li>
+<li class="listitem">
+Pivot on <code class="literal">powershell.file.script_block_id</code> and order results by <code class="literal">powershell.sequence</code>.
+</li>
+<li class="listitem">
+Use <code class="literal">powershell.total</code> to confirm you have all fragments before making a final assessment.
+</li>
+<li class="listitem">
+Preserve the reassembled content from <code class="literal">powershell.file.script_block_text</code> for follow-on analysis and scoping.
+</li>
+<li class="listitem">
+Determine the reconstructed token and follow-on behavior:
+</li>
+<li class="listitem">
+In <code class="literal">powershell.file.script_block_text</code>, identify the method string being indexed and the associated index list (for example, [n,n,n]) to determine what characters are being assembled.
+</li>
+<li class="listitem">
+Identify how the reconstructed string is used (for example, invoked directly, assigned to a variable, or passed as an argument) and what content it ultimately executes.
+</li>
+<li class="listitem">
+Capture any secondary artifacts referenced in the script content (for example, embedded payload strings, additional script blocks, or external resource locations) and use them to drive further correlation.
+</li>
+<li class="listitem">
+Validate likely origin and initiating source:
+</li>
+<li class="listitem">
+If <code class="literal">file.path</code> is present, validate whether the script location is expected for the user and host, and whether it appears in a user-writable location or a standard administrative tooling path.
+</li>
+<li class="listitem">
+If file origin fields are not present, the script may have been executed interactively or generated at runtime; rely on surrounding endpoint telemetry to identify the initiating process and any related activity.
+</li>
+<li class="listitem">
+Correlate with adjacent activity to understand impact:
+</li>
+<li class="listitem">
+Review other PowerShell script blocks on the same <code class="literal">host.id</code> and <code class="literal">user.id</code> around the alert time to identify staging steps and any follow-on execution.
+</li>
+<li class="listitem">
+If process telemetry is available, identify the PowerShell process and its parent process that initiated execution, and check for suspicious child processes near the alert time.
+</li>
+<li class="listitem">
+If network or file telemetry is available, look for downloads, outbound connections, and file writes temporally aligned with the script block execution and the content referenced within <code class="literal">powershell.file.script_block_text</code>.
+</li>
+<li class="listitem">
+Assess prevalence across the environment:
+</li>
+<li class="listitem">
+Search for similar patterns (including stable substrings from <code class="literal">powershell.file.script_block_text</code>) across other hosts and users.
+</li>
+<li class="listitem">
+Prioritize results with higher <code class="literal">Esql.script_block_pattern_count</code> and higher obfuscation metrics to identify likely common tooling or shared payloads.
 </li>
 </ul>
 </div>
@@ -195,19 +298,13 @@ Investigate the agent.id field to verify the endpoint&#8217;s security posture a
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Scripts with legitimate use of string manipulation methods like IndexOf or SubString may trigger false positives if they are part of complex PowerShell scripts used in administrative tasks. To manage this, review the context of the script and consider adding exceptions for known safe scripts or users.
+PowerShell developers or automation teams may experiment with unconventional string manipulation, but method-string indexing to assemble execution primitives is uncommon in routine administration.
 </li>
 <li class="listitem">
-Automated scripts from trusted software that perform extensive string operations for configuration or data processing might be flagged. Identify these scripts and exclude them by their script block ID or file path to prevent unnecessary alerts.
+Authorized security testing, malware analysis, or threat emulation activities can intentionally use this technique; validate against approved testing windows and operator accounts.
 </li>
 <li class="listitem">
-Development environments where PowerShell is used for testing or debugging purposes may generate alerts due to frequent use of string manipulation. Implement exclusions based on host names or user IDs associated with these environments to reduce noise.
-</li>
-<li class="listitem">
-Security tools or monitoring solutions that use PowerShell for log analysis or system checks might inadvertently match the detection pattern. Verify the source of the script and whitelist these tools by agent ID or specific script characteristics.
-</li>
-<li class="listitem">
-Regularly review and update the exclusion list to ensure it reflects the current environment and does not inadvertently allow malicious activity.
+Some script packaging or code protection approaches can introduce non-standard string operations; treat as benign only when the script origin (<code class="literal">file.path</code> / <code class="literal">file.name</code>), execution context (<code class="literal">user.id</code>), and surrounding host activity support a known, approved workflow.
 </li>
 </ul>
 </div>
@@ -215,25 +312,31 @@ Regularly review and update the exclusion list to ensure it reflects the current
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Isolate the affected host immediately to prevent further execution of potentially malicious scripts and limit lateral movement within the network.
+If malicious or suspicious activity is confirmed:
 </li>
 <li class="listitem">
-Terminate any suspicious PowerShell processes identified by the alert to stop ongoing malicious activity.
+Contain the affected host identified by <code class="literal">host.id</code> to prevent additional execution and lateral movement.
 </li>
 <li class="listitem">
-Review the PowerShell script block text and script block ID from the alert to understand the scope and intent of the obfuscation technique used.
+Preserve evidence from the alert, including <code class="literal">powershell.file.script_block_text</code>, <code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, <code class="literal">powershell.total</code>, <code class="literal">file.path</code>, and <code class="literal">Esql.script_block_pattern_count</code>.
 </li>
 <li class="listitem">
-Remove any unauthorized or malicious scripts from the affected system to prevent re-execution.
+Scope for related activity by searching for similar content patterns across the environment and identifying additional impacted hosts and accounts.
 </li>
 <li class="listitem">
-Conduct a thorough scan of the isolated host using updated antivirus and anti-malware tools to identify and remove any additional threats.
+If an on-disk script is involved (<code class="literal">file.path</code> present), collect the file for analysis and remove or quarantine it according to your incident handling process.
 </li>
 <li class="listitem">
-Restore the affected system from a known good backup if the integrity of the system is compromised and cannot be assured.
+Review the associated account (<code class="literal">user.id</code>) for additional suspicious activity and remediate credential exposure as appropriate (for example, reset credentials and review recent authentication activity).
 </li>
 <li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further analysis and to determine if additional systems are affected.
+If the activity is determined to be benign:
+</li>
+<li class="listitem">
+Document the legitimate script source, expected hosts, and operator accounts for future triage.
+</li>
+<li class="listitem">
+Reduce noise with narrowly scoped suppression using stable characteristics available in the alert (for example, consistent <code class="literal">file.path</code> and repeatable non-sensitive substrings in <code class="literal">powershell.file.script_block_text</code>), while continuing to monitor for deviations.
 </li>
 </ul>
 </div>
@@ -241,22 +344,16 @@ Escalate the incident to the security operations center (SOC) or incident respon
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_130"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/dynamic-iex-reconstruction-via-method-string-access.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_140"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/dynamic-iex-reconstruction-via-method-string-access.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
-<p>The <em>PowerShell Script Block Logging</em> logging policy must be enabled.
-Steps to implement the logging policy with Advanced Audit Configuration:</p>
-<pre class="screen">Computer Configuration &gt;
-Administrative Templates &gt;
-Windows PowerShell &gt;
-Turn on PowerShell Script Block Logging (Enable)</pre>
-<p>Steps to implement the logging policy via registry:</p>
-<pre class="screen">reg add "hklm\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" /v EnableScriptBlockLogging /t REG_DWORD /d 1</pre>
+<p>PowerShell Script Block Logging must be enabled to generate the events used by this rule (e.g., 4104).
+Setup instructions: <a href="https://ela.st/powershell-logging-setup" class="ulink" target="_top">https://ela.st/powershell-logging-setup</a></p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_318"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/dynamic-iex-reconstruction-via-method-string-access.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_338"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/dynamic-iex-reconstruction-via-method-string-access.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -292,6 +389,7 @@ Turn on PowerShell Script Block Logging (Enable)</pre>
     _version,
     _index,
     host.name,
+    host.id,
     agent.id,
     user.id
 

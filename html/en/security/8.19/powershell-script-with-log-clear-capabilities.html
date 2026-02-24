@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="powershell-script-with-log-clear-capabilities"></a>PowerShell Script with Log Clear Capabilities</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-script-with-log-clear-capabilities.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies the use of Cmdlets and methods related to Windows event log deletion activities. This is often done by attackers in an attempt to evade detection or destroy forensic evidence on a system.</p>
+<p>Identifies PowerShell script block content that clears Windows event logs using Clear-EventLog, Remove-EventLog, or EventLogSession/EventLog Clear methods. Attackers clear local logs to evade detection and destroy forensic evidence.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -165,9 +165,12 @@ Data Source: PowerShell Logs
 <li class="listitem">
 Rule Type: BBR
 </li>
+<li class="listitem">
+Resources: Investigation Guide
+</li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 210</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 211</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -179,22 +182,180 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_532"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-script-with-log-clear-capabilities.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1045"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-script-with-log-clear-capabilities.asciidoc">edit</a></div>
 </div></div></div>
-<p><span class="strong strong"><strong>Setup</strong></span></p>
-<p>The <em>PowerShell Script Block Logging</em> logging policy must be enabled.
-Steps to implement the logging policy with Advanced Audit Configuration:</p>
-<pre class="screen">Computer Configuration &gt;
-Administrative Templates &gt;
-Windows PowerShell &gt;
-Turn on PowerShell Script Block Logging (Enable)</pre>
-<p>Steps to implement the logging policy via registry:</p>
-<pre class="screen">reg add "hklm\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" /v EnableScriptBlockLogging /t REG_DWORD /d 1</pre>
+<p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This guide was created by humans with the assistance of generative AI. While its contents have been manually curated to include the most valuable information, always validate assumptions and adjust procedures to match your internal runbooks and incident triage and response policies.</p>
+</blockquote>
+</div>
+<p><span class="strong strong"><strong>Investigating PowerShell Script with Log Clear Capabilities</strong></span></p>
+<p>This alert identifies PowerShell script block content associated with clearing Windows event logs through cmdlets or .NET methods. Clearing local logs can reduce forensic visibility and interrupt security monitoring. Because script block logging records executed content, confirm whether log clearing occurred and identify the broader activity that led to this action.</p>
+<p><span class="strong strong"><strong>Key alert fields to review</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">user.id</code>: Account execution context for correlation, prioritization, and scoping.
+</li>
+<li class="listitem">
+<code class="literal">host.name</code>, <code class="literal">host.id</code>: Host execution context for correlation, prioritization, and scoping.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_text</code>: Script block content that matched the detection logic.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, <code class="literal">powershell.total</code>: Script block metadata to pivot to other fragments or reconstruct full script content when split across multiple events.
+</li>
+<li class="listitem">
+<code class="literal">file.path</code>, <code class="literal">file.directory</code>, <code class="literal">file.name</code>: File-origin context when the script block is sourced from an on-disk file.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_length</code>: Script block length (size) context.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Analyze <code class="literal">powershell.file.script_block_text</code> to determine intent and scope:
+</li>
+<li class="listitem">
+Identify the clearing technique used (for example, <code class="literal">Clear-EventLog</code>, <code class="literal">Remove-EventLog</code>, <code class="literal">EventLogSession.ClearLog</code>, or <code class="literal">Diagnostics.EventLog.Clear</code>).
+</li>
+<li class="listitem">
+Extract referenced log names/channels and any values that indicate breadth (single log vs multiple logs, loops, or log enumeration).
+</li>
+<li class="listitem">
+Note any remote targets, session objects, or hostnames that suggest log clearing on other systems.
+</li>
+<li class="listitem">
+If <code class="literal">Remove-EventLog</code> is used, treat it as higher impact and determine whether it targets built-in logs or custom logs/event sources.
+</li>
+<li class="listitem">
+Reconstruct full content when the script block is split:
+</li>
+<li class="listitem">
+Pivot on <code class="literal">powershell.file.script_block_id</code> to collect all fragments.
+</li>
+<li class="listitem">
+Order by <code class="literal">powershell.sequence</code> and confirm completeness using <code class="literal">powershell.total</code>.
+</li>
+<li class="listitem">
+Use <code class="literal">powershell.file.script_block_length</code> to identify unusually large content that may include additional actions beyond log clearing.
+</li>
+<li class="listitem">
+Establish execution context and likely origin:
+</li>
+<li class="listitem">
+Review <code class="literal">user.name</code>, <code class="literal">user.domain</code>, and <code class="literal">user.id</code> to determine whether the account is expected to perform log maintenance and whether the timing is consistent with approved activity.
+</li>
+<li class="listitem">
+Review <code class="literal">host.name</code> and <code class="literal">host.id</code> to determine whether the affected system is high value (for example, servers or shared systems) and to scope other alerts on the same host.
+</li>
+<li class="listitem">
+If <code class="literal">file.path</code>, <code class="literal">file.directory</code>, or <code class="literal">file.name</code> are present, capture the script location/name and evaluate whether it aligns with known administrative scripts or automation.
+</li>
+<li class="listitem">
+If file context is absent, treat the activity as inline or dynamically generated and prioritize identifying how PowerShell was launched (interactive session, scheduled execution, service, or parent process) using adjacent endpoint telemetry.
+</li>
+<li class="listitem">
+Confirm whether logs were actually cleared and identify what was impacted:
+</li>
+<li class="listitem">
+Review available Windows logging for records indicating event logs were cleared around <code class="literal">@timestamp</code>, and document which logs were affected.
+</li>
+<li class="listitem">
+Look for gaps in event coverage or abrupt changes in event volume beginning at or shortly after the alert time on the same <code class="literal">host.id</code>.
+</li>
+<li class="listitem">
+Correlate with adjacent activity around <code class="literal">@timestamp</code> (as available in your environment):
+</li>
+<li class="listitem">
+Process execution: identify the PowerShell host process, its parent process, and any related automation that triggered the script.
+</li>
+<li class="listitem">
+Authentication and remote access: identify new or unusual logons, session establishment, or privilege changes leading up to the event.
+</li>
+<li class="listitem">
+Network activity: review connections consistent with remote administration or lateral movement preceding the log clearing.
+</li>
+<li class="listitem">
+Additional PowerShell activity: review other script block events for the same <code class="literal">host.id</code> and <code class="literal">user.id</code> before and after the alert to identify precursor actions and follow-on cleanup.
+</li>
+<li class="listitem">
+Scope across the environment:
+</li>
+<li class="listitem">
+Search for the same or similar <code class="literal">powershell.file.script_block_text</code> patterns on other hosts to determine whether this is isolated behavior, shared tooling, or coordinated activity.
+</li>
+<li class="listitem">
+Pivot on <code class="literal">user.id</code> to identify whether the same account performed similar activity on multiple hosts within a short time window.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>False positive analysis</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Authorized administrators may clear logs during troubleshooting, controlled testing, or specific maintenance procedures. Validate against change records, maintenance windows, and documented responsibilities for the account in <code class="literal">user.name</code>.
+</li>
+<li class="listitem">
+Endpoint provisioning, imaging, or environment resets (for example, labs or short-lived systems) can include log clearing as part of baseline preparation. Validate whether <code class="literal">host.name</code> is part of an expected rebuild or reset workflow.
+</li>
+<li class="listitem">
+Operational scripts may clear specific logs to address performance or retention constraints. Benign activity is more likely when <code class="literal">file.path</code> and <code class="literal">file.name</code> are from a controlled script repository and no additional suspicious activity is present for the same <code class="literal">user.id</code> and <code class="literal">host.id</code>.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Response and remediation</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+If activity is unauthorized or suspicious:
+</li>
+<li class="listitem">
+Treat this as potential evidence destruction. Preserve remaining forensic data and collect relevant telemetry from the affected host.
+</li>
+<li class="listitem">
+Preserve the full script content by capturing all fragments linked by <code class="literal">powershell.file.script_block_id</code> (use <code class="literal">powershell.sequence</code> and <code class="literal">powershell.total</code> for ordering) and retain it with the case record.
+</li>
+<li class="listitem">
+Contain the involved account and host according to incident response procedures (for example, restrict access, reset credentials, and isolate the endpoint if required).
+</li>
+<li class="listitem">
+Investigate for additional post-compromise activity on the same <code class="literal">host.id</code> and by the same <code class="literal">user.id</code>, prioritizing persistence, credential access, and lateral movement around the alert time.
+</li>
+<li class="listitem">
+Assess logging resilience: verify critical logs are centrally forwarded and retained, and review access controls that allow event log clearing to ensure they are limited to necessary administrative roles.
+</li>
+<li class="listitem">
+If activity is confirmed benign:
+</li>
+<li class="listitem">
+Document the authorized workflow (who, what, where, and when), including expected <code class="literal">host.name</code>, <code class="literal">user.name</code>, and any associated script identifiers (<code class="literal">file.name</code>/<code class="literal">file.path</code>).
+</li>
+<li class="listitem">
+Maintain monitoring for deviations from the approved pattern (unexpected accounts, hosts, timing, or expanded targeting) to reduce noise without losing coverage.
+</li>
+</ul>
+</div>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1081"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-script-with-log-clear-capabilities.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_541"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-script-with-log-clear-capabilities.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>PowerShell Script Block Logging must be enabled to generate the events used by this rule (e.g., 4104).
+Setup instructions: <a href="https://ela.st/powershell-logging-setup" class="ulink" target="_top">https://ela.st/powershell-logging-setup</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1103"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-script-with-log-clear-capabilities.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

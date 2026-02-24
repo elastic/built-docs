@@ -115,11 +115,11 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="potential-powershell-obfuscation-via-invalid-escape-sequences"></a>Potential PowerShell Obfuscation via Invalid Escape Sequences</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-invalid-escape-sequences.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies PowerShell scripts that use invalid escape sequences as a form of obfuscation. This technique introduces backticks (`) between characters in a way that does not correspond to valid PowerShell escape sequences, breaking up strings and bypassing pattern-based detections while preserving execution logic. This is designed to evade static analysis and bypass security protections such as the Antimalware Scan Interface (AMSI).</p>
+<p>Detects PowerShell scripts with repeated invalid backtick escapes between word characters (letters, digits, underscore, or dash), splitting tokens while preserving execution. Attackers use this obfuscation to fragment keywords and evade pattern-based detection and AMSI.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: esql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>: None</p>
-<p><span class="strong strong"><strong>Severity</strong></span>: low</p>
-<p><span class="strong strong"><strong>Risk score</strong></span>: 21</p>
+<p><span class="strong strong"><strong>Severity</strong></span>: medium</p>
+<p><span class="strong strong"><strong>Risk score</strong></span>: 47</p>
 <p><span class="strong strong"><strong>Runs every</strong></span>: 5m</p>
 <p><span class="strong strong"><strong>Searches indices from</strong></span>: now-9m (<a href="/guide/en/elasticsearch/reference/8.19/common-options.html#date-math" class="ulink" target="_top">Date Math format</a>, see also <a class="xref" href="rules-ui-create.html#rule-schedule" title="Set the rule&#8217;s schedule"><code class="literal">Additional look-back time</code></a>)</p>
 <p><span class="strong strong"><strong>Maximum alerts per execution</strong></span>: 100</p>
@@ -147,7 +147,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 10</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 11</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -159,38 +159,145 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_934"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-invalid-escape-sequences.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_954"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-invalid-escape-sequences.asciidoc">edit</a></div>
 </div></div></div>
-<pre class="literallayout">## Triage and analysis</pre>
-
+<p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <div class="quoteblock">
 <blockquote>
 <p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
+This guide was created by humans with the assistance of generative AI. While its contents have been manually curated to include the most valuable information, always validate assumptions and adjust procedures to match your internal runbooks and incident triage and response policies.</p>
 </blockquote>
 </div>
 <p><span class="strong strong"><strong>Investigating Potential PowerShell Obfuscation via Invalid Escape Sequences</strong></span></p>
-<p>PowerShell, a powerful scripting language in Windows environments, can be exploited by adversaries using obfuscation techniques to evade detection. By inserting invalid escape sequences, attackers can obscure malicious scripts, bypassing static analysis and security tools like AMSI. The detection rule identifies such obfuscation by analyzing script patterns, specifically targeting unusual backtick usage, to flag potential threats.</p>
+<p>This rule flags PowerShell script block content that repeatedly inserts invalid backtick escape sequences within otherwise contiguous word characters. This can fragment tokens (cmdlets, parameters, variable names, strings) while preserving execution and readability to the interpreter, which can hinder content inspection and pattern-based detections.</p>
+<p>Analyst goals:
+- Reconstruct complete script block content when split across multiple events.
+- Normalize the content (remove or correct invalid escapes) to reveal the underlying logic.
+- Determine execution context (host, user, script origin) and correlate with adjacent activity to assess intent and impact.</p>
+<p><span class="strong strong"><strong>Key alert fields to review</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">user.id</code>: Account execution context for correlation, prioritization, and scoping.
+</li>
+<li class="listitem">
+<code class="literal">host.name</code>, <code class="literal">host.id</code>: Host execution context for correlation, prioritization, and scoping.
+</li>
+<li class="listitem">
+<code class="literal">file.path</code>, <code class="literal">file.directory</code>, <code class="literal">file.name</code>: File-origin context when the script block is sourced from an on-disk file.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_text</code>: Script block content that matched the detection logic.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, <code class="literal">powershell.total</code>: Script block metadata to pivot to other fragments or reconstruct full script content when split across multiple events.
+</li>
+<li class="listitem">
+<code class="literal">Esql.script_block_tmp</code>: Transformed script block where detection patterns replace original content with a marker to support scoring/counting and quickly spot match locations.
+</li>
+<li class="listitem">
+<code class="literal">Esql.script_block_pattern_count</code>: Count of matches for the detection pattern(s) observed in the script block content.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_entropy_bits</code>: Shannon entropy of the script block. Higher values may indicate obfuscation.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_surprisal_stdev</code>: Standard deviation of surprisal across the script block. Low values indicate uniform randomness. High values indicate mixed patterns and variability.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_unique_symbols</code>: Count of distinct characters present in the script block.
+</li>
+<li class="listitem">
+<code class="literal">powershell.file.script_block_length</code>: Script block length (size) context.
+</li>
+</ul>
+</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the <code class="literal">powershell.file.script_block_text</code> field to understand the context and content of the script block that triggered the alert. Look for patterns of invalid escape sequences and assess whether they appear intentionally obfuscated.
+Establish timeline and ownership:
 </li>
 <li class="listitem">
-Examine the <code class="literal">file.name</code> and <code class="literal">file.path</code> fields to determine the origin and location of the script. This can help identify whether the script is part of a legitimate application or potentially malicious.
+Anchor the activity using <code class="literal">@timestamp</code>, then record <code class="literal">host.name</code>, <code class="literal">host.id</code>, and <code class="literal">agent.id</code>.
 </li>
 <li class="listitem">
-Check the <code class="literal">host.name</code> and <code class="literal">agent.id</code> fields to identify the affected system and the agent responsible for logging the event. This information is crucial for understanding the scope of the potential threat.
+Identify the execution context with <code class="literal">user.name</code>, <code class="literal">user.domain</code>, and <code class="literal">user.id</code>. Note whether the account is expected to run PowerShell on this host and whether the host is commonly used for scripting.
 </li>
 <li class="listitem">
-Analyze the <code class="literal">user.id</code> field to ascertain which user executed the script. This can provide insights into whether the user has a history of executing suspicious scripts or if their account may be compromised.
+Assess the likelihood of intentional obfuscation:
 </li>
 <li class="listitem">
-Investigate the <code class="literal">powershell.file.script_block_id</code> and <code class="literal">powershell.sequence</code> fields to trace the execution sequence and correlate it with other related script blocks, which may reveal additional obfuscation or malicious activity.
+Review <code class="literal">Esql.script_block_pattern_count</code> to understand how heavily the content is fragmented. Higher counts generally increase confidence that this is deliberate obfuscation rather than incidental escaping.
 </li>
 <li class="listitem">
-Assess the <code class="literal">count</code> field to evaluate the extent of obfuscation detected. A higher count may indicate more aggressive obfuscation techniques, warranting further scrutiny.
+Use <code class="literal">powershell.file.script_block_length</code> as size context and review <code class="literal">powershell.file.script_block_entropy_bits</code>, <code class="literal">powershell.file.script_block_unique_symbols</code>, and <code class="literal">powershell.file.script_block_surprisal_stdev</code> to characterize the content (simple text vs. mixed/randomized payloads).
+</li>
+<li class="listitem">
+Compare <code class="literal">Esql.script_block_tmp</code> to <code class="literal">powershell.file.script_block_text</code> to understand where obfuscation is concentrated (localized string vs. widespread token fragmentation).
+</li>
+<li class="listitem">
+Reconstruct complete content when split across events:
+</li>
+<li class="listitem">
+If <code class="literal">powershell.total</code> is greater than 1, pivot on <code class="literal">powershell.file.script_block_id</code> and rebuild the script by ordering segments on <code class="literal">powershell.sequence</code>.
+</li>
+<li class="listitem">
+Validate the reconstructed set is complete (sequence 1 through <code class="literal">powershell.total</code>). Missing segments should be treated as an investigative gap and may require additional scoping.
+</li>
+<li class="listitem">
+Determine script origin and delivery:
+</li>
+<li class="listitem">
+If <code class="literal">file.path</code>, <code class="literal">file.directory</code>, and <code class="literal">file.name</code> are present, treat the script block as file-associated. Evaluate whether the location and naming are consistent with approved scripts or expected tooling for the endpoint.
+</li>
+<li class="listitem">
+If file fields are absent, treat the script as inline or dynamically generated content and prioritize correlation by <code class="literal">host.id</code>, <code class="literal">user.id</code>, and time.
+</li>
+<li class="listitem">
+Normalize and interpret the script content safely:
+</li>
+<li class="listitem">
+In a controlled analysis workflow, normalize the script by removing or correcting invalid backtick insertions so that split tokens become readable. Keep both the original and normalized versions for reporting.
+</li>
+<li class="listitem">
+Review the normalized text for behaviors that indicate malicious intent (secondary payload retrieval, dynamic execution, decoding/decompression, data collection, persistence logic, or remote interaction).
+</li>
+<li class="listitem">
+Extract and document indicators present in the content (network destinations, file paths/names, unique strings, or embedded encoded blobs) for scoping.
+</li>
+<li class="listitem">
+Correlate within PowerShell telemetry:
+</li>
+<li class="listitem">
+Pivot on <code class="literal">host.id</code> and <code class="literal">user.id</code> to identify additional <code class="literal">powershell.file.script_block_text</code> events shortly before and after the alert time to capture staging, follow-on commands, and potential cleanup.
+</li>
+<li class="listitem">
+Check for the same <code class="literal">powershell.file.script_block_id</code> appearing across hosts, or for repeated normalized strings, to identify automation reuse or broader activity.
+</li>
+<li class="listitem">
+Correlate with adjacent endpoint activity (if available in your environment):
+</li>
+<li class="listitem">
+Review process execution around <code class="literal">@timestamp</code> on <code class="literal">host.name</code> to identify the PowerShell host process and its parent, then assess whether the launch chain aligns with expected activity for the user and endpoint.
+</li>
+<li class="listitem">
+Review network activity around the alert time for connections that align with indicators extracted from the script content.
+</li>
+<li class="listitem">
+Review file and registry activity around the same time window for artifacts consistent with the script (new or modified scripts, dropped files, or persistence-related changes).
+</li>
+<li class="listitem">
+Review authentication activity associated with <code class="literal">user.id</code> around the alert time for suspicious logons or remote access that may align with script execution.
+</li>
+<li class="listitem">
+Scope impact:
+</li>
+<li class="listitem">
+Search for other alerts/events with similar obfuscation characteristics on the same host and for the same user to determine whether this is a one-off execution or a repeated pattern.
+</li>
+<li class="listitem">
+If multiple hosts are involved, prioritize investigation for critical assets and accounts with elevated privileges.
 </li>
 </ul>
 </div>
@@ -198,16 +305,13 @@ Assess the <code class="literal">count</code> field to evaluate the extent of ob
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Scripts from Visual Studio Code&#8217;s PowerShell extension may trigger false positives due to its shell integration. To handle this, exclude scripts containing the pattern "$([char]0x1b)]633" from detection.
+Legitimate scripts can contain backticks for formatting, string construction, or content generation; however, repeated invalid escape sequences embedded inside alphanumeric tokens are uncommon. Validate whether the execution context (<code class="literal">host.id</code>, <code class="literal">user.id</code>) aligns with known administrative or developer activity.
 </li>
 <li class="listitem">
-PowerShell modules with names starting with "TSS_" may be flagged incorrectly. Exclude these by adding a condition to ignore files matching the pattern "TSS_*.psm1".
+Some commercial or internal tools intentionally obfuscate PowerShell to protect intellectual property. Confirm whether the script origin (<code class="literal">file.path</code> when present), account context, and prevalence across the environment match an approved application or workflow.
 </li>
 <li class="listitem">
-Legitimate scripts that use backticks for formatting or other non-obfuscation purposes might be detected. Review such scripts and, if verified as safe, add them to an exception list based on their script block ID or file path.
-</li>
-<li class="listitem">
-Regularly update the exclusion list to reflect changes in legitimate script usage patterns, ensuring that new false positives are addressed promptly.
+Copy/paste artifacts and encoding transformations can introduce unexpected characters. When suspected, compare the normalized content to known-good scripts and assess whether the obfuscation is systematic (repeating across many tokens) versus localized.
 </li>
 </ul>
 </div>
@@ -215,25 +319,31 @@ Regularly update the exclusion list to reflect changes in legitimate script usag
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Isolate the affected host immediately to prevent lateral movement and further execution of potentially malicious scripts. Disconnect the host from the network and disable remote access.
+If the activity is confirmed or strongly suspected malicious:
 </li>
 <li class="listitem">
-Analyze the script block text and file path to identify the source and nature of the obfuscated script. Determine if the script is part of a larger attack or if other systems are affected.
+Contain affected host(s) to prevent further execution and lateral movement.
 </li>
 <li class="listitem">
-Remove or quarantine the identified malicious script and any associated files from the host. Ensure that all remnants of the obfuscated code are eliminated to prevent re-execution.
+Preserve evidence: reconstructed <code class="literal">powershell.file.script_block_text</code>, <code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, <code class="literal">powershell.total</code>, and alert-derived fields (<code class="literal">Esql.script_block_tmp</code>, <code class="literal">Esql.script_block_pattern_count</code>, and the script block metrics).
 </li>
 <li class="listitem">
-Conduct a thorough scan of the host using updated antivirus and antimalware tools to detect and remove any additional threats or indicators of compromise.
+If <code class="literal">file.path</code> is present, collect and quarantine the referenced script and review the surrounding directory for related artifacts.
 </li>
 <li class="listitem">
-Review and update PowerShell execution policies and security settings to restrict the execution of scripts with invalid escape sequences. Implement stricter controls to prevent similar obfuscation techniques.
+Use indicators extracted from normalized content to scope related activity across endpoints (pivot on <code class="literal">host.id</code>, <code class="literal">user.id</code>, <code class="literal">file.path</code>, and unique strings from the script).
 </li>
 <li class="listitem">
-Escalate the incident to the security operations center (SOC) or relevant cybersecurity team for further investigation and monitoring. Provide detailed logs and findings to assist in understanding the scope and impact of the threat.
+Coordinate credential remediation for affected accounts when remote execution, credential material, or post-exploitation behavior is suspected.
 </li>
 <li class="listitem">
-Implement enhanced logging and monitoring for PowerShell activities across the network to detect and respond to similar obfuscation attempts promptly. Use the identified patterns to refine detection capabilities.
+If the activity is benign but requires reduction:
+</li>
+<li class="listitem">
+Document the legitimate source (expected hosts/users and <code class="literal">file.path</code> when applicable).
+</li>
+<li class="listitem">
+Apply narrowly scoped tuning using stable attributes available in the alert (such as <code class="literal">host.id</code>, <code class="literal">user.id</code>, and <code class="literal">file.path</code>) and continue monitoring for deviations in script content and execution context.
 </li>
 </ul>
 </div>
@@ -241,22 +351,16 @@ Implement enhanced logging and monitoring for PowerShell activities across the n
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_473"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-invalid-escape-sequences.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_482"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-invalid-escape-sequences.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
-<p>The <em>PowerShell Script Block Logging</em> logging policy must be enabled.
-Steps to implement the logging policy with Advanced Audit Configuration:</p>
-<pre class="screen">Computer Configuration &gt;
-Administrative Templates &gt;
-Windows PowerShell &gt;
-Turn on PowerShell Script Block Logging (Enable)</pre>
-<p>Steps to implement the logging policy via registry:</p>
-<pre class="screen">reg add "hklm\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" /v EnableScriptBlockLogging /t REG_DWORD /d 1</pre>
+<p>PowerShell Script Block Logging must be enabled to generate the events used by this rule (e.g., 4104).
+Setup instructions: <a href="https://ela.st/powershell-logging-setup" class="ulink" target="_top">https://ela.st/powershell-logging-setup</a></p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_987"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-invalid-escape-sequences.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1009"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-invalid-escape-sequences.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -284,6 +388,7 @@ Turn on PowerShell Script Block Logging (Enable)</pre>
     _version,
     _index,
     host.name,
+    host.id,
     agent.id,
     user.id
 
