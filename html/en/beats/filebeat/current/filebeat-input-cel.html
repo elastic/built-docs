@@ -294,7 +294,8 @@ The field should be an array, but in the case of an error condition in the CEL p
 </div></div></div>
 <p>The CEL input will log the complete state after evaluation when logging at the DEBUG level.
 This will include any sensitive or secret information kept in the <code class="literal">state</code> object, and so DEBUG level logging should not be used in production when sensitive information is retained in the <code class="literal">state</code> object.
-See <a class="xref" href="filebeat-input-cel.html#cel-state-redact" title="redact"><code class="literal">redact</code></a> configuration parameters for settings to exclude sensitive fields from DEBUG logs.</p>
+Values under <code class="literal">state.secret</code> are always redacted automatically (see <a class="xref" href="filebeat-input-cel.html#secret-state-cel" title="secret_state"><code class="literal">secret_state</code></a>).
+See <a class="xref" href="filebeat-input-cel.html#cel-state-redact" title="redact"><code class="literal">redact</code></a> configuration parameters for settings to exclude other sensitive fields from DEBUG logs.</p>
 </div>
 
 <div class="section">
@@ -734,6 +735,42 @@ numbers to integers explicitly at the start of a CEL program.</p>
         "cursor": {"last_requested_at": now}
     })</pre>
 </div>
+<div class="position-relative"><h4><a id="secret-state-cel"></a><code class="literal">secret_state</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.19/x-pack/filebeat/docs/inputs/input-cel.asciidoc">edit</a></div>
+<p><code class="literal">secret_state</code> is an optional object holding secret key-value pairs. When configured in a Fleet integration package with <code class="literal">secret: true</code>, the values are stored encrypted by Fleet and decrypted before being passed to the input.</p>
+<p>At runtime, the contents of <code class="literal">secret_state</code> are placed at <code class="literal">state.secret</code>, making them available to the CEL program as <code class="literal">state.secret.&lt;key&gt;</code>. The key <code class="literal">secret</code> in the top-level <code class="literal">state</code> configuration is reserved&#8201;&#8212;&#8201;the input rejects any configuration where <code class="literal">state</code> contains a <code class="literal">secret</code> key, since values in <code class="literal">state</code> cannot be guaranteed to be encrypted in the stored configuration.</p>
+<p><code class="literal">state.secret</code> is unconditionally added to the redaction list for debug logging, regardless of whether <code class="literal">secret_state</code> is configured. This means:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Secrets from <code class="literal">secret_state</code> are automatically redacted without any <code class="literal">redact</code> configuration.
+</li>
+<li class="listitem">
+CEL programs that stash sensitive runtime values (such as session tokens) into <code class="literal">state.secret</code> during execution will also have those values redacted in debug logs.
+</li>
+<li class="listitem">
+If <code class="literal">state.secret</code> is absent at log time, the redaction is a no-op.
+</li>
+<li class="listitem">
+Values explicitly emitted by CEL <code class="literal">debug()</code> may include secrets.
+</li>
+</ul>
+</div>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: cel
+  interval: 1m
+  resource.url: https://api.example.com/data
+  secret_state:
+    api_key: "my-secret-api-key"
+  program: |
+    request("GET", state.url).with({
+        "Header": {"X-API-Key": [state.secret.api_key]}
+    }).do_request().as(resp, {
+        "events": [resp.Body.decode_json()],
+        "secret": state.secret,
+    })</pre>
+</div>
 <div class="position-relative"><h3><a id="environ-cel"></a><code class="literal">allowed_environment</code></h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.19/x-pack/filebeat/docs/inputs/input-cel.asciidoc">edit</a></div>
 <p>A list of host environment variable that will be made visible to the CEL execution environment. By default, no environment variables are visible.</p>
 <div class="pre_wrapper lang-yaml">
@@ -1075,6 +1112,7 @@ setting.</p>
 <p>This determines whether rotated logs should be gzip compressed.</p>
 <div class="position-relative"><h4><a id="cel-state-redact"></a><code class="literal">redact</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.19/x-pack/filebeat/docs/inputs/input-cel.asciidoc">edit</a></div>
 <p>During debug level logging, the <code class="literal">state</code> object and the resulting evaluation result are included in logs. This may result in leaking of secrets. In order to prevent this, fields may be redacted or deleted from the logged <code class="literal">state</code>. The <code class="literal">redact</code> configuration allows users to configure this field redaction behaviour. For safety reasons if the <code class="literal">redact</code> configuration is missing a warning is logged.</p>
+<p>The <code class="literal">state.secret</code> field is always redacted automatically (see <a class="xref" href="filebeat-input-cel.html#secret-state-cel" title="secret_state"><code class="literal">secret_state</code></a>). When <code class="literal">secret_state</code> is configured and <code class="literal">redact</code> is not, the missing-redact warning is suppressed.</p>
 <p>In the case of no-required redaction an empty <code class="literal">redact.fields</code> configuration should be used to silence the logged warning.</p>
 <div class="pre_wrapper lang-yaml">
 <div class="console_code_copy" title="Copy to clipboard"></div>
