@@ -200,7 +200,7 @@ Data Source: Crowdstrike
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 207</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 208</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -212,37 +212,90 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_816"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/outlook-home-page-registry-modification.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_820"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/outlook-home-page-registry-modification.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Outlook Home Page Registry Modification</strong></span></p>
-<p>The Outlook Home Page feature allows users to set a webpage as the default view for folders, leveraging registry keys to store URL configurations. Adversaries exploit this by modifying these keys to redirect to malicious sites, enabling command and control or persistence. The detection rule identifies suspicious registry changes, focusing on URL entries within specific paths, flagging potential misuse for further investigation.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the registry path and value to confirm the presence of a suspicious URL entry in the specified registry paths, such as "HKCU\*\SOFTWARE\Microsoft\Office\*\Outlook\Webview\Inbox\URL".
+What does the written registry value tell you about the configured Outlook content target?
 </li>
 <li class="listitem">
-Investigate the URL found in the registry data strings to determine if it is known to be malicious or associated with suspicious activity.
+Focus: <code class="literal">registry.path</code>, <code class="literal">registry.value</code>, <code class="literal">registry.data.type</code>, and <code class="literal">registry.data.strings</code>, plus which Outlook folder or Today page the key controls.
 </li>
 <li class="listitem">
-Check the modification history of the registry key to identify when the change occurred and which user or process made the modification.
+Hint: check for a deletion on the same <code class="literal">registry.path</code> after the alert time&#8201;&#8212;&#8201;if removed, urgency shifts to post-exploitation cleanup or transient testing. If a loopback or localhost URL is present, check for COM object registrations (CLSID entries) serving content on that port.
 </li>
 <li class="listitem">
-Correlate the registry modification event with other security events on the host, such as network connections or process executions, to identify potential malicious activity.
+Implication: a loopback or localhost URL with a non-standard port is a strong indicator of Specula-style COM server abuse&#8201;&#8212;&#8201;do not treat it as benign internal traffic. External URLs, local HTML files, and UNC paths also support concern. The investigation path is narrower only when the target uses a non-loopback internal hostname or a path consistent with enterprise branding.
 </li>
 <li class="listitem">
-Assess the affected system for signs of compromise, including unusual network traffic or unauthorized access attempts, to determine the scope of the incident.
+Which process wrote the setting, and does the writer context fit expected Outlook administration?
 </li>
 <li class="listitem">
-Consult threat intelligence sources to see if the URL or related indicators are associated with known threat actors or campaigns.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.code_signature.trusted</code>, and <code class="literal">user.id</code>.
+</li>
+<li class="listitem">
+Hint: if the direct writer is a broker or service process, check <code class="literal">Effective_process.executable</code> for the true initiator. If signer fields are absent on the registry event, recover the writer from surrounding process telemetry.
+</li>
+<li class="listitem">
+Implication: the writer context is harder to justify when a script host, LOLBin, unsigned, or user-writable binary writes the key, or when the user context does not match known Outlook administration tooling; it is more explainable when the writer is a signed deployment or profile-management tool with a recognized signer.
+</li>
+<li class="listitem">
+What does the target URL or path resolve to, and does it fit a known abuse pattern?
+</li>
+<li class="listitem">
+Focus: the written target in <code class="literal">registry.data.strings</code>; for URL targets, review same-host DNS "lookup_result" and connection events with <code class="literal">dns.question.name</code>, <code class="literal">dns.resolved_ip</code>, and <code class="literal">destination.ip</code>; for path targets, pivot to <code class="literal">file.path</code> on the same <code class="literal">host.id</code>.
+</li>
+<li class="listitem">
+Hint: if the target is a UNC path, confirm whether the same host reached the backing server in surrounding connection activity and whether a local <code class="literal">file.path</code> copy was staged before Outlook could render it.
+</li>
+<li class="listitem">
+Implication: external URLs to rare domains or public IPs, user-writable HTML files, and unrecognized network shares support concern. The target is less concerning when it resolves to a recognized enterprise portal or branding content path. Missing corroborating network or file telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Do file events or Outlook process events show the target being staged or activated?
+</li>
+<li class="listitem">
+Focus: same-host file activity tied to the writer or target path (<code class="literal">file.path</code>, <code class="literal">file.origin_url</code>, <code class="literal">file.Ext.windows.zone_identifier</code>), and Outlook or Office process events (<code class="literal">process.executable</code>, <code class="literal">process.parent.executable</code>) that access the configured target.
+</li>
+<li class="listitem">
+Hint: for URL targets, correlate Outlook activity to the same resolved IPs or domains; for local or UNC paths, look for the same path being opened after the write.
+</li>
+<li class="listitem">
+Implication: concern rises when the writer stages HTML or script content in user-writable locations and Outlook reaches the same target, or when the modified profile triggers suspicious child or network activity. Absence of staging or activation does not clear the registry write but reduces immediate execution risk.
+</li>
+<li class="listitem">
+If the local evidence stays suspicious, how did the account authenticate to this host before the registry write?
+</li>
+<li class="listitem">
+Why: writing the Outlook Home Page key requires HKCU hive access, so the session origin can reveal compromised credentials, lateral movement, or unexpected remote access.
+</li>
+<li class="listitem">
+Focus: if Windows Security logs are ingested, query authentication events for <code class="literal">user.id</code> and <code class="literal">host.id</code> around the alert time, checking <code class="literal">winlog.logon.type</code>, <code class="literal">source.ip</code>, and <code class="literal">winlog.event_data.AuthenticationPackageName</code>. If authentication data is unavailable, fall back to <code class="literal">process.Ext.session_info.logon_type</code> from the writer&#8217;s process event.
+</li>
+<li class="listitem">
+Implication: supports concern when the session originated from an unexpected source IP, used an unusual logon type or authentication package, or cannot be tied to the user&#8217;s normal access pattern for this host.
+</li>
+<li class="listitem">
+If the local evidence stays suspicious, does this host show related alerts or adjacent Outlook Home Page variants?
+</li>
+<li class="listitem">
+Focus: related alerts for the same <code class="literal">host.id</code> and <code class="literal">user.id</code> in the last 48 hours to identify precursor delivery, suspicious Office execution, network command-and-control, or additional persistence activity on the same asset or user.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broader compromise when the asset also shows delivery, suspicious Office execution, or follow-on persistence alerts; stays locally bounded when surrounding host alerts are limited to routine administration or unrelated benign activity.
+</li>
+<li class="listitem">
+Escalate when the registry change, writer context, target resolution, execution evidence, and alert scope align on unauthorized Outlook customization or persistence; close only when all evidence fits a recognized Outlook customization or profile-management workflow; if mixed or incomplete, preserve and escalate.
 </li>
 </ul>
 </div>
@@ -250,16 +303,10 @@ Consult threat intelligence sources to see if the URL or related indicators are 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate software updates or installations may modify the registry keys associated with Outlook&#8217;s Home Page feature. Users can create exceptions for known software update processes to prevent unnecessary alerts.
+Enterprise branding, profile migration, or configuration-management tooling can legitimately write these keys. Confirm when the <code class="literal">registry.path</code> family, <code class="literal">registry.data.strings</code> target, and writer identity all match the same customization or deployment workflow, with no staged external content or divergent infrastructure.
 </li>
 <li class="listitem">
-Custom scripts or administrative tools used by IT departments to configure Outlook settings across multiple machines might trigger this rule. Identifying and excluding these trusted scripts or tools can reduce false positives.
-</li>
-<li class="listitem">
-Some third-party Outlook add-ins or plugins may alter the registry keys for legitimate purposes. Users should verify the legitimacy of these add-ins and whitelist them if they are deemed safe.
-</li>
-<li class="listitem">
-Automated backup or recovery solutions that restore Outlook settings might cause registry changes. Users can exclude these processes if they are part of a regular and secure backup routine.
+Before creating an exception, build on the specific <code class="literal">registry.data.strings</code> value, <code class="literal">process.code_signature.subject_name</code> or <code class="literal">Effective_process.executable</code>, and the specific <code class="literal">registry.path</code> family. Avoid exceptions on <code class="literal">registry.value</code> alone, <code class="literal">user.name</code> alone, or the entire Outlook registry subtree.
 </li>
 </ul>
 </div>
@@ -267,25 +314,22 @@ Automated backup or recovery solutions that restore Outlook settings might cause
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected system from the network to prevent further communication with potentially malicious sites.
+If confirmed benign, reverse any temporary containment and document the confirmed <code class="literal">registry.path</code> family, <code class="literal">registry.data.strings</code> target, and writer identity that proved the Outlook customization workflow. Create an exception using the same <code class="literal">registry.data.strings</code> value, writer signer, and <code class="literal">registry.path</code> family.
 </li>
 <li class="listitem">
-Use endpoint detection and response (EDR) tools to terminate any suspicious processes associated with the modified registry keys.
+If suspicious but unconfirmed, preserve the modified <code class="literal">registry.path</code>, written value data, recovered <code class="literal">process.entity_id</code>, writer identity, any staged <code class="literal">file.path</code> content, and any related destination or alert context. Apply reversible containment first, such as blocking the page target or limiting Outlook use on the affected host, and avoid destructive cleanup until scope is clearer.
 </li>
 <li class="listitem">
-Restore the modified registry keys to their default values to remove the malicious URL configuration.
+If confirmed malicious, document the recovered <code class="literal">process.entity_id</code>, <code class="literal">process.command_line</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">registry.data.strings</code> target, and the modified <code class="literal">registry.path</code> values before initiating response actions. Use available endpoint response integrations to contain the affected host or account when the writer, target, staging, or activation evidence indicates unauthorized Outlook Home Page abuse. If direct endpoint response is unavailable, escalate with the documented artifacts to the team that can act.
 </li>
 <li class="listitem">
-Conduct a thorough scan of the affected system using updated antivirus and anti-malware tools to identify and remove any additional threats.
+Restore the affected Outlook Webview or Today values to a known-good state, remove any malicious local HTML or script content identified during the investigation, and block confirmed malicious domains, IPs, or network shares referenced by the page target.
 </li>
 <li class="listitem">
-Review and analyze network logs to identify any outbound connections to suspicious domains or IP addresses, and block these at the firewall.
+If the target points to external infrastructure or a shared path, review proxy, DNS, firewall, and related-alert data for additional hosts or users that reached the same content, then scope any follow-on delivery or persistence activity found on those assets.
 </li>
 <li class="listitem">
-Escalate the incident to the security operations center (SOC) for further investigation and to determine if other systems are affected.
-</li>
-<li class="listitem">
-Implement additional monitoring on the affected system and similar endpoints to detect any recurrence of the threat, focusing on registry changes and network activity.
+After containment, review whether Outlook Home Page functionality is still needed in the environment and restrict who can manage those settings.
 </li>
 </ul>
 </div>
@@ -293,7 +337,34 @@ Implement additional monitoring on the affected system and similar endpoints to 
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_878"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/outlook-home-page-registry-modification.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_413"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/outlook-home-page-registry-modification.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-reg-setup" class="ulink" target="_top">Sysmon Registry Events</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_880"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/outlook-home-page-registry-modification.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -301,7 +372,7 @@ Implement additional monitoring on the affected system and similar endpoints to 
     registry.path : (
         "*\\SOFTWARE\\Microsoft\\Office\\*\\Outlook\\Webview\\*",
         "*\\SOFTWARE\\Microsoft\\Office\\*\\Outlook\\Today\\*"
-    ) and registry.data.strings : ("*://*", "*:\\*")</pre>
+    ) and registry.data.strings : ("*://*", "*:\\*", "\\\\*\\*")</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
@@ -323,6 +394,38 @@ Reference URL: <a href="https://attack.mitre.org/tactics/TA0011/" class="ulink" 
 </div>
 </li>
 <li class="listitem">
+<p>Technique:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Name: Application Layer Protocol
+</li>
+<li class="listitem">
+ID: T1071
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/techniques/T1071/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1071/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Sub-technique:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Name: Web Protocols
+</li>
+<li class="listitem">
+ID: T1071.001
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/techniques/T1071/001/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1071/001/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
 <p>Tactic:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -334,6 +437,22 @@ ID: TA0003
 </li>
 <li class="listitem">
 Reference URL: <a href="https://attack.mitre.org/tactics/TA0003/" class="ulink" target="_top">https://attack.mitre.org/tactics/TA0003/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Technique:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Name: Modify Registry
+</li>
+<li class="listitem">
+ID: T1112
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/techniques/T1112/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1112/</a>
 </li>
 </ul>
 </div>

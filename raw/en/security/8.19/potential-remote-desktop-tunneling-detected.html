@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="potential-remote-desktop-tunneling-detected"></a>Potential Remote Desktop Tunneling Detected</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-desktop-tunneling-detected.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies potential use of an SSH utility to establish RDP over a reverse SSH Tunnel. This can be used by attackers to enable routing of network packets that would otherwise not reach their intended destination.</p>
+<p>Identifies potential use of an SSH utility to establish RDP over an SSH Tunnel. This can be used by attackers to enable routing of network packets that would otherwise not reach their intended destination.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -137,7 +137,7 @@ Data Source: Sysmon
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 419</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 420</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -149,33 +149,66 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1017"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-desktop-tunneling-detected.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1021"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-desktop-tunneling-detected.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Potential Remote Desktop Tunneling Detected</strong></span></p>
-<p>Protocol Tunneling is a mechanism that involves explicitly encapsulating a protocol within another for various use cases, ranging from providing an outer layer of encryption (similar to a VPN) to enabling traffic that network appliances would filter to reach their destination.</p>
-<p>Attackers may tunnel Remote Desktop Protocol (RDP) traffic through other protocols like Secure Shell (SSH) to bypass network restrictions that block incoming RDP connections but may be more permissive to other protocols.</p>
-<p>This rule looks for command lines involving the <code class="literal">3389</code> port, which RDP uses by default and options commonly associated with tools that perform tunneling.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the process execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+Does the command line describe local or reverse forwarding of RDP, and who is being exposed through it?
 </li>
 <li class="listitem">
-Identify the user account that performed the action and whether it should perform this kind of action.
+Why: tunnel direction changes the risk. "-L" accesses a remote RDP service through the tunnel (common admin pattern); "-R" exposes a host&#8217;s RDP service outward through an attacker-controlled SSH server (the classic plink reverse-tunnel attack pattern).
 </li>
 <li class="listitem">
-Contact the account and system owners and confirm whether they are aware of this activity.
+Focus: <code class="literal">process.command_line</code> and <code class="literal">process.executable</code>, checking whether the flag is "-L" (local) or "-R" (reverse), which host and port 3389 are forwarded, and whether inline credentials ("-pw") or saved sessions ("-load") are present. Many SSH clients ship unsigned, so use <code class="literal">process.Ext.relative_file_creation_time</code> to distinguish long-installed tools from recently dropped ones.
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Implication: "-R" (reverse forward) exposes an internal RDP service outward through the SSH server and is the higher-risk direction; "-L" (local forward) accesses a remote RDP service through the tunnel and is common in admin jump-host workflows. Both directions are common. Concern rises further when inline credentials are embedded, the remote endpoint is obscured behind a wrapper, or the binary is renamed, portable, or recently dropped.
 </li>
 <li class="listitem">
-Assess whether this behavior is prevalent in the environment by looking for similar occurrences across hosts.
+Do surrounding artifacts show the operator seeded trust or tried to keep the tunnel reusable?
 </li>
 <li class="listitem">
-Examine network data to determine if the host communicated with external servers using the tunnel.
+Why: persistent tunnels are often paired with host-key trust, saved configuration, or scheduled relaunch so the tunnel can start non-interactively and survive user interruption.
+</li>
+<li class="listitem">
+Focus: for OpenSSH clients, check <code class="literal">file.path</code> for recent changes to <code class="literal">~/.ssh/known_hosts</code>, <code class="literal">~/.ssh/config</code>, or <code class="literal">~/.ssh/authorized_keys</code>, and surrounding <code class="literal">process.command_line</code> for "schtasks.exe", "at.exe", or scripted relaunches. For PuTTY/plink, check <code class="literal">registry.path</code> and <code class="literal">registry.data.strings</code> for "SshHostKeys", "Sessions", or "-load" session reuse.
+</li>
+<li class="listitem">
+Implication: more concerning when new host-key entries, saved configurations, or scheduled relaunch activity appear just before or after the tunnel start; more explainable when the trust cache and relaunch method already belong to an established workflow with no new persistence changes.
+</li>
+<li class="listitem">
+Does network telemetry show an SSH session to a destination that fits the expected workflow?
+</li>
+<li class="listitem">
+Focus: the SSH destination is already in <code class="literal">process.args</code> from the alert. Use the network transform to confirm the connection succeeded and to check <code class="literal">destination.as.organization.name</code> for ownership context, especially for reverse forwards to external servers. !{investigate{"description":"","label":"Network activity for the alerting process","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if the command line already names an internal hostname you can verify, the network transform is optional. It adds the most value when the destination is an IP literal or an unfamiliar external host.
+</li>
+<li class="listitem">
+Implication: supports concern when the process reaches a rare external destination, an unexpected SSH port, or infrastructure with no recognizable ownership; less concerning when the destination, port, and domain pattern fit a known bastion or jump host. Missing network telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+If the local evidence stays suspicious, does this host or user show related alerts or repeated tunneling activity?
+</li>
+<li class="listitem">
+Focus: related alerts for the same <code class="literal">host.id</code> and <code class="literal">user.id</code> in the last 48 hours, looking for delivery, persistence, credential access, or other remote-access activity around the tunnel event.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: supports concern when the host or user shows delivery, credential theft, or follow-on remote-access alerts; keeps the case locally bounded when alert history stays tied to one recognized admin workflow.
+</li>
+<li class="listitem">
+Escalate when tunnel direction, binary context, persistence artifacts, network destination, or alert scope align on unauthorized RDP exposure or SSH tunneling; close only when all evidence fits a recognized administration workflow; if mixed or incomplete, preserve and escalate.
 </li>
 </ul>
 </div>
@@ -183,10 +216,10 @@ Examine network data to determine if the host communicated with external servers
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This activity is unlikely to happen legitimately. Benign true positives (B-TPs) can be added as exceptions if necessary.
+Bastion or jump-host tunneling can legitimately trigger this rule. Confirm it when <code class="literal">process.executable</code>, <code class="literal">process.parent.executable</code>, the forwarding direction and target in <code class="literal">process.args</code>, and the <code class="literal">user.id</code>/<code class="literal">host.id</code> pairing all align with one recognized admin workflow. If records are unavailable, require the same binary path, parent, and tunnel pattern to recur across prior alerts.
 </li>
 <li class="listitem">
-Investigate the command line for the execution of programs that are unrelated to tunneling, like Remote Desktop clients.
+Before creating an exception, build on the forwarding target in <code class="literal">process.command_line</code> (e.g., the specific host and port being tunneled) combined with <code class="literal">process.executable</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code>. Most SSH clients triggering this rule are unsigned, so <code class="literal">process.code_signature.subject_name</code> is usually empty and <code class="literal">process.hash.sha256</code> changes with updates. Avoid exceptions on port 3389, <code class="literal">process.name</code>, or SSH switches alone.
 </li>
 </ul>
 </div>
@@ -194,25 +227,19 @@ Investigate the command line for the execution of programs that are unrelated to
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse temporary destination blocks or process suspension and document the evidence that proved the workflow, including <code class="literal">process.hash.sha256</code>, <code class="literal">process.parent.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">destination.ip</code> or <code class="literal">dns.question.name</code>, any linked <code class="literal">source.ip</code>, and the bounded <code class="literal">user.id</code> and <code class="literal">host.id</code> scope. Create an exception only if that same workflow recurs across prior alerts from this rule.
 </li>
 <li class="listitem">
-Isolate the involved host to prevent further post-compromise behavior.
+If suspicious but unconfirmed, preserve the full <code class="literal">process.command_line</code>, the alert&#8217;s <code class="literal">process.entity_id</code>, <code class="literal">process.hash.sha256</code>, signer details, <code class="literal">destination.ip</code>, <code class="literal">dns.question.name</code>, linked <code class="literal">winlog.event_data.TargetLogonId</code> and <code class="literal">source.ip</code>, and any trust-seeding or relaunch artifacts (OpenSSH config files or PuTTY registry entries). Apply reversible containment first, such as blocking the SSH destination, suspending the tunneling process, or restricting the affected account. Escalate to host isolation only if the host role can tolerate it and the session or related-alert evidence suggests active abuse.
 </li>
 <li class="listitem">
-Take the necessary actions to disable the tunneling, which can be a process kill, service deletion, registry key modification, etc. Inspect the host to learn which method was used and to determine a response for the case.
+If confirmed malicious, use endpoint response to isolate the host and terminate or suspend the tunneling process after recording <code class="literal">process.entity_id</code>, the parent chain, destination indicators, linked logon details, and any scheduled task, service, script, or registry artifacts that relaunch the tunnel. If direct endpoint response is unavailable, escalate with that artifact set to the team that can contain the host or account.
 </li>
 <li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
+Before deleting artifacts or resetting accounts, review other hosts and users for the same destination pattern, launcher lineage, or scheduled relaunch method so scoping is complete. Then remove the scheduled task, service, script, registry entries, and SSH client artifacts that sustained the tunnel, review any RDP-reachable systems for follow-on access, and reset credentials where the session review shows likely exposure or misuse.
 </li>
 <li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-</li>
-<li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Post-incident hardening: restrict which hosts and accounts can run SSH tunneling tools, limit outbound SSH to recognized bastions, and retain process, file, and registry telemetry for SSH client activity.
 </li>
 </ul>
 </div>
@@ -220,14 +247,43 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1083"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-desktop-tunneling-detected.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_527"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-desktop-tunneling-detected.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/audit-process-creation" class="ulink" target="_top">Windows Process Creation Logs</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1085"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-desktop-tunneling-detected.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-js">process where host.os.type == "windows" and event.type == "start" and
-  /* RDP port and usual SSH tunneling related switches in command line */
-  process.args : "*:3389" and
-  process.args : ("-L", "-P", "-R", "-pw", "-ssh")</pre>
+  /* RDP port with SSH local or reverse port-forwarding flags */
+  process.args : "*:3389" and process.args : ("-L", "-R")</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
@@ -292,6 +348,22 @@ ID: T1021
 </li>
 <li class="listitem">
 Reference URL: <a href="https://attack.mitre.org/techniques/T1021/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1021/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Sub-technique:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Name: Remote Desktop Protocol
+</li>
+<li class="listitem">
+ID: T1021.001
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/techniques/T1021/001/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1021/001/</a>
 </li>
 </ul>
 </div>

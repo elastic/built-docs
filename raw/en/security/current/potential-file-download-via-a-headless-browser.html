@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="potential-file-download-via-a-headless-browser"></a>Potential File Download via a Headless Browser</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-file-download-via-a-headless-browser.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies the use of a browser to download a file from a remote URL and from a suspicious parent process. Adversaries may use browsers to avoid ingress tool transfer restrictions.</p>
+<p>Identifies headless browser execution from a suspicious parent process with arguments consistent with scripted retrieval. Adversaries use browsers because they are trusted, signed binaries that proxy and application-control policies allow through, bypassing restrictions on direct download tools.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -137,7 +137,7 @@ Data Source: Crowdstrike
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 207</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 208</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -149,23 +149,86 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_912"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-file-download-via-a-headless-browser.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_916"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-file-download-via-a-headless-browser.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Potential File Download via a Headless Browser</strong></span></p>
+<p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the process execution chain (parent process tree).
+What headless pattern does the command line express, and is the browser the installed product?
 </li>
 <li class="listitem">
-Investigate the process network and file events.
+Why: this rule fires on three distinct retrieval patterns&#8201;&#8212;&#8201;remote URL fetch, inline base64 HTML decode ("data:text/html;base64"), or DOM dump ("--dump-dom")&#8201;&#8212;&#8201;and each requires different follow-on evidence.
 </li>
 <li class="listitem">
-Identify the user account that performed the action and whether it should perform this kind of action.
+Focus: <code class="literal">process.command_line</code> and <code class="literal">process.working_directory</code> to identify the retrieval pattern and output destination; confirm the browser is the installed product via <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>.
 </li>
 <li class="listitem">
-Contact the account owner and confirm whether they are aware of this activity.
+Implication: retrieval intent is stronger when the command line targets external content, decodes base64, or redirects output to unusual paths, especially when the browser is unsigned, portable, or renamed; more explainable when the arguments match a rendering or automation workflow and the browser is the standard signed installation.
+</li>
+<li class="listitem">
+Does the parent, ancestry, and user-host pattern explain why a browser is being driven headlessly?
+</li>
+<li class="listitem">
+Why: the same browser arguments mean different things when launched by a web-rendering service than when launched by a script host, Office application, or interactive shell.
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">process.Ext.ancestry</code>, and <code class="literal">process.Ext.session_info.logon_type</code>; also check whether <code class="literal">user.id</code> and <code class="literal">host.id</code> fit a role where headless browser automation is expected.
+</li>
+<li class="listitem">
+Implication: more concerning if launched by a script host, Office process, MSI, WMI, or an unexpected interactive session, or when the user-host pair should not be running headless browsers; more explainable if the ancestry resolves to a recognized rendering service or automation component for that host role.
+</li>
+<li class="listitem">
+Do network events show the browser reaching destinations consistent with the claimed workflow?
+</li>
+<li class="listitem">
+Focus: same-host network events scoped to the alert&#8217;s <code class="literal">process.entity_id</code>, using <code class="literal">dns.resolved_ip</code> to bridge <code class="literal">dns.question.name</code> to <code class="literal">destination.ip</code> and treating <code class="literal">destination.as.organization.name</code> as ownership context rather than a verdict. !{investigate{"description":"","label":"Network activity for the alerting process","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if <code class="literal">process.entity_id</code> is not available, stay on the same <code class="literal">host.id</code> and alert window and use <code class="literal">dns.question.name</code>, <code class="literal">dns.resolved_ip</code>, and <code class="literal">destination.ip</code> to test whether the browser likely reached the fetched content.
+</li>
+<li class="listitem">
+Implication: delivery risk increases when the browser reaches rare public destinations or infrastructure unrelated to the workflow, or when another process connects to an exposed debugging port; risk falls when destinations align with recognized internal services or known automation targets. Missing network telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Do file events or child processes from the browser show downloaded, decoded, or staged artifacts?
+</li>
+<li class="listitem">
+Focus: file events scoped to <code class="literal">process.entity_id</code> (<code class="literal">file.path</code>, <code class="literal">file.origin_url</code>, <code class="literal">file.Ext.windows.zone_identifier</code>, <code class="literal">file.Ext.header_bytes</code>), child process activity, and later <code class="literal">process.executable</code> reuse of a written path.
+</li>
+<li class="listitem">
+Implication: more likely delivery when the browser writes scripts, executables, archives, or decoded content to user-writable or deceptive paths, spawns child processes, or the artifact later appears in execution telemetry; less concerning when output stays in a renderer cache or report directory with no suspicious reuse.
+</li>
+<li class="listitem">
+If the local browser, destination, or artifact evidence stays suspicious or unresolved, does related alert history show isolated automation or broader download activity on this user or host?
+</li>
+<li class="listitem">
+Focus: related alerts for <code class="literal">host.id</code> and <code class="literal">user.id</code> in the last 48 hours, checking for sibling transfer tools, non-headless browser automation, or reuse of the same destinations across hosts.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden when the same user or host shows repeated delivery behavior across hosts or through sibling tools; keep narrow when both alert views stay within one recognized automation component.
+</li>
+<li class="listitem">
+Escalate when browser identity, command line, destinations, artifacts, or alert scope point to unauthorized headless retrieval or staging; close only when all evidence aligns with a recognized automation workflow; if mixed or incomplete, preserve and escalate.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>False positive analysis</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Server-side rendering, web testing, QA, or browser automation can legitimately start a headless browser with retrieval arguments. Confirm when <code class="literal">process.executable</code>, <code class="literal">process.parent.executable</code>, and the <code class="literal">dns.question.name</code> or <code class="literal">destination.ip</code> pattern all align with one automation component and no staged artifacts diverge from that workflow. If automation records are unavailable, require the same browser, parent, and destination pattern to recur across prior alerts.
+</li>
+<li class="listitem">
+Before creating an exception, build on <code class="literal">process.executable</code>, <code class="literal">process.parent.executable</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">host.id</code> or <code class="literal">user.id</code>. Avoid exceptions on <code class="literal">process.name</code> alone, the "--headless" flag alone, or <code class="literal">host.id</code> alone.
 </li>
 </ul>
 </div>
@@ -173,40 +236,16 @@ Contact the account owner and confirm whether they are aware of this activity.
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse any temporary containment and document the <code class="literal">process.executable</code>, <code class="literal">process.parent.executable</code>, <code class="literal">process.command_line</code>, destination pattern from <code class="literal">dns.question.name</code> or <code class="literal">destination.ip</code>, and recurring <code class="literal">user.id</code> / <code class="literal">host.id</code> scope that proved the workflow. Create an exception only if that same pattern recurs consistently across prior alerts from this rule.
 </li>
 <li class="listitem">
-Isolate the involved host to prevent further post-compromise behavior.
+If suspicious but unconfirmed, first preserve the alert&#8217;s <code class="literal">process.entity_id</code>, <code class="literal">process.command_line</code>, related <code class="literal">file.path</code> outputs, <code class="literal">file.origin_url</code> provenance, and any linked <code class="literal">dns.question.name</code>, <code class="literal">dns.resolved_ip</code>, or <code class="literal">destination.ip</code> values. Then apply reversible containment such as temporary egress blocks or tighter monitoring of the affected <code class="literal">user.id</code> or <code class="literal">host.id</code>. Escalate to host isolation only when the browser, network, or artifact evidence shows material delivery or staging risk.
 </li>
 <li class="listitem">
-If the triage identified malware, search the environment for additional compromised hosts.
+If confirmed malicious, document the alert&#8217;s <code class="literal">process.entity_id</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.command_line</code>, written <code class="literal">file.path</code> artifacts, <code class="literal">process.hash.sha256</code>, and confirmed <code class="literal">dns.question.name</code> or <code class="literal">destination.ip</code> values before initiating response actions. Prefer endpoint isolation as the first containment step, weighing the host&#8217;s role before isolating critical infrastructure such as servers, domain controllers, or build systems. If direct endpoint response is unavailable, escalate with the preserved artifact set to the team that can act.
 </li>
 <li class="listitem">
-Implement temporary network rules, procedures, and segmentation to contain the malware.
-</li>
-<li class="listitem">
-Stop suspicious processes.
-</li>
-<li class="listitem">
-Immediately block the identified indicators of compromise (IoCs).
-</li>
-<li class="listitem">
-Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
-</li>
-<li class="listitem">
-Remove and block malicious artifacts identified during triage.
-</li>
-<li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
-</li>
-<li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-</li>
-<li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+After containment, review other <code class="literal">host.id</code> and <code class="literal">user.id</code> alerts for the same <code class="literal">dns.question.name</code>, <code class="literal">destination.ip</code>, or <code class="literal">process.executable</code> pattern before deleting artifacts or restoring access. Then block the malicious destinations and downloaded artifact hashes identified during the investigation, eradicate the scripts, archives, browsers, or persistence artifacts uncovered during the artifact and scope review, and remediate the launcher, automation component, or execution-control gap that allowed the headless browser to retrieve content.
 </li>
 </ul>
 </div>
@@ -214,14 +253,44 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_970"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-file-download-via-a-headless-browser.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_459"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-file-download-via-a-headless-browser.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/audit-process-creation" class="ulink" target="_top">Windows Process Creation Logs</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_972"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-file-download-via-a-headless-browser.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-js">process where host.os.type == "windows" and event.type == "start" and
   process.name : ("chrome.exe", "msedge.exe", "brave.exe", "browser.exe", "dragon.exe", "vivaldi.exe") and
   process.args : "--headless*" and
-  process.args : ("--disable-gpu", "--dump-dom", "*http*", "data:text/html;base64,*") and
+  process.args : ("--dump-dom", "*http*", "data:text/html;base64,*") and
   process.parent.name :
      ("cmd.exe", "powershell.exe", "wscript.exe", "cscript.exe", "mshta.exe", "conhost.exe", "msiexec.exe",
       "explorer.exe", "rundll32.exe", "winword.exe", "excel.exe", "onenote.exe", "hh.exe", "powerpnt.exe", "forfiles.exe",

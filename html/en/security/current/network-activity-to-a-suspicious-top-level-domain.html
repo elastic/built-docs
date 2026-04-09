@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="network-activity-to-a-suspicious-top-level-domain"></a>Network Activity to a Suspicious Top Level Domain</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/network-activity-to-a-suspicious-top-level-domain.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies DNS queries to commonly abused Top Level Domains by common LOLBINs or executable running from world writable directories or unsigned binaries. This behavior matches on common malware C2 abusing less formal domain names.</p>
+<p>Identifies DNS queries to commonly abused Top Level Domains by common LOLBINs or executables running from world writable directories or unsigned binaries. This behavior matches on common malware C2 abusing less formal domain names.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -178,9 +178,6 @@ Data Source: Elastic Endgame
 Data Source: Elastic Defend
 </li>
 <li class="listitem">
-Data Source: Windows Security Event Logs
-</li>
-<li class="listitem">
 Data Source: SentinelOne
 </li>
 <li class="listitem">
@@ -191,7 +188,7 @@ Data Source: Sysmon
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 3</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 4</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -203,7 +200,7 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_768"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/network-activity-to-a-suspicious-top-level-domain.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_772"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/network-activity-to-a-suspicious-top-level-domain.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Network Activity to a Suspicious Top Level Domain</strong></span></p>
@@ -211,19 +208,88 @@ Elastic
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the process execution chain (parent process tree) for unknown processes or malicious scripts.
+Does the alert-local DNS result and domain shape fit the process role?
 </li>
 <li class="listitem">
-Review if the domain reputation and the frequency of network activities as well as any download/upload activity.
+Focus: the alert&#8217;s <code class="literal">event.action</code>, <code class="literal">dns.question.name</code>, <code class="literal">dns.Ext.status</code>, and <code class="literal">dns.resolved_ip</code>; use "lookup_result" for resolved IPs and "lookup_requested" for failed or request-only lookups.
 </li>
 <li class="listitem">
-Verify if the executed process is persistent on the host like common mechanisms Startup folder, task or Run key.
+Implication: concern rises when the name is algorithmic, newly introduced for that tool, or resolves to unrelated external infrastructure; weaker when the lookup fails immediately or the domain matches a known vendor pattern for that process, but a failed lookup alone does not clear the process. <code class="literal">.onion</code> lookups signal Tor hidden-service resolution&#8201;&#8212;&#8201;treat these as elevated concern and look for Tor binaries or proxy configuration.
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Is the alerting binary the expected tool in the expected install context?
 </li>
 <li class="listitem">
-Extract this communication&#8217;s indicators of compromise (IoCs) and use traffic logs to search for other potentially compromised hosts.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.code_signature.trusted</code>, and <code class="literal">process.pe.original_file_name</code>.
+</li>
+<li class="listitem">
+Implication: more concerning when the binary is unsigned, renamed, user-writable, or inconsistent with its usual signer. Identity alone does not clear the DNS behavior.
+</li>
+<li class="listitem">
+Does the command line and launch chain fit a legitimate workflow?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, and <code class="literal">process.parent.command_line</code>.
+</li>
+<li class="listitem">
+Implication: more concerning if a document, script, or unexpected launcher started the process, or if the arguments look staged or evasive.
+</li>
+<li class="listitem">
+Does the same process resolve the domain and then communicate with the returned infrastructure?
+</li>
+<li class="listitem">
+Why: a suspicious DNS lookup carries more weight when the same process reuses the returned IPs for follow-on connections or transfer behavior in the same window.
+</li>
+<li class="listitem">
+Focus: process-scoped "lookup_result" and connection events on the same <code class="literal">host.id</code>, using <code class="literal">dns.resolved_ip</code> to bridge <code class="literal">dns.question.name</code> to <code class="literal">destination.ip</code>; treat <code class="literal">destination.as.organization.name</code> as ownership context rather than a verdict. !{investigate{"description":"","label":"Network activity for the alerting process","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if the transform returns no results, broaden to host-scoped network events around the alert time.
+</li>
+<li class="listitem">
+Implication: escalate when the same process repeatedly resolves the domain, connects to the returned IPs, or shows suspicious transfer patterns; lower suspicion when activity is limited to a one-off lookup with no matching connection behavior. Missing follow-on network telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Do file events or child processes from the same process chain show download-and-execute or artifact staging?
+</li>
+<li class="listitem">
+Focus: same-host file and process activity around the alert time, scoped to the alert&#8217;s <code class="literal">process.entity_id</code>, with attention to <code class="literal">file.path</code>, <code class="literal">file.origin_url</code>, <code class="literal">file.Ext.windows.zone_identifier</code>, and later <code class="literal">process.executable</code> reuse of a written path.
+</li>
+<li class="listitem">
+Hint: if file coverage is missing, keep the artifact review bounded to the same host, lineage, and alert window rather than treating the lookup as harmless.
+</li>
+<li class="listitem">
+Implication: staging risk rises when the chain writes scripts, archives, or executables to user-writable paths and later runs them.
+</li>
+<li class="listitem">
+Does the same process chain pivot to direct-IP traffic, lookalike domains, or TLD rotation that this rule would miss?
+</li>
+<li class="listitem">
+Why: attackers often keep the same process chain but swap to a nearby domain, a different abusive TLD, or direct-IP egress after the first lookup.
+</li>
+<li class="listitem">
+Focus: reuse the process-scoped network results from the prior step to look for direct <code class="literal">destination.ip</code> connections with no preceding DNS, sibling <code class="literal">dns.question.name</code> values under different TLDs, or repeated reuse of the same <code class="literal">dns.resolved_ip</code> across multiple domains. !{investigate{"description":"","label":"Network activity for the alerting process","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the process shifts from the flagged lookup to direct-IP traffic, nearby domain variants, or fast domain and TLD rotation on the same infrastructure; lower suspicion when surrounding DNS stays limited to one recognized vendor domain family with no adjacent variant traffic.
+</li>
+<li class="listitem">
+If the local DNS, process, or artifact evidence stays suspicious or unresolved, does related alert history show this DNS pattern is isolated or part of broader compromise?
+</li>
+<li class="listitem">
+Focus: related alerts for the same <code class="literal">host.id</code> and <code class="literal">user.id</code> in the last 48 hours to test whether the same lineage, domain family, or follow-on activity recurs on the asset or follows the user across hosts.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when the host or user view shows repeated suspicious lineage, related delivery or persistence alerts, or reuse of the same infrastructure on other assets; keep scope narrow when the pattern stays confined to one recognized workflow with no contradictory evidence.
+</li>
+<li class="listitem">
+Escalate when DNS fit, process context, follow-on communication, artifacts, or variant traffic point to unauthorized C2 or delivery; close only when all evidence aligns with a recognized benign workflow; if mixed or incomplete, preserve and escalate.
 </li>
 </ul>
 </div>
@@ -231,7 +297,10 @@ Extract this communication&#8217;s indicators of compromise (IoCs) and use traff
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Trusted domain from an expected process running in the environment.
+Software distribution, developer tooling, or security-testing workflows can legitimately query less common TLDs. Confirm by matching the same <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">dns.question.name</code> family, and <code class="literal">host.id</code> across prior alerts or against workflow records.
+</li>
+<li class="listitem">
+Before creating an exception, build on <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, the <code class="literal">dns.question.name</code> family, and <code class="literal">host.id</code> or <code class="literal">user.id</code>. Avoid exceptions on the TLD alone, <code class="literal">process.name</code> alone, or <code class="literal">host.id</code> alone.
 </li>
 </ul>
 </div>
@@ -239,34 +308,16 @@ Trusted domain from an expected process running in the environment.
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse any temporary containment and document the <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">dns.question.name</code> family, and bounded <code class="literal">host.id</code> or <code class="literal">user.id</code> scope that proved the workflow. Create an exception only if that same pattern recurs consistently across prior alerts from this rule.
 </li>
 <li class="listitem">
-Isolate the involved host to prevent further post-compromise behavior.
+If suspicious but unconfirmed, first preserve <code class="literal">dns.question.name</code>, <code class="literal">dns.resolved_ip</code>, connected <code class="literal">destination.ip</code> values, the alert&#8217;s <code class="literal">process.entity_id</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.command_line</code>, and any staged <code class="literal">file.path</code> values. Then apply reversible containment such as temporary DNS or egress blocks for the observed infrastructure or heightened monitoring on <code class="literal">host.id</code>. Escalate to host isolation only if the preserved evidence shows likely follow-on communication or staging and the asset role can tolerate stronger containment.
 </li>
 <li class="listitem">
-Immediately block the identified indicators of compromise (IoCs).
+If confirmed malicious, document the alert&#8217;s <code class="literal">process.entity_id</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.command_line</code>, written <code class="literal">file.path</code> artifacts, and connected <code class="literal">dns.question.name</code> or <code class="literal">destination.ip</code> infrastructure before initiating response actions. Prefer endpoint isolation as the first containment step; if direct endpoint response is unavailable, escalate with the preserved artifact set to the team that can isolate the host. Block the confirmed malicious domains and direct-IP destinations before terminating processes or deleting files.
 </li>
 <li class="listitem">
-Implement any temporary network rules, procedures, and segmentation required to contain the attack.
-</li>
-<li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
-</li>
-<li class="listitem">
-Update firewall rules to be more restrictive.
-</li>
-<li class="listitem">
-Reimage the host operating system or restore the compromised files to clean versions.
-</li>
-<li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-</li>
-<li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+After containment, review other <code class="literal">host.id</code> and <code class="literal">user.id</code> alerts for the same <code class="literal">dns.question.name</code>, <code class="literal">destination.ip</code>, or <code class="literal">process.executable</code> pattern before deleting artifacts or restoring access. Then eradicate staged binaries, scripts, and any persistence or proxy changes identified during the file or variant review, and remediate the entry path that allowed the suspicious process to run. If the same suspicious window includes credential, admin-tool, or remote-session alerts, review those sessions for follow-on misuse and reset exposed credentials when the evidence supports compromise.
 </li>
 </ul>
 </div>
@@ -274,20 +325,52 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_827"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/network-activity-to-a-suspicious-top-level-domain.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_391"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/network-activity-to-a-suspicious-top-level-domain.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-3-setup" class="ulink" target="_top">Sysmon Event ID 3 - Network Connection</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_829"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/network-activity-to-a-suspicious-top-level-domain.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-js">network where host.os.type == "windows" and dns.question.name != null and
  (
   process.name : ("MSBuild.exe", "mshta.exe", "wscript.exe", "powershell.exe", "pwsh.exe", "msiexec.exe", "rundll32.exe",
-                  "bitsadmin.exe", "InstallUtil.exe", "python.exe", "regsvr32.exe", "dllhost.exe", "node.exe",
+                  "bitsadmin.exe", "InstallUtil.exe", "python.exe", "regsvr32.exe", "dllhost.exe", "node.exe", "curl.exe",
                   "java.exe", "javaw.exe", "*.pif", "*.com", "*.scr") or
   (?process.code_signature.trusted == false or ?process.code_signature.exists == false) or
   ?process.code_signature.subject_name : ("AutoIt Consulting Ltd", "OpenJS Foundation", "Python Software Foundation") or
-  ?process.executable : ("?:\\Users\\*.exe", "?:\\ProgramData\\*.exe")
+  ?process.executable : (
+    "?:\\Users\\Public\\*.exe", "?:\\ProgramData\\*.exe", "?:\\Users\\*\\Downloads\\*.exe",
+    "\\Device\\HarddiskVolume*\\Users\\Public\\*.exe", "\\Device\\HarddiskVolume*\\ProgramData\\*.exe", "\\Device\\HarddiskVolume*\\Users\\*\\Downloads\\*.exe"
+  )
  ) and
-dns.question.name regex """.*\.(top|buzz|xyz|rest|ml|cf|gq|ga|onion|monster|cyou|quest|cc|bar|cfd|click|cam|surf|tk|shop|club|icu|pw|ws|online|fun|life|boats|store|hair|skin|motorcycles|christmas|lol|makeup|mom|bond|beauty|biz|live|work|zip|country|accountant|date|party|science|loan|win|men|faith|review|racing|download|host)"""</pre>
+dns.question.name regex """.*\.(top|buzz|xyz|rest|ml|cf|gq|ga|onion|monster|cyou|quest|cc|bar|cfd|click|cam|surf|tk|shop|club|icu|pw|ws|online|fun|life|boats|store|hair|skin|motorcycles|christmas|lol|makeup|mom|bond|beauty|biz|live|work|zip|country|accountant|date|party|science|loan|win|men|faith|review|racing|download|host|zone)""" and
+
+not process.executable : (
+    "?:\\ProgramData\\Microsoft\\Windows Defender\\platform\\*\\*.exe",
+    "\\Device\\HarddiskVolume*\\ProgramData\\Microsoft\\Windows Defender\\platform\\*\\*.exe"
+)</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
@@ -336,6 +419,70 @@ ID: T1071.004
 </li>
 <li class="listitem">
 Reference URL: <a href="https://attack.mitre.org/techniques/T1071/004/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1071/004/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Tactic:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Name: Defense Evasion
+</li>
+<li class="listitem">
+ID: TA0005
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/tactics/TA0005/" class="ulink" target="_top">https://attack.mitre.org/tactics/TA0005/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Technique:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Name: Trusted Developer Utilities Proxy Execution
+</li>
+<li class="listitem">
+ID: T1127
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/techniques/T1127/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1127/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Sub-technique:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Name: MSBuild
+</li>
+<li class="listitem">
+ID: T1127.001
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/techniques/T1127/001/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1127/001/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Technique:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Name: System Binary Proxy Execution
+</li>
+<li class="listitem">
+ID: T1218
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/techniques/T1218/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1218/</a>
 </li>
 </ul>
 </div>

@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="netsupport-manager-execution-from-an-unusual-path"></a>NetSupport Manager Execution from an Unusual Path</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/netsupport-manager-execution-from-an-unusual-path.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies execution of the NetSupport remote access software from non-default paths. Adversaries may abuse NetSupport Manager to control a target victim machine.</p>
+<p>Identifies execution of the NetSupport remote access software from non-default paths. Adversaries may abuse NetSupport Manager to control a victim machine.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -200,7 +200,7 @@ Data Source: Crowdstrike
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 1</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 2</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -212,25 +212,81 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_763"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/netsupport-manager-execution-from-an-unusual-path.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_767"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/netsupport-manager-execution-from-an-unusual-path.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating NetSupport Manager Execution from an Unusual Path</strong></span></p>
-<p>NetSupport Manager, is a remote access tool, facilitates legitimate remote support but can be exploited by adversaries to execute unauthorized commands.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the origin of the NetSupport file and if it&#8217;s related to an authorized IT Support case.
+What is the alerting process and how did NetSupport reach this host from a non-default path?
 </li>
 <li class="listitem">
-Examine if the NetSupport process is set to persist in the affected system via scheduled task, Startup folder or Run key.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.code_signature.trusted</code>, <code class="literal">process.parent.executable</code>, and <code class="literal">process.parent.command_line</code>.
 </li>
 <li class="listitem">
-Check the network, files and child processes activity associated with the NetSupport client32.exe process.
+Implication: escalate when the client is unsigned, portable, or mismatched to its original file name, or when the parent chain starts from a script host, archive utility, browser, or Office process; lower suspicion when signer, path, and parent chain resolve to a recognized deployment. Identity alone does not clear the behavior.
 </li>
 <li class="listitem">
-Correlate the event with other security alerts or logs from data sources like Elastic Defend or Microsoft Defender for Endpoint to gather additional context and identify any related malicious activities.
+Does the client or child command line show recognized deployment behavior or covert control intent?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.command_line</code>, <code class="literal">process.working_directory</code>, and <code class="literal">process.parent.command_line</code>, with attention to connection targets, relay parameters, and hidden or scripted launch behavior.
+</li>
+<li class="listitem">
+Hint: if the alert fired on a child process and the parent command line is absent or truncated, recover the NetSupport client start event on the same <code class="literal">host.id</code> before judging deployment or relay intent.
+</li>
+<li class="listitem">
+Implication: escalate when the command line reveals external control targets, stealthy launch parameters, or deployment behavior that does not fit expected support tooling; lower suspicion when the arguments match a recognized support or managed rollout workflow.
+</li>
+<li class="listitem">
+Do network events show expected support infrastructure or suspicious relay traffic?
+</li>
+<li class="listitem">
+Focus: process-scoped DNS and connection events for <code class="literal">process.entity_id</code>, checking <code class="literal">dns.question.name</code>, <code class="literal">dns.resolved_ip</code>, <code class="literal">destination.ip</code>, <code class="literal">destination.port</code>, and <code class="literal">destination.as.organization.name</code>. !{investigate{"description":"","label":"Network activity for the NetSupport process","providers":[[{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the process reaches rare public destinations or unexpected relay infrastructure; lower suspicion when destinations align with known internal support infrastructure. Missing network telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Do file events show staged components, renamed NetSupport files, or persistence artifacts?
+</li>
+<li class="listitem">
+Focus: file events scoped to <code class="literal">process.entity_id</code>: <code class="literal">file.path</code>, <code class="literal">file.origin_url</code>, <code class="literal">file.Ext.windows.zone_identifier</code>, <code class="literal">file.Ext.header_bytes</code>, and adjacent NetSupport files ("client32u.ini", "NSM.lic", "NSM.ini", "CKSINI.EXE").
+</li>
+<li class="listitem">
+Implication: escalate when the process writes portable components, renamed files, or bundled config/license files, or when artifacts later appear in persistence or execution telemetry; lower suspicion when file activity stays in a recognized installation path with no suspicious reuse.
+</li>
+<li class="listitem">
+Do child processes launched from NetSupport show interactive abuse beyond normal support?
+</li>
+<li class="listitem">
+Focus: child process events from <code class="literal">process.entity_id</code>, checking <code class="literal">process.executable</code> and <code class="literal">process.command_line</code>. !{investigate{"description":"","label":"Child processes launched by the NetSupport client","providers":[[{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when NetSupport spawns shells, scripting engines, archivers, credential tools, or other hands-on-keyboard tooling; lower suspicion when child activity stays limited to expected helper processes or no secondary execution follows.
+</li>
+<li class="listitem">
+If the local evidence stays suspicious, does this host or user show related alerts or a recurring deployment pattern?
+</li>
+<li class="listitem">
+Focus: related alerts for <code class="literal">host.id</code> and <code class="literal">user.id</code> in the last 48 hours, checking for delivery, persistence, remote-access, or credential activity, and whether the same client path, signer, and destination pattern recur across prior alerts.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if workflow documentation is unavailable, recurrence of the same client path, signer, and destination pattern across prior alerts is the strongest telemetry-based benign signal.
+</li>
+<li class="listitem">
+Implication: broaden when the host or user shows suspicious precursor, follow-on, or cross-host activity; lower suspicion when the same deployment pattern recurs with no contradictory alerts.
+</li>
+<li class="listitem">
+Escalate when binary identity, launch chain, network destinations, staged artifacts, or child-process behavior point to unauthorized NetSupport deployment or interactive abuse; close only when all evidence aligns with a recognized support deployment; if mixed or incomplete, preserve and escalate.
 </li>
 </ul>
 </div>
@@ -238,7 +294,10 @@ Correlate the event with other security alerts or logs from data sources like El
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate IT support activities using NetSupport by IT support accounts.
+Legitimate IT support or managed deployment can stage NetSupport in non-default paths. Confirm it when the client is signed by NetSupport Ltd, the parent is an IT deployment tool (SCCM, GPO, management agent), bundled config files (client32u.ini, NSM.lic) sit alongside the client in the same directory, and network destinations resolve to internal support infrastructure.
+</li>
+<li class="listitem">
+Before creating an exception, build on <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.parent.executable</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code>. Avoid exceptions on <code class="literal">process.name</code> alone, the user alone, or the host alone.
 </li>
 </ul>
 </div>
@@ -246,25 +305,19 @@ Legitimate IT support activities using NetSupport by IT support accounts.
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected system from the network to prevent further unauthorized access or lateral movement by the attacker.
+If confirmed benign, reverse any temporary containment and document <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.parent.executable</code>, the destination pattern, and the <code class="literal">user.id</code>/<code class="literal">host.id</code> pairing. Create an exception using the fields from the FP guidance above.
 </li>
 <li class="listitem">
-Terminate any suspicious processes identified in the alert, such as PowerShell, cmd.exe, or other flagged executables, to halt any ongoing malicious activity.
+If suspicious but unconfirmed, preserve the alert&#8217;s <code class="literal">process.entity_id</code>, client path, signer, <code class="literal">process.command_line</code>, related <code class="literal">file.path</code> values, child-process lineage, and any linked <code class="literal">destination.ip</code>, <code class="literal">dns.question.name</code>, or <code class="literal">dns.resolved_ip</code> values. Apply reversible containment such as temporary blocking of confirmed destinations. Escalate to host isolation only when live remote control or lateral movement is still plausible and the asset can tolerate it.
 </li>
 <li class="listitem">
-Review and revoke any unauthorized user accounts or privileges that may have been created or modified using tools like net.exe or schtasks.exe.
+If confirmed malicious, use endpoint response to contain the host after recording the alert&#8217;s <code class="literal">process.entity_id</code>, client path, signer, command line, child-process details, written artifact paths, and confirmed destinations. If direct endpoint response is unavailable, escalate with that evidence set to the team that can terminate the process, isolate the host, and block the malicious destinations and dropped artifact hashes identified during the investigation.
 </li>
 <li class="listitem">
-Conduct a thorough scan of the affected system using endpoint protection tools to identify and remove any malware or unauthorized software installed by the attacker.
+Before deleting files or removing access, review the same client path family, destinations, bundled config or license files, and dropped artifact names across other hosts and users so portable staging or shared controller infrastructure does not stay localized by mistake. Then eradicate the unauthorized NetSupport client, persistence mechanism, installer artifacts, and follow-on tooling uncovered during the file and child-process review.
 </li>
 <li class="listitem">
-Restore the system from a known good backup if any critical system files or configurations have been altered or compromised.
-</li>
-<li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to determine if additional systems are affected.
-</li>
-<li class="listitem">
-Implement enhanced monitoring and logging for ScreenConnect and other remote access tools to detect similar activities in the future, ensuring that alerts are promptly reviewed and acted upon.
+Post-incident hardening: restrict remote-access tool installs to approved signed packages and approved paths, review software-allowlisting or deployment controls that allowed the portable client to run, and retain endpoint process, file, and network telemetry.
 </li>
 </ul>
 </div>
@@ -272,7 +325,37 @@ Implement enhanced monitoring and logging for ScreenConnect and other remote acc
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_822"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/netsupport-manager-execution-from-an-unusual-path.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_387"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/netsupport-manager-execution-from-an-unusual-path.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/audit-process-creation" class="ulink" target="_top">Windows Process Creation Logs</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_824"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/netsupport-manager-execution-from-an-unusual-path.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -282,8 +365,8 @@ Implement enhanced monitoring and logging for ScreenConnect and other remote acc
   process.executable :
                ("?:\\Users\\*.exe",
                 "?:\\ProgramData\\*.exe",
-                "\\Device\\HarddiskVolume?\\Users\\*.exe",
-                "\\Device\\HarddiskVolume?\\ProgramData\\*.exe") or
+                "\\Device\\HarddiskVolume*\\Users\\*.exe",
+                "\\Device\\HarddiskVolume*\\ProgramData\\*.exe") or
   ?process.parent.executable : ("?:\\Users\\*\\client32.exe", "?:\\ProgramData\\*\\client32.exe")
   )</pre>
 </div>
