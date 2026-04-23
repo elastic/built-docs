@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="disabling-windows-defender-security-settings-via-powershell"></a>Disabling Windows Defender Security Settings via PowerShell</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/disabling-windows-defender-security-settings-via-powershell.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies use of the Set-MpPreference PowerShell command to disable or weaken certain Windows Defender settings.</p>
+<p>Identifies use of the Set-MpPreference or Add-MpPreference PowerShell commands to disable or weaken certain Windows Defender settings, including detection of base64-encoded variants used to bypass command-line inspection.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -166,6 +166,9 @@ winlogbeat-*
 <li class="listitem">
 <a href="/security-labs/invisible-miners-unveiling-ghostengine" class="ulink" target="_top">https://www.elastic.co/security-labs/invisible-miners-unveiling-ghostengine</a>
 </li>
+<li class="listitem">
+<a href="https://github.com/SigmaHQ/sigma/blob/master/rules/windows/process_creation/proc_creation_win_powershell_defender_disable_feature.yml" class="ulink" target="_top">https://github.com/SigmaHQ/sigma/blob/master/rules/windows/process_creation/proc_creation_win_powershell_defender_disable_feature.yml</a>
+</li>
 </ul>
 </div>
 <p><span class="strong strong"><strong>Tags</strong></span>:</p>
@@ -199,7 +202,7 @@ Data Source: Elastic Defend
 Data Source: Windows Security Event Logs
 </li>
 <li class="listitem">
-Data Source: Microsoft Defender for Endpoint
+Data Source: Microsoft Defender XDR
 </li>
 <li class="listitem">
 Data Source: Sysmon
@@ -212,7 +215,7 @@ Data Source: Crowdstrike
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 317</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 318</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -224,7 +227,7 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_321"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/disabling-windows-defender-security-settings-via-powershell.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_323"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/disabling-windows-defender-security-settings-via-powershell.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Disabling Windows Defender Security Settings via PowerShell</strong></span></p>
@@ -305,7 +308,7 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_335"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/disabling-windows-defender-security-settings-via-powershell.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_337"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/disabling-windows-defender-security-settings-via-powershell.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -314,7 +317,50 @@ Using the incident response data, update logging and audit policies to improve t
     process.name : ("powershell.exe", "pwsh.exe", "powershell_ise.exe") or
     ?process.pe.original_file_name in ("PowerShell.EXE", "pwsh.dll", "powershell_ise.EXE")
   ) and
-  process.args : "Set-MpPreference" and process.args : ("-Disable*", "Disabled", "NeverSend", "-Exclusion*")</pre>
+  (
+    (
+      process.args : ("Set-MpPreference", "Add-MpPreference") and
+      process.args : ("-Disable*", "Disabled", "NeverSend", "-Exclusion*")
+    ) or
+    /* base64-encoded (UTF-16LE) fragments of critical Defender settings, 3 byte-alignment offsets each */
+    (
+      process.command_line : ("*-e *", "*-en *", "* -enc*", "*FromBase64String*") and
+      process.command_line : (
+        /* DisableRealtimeMonitoring */
+        "*RABpAHMAYQBiAGwAZQBSAGUAYQBsAHQAaQBtAGUATQBvAG4AaQB0AG8AcgBpAG4AZwAgA*",
+        "*QAaQBzAGEAYgBsAGUAUgBlAGEAbAB0AGkAbQBlAE0AbwBuAGkAdABvAHIAaQBuAGcAIA*",
+        "*EAGkAcwBhAGIAbABlAFIAZQBhAGwAdABpAG0AZQBNAG8AbgBpAHQAbwByAGkAbgBnACAA*",
+        /* disablerealtimemonitoring */
+        "*ZABpAHMAYQBiAGwAZQByAGUAYQBsAHQAaQBtAGUAbQBvAG4AaQB0AG8AcgBpAG4AZwAgA*",
+        "*QAaQBzAGEAYgBsAGUAcgBlAGEAbAB0AGkAbQBlAG0AbwBuAGkAdABvAHIAaQBuAGcAIA*",
+        "*kAGkAcwBhAGIAbABlAHIAZQBhAGwAdABpAG0AZQBtAG8AbgBpAHQAbwByAGkAbgBnACAA*",
+        /* DisableIOAVProtection */
+        "*RABpAHMAYQBiAGwAZQBJAE8AQQBWAFAAcgBvAHQAZQBjAHQAaQBvAG4AIA*",
+        "*QAaQBzAGEAYgBsAGUASQBPAEEAVgBQAHIAbwB0AGUAYwB0AGkAbwBuACAA*",
+        "*EAGkAcwBhAGIAbABlAEkATwBBAFYAUAByAG8AdABlAGMAdABpAG8AbgAgA*",
+        /* disableioavprotection */
+        "*ZABpAHMAYQBiAGwAZQBpAG8AYQB2AHAAcgBvAHQAZQBjAHQAaQBvAG4AIA*",
+        "*QAaQBzAGEAYgBsAGUAaQBvAGEAdgBwAHIAbwB0AGUAYwB0AGkAbwBuACAA*",
+        "*kAGkAcwBhAGIAbABlAGkAbwBhAHYAcAByAG8AdABlAGMAdABpAG8AbgAgA*",
+        /* DisableBehaviorMonitoring */
+        "*RABpAHMAYQBiAGwAZQBCAGUAaABhAHYAaQBvAHIATQBvAG4AaQB0AG8AcgBpAG4AZwAgA*",
+        "*QAaQBzAGEAYgBsAGUAQgBlAGgAYQB2AGkAbwByAE0AbwBuAGkAdABvAHIAaQBuAGcAIA*",
+        "*EAGkAcwBhAGIAbABlAEIAZQBoAGEAdgBpAG8AcgBNAG8AbgBpAHQAbwByAGkAbgBnACAA*",
+        /* disablebehaviormonitoring */
+        "*ZABpAHMAYQBiAGwAZQBiAGUAaABhAHYAaQBvAHIAbQBvAG4AaQB0AG8AcgBpAG4AZwAgA*",
+        "*QAaQBzAGEAYgBsAGUAYgBlAGgAYQB2AGkAbwByAG0AbwBuAGkAdABvAHIAaQBuAGcAIA*",
+        "*kAGkAcwBhAGIAbABlAGIAZQBoAGEAdgBpAG8AcgBtAG8AbgBpAHQAbwByAGkAbgBnACAA*",
+        /* DisableBlockAtFirstSeen */
+        "*RABpAHMAYQBiAGwAZQBCAGwAbwBjAGsAQQB0AEYAaQByAHMAdABTAGUAZQBuACAA*",
+        "*QAaQBzAGEAYgBsAGUAQgBsAG8AYwBrAEEAdABGAGkAcgBzAHQAUwBlAGUAbgAgA*",
+        "*EAGkAcwBhAGIAbABlAEIAbABvAGMAawBBAHQARgBpAHIAcwB0AFMAZQBlAG4AIA*",
+        /* disableblockatfirstseen */
+        "*ZABpAHMAYQBiAGwAZQBiAGwAbwBjAGsAYQB0AGYAaQByAHMAdABzAGUAZQBuACAA*",
+        "*QAaQBzAGEAYgBsAGUAYgBsAG8AYwBrAGEAdABmAGkAcgBzAHQAcwBlAGUAbgAgA*",
+        "*kAGkAcwBhAGIAbABlAGIAbABvAGMAawBhAHQAZgBpAHIAcwB0AHMAZQBlAG4AIA*"
+      )
+    )
+  )</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
