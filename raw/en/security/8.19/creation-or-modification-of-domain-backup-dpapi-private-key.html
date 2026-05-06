@@ -128,7 +128,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 417</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 418</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -140,15 +140,150 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_272"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/creation-or-modification-of-domain-backup-dpapi-private-key.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_285"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/creation-or-modification-of-domain-backup-dpapi-private-key.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<p>Domain DPAPI Backup keys are stored on domain controllers and can be dumped remotely with tools such as Mimikatz. The resulting .pvk private key can be used to decrypt ANY domain user masterkeys, which then can be used to decrypt any secrets protected by those keys.</p>
+<p><span class="strong strong"><strong>Investigating Creation or Modification of Domain Backup DPAPI private key</strong></span></p>
+<p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Does the alert show a new or changed domain DPAPI backup key artifact?
+</li>
+<li class="listitem">
+Focus: <code class="literal">event.type</code>, <code class="literal">event.action</code>, <code class="literal">file.name</code>, <code class="literal">file.path</code>, and <code class="literal">file.size</code>; distinguish <code class="literal">ntds_capi_*.pfx</code> or <code class="literal">ntds_capi_*.pvk</code> in temp, user, share, removable, archive, or controlled recovery paths.
+</li>
+<li class="listitem">
+Implication: escalate on create or modify activity in staging paths or analyst home directories because the artifact can unlock domain DPAPI-protected secrets; lower suspicion only when the path is a controlled DC recovery or IR location tied to the same case.
+</li>
+<li class="listitem">
+Is the acting process a recognized recovery tool or an export utility being abused?
+</li>
+<li class="listitem">
+Why: live DC retrieval and offline AD database extraction both create domain-scale DPAPI exposure once backup keys leave controlled recovery.
+</li>
+<li class="listitem">
+Focus: process-start events scoped by <code class="literal">host.id</code> and <code class="literal">process.entity_id</code>, checking <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.parent.command_line</code>, and <code class="literal">process.code_signature.subject_name</code>. !{investigate{"description":"","label":"Process events for the alerting process","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when a shell, script host, renamed binary, or command line expresses backup-key export outside controlled recovery; lower concern only when tool identity, parent, and output path fit one controlled recovery workflow.
+</li>
+<li class="listitem">
+Did the same process export companion key material or package the result?
+</li>
+<li class="listitem">
+Focus: file events scoped to <code class="literal">process.entity_id</code>, or <code class="literal">host.id</code> plus <code class="literal">process.pid</code> in a tight time window, checking <code class="literal">file.name</code>, <code class="literal">file.path</code>, <code class="literal">file.Ext.original.path</code>, and <code class="literal">file.Ext.original.name</code>. !{investigate{"description":"","label":"File activity for the alerting process","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the process creates multiple backup-key outputs, writes companion legacy-key material, renames the files, archives them, or stages other credential-sensitive artifacts.
+</li>
+<li class="listitem">
+Hint: if <code class="literal">ntds_capi_*</code> disappears quickly, trace rename events through <code class="literal">file.Ext.original.path</code> and <code class="literal">file.Ext.original.name</code>; if those fields are absent, fall back to current <code class="literal">file.path</code> plus the same <code class="literal">process.entity_id</code> or host/PID time window.
+</li>
+<li class="listitem">
+Do the user and host telemetry fit a tightly scoped recovery operator path?
+</li>
+<li class="listitem">
+Focus: <code class="literal">user.id</code>, <code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">host.id</code>, and <code class="literal">host.name</code>; separate domain recovery, backup, or IR identities from standard users and ad hoc workstations.
+</li>
+<li class="listitem">
+Implication: escalate when the user or host identity is mismatched, generic, or unexplained for domain backup-key handling; treat a plausible operator and host pairing as candidate benign only after the file, process, and artifact evidence also fit the same workflow.
+</li>
+<li class="listitem">
+Did follow-on activity stage the export for off-host use?
+</li>
+<li class="listitem">
+Focus: process, child-process, file, and network events for the recovered process scope, especially <code class="literal">process.command_line</code>, <code class="literal">process.parent.command_line</code>, UNC, removable-media, archive, or share values in <code class="literal">file.path</code>, and off-host connections. !{investigate{"description":"","label":"Child processes of the export process","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}} !{investigate{"description":"","label":"Network activity for the export process and children","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when copy, archive, compression, removable-media, or share-write activity follows the export, especially from a non-DC host; absence of staging evidence narrows scope but does not close the alert by itself.
+</li>
+<li class="listitem">
+If local evidence remains suspicious or unresolved and related-alert telemetry is available, does the same user or host show credential-access, staging, or tier-0 alerts?
+</li>
+<li class="listitem">
+Focus: optional related-alert views for <code class="literal">user.id</code>, especially DPAPI abuse, LSASS or credential dumping, DCSync, archive or share staging, lateral movement to DCs, or tier-0 persistence. !{investigate{"description":"","label":"Alerts associated with this user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: Pivot by <code class="literal">host.id</code> when user scope is sparse or host role changes urgency; absence of related-alert telemetry is unresolved, not benign. !{investigate{"description":"","label":"Alerts associated with this host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden to domain-compromise scoping when related alerts show credential access, DC access, or staging around the same time; absence of related alerts can narrow scope but must not close the alert without local file, process, artifact, and context alignment.
+</li>
+<li class="listitem">
+Escalate on unrecognized export path, export-tool intent, companion artifacts, mismatched user or host, staging, or corroborating tier-0 alerts; close only when telemetry and recovery, backup, or IR verification bind one controlled workflow; preserve and escalate if evidence is mixed or visibility is incomplete.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>False positive analysis</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+AD disaster-recovery, backup validation, or IR collection can legitimately export DPAPI domain backup material. Confirm telemetry first: <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">file.path</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code> must all align with the same exact workflow.
+</li>
+<li class="listitem">
+Use a recovery ticket, backup job, or IR case only to verify an already aligned telemetry pattern; do not close on records alone. If records are unavailable, recurring telemetry is a candidate benign pattern, not closure, until it verifies one controlled recovery path without contradictory staging.
+</li>
+<li class="listitem">
+Before creating an exception, validate that the same <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">file.path</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code> recur across prior alerts from this rule. Build the exception from that confirmed workflow, and avoid exceptions on <code class="literal">file.name</code> alone, <code class="literal">.pvk</code> or <code class="literal">.pfx</code> extensions alone, or the host alone.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Response and remediation</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+If confirmed benign, reverse any temporary containment and record the process path, command-line pattern, export location, operator identity, and host role that justified closure. Create an exception only if that same workflow recurs consistently across prior alerts from this rule.
+</li>
+<li class="listitem">
+If suspicious but unconfirmed, preserve the exported <code class="literal">file.path</code>, rename evidence from <code class="literal">file.Ext.original.path</code> or <code class="literal">file.Ext.original.name</code>, the file-event timeline, recovered <code class="literal">process.entity_id</code> or <code class="literal">process.pid</code>, <code class="literal">process.command_line</code>, responsible <code class="literal">user.id</code>, <code class="literal">host.id</code>, and any UNC, removable-media, archive, or share paths before destructive changes. Apply reversible containment first, such as temporarily restricting share access or outbound connectivity for the affected <code class="literal">host.id</code>; escalate to host isolation or account containment only if companion staging, corroborating alerts, or other findings show broader compromise and the asset role can tolerate it.
+</li>
+<li class="listitem">
+If confirmed malicious, preserve the same artifacts and use endpoint response to isolate the host or terminate the responsible process. If direct response is unavailable, escalate with the preserved artifact set to the team that can act. For domain controllers, weigh service impact before isolation but do not leave the export accessible.
+</li>
+<li class="listitem">
+If unauthorized domain backup-key export is confirmed on a domain controller, activate the organization&#8217;s Active Directory compromise response plan, preserve evidence needed to scope DPAPI-protected credential exposure, and begin privileged-account hygiene according to that plan.
+</li>
+<li class="listitem">
+Before deleting or rotating anything, review related <code class="literal">host.id</code> and <code class="literal">user.id</code> activity for the same exported filenames, companion legacy-key artifacts, archive names, and UNC or share paths. Then eradicate the unauthorized export files, staging archives, copy utilities, scripts, and persistence mechanisms uncovered during the investigation, and remediate the privilege path or access vector that allowed the export.
+</li>
+<li class="listitem">
+After containment, hunt for the same exported filenames, archive names, and UNC or share paths across other hosts.
+</li>
+</ul>
+</div>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_284"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/creation-or-modification-of-domain-backup-dpapi-private-key.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_134"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/creation-or-modification-of-domain-backup-dpapi-private-key.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-11-setup" class="ulink" target="_top">Sysmon Event ID 11 - File Create</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_297"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/creation-or-modification-of-domain-backup-dpapi-private-key.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

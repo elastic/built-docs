@@ -94,9 +94,6 @@ Use Case: Threat Detection
 Tactic: Credential Access
 </li>
 <li class="listitem">
-Data Source: Sysmon
-</li>
-<li class="listitem">
 Data Source: Windows Security Event Logs
 </li>
 <li class="listitem">
@@ -104,7 +101,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 212</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 213</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -116,37 +113,69 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_940"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-lsass-clone-creation-via-psscapturesnapshot.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_971"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-lsass-clone-creation-via-psscapturesnapshot.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Potential LSASS Clone Creation via PssCaptureSnapShot</strong></span></p>
-<p>PssCaptureSnapShot is a Windows API used for creating snapshots of processes, often for debugging. Adversaries exploit this to clone the LSASS process, aiming to extract credentials without detection. The detection rule identifies suspicious LSASS clones by monitoring process creation events where both the process and its parent are LSASS, signaling potential credential dumping attempts.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the process creation event logs for the specific event code 4688 to confirm the creation of an LSASS process clone. Verify that both the process and its parent have the executable path "?:\Windows\System32\lsass.exe".
+Does the alert-local 4688 event show the LSASS-clone pattern?
 </li>
 <li class="listitem">
-Check the timeline of events to determine if there are any preceding or subsequent suspicious activities related to the LSASS process, such as unusual access patterns or modifications.
+Focus: <code class="literal">event.code</code>, <code class="literal">process.executable</code>, <code class="literal">process.parent.executable</code>, <code class="literal">host.id</code>, <code class="literal">@timestamp</code>.
 </li>
 <li class="listitem">
-Investigate the user account and privileges associated with the process creation event to assess if the account has legitimate reasons to interact with LSASS or if it might be compromised.
+Implication: treat the alert as clone creation when both paths resolve to lsass.exe on one host; lower suspicion only when the tuple maps to stable EDR, forensic, or debugging workflow.
 </li>
 <li class="listitem">
-Analyze network activity from the host to identify any potential data exfiltration attempts or connections to known malicious IP addresses following the LSASS clone creation.
+Hint: pivot with <code class="literal">host.id</code> plus <code class="literal">process.entity_id</code>; if absent, use <code class="literal">host.id</code>, <code class="literal">process.pid</code>, and a tight alert-time window.
 </li>
 <li class="listitem">
-Correlate this event with other security alerts or logs from the same host to identify if this is part of a broader attack pattern or isolated incident.
+Do surrounding 4688 events reveal the setup or dump-conversion chain?
 </li>
 <li class="listitem">
-Examine the host for any signs of malware or tools commonly used for credential dumping, such as Mimikatz, that might have been used in conjunction with the LSASS clone creation.
+Focus: same-host 4688 around <code class="literal">@timestamp</code>, especially <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, <code class="literal">user.id</code>, and terms such as "PssCaptureSnapshot", "MiniDumpWriteDump", "comsvcs", "rundll32", "WerFault", "procdump", "createdump", archive utilities, or cleanup commands. !{investigate{"description":"","label":"Same-host 4688 process creation events","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"4688","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when shells, PowerShell, dump helpers, archive tools, cleanup, or remote-admin launchers appear without the same recognized collection workflow; absence of helpers leaves the clone unresolved, not benign.
+</li>
+<li class="listitem">
+If file telemetry exists, did the clone create dumps, archives, or renamed outputs?
+</li>
+<li class="listitem">
+Focus: same-host file or child-process telemetry for <code class="literal">file.path</code>, <code class="literal">file.Ext.original.path</code> matching ".dmp", ".zip", ".7z", or renamed outputs. !{investigate{"description":"","label":"File activity on the affected host","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}. If unavailable, use surrounding 4688 commands with output files or archive utilities.
+</li>
+<li class="listitem">
+Implication: escalate when dump paths, archive names, or cleanup commands appear around clone creation. Missing file telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Do authentication events show follow-on remote use, explicit credentials, or unusual logons?
+</li>
+<li class="listitem">
+Why: clone creation often precedes credential use; later auth can show post-dump pivoting.
+</li>
+<li class="listitem">
+Focus: same-host 4624, 4648, and 4625 around <code class="literal">@timestamp</code>, using <code class="literal">winlog.event_data.TargetUserName</code>, <code class="literal">winlog.logon.type</code>, and <code class="literal">source.ip</code>. !{investigate{"description":"","label":"Authentication events on the affected host","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"4624","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"4648","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"4625","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the host or user quickly shows new remote-interactive, service, or explicit-credential logons from unusual sources. If auth telemetry is missing, record the gap and keep the finding unresolved.
+</li>
+<li class="listitem">
+Does same-user or same-host activity repeat the evidence pattern?
+</li>
+<li class="listitem">
+Focus: same-user 48h alerts for helper commands, dump/archive names, or post-clone authentication. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if user scope is sparse or the host is shared, review same-host alerts for process, output, and authentication evidence. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when helper-command, output, or authentication patterns repeat around clone windows; no repeat keeps response local but does not clear the clone.
+</li>
+<li class="listitem">
+Escalate for unauthorized LSASS clone creation, dump preparation, post-clone credential use, or clone creation on domain controllers, jump hosts, or privileged admin systems; close only when the alert tuple and recovery evidence bind to one recognized EDR, forensic, or debugging workflow with no conflicting dump-conversion, output, or authentication evidence; preserve artifacts and escalate when answers are mixed or visibility is incomplete.
 </li>
 </ul>
 </div>
@@ -154,19 +183,10 @@ Examine the host for any signs of malware or tools commonly used for credential 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate security software or system management tools may create LSASS process snapshots for monitoring or debugging purposes. Identify these tools and create exceptions for their process creation events to avoid false positives.
+Recognized EDR/forensic collection or bounded lab validation can create snapshot-based clones. Require the alert tuple, helper command line, <code class="literal">user.id</code>, <code class="literal">host.id</code>, dump-output pattern, and no unexpected 4624 or 4648 activity inside that workflow; use records only to corroborate unresolved telemetry.
 </li>
 <li class="listitem">
-System administrators or IT personnel might use authorized scripts or tools that interact with LSASS for legitimate reasons. Verify these activities and whitelist the associated processes to prevent unnecessary alerts.
-</li>
-<li class="listitem">
-During system updates or patches, certain processes might temporarily mimic suspicious behavior. Monitor these updates and temporarily adjust detection rules to accommodate expected changes in process behavior.
-</li>
-<li class="listitem">
-Some enterprise environments may have custom applications that interact with LSASS for performance monitoring. Document these applications and exclude their process creation events from triggering alerts.
-</li>
-<li class="listitem">
-Regularly review and update the list of known benign processes and tools that interact with LSASS to ensure that the detection rule remains effective without generating excessive false positives.
+Before creating an exception, validate that the same <code class="literal">host.id</code> and <code class="literal">user.id</code> cohort repeats the same process identity, helper-command, output-path, and authentication pattern across prior alerts from this rule. Avoid exceptions on "lsass.exe", <code class="literal">event.code</code>, or <code class="literal">host.id</code> alone.
 </li>
 </ul>
 </div>
@@ -174,25 +194,22 @@ Regularly review and update the list of known benign processes and tools that in
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected host from the network to prevent further credential access or lateral movement by the adversary.
+If confirmed benign, reverse temporary containment and document the collection workflow identity, launcher path, actor, host scope, dump-output pattern, and follow-on authentication pattern. Create an exception only if that pattern recurs across prior alerts.
 </li>
 <li class="listitem">
-Terminate any suspicious LSASS clone processes identified by the detection rule to halt ongoing credential dumping activities.
+If suspicious but unconfirmed, preserve the alert 4688 event, surrounding helper-process events, command lines, dump/archive paths, rename evidence, affected identities, and post-clone authentication records before containment. Apply reversible containment first, such as heightened monitoring or temporary restrictions on remote admin access; escalate to host isolation only when dump artifacts or post-clone authentication confirm likely credential exposure and the host role can tolerate interruption.
 </li>
 <li class="listitem">
-Conduct a thorough memory analysis of the affected system to identify any additional malicious activities or tools used by the adversary.
+If confirmed malicious, preserve the alert event, helper-process chain, dump/archive paths, rename evidence, and affected identities before containment. Then isolate the host through endpoint response; if unavailable, escalate with preserved evidence. Block confirmed remote-auth or transfer sources before cleanup.
 </li>
 <li class="listitem">
-Change all potentially compromised credentials, especially those with administrative privileges, to mitigate the risk of unauthorized access.
+On domain controllers, jump hosts, or privileged admin systems, scope which local, cached, service, or domain credentials may have been exposed, then reset or rotate affected credentials before removing collected artifacts.
 </li>
 <li class="listitem">
-Review and enhance endpoint security configurations to ensure that LSASS process memory is protected from unauthorized access, such as enabling Credential Guard if applicable.
+Before eradication, review related hosts and users for the same helper-process pattern, dump path, <code class="literal">winlog.logon.type</code>, or <code class="literal">source.ip</code> indicators. Then remove dump files, archives, helper tools, and persistence, and remediate the access or privilege path that enabled clone creation.
 </li>
 <li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to determine the scope of the breach.
-</li>
-<li class="listitem">
-Implement additional monitoring and alerting for similar suspicious activities, focusing on process creation events involving LSASS, to improve early detection of future attempts.
+Post-incident hardening: restrict memory-acquisition and dump tooling to recognized admin cohorts, retain supplemental file telemetry where its absence limited the case, and document the confirmed workflow or malicious pattern for future triage.
 </li>
 </ul>
 </div>
@@ -200,7 +217,16 @@ Implement additional monitoring and alerting for similar suspicious activities, 
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_996"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-lsass-clone-creation-via-psscapturesnapshot.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_622"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-lsass-clone-creation-via-psscapturesnapshot.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>Audit Process Creation and Command Line must be enabled to generate the events used by this rule.
+Setup instructions: <a href="https://ela.st/audit-process-creation" class="ulink" target="_top">https://ela.st/audit-process-creation</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1027"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-lsass-clone-creation-via-psscapturesnapshot.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

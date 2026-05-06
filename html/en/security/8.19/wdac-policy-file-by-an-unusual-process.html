@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="wdac-policy-file-by-an-unusual-process"></a>WDAC Policy File by an Unusual Process</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/wdac-policy-file-by-an-unusual-process.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies the creation of a Windows Defender Application Control (WDAC) policy file by an unusual process. Adversaries may use a secially crafted WDAC policy to restrict the execution of security products.</p>
+<p>Identifies the creation of a Windows Defender Application Control (WDAC) policy file by an unusual process. Adversaries may use a specially crafted WDAC policy to restrict the execution of security products.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -197,7 +197,7 @@ Data Source: Crowdstrike
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 6</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 7</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -209,7 +209,7 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1558"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/wdac-policy-file-by-an-unusual-process.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1594"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/wdac-policy-file-by-an-unusual-process.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating WDAC Policy File by an Unusual Process</strong></span></p>
@@ -217,22 +217,73 @@ Elastic
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the process execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+Does the alert show active WDAC policy placement by a non-servicing writer?
 </li>
 <li class="listitem">
-Identify the user account that performed the action and whether it should perform this kind of action.
+Focus: <code class="literal">file.path</code>, <code class="literal">file.extension</code>, optional rename source <code class="literal">file.Ext.original.path</code>, writer <code class="literal">process.executable</code>, and <code class="literal">process.entity_id</code>. Separate "CodeIntegrity\SiPolicy.p7b" base-policy placement from "CodeIntegrity\CiPolicies\Active\*.cip" activation.
 </li>
 <li class="listitem">
-Contact the account owner and confirm whether they are aware of this activity.
+Implication: escalate when an active WDAC path is written or renamed by anything other than a recognized WDAC or Windows servicing component such as "poqexec.exe"; lower suspicion only when active path, original path when present, and writer align with one recognized WDAC rollout or servicing package.
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Is the writer a recognized deployment component or suspicious execution host?
 </li>
 <li class="listitem">
-Verify if any other anti-forensics behaviors were observed.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.hash.sha256</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>.
 </li>
 <li class="listitem">
-Investigate the event logs prior to the action for suspicious behaviors that an attacker may be trying to cover up.
+Implication: escalate when a script host, LOLBin, remote administration tool, or custom .NET assembly writes the policy, especially from temp, user, or share-backed paths; lower suspicion when the signer, hash, executable path, and command line all match a recognized WDAC deployment component.
+</li>
+<li class="listitem">
+Does the launch chain and user context fit WDAC administration?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, and <code class="literal">user.id</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the parent chain suggests in-memory tooling, service-control abuse, remote execution, or an unexpected admin/service identity; lower suspicion when parent context and <code class="literal">user.id</code> match the same recognized WDAC workflow for this host.
+</li>
+<li class="listitem">
+Was the policy staged, renamed, or rapidly replaced before activation?
+</li>
+<li class="listitem">
+Focus: same-writer file events on <code class="literal">host.id</code> and <code class="literal">process.entity_id</code>: <code class="literal">file.path</code>, optional <code class="literal">file.Ext.original.path</code>, <code class="literal">file.size</code>, and <code class="literal">file.Ext.header_bytes</code> when populated. !{investigate{"description":"","label":"File events for the writer process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: file telemetry does not decode WDAC policy intent; preserve the written policy artifact for offline review before cleanup.
+</li>
+<li class="listitem">
+Implication: escalate when rename evidence shows the policy moving from a temp, user-writable, or share-backed location into the active Code Integrity path, or when repeated writes suggest last-minute replacement; lower suspicion when file movement stays inside one recognized rollout cache path and preserves the same writer. Missing rename or header detail is unresolved, not benign.
+</li>
+<li class="listitem">
+Was the write followed by reboot preparation or activation behavior?
+</li>
+<li class="listitem">
+Why: Krueger-style WDAC abuse relies on the next boot to make the malicious policy block security tooling, so reboot preparation changes response urgency.
+</li>
+<li class="listitem">
+Focus: later process activity from the writer or its children on <code class="literal">host.id</code>: <code class="literal">process.name</code>, <code class="literal">process.executable</code>, and <code class="literal">process.command_line</code> for "shutdown.exe", restart tooling, service-control utilities, or custom reboot helpers. !{investigate{"description":"","label":"Process events for the writer process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}} !{investigate{"description":"","label":"Child process events for the writer process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the writer or parent chain quickly prepares a reboot; absence of a visible reboot helper leaves activation timing unresolved, not benign.
+</li>
+<li class="listitem">
+If local evidence is suspicious or unresolved, does the same writer or host pattern repeat?
+</li>
+<li class="listitem">
+Focus: related alerts for <code class="literal">user.id</code> and <code class="literal">host.id</code>, compared against <code class="literal">process.executable</code>, <code class="literal">process.hash.sha256</code>, active-policy <code class="literal">file.path</code>, and any staging <code class="literal">file.Ext.original.path</code>.
+</li>
+<li class="listitem">
+Hint: review Alerts associated with the user, host, and writer process. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}} !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}} !{investigate{"description":"","label":"Alerts associated with the writer process","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"process.executable","queryType":"phrase","value":"{{process.executable}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when the same writer, hash, user, or host pattern repeats across active WDAC placements; keep scope local only when the activity is confined to one host and one bounded change window.
+</li>
+<li class="listitem">
+Based on active placement, writer identity, launch context, staging, reboot behavior, and recurrence, what disposition is supported?
+</li>
+<li class="listitem">
+Implication: escalate on suspicious writer identity, lineage, staging, reboot, or recurrence; close only when active path, writer, lineage, and any observed staging or reboot evidence bind one recognized WDAC rollout or servicing workflow; preserve the policy artifact and escalate when evidence stays mixed or incomplete.
 </li>
 </ul>
 </div>
@@ -240,7 +291,13 @@ Investigate the event logs prior to the action for suspicious behaviors that an 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This activity is unlikely to happen legitimately. Benign true positives (B-TPs) can be added as exceptions if necessary.
+WDAC management, servicing, security management, OEM device-control, or endpoint-hardening products can legitimately place active "SiPolicy.p7b" or "*.cip" policies. Confirm writer identity (<code class="literal">process.executable</code>, <code class="literal">process.hash.sha256</code>, <code class="literal">process.code_signature.subject_name</code>), launch context (<code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">user.id</code>), artifact path (<code class="literal">file.path</code>, and <code class="literal">file.Ext.original.path</code> when present), cache location, and reboot behavior all align with the same rollout or product writer. External change records or product inventory can corroborate only after those telemetry anchors align; contradictory identity, lineage, staging, or reboot evidence should not close as benign.
+</li>
+<li class="listitem">
+Bootable media creation, disk imaging, and backup tools (e.g., Rufus, Acronis, Windows Backup Engine) writing to non-system drives or volumes can trigger the rule when copying or restoring Windows installations that include CodeIntegrity policies. Check <code class="literal">file.path</code> drive letter or volume number against the host&#8217;s system drive; writes to removable, secondary, or high-numbered volumes do not affect the host&#8217;s WDAC protection.
+</li>
+<li class="listitem">
+Before creating an exception, require recurrence for the same stable writer identity, signer, parent workflow, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and bounded active <code class="literal">file.path</code>. Avoid exceptions on <code class="literal">file.extension</code>, <code class="literal">file.name</code>, or the broad "CodeIntegrity" prefix alone because those conditions would suppress malicious lookalike policies.
 </li>
 </ul>
 </div>
@@ -248,25 +305,16 @@ This activity is unlikely to happen legitimately. Benign true positives (B-TPs) 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse any temporary containment and document the evidence that justified closure: writer identity, parent workflow, <code class="literal">user.id</code>, <code class="literal">file.path</code>, staging path, and reboot behavior all pointed to one recognized WDAC rollout or maintenance path. Create an exception only after that bounded pattern recurs.
 </li>
 <li class="listitem">
-Isolate the involved host to prevent further post-compromise behavior.
+If suspicious but unconfirmed, preserve the alert file event, the written "SiPolicy.p7b" or "*.cip" artifact, any rename-source evidence, the writer identity bundle, parent command context, <code class="literal">user.id</code>, and reboot-command evidence before destructive action. Apply reversible containment first, such as delaying an imminent reboot when operationally safe or temporarily restricting the writer, <code class="literal">user.id</code>, or management channel that introduced the policy.
 </li>
 <li class="listitem">
-Re-enable affected logging components, services, and security monitoring.
+If confirmed malicious, first export the preserved policy artifact and process/file evidence set. Then isolate the host when active policy placement by an unauthorized writer, repeated placement, or reboot preparation makes containment necessary. After evidence export and containment decisions, remove only the malicious WDAC policy artifacts, restore the known-good WDAC state, and review other hosts and users for the same writer, hash, active <code class="literal">file.path</code>, or staging pattern.
 </li>
 <li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
-</li>
-<li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-</li>
-<li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Post-incident hardening should restrict who can write to active Code Integrity paths, limit management channels that can copy policy files and reboot hosts, require controlled WDAC deployment records, and retain process and file telemetry around "CodeIntegrity" changes.
 </li>
 </ul>
 </div>
@@ -274,7 +322,34 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1572"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/wdac-policy-file-by-an-unusual-process.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_1136"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/wdac-policy-file-by-an-unusual-process.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-11-setup" class="ulink" target="_top">Sysmon Event ID 11 - File Create</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1608"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/wdac-policy-file-by-an-unusual-process.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -288,8 +363,12 @@ Using the incident response data, update logging and audit policies to improve t
   ) and
   not process.executable : (
     "C:\\Windows\\System32\\poqexec.exe",
-    "\\Device\\HarddiskVolume*\\Windows\\System32\\poqexec.exe"
-  )</pre>
+    "\\Device\\HarddiskVolume*\\Windows\\System32\\poqexec.exe",
+    "?:\\Windows\\WinSxS\\*\\TiWorker.exe",
+    "?:\\Windows\\System32\\omadmclient.exe"
+  ) and
+  /* System / ntoskrnl.exe (PID 4) */
+  not process.pid == 4</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

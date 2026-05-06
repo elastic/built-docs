@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="potential-local-ntlm-relay-via-http"></a>Potential Local NTLM Relay via HTTP</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-local-ntlm-relay-via-http.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies attempt to coerce a local NTLM authentication via HTTP using the Windows Printer Spooler service as a target. An adversary may use this primitive in combination with other techniques to elevate privileges on a compromised system.</p>
+<p>Identifies attempts to coerce local NTLM authentication over HTTP through WebDAV named-pipe paths such as Print Spooler or SRVSVC. Adversaries can combine this primitive with relay tooling to elevate privileges.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -212,7 +212,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 317</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 318</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -224,37 +224,84 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_952"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-local-ntlm-relay-via-http.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_983"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-local-ntlm-relay-via-http.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Potential Local NTLM Relay via HTTP</strong></span></p>
-<p>NTLM, a suite of Microsoft security protocols, is often targeted by adversaries for credential theft. Attackers may exploit the Windows Printer Spooler service to coerce NTLM authentication over HTTP, potentially elevating privileges. The detection rule identifies suspicious rundll32.exe executions invoking WebDAV client DLLs with specific arguments, signaling attempts to access named pipes via HTTP, indicative of NTLM relay attacks.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the process execution details for rundll32.exe, focusing on the specific arguments related to davclnt.dll and DavSetCookie, to confirm the presence of suspicious WebDAV client activity.
+Does the alert-local command line confirm WebDAV-to-named-pipe relay behavior?
 </li>
 <li class="listitem">
-Investigate the network connections initiated by the rundll32.exe process to identify any HTTP requests targeting named pipes, such as those containing "/print/pipe/", "/pipe/spoolss", or "/pipe/srvsvc".
+Focus: <code class="literal">process.command_line</code> and <code class="literal">process.executable</code>; confirm rundll32.exe loads davclnt.dll,DavSetCookie and targets HTTP pipe paths: /print/pipe/, /pipe/spoolss, or /pipe/srvsvc.
 </li>
 <li class="listitem">
-Check the system&#8217;s event logs for any related authentication attempts or failures around the time of the alert to identify potential NTLM relay activity.
+Implication: escalate when one command combines DavSetCookie with HTTP named-pipe paths, matching NTLMRelay2Self and printerbug-style coercion; close only when exact <code class="literal">process.command_line</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code> tie to authorized relay testing or explicit WebDAV/print diagnostics intentionally exercising this path.
 </li>
 <li class="listitem">
-Analyze the history of the Windows Printer Spooler service on the affected host to determine if it has been recently manipulated or exploited.
+Is the binary identity and launch chain consistent with the relay context?
 </li>
 <li class="listitem">
-Correlate the alert with other security events or alerts from data sources like Microsoft Defender XDR or Sysmon to identify any related suspicious activities or patterns.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.parent.executable</code>, and <code class="literal">process.parent.command_line</code>.
 </li>
 <li class="listitem">
-Assess the user account associated with the NTLM authentication attempt to determine if it has been compromised or is being used in an unauthorized manner.
+Implication: escalate when rundll32.exe is renamed, outside a Windows system path, launched by a script, document, remote-management, or user-writable parent, or signer-mismatched; lower suspicion only when identity and parent chain match the authorized test or diagnostic workflow. Identity alone does not clear relay behavior.
+</li>
+<li class="listitem">
+Did the process contact the HTTP listener implied by the relay path?
+</li>
+<li class="listitem">
+Focus: if endpoint network telemetry exists, recover process network events with <code class="literal">host.id</code> plus <code class="literal">process.entity_id</code>; fallback to <code class="literal">host.id</code> plus <code class="literal">process.pid</code> in a tight window. Read DNS via <code class="literal">dns.question.name</code>; connections via <code class="literal">destination.ip</code> and <code class="literal">destination.port</code>. !{investigate{"description":"","label":"Network events for the relay process","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: compare destinations to the HTTP host in <code class="literal">process.command_line</code>; loopback, same-host aliases, private listeners, or unexpected external HTTP infrastructure are decisive.
+</li>
+<li class="listitem">
+Implication: escalate when traffic reaches the listener named by the relay command or an unexplained HTTP endpoint. Missing endpoint network or DNS telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Did authentication events explain the local rundll32 session or relay follow-on?
+</li>
+<li class="listitem">
+Why: the process alert proves relay intent; Windows Security events can explain the operator session, while relay proof may surface as inbound NTLM on this host, target-host authentication, or DC-side validation.
+</li>
+<li class="listitem">
+Focus: for local session context, bridge <code class="literal">process.Ext.authentication_id</code> to same-host <code class="literal">winlog.event_data.TargetLogonId</code>; on 4624, read <code class="literal">winlog.event_data.AuthenticationPackageName</code> and <code class="literal">source.ip</code>. !{investigate{"description":"","label":"Windows Security events for the local process session","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"winlog.event_data.TargetLogonId","queryType":"phrase","value":"{{process.Ext.authentication_id}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"4624","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"winlog.event_data.SubjectLogonId","queryType":"phrase","value":"{{process.Ext.authentication_id}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"4648","valueType":"string"}]],"relativeFrom":"now-24h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: for relay proof, search same-host inbound NTLM without <code class="literal">user.id</code>, target-host 4624/4625, and DC-side 4776 using the listener, reconstructed targets, or source addresses from command/network evidence. Search 4648 on <code class="literal">winlog.event_data.SubjectLogonId</code> only for explicit credentials from the local session.
+</li>
+<li class="listitem">
+Implication: escalate when the local session origin is unexplained, same-host inbound NTLM appears around the alert, or target/DC authentication shows coerced machine or service-account use tied to the listener or targets. Missing authentication telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Is there follow-on execution, tooling, or repeated coercion around the process?
+</li>
+<li class="listitem">
+Focus: child processes where <code class="literal">process.parent.entity_id</code> matches <code class="literal">process.entity_id</code>, reading <code class="literal">process.Ext.token.integrity_level_name</code>; if endpoint file telemetry exists, recover files with <code class="literal">host.id</code> plus <code class="literal">process.entity_id</code>, or <code class="literal">host.id</code> plus <code class="literal">process.pid</code> in a tight window, then read <code class="literal">file.path</code>. !{investigate{"description":"","label":"Child process events for the relay process","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: look for command lines or artifacts naming PetitPotam, printerbug, NTLMRelay2Self, ntlmrelayx, shadow credentials, RBCD, or WebClient/Print Spooler preparation.
+</li>
+<li class="listitem">
+Implication: escalate when the window shows dropped tools, secondary scripts, repeated rundll32.exe relay attempts, privileged child processes, or WebClient/Print Spooler preparation. Missing endpoint file telemetry limits corroboration, not the alert-local finding.
+</li>
+<li class="listitem">
+If local evidence is suspicious or unresolved, do related alerts change scope?
+</li>
+<li class="listitem">
+Focus: related alerts for <code class="literal">user.id</code> covering credential access, relay testing, privilege escalation, or lateral movement. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: compare related alerts for <code class="literal">host.id</code> for spooler abuse, WebClient activity, remote execution, NTLM relay, or coercion patterns. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden when either pivot shows repeated relay/coercion or credential-access activity outside the authorized test or diagnostic; keep local when both stay confined to that activity.
+</li>
+<li class="listitem">
+Escalate when relay-path arguments plus binary lineage, listener contact, NTLM/auth evidence, follow-on tooling, or related alerts indicate unauthorized relay; close only when alert-local evidence and supported recovery fit one authorized workflow; preserve and escalate if evidence is mixed or incomplete.
 </li>
 </ul>
 </div>
@@ -262,19 +309,10 @@ Assess the user account associated with the NTLM authentication attempt to deter
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate administrative tasks using rundll32.exe with WebDAV client DLLs may trigger the rule. Review the context of the execution, such as the user account and the timing, to determine if it aligns with expected administrative activities.
+Authorized red-team, purple-team, relay-lab validation, or explicit WebDAV/print diagnostics can trigger this rule. Confirm that <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, <code class="literal">user.id</code>, <code class="literal">host.id</code>, destination evidence if available, and authentication evidence all align with that activity. Routine WebDAV or print troubleshooting is insufficient unless it explains the DavSetCookie-to-HTTP-pipe pattern.
 </li>
 <li class="listitem">
-Automated software deployment or update processes might use similar rundll32.exe calls. Verify if the process is part of a scheduled or known deployment task and consider excluding these specific processes from the rule.
-</li>
-<li class="listitem">
-Some third-party applications may use WebDAV for legitimate purposes, which could mimic the behavior detected by the rule. Identify these applications and create exceptions for their known processes to prevent false alerts.
-</li>
-<li class="listitem">
-System maintenance scripts or tools that interact with network resources via HTTP might inadvertently match the rule&#8217;s criteria. Ensure these scripts are documented and exclude them if they are verified as non-threatening.
-</li>
-<li class="listitem">
-Regularly review and update the exclusion list to accommodate changes in legitimate software behavior, ensuring that only verified false positives are excluded to maintain the rule&#8217;s effectiveness.
+Without workflow records, require a telemetry-only match across prior alerts from this rule: same <code class="literal">process.parent.executable</code>, exact <code class="literal">process.command_line</code> pattern, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and supported destination or authentication pattern. Build exceptions only from that full workflow; avoid exceptions on rundll32.exe, davclnt.dll, or the pipe path alone.
 </li>
 </ul>
 </div>
@@ -282,25 +320,22 @@ Regularly review and update the exclusion list to accommodate changes in legitim
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected system from the network to prevent further unauthorized access or lateral movement.
+If confirmed benign, release temporary containment and document the workflow anchors: <code class="literal">process.executable</code>, <code class="literal">process.parent.executable</code>, exact <code class="literal">process.command_line</code>, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and the recovered destination or authentication evidence. Create an exception only when the same full workflow recurs across prior alerts from this rule.
 </li>
 <li class="listitem">
-Terminate any suspicious rundll32.exe processes identified in the alert to stop ongoing malicious activity.
+If suspicious but unconfirmed, preserve the alert details, <code class="literal">process.entity_id</code> or <code class="literal">process.pid</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.command_line</code>, process tree, recovered network or DNS records, Windows Security records, and file artifacts before containment. Apply reversible containment first, such as temporary HTTP/WebDAV restrictions or heightened monitoring on the host; isolate only if repeated relay attempts, corroborating NTLM activity, follow-on execution, or exposure on a domain controller, print server, or jump host raises the risk and the asset can tolerate isolation.
 </li>
 <li class="listitem">
-Conduct a thorough review of the affected system&#8217;s event logs and network traffic to identify any additional indicators of compromise or related malicious activity.
+If confirmed malicious, preserve the command line, process tree, listener details, authentication records, and dropped artifacts first. Then isolate the host through endpoint response when the evidence establishes unauthorized relay, and kill or suspend the responsible process if it is still active. Block confirmed malicious listeners, path fragments, hashes, or follow-on tools before cleanup.
 </li>
 <li class="listitem">
-Reset credentials for any accounts that may have been exposed or compromised during the attack to prevent unauthorized access.
+If investigation shows successful relay or privileged machine/service-account use, review and rotate affected credentials or secrets according to privilege tier, and coordinate disruptive identity or infrastructure changes before acting on domain controllers, print servers, or jump hosts.
 </li>
 <li class="listitem">
-Apply the latest security patches and updates to the Windows Printer Spooler service and related components to mitigate known vulnerabilities.
+Before eradication, scope the same command fragment, listener, <code class="literal">user.id</code>, <code class="literal">host.id</code>, authentication indicators, and adjacent tooling across other hosts and sessions so evidence is not destroyed before spread is understood. Then remove the relay tooling and harden the exposed path, including unnecessary WebClient or Print Spooler exposure, NTLM relay mitigations, and service-specific controls identified during the investigation.
 </li>
 <li class="listitem">
-Implement network segmentation to limit the exposure of critical services and reduce the risk of similar attacks in the future.
-</li>
-<li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to ensure comprehensive remediation efforts are undertaken.
+Post-incident hardening: retain process, endpoint network, endpoint file, and Windows Security telemetry needed for this correlation, and document adjacent PetitPotam, printerbug, NTLMRelay2Self, or alternate coercion evidence for future triage.
 </li>
 </ul>
 </div>
@@ -308,7 +343,37 @@ Escalate the incident to the security operations center (SOC) or incident respon
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1008"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-local-ntlm-relay-via-http.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_634"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-local-ntlm-relay-via-http.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/audit-process-creation" class="ulink" target="_top">Windows Process Creation Logs</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1039"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-local-ntlm-relay-via-http.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="lsass-memory-dump-creation"></a>LSASS Memory Dump Creation</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/lsass-memory-dump-creation.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies the creation of a Local Security Authority Subsystem Service (lsass.exe) default memory dump. This may indicate a credential access attempt via trusted system utilities such as Task Manager (taskmgr.exe) and SQL Dumper (sqldumper.exe) or known pentesting tools such as Dumpert and AndrewSpecial.</p>
+<p>Identifies creation of LSASS memory dump artifacts with filenames matching LSASS dumps or common dumping-tool outputs, including dumpert.dmp, Andrew.dmp, SQLDmpr*.mdmp, and Coredump.dmp. This can indicate credential access through trusted utilities such as Task Manager or SQLDumper, or known tooling such as Dumpert and AndrewSpecial.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -122,7 +122,7 @@ Data Source: SentinelOne
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 315</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 316</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -134,74 +134,87 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_634"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/lsass-memory-dump-creation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_659"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/lsass-memory-dump-creation.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating LSASS Memory Dump Creation</strong></span></p>
-<p>Local Security Authority Server Service (LSASS) is a process in Microsoft Windows operating systems that is responsible for enforcing security policy on the system. It verifies users logging on to a Windows computer or server, handles password changes, and creates access tokens.</p>
-<p>This rule looks for the creation of memory dump files with file names compatible with credential dumping tools or that start with <code class="literal">lsass</code>.</p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Note</strong></span>:
-This investigation guide uses the <a href="/guide/en/security/current/invest-guide-run-osquery.html" class="ulink" target="_top">Osquery Markdown Plugin</a> introduced in Elastic Stack version 8.5.0. Older Elastic Stack versions will display unrendered Markdown in this guide.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Identify the process responsible for creating the dump file.
+What dump artifact did the alert record, and does it look like crash handling or credential collection?
 </li>
 <li class="listitem">
-Investigate the process execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+Focus: <code class="literal">file.path</code>, <code class="literal">file.name</code>, <code class="literal">file.extension</code>, <code class="literal">file.size</code>, and the alerting <code class="literal">process.entity_id</code>.
 </li>
 <li class="listitem">
-Identify the user account that performed the action and whether it should perform this kind of action.
+Implication: escalate when the path is user-writable, remote, hidden, or deceptive, or when <code class="literal">file.name</code> is "dumpert.dmp", "Andrew.dmp", "Coredump.dmp", or an LSASS-named dump outside a recognized crash location; lower suspicion only when the artifact fits a known crash-analysis, vendor support, or IR acquisition path for this <code class="literal">host.id</code>.
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Hint: the rule already filters common WER LSASS crash paths and expected SQLDumper dump locations, so a remaining SQLDmpr or LSASS dump path needs its own workflow explanation.
 </li>
 <li class="listitem">
-Examine the host for derived artifacts that indicate suspicious activities:
+Is the writer an expected dump utility in an expected execution context?
 </li>
 <li class="listitem">
-Analyze the process executable using a private sandboxed analysis system.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.code_signature.trusted</code>, and <code class="literal">process.command_line</code>. !{investigate{"description":"","label":"Process events by dump writer","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Observe and collect information about the following activities in both the sandbox and the alert subject host:
+Implication: escalate when the writer is unsigned, renamed, user-writable, launched with dump-specific arguments, or matches a "rundll32.exe" Dumpert DLL chain; reduce concern only when signer, path, arguments, and parent context all fit the same recognized diagnostic or IR workflow. Identity alone does not clear LSASS dumping.
 </li>
 <li class="listitem">
-Attempts to contact external domains and addresses.
+Does the parent chain and user context explain why this account created an LSASS dump?
 </li>
 <li class="listitem">
-Use the Elastic Defend network events to determine domains and addresses contacted by the subject process by filtering by the process' <code class="literal">process.entity_id</code>.
+Focus: <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">process.Ext.ancestry</code>, <code class="literal">user.id</code>, and <code class="literal">user.name</code>.
 </li>
 <li class="listitem">
-Examine the DNS cache for suspicious or anomalous entries.
+Implication: escalate when shells, script hosts, Office, browsers, remote-admin tooling, or an unexpected user launch the writer; lower suspicion only when lineage and <code class="literal">user.id</code> match the same recognized support, vendor, or forensic collection workflow.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve DNS Cache","query":"SELECT * FROM dns_cache"}}
+Did the same writer hide, move, archive, or copy the dump after creation?
 </li>
 <li class="listitem">
-Use the Elastic Defend registry events to examine registry keys accessed, modified, or created by the related processes in the process tree.
+Focus: same-writer file events for <code class="literal">host.id</code> and <code class="literal">process.entity_id</code>, especially <code class="literal">file.path</code>, <code class="literal">file.Ext.original.path</code>, <code class="literal">file.name</code>, and <code class="literal">file.size</code>. !{investigate{"description":"","label":"File events by dump writer","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Examine the host services for suspicious or anomalous entries.
+Implication: escalate when the dump is renamed, compressed, copied to a share, moved into hidden or user-controlled paths, or removed after staging; unresolved when same-writer file telemetry does not explain the dump&#8217;s handling.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve All Services","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services"}}
+Hint: use <code class="literal">file.Ext.original.path</code> on rename events to connect a detected dump name to a later archive, deceptive extension, or alternate staging path.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Services Running on User Accounts","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services WHERE\nNOT (user_account LIKE <em>%LocalSystem</em> OR user_account LIKE <em>%LocalService</em> OR user_account LIKE <em>%NetworkService</em> OR\nuser_account == null)\n"}}
+Did child processes use or clean up the dump?
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Service Unsigned Executables with Virustotal Link","query":"SELECT concat(<em><a href="https://www.virustotal.com/gui/file/" class="ulink" target="_top">https://www.virustotal.com/gui/file/</a></em>, sha1) AS VtLink, name, description, start_type, status, pid,\nservices.path FROM services JOIN authenticode ON services.path = authenticode.path OR services.module_path =\nauthenticode.path JOIN hash ON services.path = hash.path WHERE authenticode.result != <em>trusted</em>\n"}}
+Focus: child process events on <code class="literal">host.id</code> where <code class="literal">process.parent.entity_id</code> equals the writer <code class="literal">process.entity_id</code>, with <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, and <code class="literal">@timestamp</code>. !{investigate{"description":"","label":"Child processes by dump writer","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Retrieve the files' SHA-256 hash values using the PowerShell <code class="literal">Get-FileHash</code> cmdlet and search for the existence and reputation of the hashes in resources like VirusTotal, Hybrid-Analysis, CISCO Talos, Any.run, etc.
+Implication: escalate when archivers, copy tools, PowerShell, "rundll32.exe", dump parsers such as Mimikatz, or deletion commands follow the dump write; no child follow-on only narrows this path and does not rule out in-process or remote retrieval.
 </li>
 <li class="listitem">
-Investigate potentially compromised accounts. Analysts can do this by searching for login events (for example, 4624) to the target host after the registry modification.
+Does the host or session make the exposed credential material high impact?
+</li>
+<li class="listitem">
+Focus: <code class="literal">host.id</code>, <code class="literal">host.name</code>, <code class="literal">user.domain</code>, <code class="literal">user.id</code>, and <code class="literal">process.Ext.session_info.logon_type</code>; asset or host-role context when available.
+</li>
+<li class="listitem">
+Implication: raise urgency when the dump is on a server, jump host, domain controller, privileged admin workstation, or from an unexpected administrative session; a lab or diagnostics host lowers urgency only after artifact, writer, lineage, and handling evidence fit one recognized workflow.
+</li>
+<li class="listitem">
+If local evidence is suspicious or unresolved, do related alerts change scope?
+</li>
+<li class="listitem">
+Focus: related credential-access, staging, privilege, or lateral-movement alerts for <code class="literal">user.id</code>. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: compare related alerts for <code class="literal">host.id</code> separately to determine whether activity is isolated to this host or part of broader compromise. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden containment when the same user or host has related credential-access or post-compromise alerts; keep scope local when related alerts are quiet, but do not use quiet scoping to close unresolved dump evidence.
+</li>
+<li class="listitem">
+Escalate when artifact, writer, lineage, staging, child-process, host-role, or related-alert evidence shows deliberate LSASS collection or broader compromise; close only when those categories bind to one recognized troubleshooting, vendor support, or IR workflow for this host; preserve artifacts and escalate when evidence is mixed or incomplete.
 </li>
 </ul>
 </div>
@@ -209,7 +222,13 @@ Investigate potentially compromised accounts. Analysts can do this by searching 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This activity is unlikely to happen legitimately. Any activity that triggered the alert and is not inherently malicious must be monitored by the security team.
+Recognized crash analysis, vendor support, Task Manager troubleshooting, SQL Server diagnostics outside filtered paths, or IR/forensic acquisition can legitimately create LSASS dumps. Confirm by aligning identity (<code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.pe.original_file_name</code>), artifact (<code class="literal">file.path</code>, <code class="literal">file.name</code>, <code class="literal">file.size</code>, rename history), lineage (<code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>), actor (<code class="literal">user.id</code>, <code class="literal">user.domain</code>), and host (<code class="literal">host.id</code>, role) to the same exact workflow. If any dimension contradicts the workflow or telemetry cannot explain why LSASS was dumped, do not close on owner or change-record claims alone.
+</li>
+<li class="listitem">
+If workflow records or owner confirmation are unavailable, require telemetry-only stability for the same workflow pattern on the same <code class="literal">host.id</code> and <code class="literal">user.id</code> across prior alerts before considering closure; a first-time or one-off LSASS dump remains suspicious unless artifact, writer, lineage, and handling evidence are clean.
+</li>
+<li class="listitem">
+Build exceptions from the minimum confirmed pattern: <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.pe.original_file_name</code>, parent workflow, <code class="literal">file.path</code> pattern, <code class="literal">user.id</code>, and <code class="literal">host.id</code>. Avoid exceptions on <code class="literal">file.name</code>, <code class="literal">process.name</code>, LSASS naming, or host alone.
 </li>
 </ul>
 </div>
@@ -217,40 +236,22 @@ This activity is unlikely to happen legitimately. Any activity that triggered th
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse temporary containment and document the dump path, writer identity, signer, parent workflow, user, host role, and confirming workflow evidence. Create an exception only when the same workflow recurs consistently for the same scope.
 </li>
 <li class="listitem">
-Isolate the involved host to prevent further post-compromise behavior.
+If suspicious but unconfirmed, preserve the dump or case-safe copy, <code class="literal">file.path</code>, rename/archive paths, writer <code class="literal">process.entity_id</code>, <code class="literal">process.command_line</code>, parent chain, child-process records, <code class="literal">user.id</code>, and <code class="literal">host.id</code> before containment or cleanup. Apply reversible containment first, such as restricting outbound administrative access or suspending the writer when operationally safe. Escalate to host isolation or account containment only when staging, transfer, parsing, or related-alert evidence shows likely credential theft.
 </li>
 <li class="listitem">
-If the triage identified malware, search the environment for additional compromised hosts.
+If confirmed malicious, isolate the host when host role permits, or escalate with the preserved artifact set to the team that can contain it. Record artifacts before terminating processes or deleting dumps, archives, or tools.
 </li>
 <li class="listitem">
-Implement temporary network rules, procedures, and segmentation to contain the malware.
+Treat confirmed LSASS dump exposure on servers, jump hosts, domain controllers, or privileged administration assets as credential compromise risk. Scope which local, cached, service, or administrative credentials may have been present and begin credential hygiene for implicated accounts and systems.
 </li>
 <li class="listitem">
-Stop suspicious processes.
+Eradicate unauthorized dump utilities, scripts, archives, copied dumps, and persistence mechanisms found during the investigation, then remediate the privilege path or initial access route that allowed dump creation.
 </li>
 <li class="listitem">
-Immediately block the identified indicators of compromise (IoCs).
-</li>
-<li class="listitem">
-Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
-</li>
-<li class="listitem">
-Remove and block malicious artifacts identified during triage.
-</li>
-<li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
-</li>
-<li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-</li>
-<li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+After containment, hunt for the same writer paths, dump-file naming patterns, "rundll32.exe" Dumpert launch chains, and archive or copy commands across other hosts.
 </li>
 </ul>
 </div>
@@ -258,7 +259,31 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_678"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/lsass-memory-dump-creation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_397"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/lsass-memory-dump-creation.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-11-setup" class="ulink" target="_top">Sysmon Event ID 11 - File Create</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_704"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/lsass-memory-dump-creation.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

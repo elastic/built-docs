@@ -190,7 +190,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 318</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 319</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -202,40 +202,72 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1447"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-child-process-from-a-system-virtual-process.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1482"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-child-process-from-a-system-virtual-process.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Unusual Child Process from a System Virtual Process</strong></span></p>
-<p>In Windows environments, the System process (PID 4) is a critical component responsible for managing system-level operations. Adversaries may exploit this by injecting malicious code to spawn unauthorized child processes, evading detection. The detection rule identifies anomalies by flagging unexpected child processes originating from the System process, excluding known legitimate executables, thus highlighting potential threats.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the process details of the suspicious child process, including the executable path and command line arguments, to determine if it matches known malicious patterns or anomalies.
+Does the alert prove a real PID 4 child outside normal System-process exclusions?
 </li>
 <li class="listitem">
-Check the parent process (PID 4) to confirm it is indeed the System process and verify if any legitimate processes are excluded as per the rule (e.g., Registry, MemCompression, smss.exe).
+Focus: alert-local <code class="literal">process.parent.pid</code>, <code class="literal">process.parent.name</code>, <code class="literal">process.parent.executable</code>, <code class="literal">process.executable</code>, and <code class="literal">process.command_line</code>.
 </li>
 <li class="listitem">
-Investigate the timeline of events leading up to the process start event to identify any preceding suspicious activities or anomalies that might indicate process injection or exploitation.
+Implication: escalate when PID 4 spawned a non-standard user-mode child whose path or command does not fit a signed system helper; lower suspicion only when identity and context fit one recognized boot, servicing, driver, security, or virtualization helper.
 </li>
 <li class="listitem">
-Correlate the alert with other security telemetry from data sources like Microsoft Defender XDR or Sysmon to identify any related alerts or indicators of compromise.
+Is the child binary identity consistent with the claimed system component?
 </li>
 <li class="listitem">
-Examine the network activity associated with the suspicious process to detect any unauthorized connections or data exfiltration attempts.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.hash.sha256</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>.
 </li>
 <li class="listitem">
-Consult threat intelligence sources to determine if the process executable or its behavior is associated with known malware or threat actor techniques.
+Implication: escalate when path, hash, original file name, or signer conflicts with the claimed binary, especially from user-writable or unusual system paths; lower suspicion only when signer, hash history, and path converge on one recognized product.
 </li>
 <li class="listitem">
-If necessary, isolate the affected system to prevent further potential malicious activity and conduct a deeper forensic analysis.
+Does the child show drop, rename, or hollowing clues at start?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.Ext.relative_file_creation_time</code>, <code class="literal">process.Ext.relative_file_name_modify_time</code>, <code class="literal">process.Ext.created_suspended</code>, and <code class="literal">process.command_line</code>. !{investigate{"description":"","label":"File events for the child executable path","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"file.path","queryType":"phrase","value":"{{process.executable}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the executable is newly created or renamed, starts suspended, or invokes script/LOLBins; older stable timing and a product-consistent command lower concern but do not clear abnormal parentage alone.
+</li>
+<li class="listitem">
+Which account, session, and token context owned the child?
+</li>
+<li class="listitem">
+Focus: <code class="literal">user.id</code>, <code class="literal">process.Ext.authentication_id</code>, <code class="literal">process.Ext.session_info.logon_type</code>, and <code class="literal">process.Ext.token.integrity_level_name</code>.
+</li>
+<li class="listitem">
+Implication: escalate when a PID 4 child appears in an interactive, remote, or unexpected user context, or carries a token that does not fit the helper role; service or boot context lowers concern only when identity and behavior align.
+</li>
+<li class="listitem">
+Did the child launch follow-on processes that reveal intent?
+</li>
+<li class="listitem">
+Why: injected code can use a trusted or privileged process as a launcher, so the child process&#8217;s descendants may be the first visible operator action.
+</li>
+<li class="listitem">
+Focus: child process events from <code class="literal">process.entity_id</code>, reading <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, and <code class="literal">process.Ext.ancestry</code>. !{investigate{"description":"","label":"Process descendants spawned by the System-spawned child","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when descendants are scripting engines, admin tools, renamed binaries, or commands that do not fit the child identity; no descendants lowers urgency but does not clear abnormal identity, session, or timing.
+</li>
+<li class="listitem">
+If local evidence remains suspicious or unresolved, does the same child identity appear outside this host?
+</li>
+<li class="listitem">
+Focus: same-host related alerts plus process starts for <code class="literal">process.hash.sha256</code>, <code class="literal">process.executable</code>, and <code class="literal">process.code_signature.subject_name</code>. !{investigate{"description":"","label":"Process starts for the same child identity","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"},{"excluded":false,"field":"process.hash.sha256","queryType":"phrase","value":"{{process.hash.sha256}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"},{"excluded":false,"field":"process.executable","queryType":"phrase","value":"{{process.executable}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}} !{investigate{"description":"","label":"Alerts associated with the host in the last 48h","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when the same child identity, signer mismatch, or descendant pattern appears on unrelated hosts; keep localized only when confined to one clean workflow on one host.
+</li>
+<li class="listitem">
+Escalate on abnormal or contradictory parentage, identity, start-state, session/token, descendant, or scope evidence; close only when all support one signed workflow; preserve and escalate when mixed or incomplete.
 </li>
 </ul>
 </div>
@@ -243,19 +275,10 @@ If necessary, isolate the affected system to prevent further potential malicious
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate system maintenance tools may occasionally spawn child processes from the System process. Users should monitor and verify these tools and add them to the exclusion list if they are confirmed to be safe.
+Endpoint security, virtualization, hardware, driver, servicing, or boot workflows can legitimately spawn signed helpers from PID 4. Confirm <code class="literal">process.executable</code>, <code class="literal">process.hash.sha256</code>, <code class="literal">process.code_signature.subject_name</code>, session/token context, command line, start-state timing, and descendants all align with the same product or Microsoft servicing sequence. Use inventory or change records only after telemetry matches; if unavailable, require the same stable child identity and bounded descendant pattern to recur for the same <code class="literal">host.id</code> across prior alerts from this rule before exceptioning.
 </li>
 <li class="listitem">
-Some security software might create child processes from the System process as part of their normal operation. Identify these processes and configure exceptions to prevent unnecessary alerts.
-</li>
-<li class="listitem">
-Windows updates or system patches can sometimes trigger unexpected child processes. Ensure that these processes are part of a legitimate update cycle and exclude them if they are verified.
-</li>
-<li class="listitem">
-Custom scripts or administrative tools used for system management might also cause false positives. Review these scripts and tools, and if they are deemed safe, add them to the exclusion list.
-</li>
-<li class="listitem">
-Virtualization software or sandbox environments may mimic or interact with the System process in ways that trigger alerts. Validate these interactions and exclude them if they are part of normal operations.
+Before creating an exception, require recurrence for the same <code class="literal">host.id</code> plus stable <code class="literal">process.hash.sha256</code>, <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, and command or descendant pattern. Avoid exceptions on <code class="literal">process.parent.pid</code>, <code class="literal">process.name</code>, or the System parent condition alone.
 </li>
 </ul>
 </div>
@@ -263,25 +286,16 @@ Virtualization software or sandbox environments may mimic or interact with the S
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected system from the network to prevent further spread of the potential threat.
+If confirmed benign, reverse any temporary containment and document the signed maintenance, security, driver, virtualization, or servicing workflow that matched the child identity, session/token context, command line, and descendant process pattern. Create an exception only after the same bounded pattern recurs.
 </li>
 <li class="listitem">
-Terminate any suspicious child processes identified as originating from the System process (PID 4) that are not part of the known legitimate executables.
+If suspicious but unconfirmed, preserve the alert event, child and parent entity IDs, binary identity, command line, signer, session/token context, and descendant process events before containment. Apply reversible containment first; isolate only if the host role can tolerate it and the child or descendants show active suspicious behavior.
 </li>
 <li class="listitem">
-Conduct a thorough scan of the affected system using updated antivirus and anti-malware tools to identify and remove any injected malicious code.
+If confirmed malicious, isolate the host when process identity, session/token context, start-state clues, or descendant behavior establish unauthorized activity. Before termination, record the child and descendant process identifiers, command lines, hashes, signer details, and timeline evidence. Terminate the malicious child and descendants only after preservation, then remove only confirmed malicious artifacts or persistence changes identified during response and scope other hosts for the same child identity.
 </li>
 <li class="listitem">
-Review recent system changes and installed software to identify any unauthorized modifications or installations that could have facilitated the process injection.
-</li>
-<li class="listitem">
-Restore the system from a known good backup if malicious activity is confirmed and cannot be fully remediated through other means.
-</li>
-<li class="listitem">
-Escalate the incident to the security operations team for further investigation and to determine if additional systems are affected.
-</li>
-<li class="listitem">
-Implement enhanced monitoring and logging for the affected system and similar environments to detect any recurrence of the threat, focusing on process creation events and anomalies related to the System process.
+Post-incident hardening should determine why the System process spawned the child, review the responsible driver, service, security product, or exploit path, retain process telemetry needed for PID 4 parentage and descendant analysis, and document any adjacent blind spots for follow-up.
 </li>
 </ul>
 </div>
@@ -289,7 +303,34 @@ Implement enhanced monitoring and logging for the affected system and similar en
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1506"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-child-process-from-a-system-virtual-process.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_1041"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-child-process-from-a-system-virtual-process.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/audit-process-creation" class="ulink" target="_top">Windows Process Creation Logs</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1541"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-child-process-from-a-system-virtual-process.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

@@ -52,10 +52,10 @@
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-winlogbeat-*
+logs-windows.powershell*
 </li>
 <li class="listitem">
-logs-windows.powershell*
+winlogbeat-*
 </li>
 </ul>
 </div>
@@ -95,7 +95,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 112</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 113</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -107,138 +107,96 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1075"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-invoke-ninjacopy-script.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1108"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-invoke-ninjacopy-script.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating PowerShell Invoke-NinjaCopy script</strong></span></p>
-<p>This rule identifies PowerShell script block content referencing <code class="literal">Invoke-NinjaCopy</code> or related <code class="literal">Stealth*</code> helper functions. These functions are commonly used to perform direct volume file reads that can bypass normal file locking and access controls, enabling copies of sensitive credential stores (for example, <code class="literal">NTDS.dit</code> or registry hives like <code class="literal">SAM</code>, <code class="literal">SYSTEM</code>, and <code class="literal">SECURITY</code>). The presence of these strings can represent tool staging (definition/import) or active execution, so focus on determining intent, targeted artifacts, output locations, and surrounding activity.</p>
-<p><span class="strong strong"><strong>Key alert fields to review</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-<code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">user.id</code>: Account execution context for correlation, prioritization, and scoping.
-</li>
-<li class="listitem">
-<code class="literal">host.name</code>, <code class="literal">host.id</code>: Host execution context for correlation, prioritization, and scoping.
-</li>
-<li class="listitem">
-<code class="literal">powershell.file.script_block_text</code>: Script block content that matched the detection logic.
-</li>
-<li class="listitem">
-<code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, <code class="literal">powershell.total</code>: Script block metadata to pivot to other fragments or reconstruct full script content when split across multiple events.
-</li>
-<li class="listitem">
-<code class="literal">file.path</code>, <code class="literal">file.directory</code>, <code class="literal">file.name</code>: File-origin context when the script block is sourced from an on-disk file.
-</li>
-<li class="listitem">
-<code class="literal">powershell.file.script_block_length</code>: Script block length (size) context.
-</li>
-</ul>
-</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Triage the alert context:
+Does the alert-preserved script content show active NinjaCopy direct-volume access rather than inert reference text?
 </li>
 <li class="listitem">
-Identify the affected <code class="literal">host.name</code> / <code class="literal">host.id</code> and the account (<code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">user.id</code>).
+Focus: <code class="literal">powershell.file.script_block_text</code>, <code class="literal">powershell.file.script_block_length</code>, and file-backed <code class="literal">file.path</code> or <code class="literal">file.name</code>.
 </li>
 <li class="listitem">
-Determine whether the host is expected to store credential material (for example, a directory services server) and whether the user is expected to perform privileged maintenance on it.
+Implication: escalate sooner when the fragment shows <code class="literal">Invoke-NinjaCopy</code>, <code class="literal">StealthOpenFile</code>, <code class="literal">StealthReadFile</code>, credential-store targets, output destinations, or cleanup logic; lower concern only for inert example or recognized validation content that later recovery does not contradict.
 </li>
 <li class="listitem">
-Use the alert time (<code class="literal">@timestamp</code>) to define an initial correlation window and expand as needed.
+Does full script reconstruction reveal target, destination, or cleanup behavior that the matching fragment did not show?
 </li>
 <li class="listitem">
-Analyze <code class="literal">powershell.file.script_block_text</code> to understand what was staged or executed:
+Why: Script Block Logging can split one script across events; later fragments often contain output paths, loops, or cleanup logic that change urgency.
 </li>
 <li class="listitem">
-Determine whether the content is primarily function definitions/module code (tool load) or includes direct invocation of <code class="literal">Invoke-NinjaCopy</code> and <code class="literal">Stealth*</code> functions.
+Focus: reconstruct on <code class="literal">host.id</code> + <code class="literal">powershell.file.script_block_id</code>, ordering by <code class="literal">powershell.sequence</code> / <code class="literal">powershell.total</code>; read <code class="literal">powershell.file.script_block_text</code> for "-Path", "-ComputerName", "-LocalDestination", or "-RemoteDestination". !{investigate{"description":"","label":"Script block fragments for the same script","providers":[[{"excluded":false,"field":"powershell.file.script_block_id","queryType":"phrase","value":"{{powershell.file.script_block_id}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Extract any referenced source artifacts (for example, <code class="literal">NTDS.dit</code> or registry hives) and any destination/output file names, directories, or remote paths.
+Hint: if <code class="literal">powershell.sequence</code> is missing or never reaches <code class="literal">powershell.total</code>, record the gap before treating the script as understood.
 </li>
 <li class="listitem">
-Look for indicators of direct volume access, such as device/volume path handling, low-level file handle usage, delegates, or logic intended to bypass normal file locking.
+Implication: escalate when reconstruction adds remote targets, credential stores (<code class="literal">NTDS.dit</code>, <code class="literal">SAM</code>, <code class="literal">SYSTEM</code>, <code class="literal">SECURITY</code>), temp/share destinations, large copy buffers, archive paths, encoding, or delete-after-copy logic; lower concern when the full script is confirmed lab, forensic, or validation content with no hostile follow-on behavior.
 </li>
 <li class="listitem">
-Identify follow-on logic that would support collection and handling (copy loops, chunking, archiving, encoding, renaming, or cleanup).
+Does the script provenance and reconstructed target fit a recognized workflow?
 </li>
 <li class="listitem">
-Use script block metadata to reconstruct full content when logged in multiple parts:
+Focus: <code class="literal">file.path</code>, <code class="literal">file.name</code>, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and reconstructed "-Path", "-ComputerName", "-LocalDestination", or "-RemoteDestination".
 </li>
 <li class="listitem">
-Pivot on <code class="literal">powershell.file.script_block_id</code> for the same <code class="literal">host.id</code>.
+Hint: if <code class="literal">file.path</code> is absent, treat content as inline, generated, interactive, or remote; do not close on path absence alone.
 </li>
 <li class="listitem">
-Order fragments by <code class="literal">powershell.sequence</code> and confirm the final part count matches <code class="literal">powershell.total</code>.
+Implication: escalate when source is temp, downloads, or user-writable shares, or parameters name remote servers, <code class="literal">NTDS.dit</code>, registry hives, or staging destinations; lower concern when source, targets, and destinations match one recognized forensic, IR, lab, or validation workflow.
 </li>
 <li class="listitem">
-If parts are missing, treat the content as incomplete and continue scoping for additional fragments.
+Do surrounding script blocks from the same user and host show staging, retries, or variant logic?
 </li>
 <li class="listitem">
-Preserve the reconstructed content and the original fragment events for case evidence.
+Focus: manually search the same execution window for <code class="literal">user.id</code>, <code class="literal">host.id</code>, <code class="literal">powershell.file.script_block_text</code>, and adjacent <code class="literal">powershell.file.script_block_id</code> values.
 </li>
 <li class="listitem">
-Determine script provenance when file context is present:
+Hint: renamed wrappers may omit <code class="literal">Invoke-NinjaCopy</code>; still check <code class="literal">Stealth*</code> helpers and reconstructed target or destination values.
 </li>
 <li class="listitem">
-Review <code class="literal">file.path</code> / <code class="literal">file.name</code> (and <code class="literal">file.directory</code> if populated) to identify where the script was executed from.
+Implication: escalate when adjacent fragments show retries, renamed helpers, alternative raw-volume logic, output-file reuse, or follow-on compression and cleanup.
 </li>
 <li class="listitem">
-Treat execution from user-writable or temporary locations as higher risk, and scope for other executions originating from the same path or directory on the host.
+Can process telemetry recover the PowerShell process and explain how it was launched?
 </li>
 <li class="listitem">
-If file context is not present, consider interactive execution or remote delivery and expand scoping to other script blocks from the same <code class="literal">host.id</code> and <code class="literal">user.id</code> around the alert time.
+Focus: match the PowerShell PID on <code class="literal">host.id</code>, <code class="literal">process.pid</code>, and <code class="literal">@timestamp</code>; record <code class="literal">process.entity_id</code>, then interpret <code class="literal">process.command_line</code>, <code class="literal">process.parent.command_line</code>, and <code class="literal">process.Ext.token.integrity_level_name</code>. !{investigate{"description":"","label":"Process events for the PowerShell instance","providers":[[{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Scope for related PowerShell activity on the endpoint:
+Hint: recover the matching process via <code class="literal">host.id + process.pid</code> before using <code class="literal">process.*</code> or <code class="literal">process.parent.*</code>. If no process start event appears, expand the window because PowerShell can predate the script block; if still absent, bound file review to <code class="literal">host.id</code>, <code class="literal">user.id</code>, <code class="literal">process.pid</code>, and alert time.
 </li>
 <li class="listitem">
-Review additional Script Block Logging events for the same <code class="literal">host.id</code> and <code class="literal">user.id</code> around the alert time to identify staging, retries, and post-collection actions.
+Implication: escalate when recovery shows encoded commands, remote-admin launchers, Office/browser ancestry, or unexpected high-integrity execution; unresolved process recovery does not make direct-volume script content benign.
 </li>
 <li class="listitem">
-Use <code class="literal">powershell.file.script_block_length</code> to prioritize larger blocks that may contain full tooling, embedded functions, or post-processing logic.
+Do file events confirm copied credential stores or staging artifacts?
 </li>
 <li class="listitem">
-Prioritize script blocks that reference the same artifact names or output locations observed in the matched content.
+Focus: endpoint file events scoped to <code class="literal">host.id</code>, <code class="literal">process.pid</code>, and alert time; review <code class="literal">file.path</code>, <code class="literal">file.directory</code>, and <code class="literal">file.name</code>. !{investigate{"description":"","label":"File events for the PowerShell process","providers":[[{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Assess prevalence across the environment:
+Implication: escalate when file activity confirms copied hives, <code class="literal">NTDS.dit</code>, archives, or renamed staging files; missing file telemetry is unresolved, not benign.
 </li>
 <li class="listitem">
-Search for the same keywords within <code class="literal">powershell.file.script_block_text</code> (for example, <code class="literal">Invoke-NinjaCopy</code> and <code class="literal">StealthOpenFile</code>) across other hosts to identify broader deployment.
+If the local script, launch, or artifact answers remain suspicious or unresolved, is this script block isolated, or part of broader suspicious activity for the same user or host?
 </li>
 <li class="listitem">
-If <code class="literal">file.path</code> or <code class="literal">file.name</code> is present, use it to identify reuse of the same script file across multiple hosts or users.
+Focus: related <code class="literal">user.id</code> alerts for repeated credential access, execution, or post-compromise behavior. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Correlate with adjacent telemetry (if available) using <code class="literal">host.name</code>, <code class="literal">host.id</code>, <code class="literal">user.id</code>, and the alert time:
+Hint: compare <code class="literal">host.id</code> alerts for credential access, persistence, or staging. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Process activity to identify the PowerShell host process and the parent/source that initiated it, and whether execution aligns with expected administrative workflows.
+Implication: broaden scope when either view shows adjacent credential-access or post-compromise behavior; keep it local only when both are quiet and the local evidence fits one recognized workflow.
 </li>
 <li class="listitem">
-File activity to confirm whether copies of targeted artifacts were created, where they were written, and whether they were later archived or moved.
-</li>
-<li class="listitem">
-Network activity to identify outbound transfers or remote access shortly after script execution.
-</li>
-<li class="listitem">
-Authentication activity to identify suspicious logons, privilege use, or lateral movement following potential credential material collection.
-</li>
-<li class="listitem">
-Determine impact:
-</li>
-<li class="listitem">
-If the script indicates attempted access to directory services database files or registry hives, treat this as potential credential exposure until corroborating telemetry shows otherwise and respond accordingly.
+Escalate when script content, reconstruction, target parameters, launch context, or artifacts show unauthorized direct-volume access or credential-store targeting; close only when source path, targets, destinations, launch context, and artifacts align with one recognized forensic, IR, lab, or validation workflow; preserve and escalate if mixed or incomplete.
 </li>
 </ul>
 </div>
@@ -246,13 +204,10 @@ If the script indicates attempted access to directory services database files or
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Approved security testing, adversary emulation, or controlled red team activity that includes NinjaCopy-derived code.
+Recognized red-team, security-validation, forensic-acquisition, or IR workflows can legitimately include NinjaCopy-derived code. Confirm only when <code class="literal">powershell.file.script_block_text</code>, reconstructed targets/destinations, <code class="literal">file.path</code>, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and recovered launch context align with the same workflow. If records are unavailable, prior recurrence can support but not replace local telemetry proof; first occurrences stay candidate exceptions.
 </li>
 <li class="listitem">
-Authorized incident response, forensic acquisition, or recovery workflows that require copying locked system files.
-</li>
-<li class="listitem">
-Administrative tooling that embeds similar helper functions for troubleshooting or backup operations (uncommon); validate ownership, expected hosts, and change control.
+Build exceptions from <code class="literal">user.id</code>, <code class="literal">host.id</code>, stable <code class="literal">file.path</code>, recovered parent-launch pattern when available, and the <code class="literal">powershell.file.script_block_text</code> pattern. Avoid exceptions on "Invoke-NinjaCopy", <code class="literal">user.name</code>, or host alone.
 </li>
 </ul>
 </div>
@@ -260,52 +215,22 @@ Administrative tooling that embeds similar helper functions for troubleshooting 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-If the activity is not expected or cannot be attributed to an approved task:
+If confirmed benign, reverse containment and document the recognized workflow: <code class="literal">user.id</code>, <code class="literal">host.id</code>, <code class="literal">file.path</code>, <code class="literal">powershell.file.script_block_id</code>, recovered launch context, and reconstructed target or destination values. Create an exception only if the same pattern recurs across prior alerts.
 </li>
 <li class="listitem">
-Isolate the affected host to prevent additional collection, staging, or lateral movement.
+If suspicious but unconfirmed, preserve reconstructed <code class="literal">powershell.file.script_block_text</code>, <code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, <code class="literal">process.pid</code>, recovered launch context, target or destination values, and <code class="literal">file.path</code> before cleanup. Apply reversible containment first; escalate to host isolation only if copied credential artifacts, staging, or broader post-compromise activity appears.
 </li>
 <li class="listitem">
-Take immediate steps to prevent further use of the implicated account (<code class="literal">user.id</code>) until legitimacy is confirmed.
+If confirmed malicious, preserve the reconstructed script, launch context, targets, destinations, copied stores, and related alerts first. Then use reversible endpoint response to isolate the host when needed; if unavailable, escalate with the preserved artifact set to the team that can act. Record all evidence before terminating processes or deleting files.
 </li>
 <li class="listitem">
-Preserve and collect evidence:
+If "NTDS.dit", "SAM", "SYSTEM", or "SECURITY" targeting is confirmed with copied artifacts, follow the organization&#8217;s credential-exposure playbook and prioritize privileged-account hygiene.
 </li>
 <li class="listitem">
-Save the full <code class="literal">powershell.file.script_block_text</code> and reconstruct missing fragments using <code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, and <code class="literal">powershell.total</code> where applicable.
+Before eradicating, review related hosts for the same script pattern, <code class="literal">file.path</code> destinations, and recovered parent-launch pattern. Then remove unauthorized scripts, copied stores, archives, and persistence mechanisms and remediate the delivery path.
 </li>
 <li class="listitem">
-Record <code class="literal">@timestamp</code>, <code class="literal">host.name</code>, <code class="literal">host.id</code>, <code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">user.id</code>, and any available <code class="literal">file.path</code> / <code class="literal">file.name</code> context.
-</li>
-<li class="listitem">
-Identify any destination/output locations referenced in the script content and preserve related artifacts (copied files, archives, temporary staging).
-</li>
-<li class="listitem">
-Assess credential exposure and potential follow-on activity:
-</li>
-<li class="listitem">
-Use available endpoint telemetry to determine whether credential stores were successfully copied or staged.
-</li>
-<li class="listitem">
-If credential stores may have been accessed or copied, follow your credential containment process and prioritize rotation of impacted and privileged credentials.
-</li>
-<li class="listitem">
-Eradicate and scope:
-</li>
-<li class="listitem">
-Remove unauthorized scripts and supporting artifacts identified from <code class="literal">file.path</code> / <code class="literal">file.name</code> and from any output locations referenced in the script.
-</li>
-<li class="listitem">
-Hunt for additional NinjaCopy-related script blocks across endpoints and for subsequent suspicious authentication activity associated with the same user and host context.
-</li>
-<li class="listitem">
-Recover and harden:
-</li>
-<li class="listitem">
-Restore affected systems as needed and validate that no persistence remains.
-</li>
-<li class="listitem">
-Reduce recurrence by tightening administrative scripting governance for PowerShell (least privilege, controlled script deployment locations, and application control where feasible) and by restricting access to systems that store credential material.
+Post-incident hardening: restrict direct-volume-copy tooling to controlled acquisition hosts, retain PowerShell Script Block Logging and endpoint file/process telemetry, and document the recognized workflow pattern for future analysts.
 </li>
 </ul>
 </div>
@@ -313,7 +238,16 @@ Reduce recurrence by tightening administrative scripting governance for PowerShe
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1141"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-invoke-ninjacopy-script.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_735"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-invoke-ninjacopy-script.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>PowerShell Script Block Logging must be enabled to generate the events used by this rule (e.g., 4104).
+Setup instructions: <a href="https://ela.st/powershell-logging-setup" class="ulink" target="_top">https://ela.st/powershell-logging-setup</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1174"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/powershell-invoke-ninjacopy-script.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -324,11 +258,9 @@ Reduce recurrence by tightening administrative scripting governance for PowerShe
     "StealthCloseFileDelegate" or
     "StealthOpenFile" or
     "StealthCloseFile" or
-    "StealthReadFile" or
     "Invoke-NinjaCopy"
-   )
-  and not user.id : "S-1-5-18"
-  and not powershell.file.script_block_text : (
+   ) and
+  not powershell.file.script_block_text : (
     "sentinelbreakpoints" and "Set-PSBreakpoint" and "PowerSploitIndicators"
   )</pre>
 </div>

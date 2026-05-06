@@ -161,7 +161,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 3</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 4</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -173,28 +173,81 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1531"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-web-config-file-access.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1567"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-web-config-file-access.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Unusual Web Config File Access</strong></span></p>
-<p>Web.config files are crucial in Windows environments, storing sensitive data like database credentials and encryption keys. Adversaries target these files to extract information for attacks such as forging malicious requests or accessing databases. The detection rule identifies suspicious access patterns by monitoring file access events in specific directories, helping analysts spot potential credential theft or server exploitation attempts.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the user account associated with the access event to verify if the account has legitimate reasons to access the web.config file or if it might be compromised.
+What process opened which "web.config" path, and what secrets could it expose?
 </li>
 <li class="listitem">
-Analyze recent activity from the same user or IP address to identify any other suspicious behavior or access patterns that could indicate a broader security incident.
+Why: IIS, SharePoint, federation, or shared application configs can expose connection strings, MachineKey validation/decryption keys, and OAuth/SAML settings for ViewState forgery or credential pivots.
 </li>
 <li class="listitem">
-Review system logs and network traffic around the time of the alert to identify any related anomalies or signs of exploitation attempts, such as unusual database queries or web server requests.
+Focus: <code class="literal">file.path</code>, <code class="literal">process.entity_id</code>, <code class="literal">process.executable</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code>.
+</li>
+<li class="listitem">
+Implication: escalate when <code class="literal">file.path</code> points to SharePoint, federation, shared application, database-connected app, or another high-value IIS root; lower suspicion only when asset inventory or owner confirmation verifies a non-sensitive test path and later endpoint evidence stays inside that exact workflow.
+</li>
+<li class="listitem">
+Is the reader a recognized maintenance component or an anomalous binary?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.code_signature.trusted</code>, and <code class="literal">process.parent.executable</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the reader is unsigned, user-writable, renamed, or launched by a shell, script host, web worker, or remote-admin chain; lower suspicion when signer, path, command line, and parent match one recognized deployment, backup, scan, or web-maintenance component. Identity alone does not clear the read.
+</li>
+<li class="listitem">
+Do the account and lineage fit application maintenance on this host?
+</li>
+<li class="listitem">
+Focus: <code class="literal">user.id</code>, <code class="literal">user.name</code>, <code class="literal">process.parent.executable</code>, and <code class="literal">process.Ext.ancestry</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the account lacks a web-admin, service, deployment, backup, or response role, the service identity is unexpected, or the parent is a shell, script host, web worker, or remote-admin tool; lower suspicion when identity, parent, and ancestry match one recognized workflow.
+</li>
+<li class="listitem">
+Did the same process enumerate or stage config secrets beyond one bounded read?
+</li>
+<li class="listitem">
+Focus: same-process file events by <code class="literal">host.id</code> and <code class="literal">process.entity_id</code>: <code class="literal">event.action</code>, <code class="literal">file.path</code>, and <code class="literal">file.Ext.original.path</code>; look for sibling "web.config", "applicationHost.config", backup or copied configs, script output, web-shell files, or archives. !{investigate{"description":"","label":"File events for the same process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the process walks multiple site roots, opens server-wide config, reads backups, or writes collection/web-shell artifacts; lower suspicion when file activity stays inside one expected application path with no copy, archive, or helper-file staging.
+</li>
+<li class="listitem">
+Did direct child process activity show extraction, staging, or attempted use of exposed secrets?
+</li>
+<li class="listitem">
+Why: shell or encoded PowerShell chains can collect config contents, extract MachineKey material, or stage a web shell.
+</li>
+<li class="listitem">
+Focus: direct child process events on <code class="literal">host.id</code> where <code class="literal">process.parent.entity_id</code> matches <code class="literal">process.entity_id</code>: <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, and <code class="literal">process.parent.executable</code>. !{investigate{"description":"","label":"Direct child process events","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: expand manually from direct children into deeper descendants or the recovered process tree.
+</li>
+<li class="listitem">
+Implication: escalate when children or descendants include "cmd.exe", PowerShell, archive tools, database clients, web-shell writers, or commands referencing MachineKey, validation keys, decryption keys, config copies, or archive staging; absent child events lower immediate-use concern only if the reader, path, and file pattern are already bounded.
+</li>
+<li class="listitem">
+If local evidence is suspicious or unresolved, does endpoint telemetry show broader config access or staging by the same user or host?
+</li>
+<li class="listitem">
+Focus: same-<code class="literal">user.id</code> file events with <code class="literal">file.path</code> values showing additional config reads, copied configs, script output, web-shell files, or archives. !{investigate{"description":"","label":"File events for the same user","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if the user identity is shared or sparse, review same-<code class="literal">host.id</code> and <code class="literal">user.id</code> process events: <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, and <code class="literal">process.Ext.ancestry</code>. !{investigate{"description":"","label":"Process events for the same host and user","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: expand scope when either view shows additional config reads, collection artifacts, staged scripts, or suspicious administration around the read window; keep the case local only when broader endpoint telemetry shows no additional staging and local evidence fits one exact workflow.
+</li>
+<li class="listitem">
+Escalate when path, reader identity, lineage, same-process file behavior, child/descendant behavior, or related alerts indicate unauthorized config access or secret staging; close only when path, process, user/session, lineage, and same-process file evidence bind to one recognized maintenance, deployment, backup, or response workflow and outside confirmation verifies legitimacy telemetry cannot prove; preserve artifacts and escalate when evidence is mixed or incomplete.
 </li>
 </ul>
 </div>
@@ -202,19 +255,13 @@ Review system logs and network traffic around the time of the alert to identify 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Routine administrative tasks by IT personnel may trigger alerts when accessing web.config files for legitimate configuration updates. To manage this, create exceptions for known administrative accounts or scheduled maintenance windows.
+AV/EDR products may open web.config during scans. Confirm trusted-signed AV binary, SYSTEM or service account, and no same-process config copy, archive, or staging.
 </li>
 <li class="listitem">
-Automated backup processes that access web.config files can be mistaken for suspicious activity. Identify and exclude these processes by their specific user accounts or service names.
+Deployment, backup, scanning, or IR workflows can open web.config. Confirm <code class="literal">process.executable</code>, signer, parent, <code class="literal">file.path</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code> align with one workflow, with no config copy, archive, web-shell, shell descendants, or broader enumeration. Do not close on historical similarity alone.
 </li>
 <li class="listitem">
-Web application updates or deployments often involve accessing web.config files. Exclude these activities by correlating them with known deployment tools or scripts.
-</li>
-<li class="listitem">
-Security scanning tools that check web.config files for vulnerabilities might generate false positives. Whitelist these tools by their process names or IP addresses to prevent unnecessary alerts.
-</li>
-<li class="listitem">
-Monitoring or logging solutions that periodically read web.config files for audit purposes can be excluded by identifying their specific access patterns and excluding them from the rule.
+Build exceptions from <code class="literal">process.executable</code>, signer, parent, exact <code class="literal">file.path</code> root, <code class="literal">user.id</code>, and <code class="literal">host.id</code>. Avoid exceptions on "web.config" or host alone. For this new-terms rule, keep first-time cases as candidates until confirmed repeats show the same workflow.
 </li>
 </ul>
 </div>
@@ -222,25 +269,19 @@ Monitoring or logging solutions that periodically read web.config files for audi
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected server to prevent further unauthorized access and potential lateral movement within the network.
+If confirmed benign, reverse temporary containment and document which evidence proved the workflow: reader identity, parent lineage, <code class="literal">file.path</code>, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and same-process file pattern. Create an exception only for the independently confirmed minimum workflow, not for "web.config" broadly.
 </li>
 <li class="listitem">
-Conduct a thorough review of the web.config file to identify any unauthorized changes or access patterns, focusing on exposed credentials and keys.
+If suspicious but unconfirmed, preserve the alert details, process tree, same-process file timeline, targeted config path, suspected copies, archives, script output, web-shell files, and case notes before containment. Apply reversible containment first, such as heightened monitoring, temporary account restrictions, or temporary outbound controls; isolate the host only if copied config, web-shell creation, or secret reuse is confirmed and service impact is acceptable.
 </li>
 <li class="listitem">
-Rotate all credentials and keys found within the web.config file, including database connection strings and encryption keys, to mitigate the risk of credential theft.
+If confirmed malicious, preserve the reader process instance, parent chain, targeted <code class="literal">file.path</code>, copied or staged config, script output, web-shell files, archives, and case notes before containment. Then contain the affected host or account based on the unauthorized reader, high-value path, enumeration, staged artifacts, or descendant process evidence, and record those identifiers before terminating processes or deleting files.
 </li>
 <li class="listitem">
-Implement additional monitoring and logging for access to web.config files across all servers to detect future unauthorized access attempts.
+Rotate secrets exposed through the targeted <code class="literal">file.path</code>, including database credentials, MachineKey validation/decryption keys, OAuth/SAML secrets, and shared service-account credentials. Prioritize production, internet-facing, and shared application secrets.
 </li>
 <li class="listitem">
-Escalate the incident to the security operations center (SOC) for further investigation and correlation with other potential indicators of compromise.
-</li>
-<li class="listitem">
-Review and update firewall rules and access controls to ensure that only authorized users and applications can access sensitive directories containing web.config files.
-</li>
-<li class="listitem">
-Conduct a post-incident analysis to identify gaps in security controls and enhance detection capabilities for similar threats in the future.
+Eradicate only the webshells, scripts, copied configuration files, archives, persistence mechanisms, and altered application files identified during the investigation; restore affected application configuration from known-good state and remediate the initial access or privilege path that allowed the read.
 </li>
 </ul>
 </div>
@@ -248,7 +289,16 @@ Conduct a post-incident analysis to identify gaps in security controls and enhan
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1556"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-web-config-file-access.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_1115"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-web-config-file-access.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1592"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-web-config-file-access.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -257,7 +307,8 @@ Conduct a post-incident analysis to identify gaps in security controls and enhan
   not process.executable: (
         "C:\Program Files\Microsoft Security Client\MsMpEng.exe" or
         "C:\Program Files\Windows Defender Advanced Threat Protection\MsSense.exe" or
-        "C:\Windows\System32\MRT.exe"
+        "C:\Windows\System32\MRT.exe" or
+        "C:\Windows\System32\inetsrv\w3wp.exe"
   )</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
@@ -275,22 +326,6 @@ ID: TA0006
 </li>
 <li class="listitem">
 Reference URL: <a href="https://attack.mitre.org/tactics/TA0006/" class="ulink" target="_top">https://attack.mitre.org/tactics/TA0006/</a>
-</li>
-</ul>
-</div>
-</li>
-<li class="listitem">
-<p>Technique:</p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-Name: OS Credential Dumping
-</li>
-<li class="listitem">
-ID: T1003
-</li>
-<li class="listitem">
-Reference URL: <a href="https://attack.mitre.org/techniques/T1003/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1003/</a>
 </li>
 </ul>
 </div>

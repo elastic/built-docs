@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="mimikatz-memssp-log-file-detected"></a>Mimikatz Memssp Log File Detected</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/mimikatz-memssp-log-file-detected.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies the password log file from the default Mimikatz memssp module.</p>
+<p>Identifies the default Mimikatz MemSSP credential log file, mimilsa.log. This file is created after the misc::memssp module injects a malicious Security Support Provider into LSASS and can contain credentials from subsequent logons to the host.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -125,7 +125,7 @@ Data Source: Crowdstrike
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 417</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 418</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -137,38 +137,84 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_733"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/mimikatz-memssp-log-file-detected.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_759"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/mimikatz-memssp-log-file-detected.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Mimikatz Memssp Log File Detected</strong></span></p>
-<p><a href="https://github.com/gentilkiwi/mimikatz" class="ulink" target="_top">Mimikatz</a> is an open-source tool used to collect, decrypt, and/or use cached credentials. This tool is commonly abused by adversaries during the post-compromise stage where adversaries have gained an initial foothold on an endpoint and are looking to elevate privileges and seek out additional authentication objects such as tokens/hashes/credentials that can then be used to laterally move and pivot across a network.</p>
-<p>This rule looks for the creation of a file named <code class="literal">mimilsa.log</code>, which is generated when using the Mimikatz misc::memssp module, which injects a malicious Windows SSP to collect locally authenticated credentials, which includes the computer account password, running service credentials, and any accounts that logon.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the script execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+Is the alert-local event the default MemSSP credential log?
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Focus: <code class="literal">file.name</code>, <code class="literal">file.path</code>, <code class="literal">file.size</code>, <code class="literal">process.name</code>, and <code class="literal">process.executable</code>.
 </li>
 <li class="listitem">
-Investigate potentially compromised accounts. Analysts can do this by searching for login events (e.g., 4624) to the target host.
+Implication: escalate when "lsass.exe" creates "mimilsa.log", especially at "C:\Windows\System32\mimilsa.log" or a staging path; lower suspicion only when the same host, path, and process evidence align with an authorized red-team, responder, malware-analysis, or isolated lab run.
 </li>
 <li class="listitem">
-Retrieve and inspect the log file contents.
+Was the log handled like credential material after creation?
 </li>
 <li class="listitem">
-Search for DLL files created in the same location as the log file, and retrieve unsigned DLLs.
+Focus: file events on the same <code class="literal">host.id</code> around <code class="literal">file.path</code>, including <code class="literal">file.Ext.original.path</code>, <code class="literal">file.extension</code>, and the acting <code class="literal">process.executable</code>.
 </li>
 <li class="listitem">
-Use the PowerShell Get-FileHash cmdlet to get the SHA-256 hash value of these files.
+Implication: escalate when "mimilsa.log" is copied, renamed, archived, deleted, or paired with DLL/archive artifacts such as "mimilib.dll"; absence of follow-on file handling does not clear the alert because the log creation itself can mean credential capture.
 </li>
 <li class="listitem">
-Search for the existence of these files in resources like VirusTotal, Hybrid-Analysis, CISCO Talos, Any.run, etc.
+Hint: pivot first on the exact <code class="literal">file.path</code> and rename source path, then on companion "mimilib.dll" file events on the same host. !{investigate{"description":"","label":"MemSSP log and companion file events","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"file.path","queryType":"phrase","value":"{{file.path}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"file.Ext.original.path","queryType":"phrase","value":"{{file.path}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"file.name","queryType":"phrase","value":"mimilib.dll","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Identify the process that created the DLL using file creation events.
+Which process activity likely enabled MemSSP before LSASS wrote the log?
+</li>
+<li class="listitem">
+Focus: process starts on the same <code class="literal">host.id</code>: <code class="literal">process.command_line</code>, <code class="literal">process.executable</code>, <code class="literal">process.parent.executable</code>, <code class="literal">process.code_signature.trusted</code>, and <code class="literal">process.Ext.token.integrity_level_name</code>.
+</li>
+<li class="listitem">
+Implication: escalate when "misc::memssp", Mimikatz/Invoke-Mimikatz, "mimilib.dll", PowerShell, rundll32, regsvr32, unsigned helpers, or high-integrity/system tooling appear before the write; a clean process search narrows the launcher only if collection covers that window.
+</li>
+<li class="listitem">
+Hint: search backward from alert <code class="literal">@timestamp</code> for process starts containing "memssp", "mimikatz", "mimilib", or script/LOLBIN launchers on the same <code class="literal">host.id</code>. !{investigate{"description":"","label":"MemSSP-related process starts","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.command_line","queryType":"phrase","value":"<span class="strong strong"><strong>memssp</strong></span>","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.command_line","queryType":"phrase","value":"<span class="strong strong"><strong>mimikatz</strong></span>","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.command_line","queryType":"phrase","value":"<span class="strong strong"><strong>mimilib</strong></span>","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Which accounts may have been exposed after the log appeared?
+</li>
+<li class="listitem">
+Why: MemSSP records credentials from successful authentications after injection, so exposure depends on who logged on or unlocked the host after the write.
+</li>
+<li class="listitem">
+Focus: if Windows Security authentication logs are available, correlate same-<code class="literal">host.id</code> events after <code class="literal">@timestamp</code> with <code class="literal">winlog.event_id</code>, <code class="literal">winlog.event_data.TargetUserName</code>, <code class="literal">winlog.logon.type</code>, <code class="literal">source.ip</code>, and <code class="literal">winlog.event_data.AuthenticationPackageName</code>. !{investigate{"description":"","label":"Authentication events after MemSSP log creation","providers":[[{"excluded":false,"field":"event.code","queryType":"phrase","value":"4624","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}],[{"excluded":false,"field":"event.code","queryType":"phrase","value":"4776","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-24h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when privileged, service, machine, remote, or unexpected NTLM logons appear after creation; if policy permits secure collection, accounts visible in "mimilsa.log" are direct exposure evidence. Missing Windows Security telemetry or uncollected log content is unresolved, not benign.
+</li>
+<li class="listitem">
+Does the host show default in-memory MemSSP only, or a persistent SSP setup?
+</li>
+<li class="listitem">
+Why: persistent SSP changes survive a single process-memory event and widen eradication scope beyond the observed log file.
+</li>
+<li class="listitem">
+Focus: companion DLL file events (<code class="literal">file.path</code>, <code class="literal">file.extension</code>) and, when registry telemetry is available, LSA Security Packages changes in <code class="literal">registry.path</code> and <code class="literal">registry.data.strings</code>. !{investigate{"description":"","label":"MemSSP persistence file and registry evidence","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"file.name","queryType":"phrase","value":"mimilib.dll","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"registry","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"registry.path","queryType":"phrase","value":"<span class="strong strong"><strong>\Control\Lsa\Security Packages</strong></span>","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"registry","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"registry.data.strings","queryType":"phrase","value":"<span class="strong strong"><strong>mimilib</strong></span>","valueType":"string"}]],"relativeFrom":"now-24h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate persistence scope when "mimilib.dll" or an unfamiliar SSP DLL is placed for loading, or when LSA Security Packages registry data names it; if registry telemetry is unavailable, persistence is unresolved and must not be used to close.
+</li>
+<li class="listitem">
+If local evidence is suspicious or unresolved, what related alert activity changes scope?
+</li>
+<li class="listitem">
+Focus: related alerts for the same <code class="literal">host.id</code> in the last 48 hours covering delivery, privilege escalation, LSASS access, persistence, lateral movement, or additional credential access. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: use the <code class="literal">user.id</code> alert pivot only when a non-SYSTEM account from process or authentication evidence becomes part of scope. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden response when related alerts explain precursor access or follow-on use of captured credentials; keep scope local only when artifact, lineage, exposure, and persistence evidence remain bounded and no contradictory alerts appear.
+</li>
+<li class="listitem">
+Escalate when alert-local artifact, file handling, enabling process, credential exposure, persistence, or related alerts point to hostile MemSSP use; close only when telemetry and outside confirmation align with one authorized lab, red-team, or responder workflow; preserve and escalate when evidence is mixed, missing, or credential exposure cannot be scoped.
 </li>
 </ul>
 </div>
@@ -176,15 +222,10 @@ Identify the process that created the DLL using file creation events.
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This file name <code class="literal">mimilsa.log</code> should not legitimately be created.
+Normal Windows operation should not create "mimilsa.log". Authorized red-team, responder, malware-analysis, or isolated lab validation is the narrow benign path. Confirm by verifying alert-local <code class="literal">file.path</code>/<code class="literal">process.executable</code>, enabling <code class="literal">process.command_line</code>/<code class="literal">process.parent.executable</code>, file handling, asset identity, and any credential-exposure evidence all align with the same case; if any dimension contradicts it, do not close as benign.
 </li>
-</ul>
-</div>
-<p><span class="strong strong"><strong>Related rules</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
 <li class="listitem">
-Mimikatz Powershell Module Activity - ac96ceb8-4399-4191-af1d-4feeac1f1f46
+If exercise or case records are unavailable, do not exception a first occurrence; require a previously confirmed exercise or responder case plus the same stable pattern (<code class="literal">host.id</code>, <code class="literal">file.path</code>, <code class="literal">process.executable</code>, enabling <code class="literal">process.command_line</code>, and file-handling behavior) across prior alerts. Avoid exceptions on <code class="literal">file.name</code>, <code class="literal">process.name</code>, or host alone.
 </li>
 </ul>
 </div>
@@ -192,37 +233,22 @@ Mimikatz Powershell Module Activity - ac96ceb8-4399-4191-af1d-4feeac1f1f46
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse containment and document the exact exercise or responder case with <code class="literal">host.id</code>, <code class="literal">file.path</code>, <code class="literal">process.executable</code>, enabling command/parent, and file-handling evidence. Create an exception only for the recurring same pattern.
 </li>
 <li class="listitem">
-Isolate the involved hosts to prevent further post-compromise behavior.
+If suspicious but unconfirmed, preserve evidence before containment: export the alert, surrounding process/file events, related alerts, any available authentication events, and securely collect "mimilsa.log" as credential material if policy permits. Capture volatile LSASS state or memory through approved IR tooling before rebooting because restart can remove in-memory evidence.
 </li>
 <li class="listitem">
-If the host is a Domain Controller (DC):
+Then apply reversible containment based on scope: restrict network access for the affected <code class="literal">host.id</code>, heighten monitoring, and scrutinize accounts identified in "mimilsa.log" or post-write logons. Avoid deleting the log, terminating suspected tooling, or rebooting until preservation is complete.
 </li>
 <li class="listitem">
-Activate your incident response plan for total Active Directory compromise.
+If confirmed malicious, isolate or rebuild the host as host criticality allows; remove "mimilsa.log", companion DLLs, archives, and any persistent SSP configuration discovered; terminate tooling only after evidence capture; then reboot or rebuild to clear injected SSP state.
 </li>
 <li class="listitem">
-Review the privileges assigned to users that can access the DCs to ensure that the least privilege principle is being followed and reduce the attack surface.
+Reset or rotate credentials for privileged, service, machine, and lateral-movement-relevant accounts shown in the log content or post-write authentication evidence; review related hosts/accounts before broad resets when exposure is uncertain.
 </li>
 <li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
-</li>
-<li class="listitem">
-Reboot the host to remove the injected SSP from memory.
-</li>
-<li class="listitem">
-Reimage the host operating system or restore compromised files to clean versions.
-</li>
-<li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-</li>
-<li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Post-incident hardening: reduce interactive logons to high-value hosts, restrict debug and LSASS access, review LSA protection and allowed SSP configuration where compatible, monitor for "mimilsa.log" and "mimilib.dll", and document telemetry gaps that limited credential-exposure or persistence scoping.
 </li>
 </ul>
 </div>
@@ -230,19 +256,34 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_372"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/mimikatz-memssp-log-file-detected.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_471"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/mimikatz-memssp-log-file-detected.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
-<p>If enabling an EQL rule on a non-elastic-agent index (such as beats) for versions &lt;8.2,
-events will not define <code class="literal">event.ingested</code> and default fallback for EQL rules was not added until version 8.2.
-Hence for this rule to work effectively, users will need to add a custom ingest pipeline to populate
-<code class="literal">event.ingested</code> to @timestamp.
-For more details on adding a custom ingest pipeline refer - <a href="/guide/en/fleet/current/data-streams-pipeline-tutorial.html" class="ulink" target="_top">https://www.elastic.co/guide/en/fleet/current/data-streams-pipeline-tutorial.html</a></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-11-setup" class="ulink" target="_top">Sysmon Event ID 11 - File Create</a>
+</li>
+</ul>
+</div>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_790"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/mimikatz-memssp-log-file-detected.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_816"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/mimikatz-memssp-log-file-detected.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

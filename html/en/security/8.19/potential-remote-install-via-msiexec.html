@@ -196,7 +196,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 4</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 5</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -208,37 +208,66 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1027"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-install-via-msiexec.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1059"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-install-via-msiexec.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Potential Remote Install via MsiExec</strong></span></p>
-<p>MsiExec is a Windows utility for installing, maintaining, and removing software. Adversaries exploit it to execute malicious payloads by disguising them as legitimate installations. The detection rule identifies suspicious child processes spawned by MsiExec that initiate network activity, which is atypical for standard installations. By focusing on unusual executable paths and network connections, the rule helps uncover potential misuse indicative of malware delivery or initial access attempts.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the process tree to identify the parent and child processes of the suspicious MsiExec activity, focusing on the process.entity_id and process.parent.name fields to understand the execution flow.
+What remote installer behavior is preserved in the alert?
 </li>
 <li class="listitem">
-Examine the process.executable path to determine if it deviates from typical installation paths, as specified in the query, to assess the likelihood of malicious activity.
+Focus: <code class="literal">process.command_line</code>, <code class="literal">process.parent.name</code>, and <code class="literal">process.parent.command_line</code>, especially quiet install or patch switches, the remote MSI or <code class="literal">TRANSFORMS=</code> source, and HTTP, raw-IP, public-hosting, or recognized distribution sources.
 </li>
 <li class="listitem">
-Analyze the network or DNS activity associated with the process by reviewing the event.category field for network or dns events, and correlate these with the process.name to identify any unusual or unauthorized connections.
+Implication: escalate for quiet remote installs, remote MSTs, or patches from suspicious infrastructure under interactive or script-launcher parents; lower concern only when the command, source, and parent match one recurring deployment, repair, or onboarding pattern.
 </li>
 <li class="listitem">
-Check the process.args for any unusual or suspicious command-line arguments that might indicate an attempt to execute malicious payloads or scripts.
+Is the msiexec binary identity expected for Windows Installer?
 </li>
 <li class="listitem">
-Investigate the host&#8217;s recent activity and security logs to identify any other indicators of compromise or related suspicious behavior, leveraging data sources like Elastic Defend, Sysmon, or SentinelOne as mentioned in the rule&#8217;s tags.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.code_signature.trusted</code>, and <code class="literal">process.hash.sha256</code>.
 </li>
 <li class="listitem">
-Assess the risk and impact of the detected activity by considering the context of the alert, such as the host&#8217;s role in the network and any potential data exposure or system compromise.
+Implication: escalate faster when msiexec is renamed, unsigned, untrusted, newly seen, or in a user-writable path; trusted Microsoft identity only confirms the proxy binary, not the remote install.
+</li>
+<li class="listitem">
+Does the parent and ancestry explain why msiexec ran?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">process.Ext.ancestry</code>, <code class="literal">user.id</code>, and the affected host.
+</li>
+<li class="listitem">
+Implication: escalate when browser-adjacent, script, shell, WMI, or unusual interactive ancestry invokes the remote package without a stable workflow; lower concern when the parent, user, and host pattern fits a recognized management or support path.
+</li>
+<li class="listitem">
+Do process events show payload execution after the installer starts?
+</li>
+<li class="listitem">
+Focus: child starts on the same <code class="literal">host.id</code> where <code class="literal">process.parent.entity_id</code> matches <code class="literal">process.entity_id</code>, checking child <code class="literal">process.command_line</code>, <code class="literal">process.executable</code>, and <code class="literal">process.hash.sha256</code>. !{investigate{"description":"","label":"Child process activity from msiexec","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: use <code class="literal">host.id</code> + <code class="literal">process.pid</code> + tight alert window only when entity linkage is unavailable, and treat the result as weaker.
+</li>
+<li class="listitem">
+Implication: escalate when msiexec spawns shells, script interpreters, LOLBins, scheduled-task tools, or user-space binaries tied to the remote package; lower concern when follow-on activity stays inside the same signed product install flow.
+</li>
+<li class="listitem">
+Does the remote source and workflow context fit one legitimate package path?
+</li>
+<li class="listitem">
+Focus: URL, host, package name, or remote <code class="literal">TRANSFORMS=</code> in <code class="literal">process.command_line</code>, plus <code class="literal">process.parent.executable</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code> context for that source.
+</li>
+<li class="listitem">
+Hint: if network or file telemetry exists, correlate destination or artifact evidence with <code class="literal">host.id</code> + <code class="literal">process.entity_id</code>; use <code class="literal">host.id</code> + <code class="literal">process.pid</code> + tight alert window only without entity linkage. Missing file or network telemetry is unresolved, not benign, and does not block escalation when process evidence is strong. !{investigate{"description":"","label":"File or network activity by msiexec","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the source is raw IPs, public file hosting, look-alike vendors, temp/download staging, or infrastructure unrelated to the expected product; lower concern when source, launcher, user-host scope, and recovered corroboration fit one internal distribution point or vendor service.
+</li>
+<li class="listitem">
+Escalate on suspicious quiet-install intent, mismatched identity or lineage, unfit package source, or payload child execution; close only when process evidence and recovered corroboration align to one exact deployment, repair, or support workflow; preserve and escalate when evidence is mixed or visibility is incomplete. Use same-user or same-host related alerts after escalation only to size scope, not prove the local alert. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}} !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
 </li>
 </ul>
 </div>
@@ -246,19 +275,13 @@ Assess the risk and impact of the detected activity by considering the context o
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate software installations or updates may trigger the rule if they involve network activity. Users can create exceptions for known software update processes that are verified as safe.
+First check whether <code class="literal">http:</code> or <code class="literal">https:</code> follows <code class="literal">/i</code> or <code class="literal">/p</code> directly (remote source&#8201;&#8212;&#8201;investigate) or sits inside a <code class="literal">PROPERTY=</code> value while the MSI source is local or relative (configuration URL&#8201;&#8212;&#8201;likely benign). The rule excludes local <code class="literal">C:\</code> sources after <code class="literal">/i</code>; UNC, relative-path, or other local sources with property URLs need manual confirmation or customer-side exceptions.
 </li>
 <li class="listitem">
-Custom enterprise applications that use MsiExec for deployment and require network access might be flagged. Identify these applications and exclude their specific executable paths from the rule.
+Legitimate deployment, patching, or agent-repair workflows can use quiet remote msiexec. Confirm when <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code> align to one recurring product path. Do not close on a vendor-looking URL, signed msiexec, or familiar parent name alone.
 </li>
 <li class="listitem">
-Automated deployment tools that utilize MsiExec and perform network operations could be misidentified. Review these tools and whitelist their processes to prevent false alerts.
-</li>
-<li class="listitem">
-Security software or system management tools that leverage MsiExec for legitimate purposes may cause false positives. Confirm these tools' activities and add them to an exclusion list if necessary.
-</li>
-<li class="listitem">
-Regularly review and update the exclusion list to ensure it reflects the current environment and any new legitimate software that may interact with MsiExec.
+Build exceptions from <code class="literal">process.parent.executable</code>, package source pattern in <code class="literal">process.command_line</code>, and stable <code class="literal">host.id</code> or <code class="literal">user.id</code> cohort. Avoid exceptions on msiexec, <code class="literal">process.parent.name</code>, domain suffix, or <code class="literal">user.name</code> alone.
 </li>
 </ul>
 </div>
@@ -266,25 +289,16 @@ Regularly review and update the exclusion list to ensure it reflects the current
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Isolate the affected system from the network immediately to prevent further malicious activity and lateral movement.
+If confirmed benign, reverse any temporary containment and record the installer command, remote package source, parent launcher, signer/hash identity, affected <code class="literal">user.id</code>, affected <code class="literal">host.id</code>, and any recovered destination or artifact pattern. Create an exception only after the same workflow recurs across prior alerts from this rule.
 </li>
 <li class="listitem">
-Terminate the suspicious child process spawned by MsiExec to halt any ongoing malicious operations.
+If suspicious but unconfirmed, preserve the alert record, process tree, <code class="literal">process.entity_id</code> values, installer command line, remote URL or <code class="literal">TRANSFORMS=</code> value, parent command line, child process records, and any recovered package, destination, or provenance artifacts before containment. Apply reversible controls only when command, parent, or child-process evidence suggests active delivery; otherwise keep evidence collection open rather than starting cleanup.
 </li>
 <li class="listitem">
-Conduct a thorough scan of the affected system using updated antivirus or endpoint detection and response (EDR) tools to identify and remove any malicious payloads or remnants.
+If confirmed malicious, preserve process identifiers, command lines, recovered packages, and destination indicators before isolating the host, terminating msiexec or follow-on payloads, blocking confirmed indicators, or removing staged installers, extracted payloads, persistence changes, or scheduled-task material tied to the chain.
 </li>
 <li class="listitem">
-Review and analyze the process execution and network activity logs to identify any additional indicators of compromise (IOCs) and assess the scope of the intrusion.
-</li>
-<li class="listitem">
-Reset credentials and review access permissions for any accounts that may have been compromised or used during the attack.
-</li>
-<li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to determine if additional systems are affected.
-</li>
-<li class="listitem">
-Implement enhanced monitoring and detection rules to identify similar threats in the future, focusing on unusual MsiExec activity and network connections.
+Post-incident hardening: close the delivery path that introduced the remote package, restrict msiexec remote-install use to controlled deployment tooling where feasible, review hosts where installer-elevation policy would increase impact, and document adjacent variants such as remote <code class="literal">TRANSFORMS=</code> abuse or DLL registration through <code class="literal">/y</code> and <code class="literal">/z</code>.
 </li>
 </ul>
 </div>
@@ -292,17 +306,54 @@ Implement enhanced monitoring and detection rules to identify similar threats in
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1091"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-install-via-msiexec.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_698"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-install-via-msiexec.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/audit-process-creation" class="ulink" target="_top">Windows Process Creation Logs</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1123"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-install-via-msiexec.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-js">process where host.os.type == "windows" and event.type == "start" and
-  process.name : "msiexec.exe" and process.args : ("-i*", "/i*", "-p*", "/p*") and process.command_line : "*http*" and
+  process.name : "msiexec.exe" and process.args : ("-i*", "/i*", "-p*", "/p*") and
+  process.command_line : ("*http:*", "*https:*") and
   process.args : ("/qn", "-qn", "-q", "/q", "/quiet") and
-  process.parent.name : ("sihost.exe", "explorer.exe", "cmd.exe", "wscript.exe", "mshta.exe", "powershell.exe", "wmiprvse.exe", "pcalua.exe", "forfiles.exe", "conhost.exe") and
-  not process.command_line : ("*--set-server=*", "*UPGRADEADD=*" , "*--url=*",
-                              "*USESERVERCONFIG=*", "*RCTENTERPRISESERVER=*", "*app.ninjarmm.com*", "*zoom.us/client*",
-                              "*SUPPORTSERVERSTSURI=*", "*START_URL=*", "*AUTOCONFIG=*", "*awscli.amazonaws.com*")</pre>
+  process.parent.name : (
+    "sihost.exe", "explorer.exe", "cmd.exe", "wscript.exe", "mshta.exe",
+    "powershell.exe", "wmiprvse.exe", "pcalua.exe", "forfiles.exe", "conhost.exe"
+  ) and
+
+  not process.command_line : (
+        "*--set-server=*", "*UPGRADEADD=*" , "*--url=*", "*USESERVERCONFIG=*", "*RCTENTERPRISESERVER=*",
+        "*app.ninjarmm.com*", "*zoom.us/client*", "*SUPPORTSERVERSTSURI=*", "*START_URL=*", "*AUTOCONFIG=*",
+        "*awscli.amazonaws.com*", "*/i \"C:*", "*/i C:\\*"
+  )</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

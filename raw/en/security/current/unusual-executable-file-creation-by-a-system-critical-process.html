@@ -121,7 +121,7 @@ Data Source: Crowdstrike
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 317</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 318</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -133,71 +133,81 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1458"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-executable-file-creation-by-a-system-critical-process.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1493"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-executable-file-creation-by-a-system-critical-process.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Unusual Executable File Creation by a System Critical Process</strong></span></p>
-<p>Windows internal/system processes have some characteristics that can be used to spot suspicious activities. One of these characteristics is file operations.</p>
-<p>This rule looks for the creation of executable files done by system-critical processes. This can indicate the exploitation of a vulnerability or a malicious process masquerading as a system-critical process.</p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Note</strong></span>:
-This investigation guide uses the <a href="/guide/en/security/current/invest-guide-run-osquery.html" class="ulink" target="_top">Osquery Markdown Plugin</a> introduced in Elastic Stack version 8.5.0. Older Elastic Stack versions will display unrendered Markdown in this guide.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the process execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+What exact critical-process write did the alert preserve?
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Focus: <code class="literal">process.name</code>, <code class="literal">process.executable</code>, <code class="literal">file.path</code>, <code class="literal">file.extension</code>, and <code class="literal">event.action</code>; writer should match a critical-process name in the query.
 </li>
 <li class="listitem">
-Investigate any abnormal behavior by the subject process such as network connections, registry or file modifications, and any spawned child processes.
+Implication: escalate faster when it writes an EXE or DLL in user-writable, startup, temp, or other non-servicing paths; lower concern only for protected OS servicing paths or a repaired vendor product tree.
 </li>
 <li class="listitem">
-Examine the host for derived artifacts that indicate suspicious activities:
+Is the writer the expected protected Windows binary, not a masquerade or tampered copy?
 </li>
 <li class="listitem">
-Analyze the process executable using a private sandboxed analysis system.
+Why: exploitation for defense evasion can preserve a genuine protected-process identity while changing what that process writes.
 </li>
 <li class="listitem">
-Observe and collect information about the following activities in both the sandbox and the alert subject host:
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>; recover <code class="literal">process.hash.sha256</code> and <code class="literal">process.pe.original_file_name</code> from matching process-start events on <code class="literal">host.id</code> and <code class="literal">process.entity_id</code> when absent. !{investigate{"description":"","label":"Process start for the writing process","providers":[[{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Attempts to contact external domains and addresses.
+Implication: escalate when path, signer, hash, or original file name conflicts with the expected critical process; if identity is the expected Microsoft binary, continue because exploitation can still force a genuine process to write attacker-controlled content.
 </li>
 <li class="listitem">
-Use the Elastic Defend network events to determine domains and addresses contacted by the subject process by filtering by the process' <code class="literal">process.entity_id</code>.
+What launch and user context led to the write?
 </li>
 <li class="listitem">
-Examine the DNS cache for suspicious or anomalous entries.
+Why: client-side or service exploitation often appears as Office, browser, script, archive, or user-profile ancestry before an abnormal critical-process file write.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve DNS Cache","query":"SELECT * FROM dns_cache"}}
+Focus: matching process-start event: <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">process.Ext.ancestry</code>, and <code class="literal">user.id</code>.
 </li>
 <li class="listitem">
-Use the Elastic Defend registry events to examine registry keys accessed, modified, or created by the related processes in the process tree.
+Implication: escalate when the chain traces to Office, browser, script, archive, LOLBin, or user-profile activity before the critical-process write; lower concern only when parentage and user context align with OS servicing or one bounded product repair.
 </li>
 <li class="listitem">
-Examine the host services for suspicious or anomalous entries.
+Does the written artifact look staged or renamed rather than serviced?
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve All Services","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services"}}
+Focus: <code class="literal">file.path</code>, <code class="literal">file.Ext.original.path</code>, <code class="literal">file.Ext.original.extension</code>, <code class="literal">file.Ext.header_bytes</code>, and <code class="literal">file.Ext.windows.zone_identifier</code>. !{investigate{"description":"","label":"File activity for the written path on this host","providers":[[{"excluded":false,"field":"file.path","queryType":"phrase","value":"{{file.path}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Services Running on User Accounts","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services WHERE\nNOT (user_account LIKE <em>%LocalSystem</em> OR user_account LIKE <em>%LocalService</em> OR user_account LIKE <em>%NetworkService</em> OR\nuser_account == null)\n"}}
+Implication: escalate when content is renamed into an executable extension, lands in a deceptive or writable path, carries internet provenance, or header bytes do not fit the file name.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Service Unsigned Executables with Virustotal Link","query":"SELECT concat(<em><a href="https://www.virustotal.com/gui/file/" class="ulink" target="_top">https://www.virustotal.com/gui/file/</a></em>, sha1) AS VtLink, name, description, start_type, status, pid,\nservices.path FROM services JOIN authenticode ON services.path = authenticode.path OR services.module_path =\nauthenticode.path JOIN hash ON services.path = hash.path WHERE authenticode.result != <em>trusted</em>\n"}}
+Did the written file become an execution target or command-line dependency?
 </li>
 <li class="listitem">
-Retrieve the files' SHA-256 hash values using the PowerShell <code class="literal">Get-FileHash</code> cmdlet and search for the existence and reputation of the hashes in resources like VirusTotal, Hybrid-Analysis, CISCO Talos, Any.run, etc.
+Focus: same-writer file activity on <code class="literal">host.id</code> and <code class="literal">process.entity_id</code>, plus later process starts from <code class="literal">file.path</code>. !{investigate{"description":"","label":"Events for the writing process on this host","providers":[[{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Investigate potentially compromised accounts. Analysts can do this by searching for login events (for example, 4624) to the target host after the registry modification.
+Hint: for EXE reuse, inspect later process starts where <code class="literal">process.executable</code> equals <code class="literal">file.path</code>; for DLL writes, search <code class="literal">process.command_line</code> for the path and treat a quiet result as unresolved, not benign. !{investigate{"description":"","label":"Process starts from the written file path on this host","providers":[[{"excluded":false,"field":"process.executable","queryType":"phrase","value":"{{file.path}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"}],[{"excluded":false,"field":"process.command_line","queryType":"phrase","value":"{{file.path}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the artifact executes or is referenced by follow-on commands; if the same-process file view is quiet, use the EXE or DLL recovery cue before lowering urgency.
+</li>
+<li class="listitem">
+If local evidence remains suspicious or unresolved, does the artifact pattern recur on this host or other hosts?
+</li>
+<li class="listitem">
+Focus: related alerts for the same written <code class="literal">file.path</code>; add writer <code class="literal">process.executable</code> only after alert or identity confirms it. !{investigate{"description":"","label":"Alerts associated with the written file path","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"file.path","queryType":"phrase","value":"{{file.path}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: compare related alerts for the same <code class="literal">host.id</code> and <code class="literal">host.name</code> before broadening to other assets. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when the same artifact path, writer identity, or follow-on execution appears on multiple hosts or repeats on the same host; localize when evidence stays limited to one short-lived, well-bounded servicing chain.
+</li>
+<li class="listitem">
+Escalate for abnormal identity, exploit-like lineage, staged content, execution/reference, or recurrence; close only when identity, lineage, artifact, and scope bind one servicing or vendor-maintenance workflow with no contradictions; preserve artifacts and escalate when evidence stays mixed or incomplete.
 </li>
 </ul>
 </div>
@@ -205,7 +215,10 @@ Investigate potentially compromised accounts. Analysts can do this by searching 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This activity is unlikely to happen legitimately. Benign true positives (B-TPs) can be added as exceptions if necessary.
+Windows servicing/component repair or product/security-agent upgrade can replace binaries in protected OS or vendor paths. Confirm writer identity (<code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.hash.sha256</code>, <code class="literal">process.pe.original_file_name</code>), lineage (<code class="literal">process.parent.executable</code>, <code class="literal">process.Ext.ancestry</code>), and <code class="literal">file.path</code> all match one servicing or product workflow on the same <code class="literal">host.id</code>; for vendor repair, also require the path to stay inside the vendor directory and no user-writable staging, staged rename, or later execution from that path. If maintenance records are unavailable, use prior alerts from this rule for the same host and require the same protected path pattern without staged rename or later execution.
+</li>
+<li class="listitem">
+Before creating an exception, require recurrence for the same <code class="literal">host.id</code> plus stable <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, parent context, and protected <code class="literal">file.path</code> pattern. Avoid exceptions on <code class="literal">process.name</code>, <code class="literal">file.extension</code>, or the whole critical-process list alone.
 </li>
 </ul>
 </div>
@@ -213,37 +226,16 @@ This activity is unlikely to happen legitimately. Benign true positives (B-TPs) 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse temporary containment and document the servicing or vendor-maintenance evidence: writer identity, parent context, written path, content indicators, and host scope. Create an exception only after the bounded pattern recurs.
 </li>
 <li class="listitem">
-Isolate the involved host to prevent further post-compromise behavior.
+If suspicious but unconfirmed, export the alert file event and matching process-start event, preserve a copy of the written file when safe, and record the writer <code class="literal">process.entity_id</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, <code class="literal">file.path</code>, and recovered <code class="literal">process.hash.sha256</code> before containment. Apply reversible containment first, such as heightened monitoring or temporary host isolation when host criticality allows, and avoid deleting the artifact until scope is clearer.
 </li>
 <li class="listitem">
-If the triage identified malware, search the environment for additional compromised hosts.
+If confirmed malicious, isolate the host when writer identity, lineage, artifact, or execution evidence establishes unauthorized activity. Record <code class="literal">process.entity_id</code>, <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">file.path</code>, and recovered hashes before killing processes or deleting files; then terminate the offending process if still active and quarantine only the executable or DLL artifacts identified during investigation.
 </li>
 <li class="listitem">
-Implement temporary network rules, procedures, and segmentation to contain the malware.
-</li>
-<li class="listitem">
-Stop suspicious processes.
-</li>
-<li class="listitem">
-Immediately block the identified indicators of compromise (IoCs).
-</li>
-<li class="listitem">
-Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
-</li>
-<li class="listitem">
-Remove and block malicious artifacts identified during triage.
-</li>
-<li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-</li>
-<li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Post-incident hardening should verify why a critical process could write executable content, restore affected files from trusted media when replacement occurred, retain process and file telemetry that supported the case, and document artifact-path or lineage variants in the incident record for future triage.
 </li>
 </ul>
 </div>
@@ -251,7 +243,34 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1514"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-executable-file-creation-by-a-system-critical-process.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_1049"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-executable-file-creation-by-a-system-critical-process.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-11-setup" class="ulink" target="_top">Sysmon Event ID 11 - File Create</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1549"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-executable-file-creation-by-a-system-critical-process.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -265,7 +284,21 @@ Using the incident response data, update logging and audit policies to improve t
                   "lsass.exe",
                   "winlogon.exe",
                   "userinit.exe",
-                  "LogonUI.exe")</pre>
+                  "LogonUI.exe") and
+  not (
+    process.name : "smss.exe" and
+    file.path : (
+      "?:\\Windows\\System32\\wpbbin.exe",
+      "\\Device\\HarddiskVolume*\\Windows\\System32\\wpbbin.exe"
+    )
+  ) and
+  not (
+    process.name : "lsass.exe" and
+    file.path : (
+      "?:\\Windows\\System32\\eac_usermode_*.dll",
+      "\\Device\\HarddiskVolume*\\Windows\\System32\\eac_usermode_*.dll"
+    )
+  )</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

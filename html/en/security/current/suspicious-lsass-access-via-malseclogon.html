@@ -164,7 +164,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 311</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 312</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -176,37 +176,99 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1326"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-lsass-access-via-malseclogon.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1360"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-lsass-access-via-malseclogon.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Suspicious LSASS Access via MalSecLogon</strong></span></p>
-<p>The Local Security Authority Subsystem Service (LSASS) is crucial for managing security policies and user authentication in Windows environments. Adversaries may exploit the Secondary Logon service to gain unauthorized access to LSASS, aiming to extract sensitive credentials. The detection rule identifies this threat by monitoring for unusual access patterns involving LSASS, specifically when the seclogon.dll is involved, indicating potential credential dumping activities.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the event logs for the specific event code "10" to gather more details about the process that triggered the alert, focusing on the time of occurrence and any associated user accounts.
+Does the alert show the MalSecLogon handle-leak pattern rather than generic LSASS access?
 </li>
 <li class="listitem">
-Examine the process details for "svchost.exe" to determine if it is running under an expected service or if there are any anomalies in its execution context, such as unusual parent processes or command-line arguments.
+Why: the alert-local target, call trace, and access mask distinguish seclogon-mediated LSASS handle leakage from ordinary LSASS access; they do not prove a dump was written.
 </li>
 <li class="listitem">
-Investigate the call trace involving "seclogon.dll" to understand the sequence of events leading to the LSASS access, and check for any other suspicious modules or DLLs loaded in the process.
+Focus: <code class="literal">winlog.event_data.TargetImage</code>, <code class="literal">winlog.event_data.CallTrace</code>, <code class="literal">winlog.event_data.GrantedAccess</code>, <code class="literal">winlog.event_data.SourceImage</code>, <code class="literal">winlog.event_data.SourceProcessGUID</code>, <code class="literal">@timestamp</code>, and <code class="literal">host.id</code>.
 </li>
 <li class="listitem">
-Analyze the granted access value "0x14c0" to confirm if it aligns with typical access patterns for legitimate processes interacting with LSASS, and identify any deviations that could indicate malicious intent.
+Implication: escalate when the tuple is LSASS target + "seclogon.dll" call trace + "0x14c0" access from the seclogon-hosting "svchost.exe"; lower suspicion only when that exact tuple and service context match a recognized security product or authorized test on the same host.
 </li>
 <li class="listitem">
-Correlate the alert with other security events or logs from the same host or user account to identify any patterns or additional indicators of compromise, such as failed login attempts or other suspicious process activities.
+Which seclogon source process and surrounding initiator candidates can you recover?
 </li>
 <li class="listitem">
-Check for any recent changes or updates to the system that might explain the unusual behavior, such as software installations, patches, or configuration changes that could affect the Secondary Logon service or LSASS.
+Focus: use <code class="literal">winlog.event_data.SourceProcessGUID</code> and <code class="literal">winlog.event_data.SourceImage</code> to recover the seclogon-hosting process, then use <code class="literal">host.id</code> and <code class="literal">process.entity_id</code> to review surrounding process starts with <code class="literal">process.executable</code> and <code class="literal">process.command_line</code>. !{investigate{"description":"","label":"Process events for the recovered seclogon source process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: <code class="literal">winlog.event_data.SourceProcessGUID</code> identifies the service host that touched LSASS, not automatically the original RPC caller; if endpoint process start details are sparse, keep the conclusion at service-host level instead of assigning a caller.
+</li>
+<li class="listitem">
+Implication: escalate when the surrounding window shows MalSeclogon-like tooling, shells, script hosts, dump utilities, or newly started binaries that explain why seclogon touched LSASS; unresolved initiator recovery does not clear the alert.
+</li>
+<li class="listitem">
+Does the recovered lineage and session context fit a recognized Secondary Logon workflow?
+</li>
+<li class="listitem">
+Focus: process context for the recovered service host or initiator candidates: <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">process.Ext.ancestry</code>, and <code class="literal">user.id</code>; if parent or ancestry fields are absent, stay scoped to <code class="literal">host.id</code> plus <code class="literal">process.entity_id</code> and the tight alert window.
+</li>
+<li class="listitem">
+Implication: escalate when the chain starts from phishing, scripting, remote-admin, dump tooling, or a user context inconsistent with the asset role; treat recognized security-product or authorized-test lineage as lower suspicion, but continue to artifact and authentication checks before closure.
+</li>
+<li class="listitem">
+Do process or file artifacts show dump preparation after the handle access?
+</li>
+<li class="listitem">
+Why: the alert proves seclogon-hosted handle access, not dump completion; process and file artifacts show whether the activity advanced toward credential dumping.
+</li>
+<li class="listitem">
+Focus: endpoint process and file events scoped by <code class="literal">host.id</code> plus recovered <code class="literal">process.entity_id</code>, checking <code class="literal">process.command_line</code>, <code class="literal">process.executable</code>, <code class="literal">file.path</code>, and <code class="literal">file.name</code>. !{investigate{"description":"","label":"Process and file events for the recovered process context","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: look for LSASS clone or dump-helper command lines, dump-like files, encrypted or renamed dump output, or rapid child creation around the handle event; missing endpoint file telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Implication: escalate when the timeline shows dump output, clone or dump helpers, suspicious child creation, or staged files tied to the recovered process context; absence of artifacts lowers urgency only when file coverage is present and the process context is otherwise recognized.
+</li>
+<li class="listitem">
+Does the user and host context make this access especially high impact?
+</li>
+<li class="listitem">
+Focus: <code class="literal">host.name</code>, <code class="literal">user.id</code>, <code class="literal">user.name</code>, and <code class="literal">user.domain</code>, plus asset inventory or alert enrichment for domain controller, jump host, credential vault, or tier-0 administration roles when available.
+</li>
+<li class="listitem">
+Implication: escalate faster when the host or account can expose privileged credentials; ordinary workstation context lowers scope, not suspicion, unless the alert-local tuple and recovered workflow are also recognized.
+</li>
+<li class="listitem">
+Do follow-on authentication events suggest the leaked handle was used to pivot?
+</li>
+<li class="listitem">
+Why: MalSecLogon handle leakage is usually a precursor to dumping or token abuse, so later credential use can be more decisive than the access event alone.
+</li>
+<li class="listitem">
+Focus: Windows Security events for the same <code class="literal">host.id</code> and initial <code class="literal">user.id</code> pivot, especially <code class="literal">winlog.event_id</code>, <code class="literal">winlog.logon.type</code>, <code class="literal">winlog.event_data.TargetLogonId</code>, <code class="literal">winlog.event_data.SubjectLogonId</code>, and <code class="literal">source.ip</code>. !{investigate{"description":"","label":"Authentication events for the same user on the host","providers":[[{"excluded":false,"field":"event.code","queryType":"phrase","value":"4624","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"winlog.event_data.TargetUserSid","queryType":"phrase","value":"{{user.id}}","valueType":"string"}],[{"excluded":false,"field":"event.code","queryType":"phrase","value":"4648","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"winlog.event_data.SubjectUserSid","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-24h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if <code class="literal">process.Ext.authentication_id</code> is available, match it to <code class="literal">winlog.event_data.TargetLogonId</code> for 4624 session creation and search <code class="literal">winlog.event_data.SubjectLogonId</code> separately for 4648 explicit-credential use; read <code class="literal">winlog.event_data.TargetUserSid</code> as the authenticated account and <code class="literal">winlog.event_data.SubjectUserSid</code> as the initiator when they differ. Missing authentication telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Implication: escalate when later events show NewCredentials logon type 9, explicit-credential use, or unexpected remote logons after the LSASS access; do not close solely because no follow-on authentication telemetry was ingested.
+</li>
+<li class="listitem">
+If the local evidence remains suspicious or unresolved, do related alerts for this user or host show broader credential abuse?
+</li>
+<li class="listitem">
+Focus: related alerts for the same <code class="literal">user.id</code> in the last 48 hours, especially credential-access, lateral-movement, privilege-escalation, archive, or suspicious authentication findings. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: compare related alerts for the same <code class="literal">host.id</code> only after local evidence is suspicious or unresolved, to decide whether this is confined to one asset or part of a broader credential-theft chain. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when the same user or host also shows dumping, token abuse, remote-admin, or suspicious authentication alerts that support the local findings; keep the case local when related alerts are absent or clearly separate from the LSASS-handle activity.
+</li>
+<li class="listitem">
+Escalate when the alert-local tuple, recovered process context, artifacts, privileged scope, or follow-on credential use support unauthorized handle leakage; close only when the exact tuple and recovered workflow align with recognized security tooling or authorized testing; preserve and escalate when evidence is mixed or missing.
 </li>
 </ul>
 </div>
@@ -214,16 +276,10 @@ Check for any recent changes or updates to the system that might explain the unu
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate administrative tools or scripts that require access to LSASS for system management tasks may trigger this rule. Users can create exceptions for known tools by excluding specific process names or paths that are verified as safe.
+Seclogon-mediated LSASS handle access with "0x14c0" is an operational anti-pattern outside credential-protection products, EDR diagnostics, and authorized IR or red-team testing. Confirm a benign workflow only when the alert-local tuple, seclogon service context, recovered process identity, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and absence of dump artifacts or credential-use follow-on all align. When telemetry cannot prove legitimacy, require confirmation for that exact activity from the security product owner, IR lead, or test plan.
 </li>
 <li class="listitem">
-Security software or endpoint protection solutions that perform regular scans and require access to LSASS might be flagged. Coordinate with security vendors to identify these processes and exclude them from the rule.
-</li>
-<li class="listitem">
-System updates or patches that involve the Secondary Logon service could cause temporary access patterns that mimic suspicious behavior. Monitor update schedules and temporarily adjust the rule to prevent false alerts during these periods.
-</li>
-<li class="listitem">
-Custom enterprise applications that utilize the Secondary Logon service for legitimate purposes may inadvertently match the rule criteria. Work with application developers to understand these access patterns and whitelist the associated processes.
+Before creating an exception, verify prior alerts from this rule show the same <code class="literal">winlog.event_data.SourceImage</code>, <code class="literal">winlog.event_data.CallTrace</code>, <code class="literal">winlog.event_data.GrantedAccess</code>, recovered workflow identity, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and benign follow-on pattern. Avoid exceptions on <code class="literal">process.name</code>, "svchost.exe", seclogon, or the access mask alone.
 </li>
 </ul>
 </div>
@@ -231,25 +287,22 @@ Custom enterprise applications that utilize the Secondary Logon service for legi
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected system from the network to prevent further unauthorized access or data exfiltration.
+If confirmed benign, reverse temporary containment and record the exact alert-local tuple, service context, recovered workflow identity, host/user scope, and benign follow-on evidence. Create an exception only for that stable pattern after recurrence or explicit product/test confirmation.
 </li>
 <li class="listitem">
-Terminate any suspicious processes associated with svchost.exe that are accessing LSASS with the identified suspicious access rights.
+If suspicious but unconfirmed, preserve the alert document, source service GUID/image, recovered process starts, command lines, authentication records, volatile handle/service state when feasible, and any <code class="literal">file.path</code> dump artifacts before containment. Apply reversible containment first, such as suspending the recovered non-system tool, restricting outbound administrative access, or temporarily limiting the affected <code class="literal">user.id</code> while scope is unresolved.
 </li>
 <li class="listitem">
-Conduct a thorough review of user accounts and privileges on the affected system to identify any unauthorized changes or access.
+If confirmed malicious, isolate the affected host and contain accounts only after preserving the seclogon context, recovered initiator candidates, dump artifacts, and follow-on authentication evidence. If immediate isolation is unavailable, escalate with that evidence set to the team that can act.
 </li>
 <li class="listitem">
-Reset passwords for all accounts that may have been compromised, focusing on high-privilege accounts first.
+For privileged hosts or accounts, activate credential-compromise response and rotate exposed credentials according to host role and account tier. Do not assume enterprise-wide compromise without dump or credential-use evidence, but treat confirmed LSASS dump artifacts on tier-0 assets as urgent.
 </li>
 <li class="listitem">
-Collect and preserve relevant logs and forensic data from the affected system for further analysis and potential legal action.
+Eradicate only the tools, scripts, dump files, XOR-protected dumps, staged files, persistence, and entry-path artifacts found during the investigation, then remediate the access path that allowed the Secondary Logon abuse.
 </li>
 <li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for a comprehensive investigation and to determine the full scope of the breach.
-</li>
-<li class="listitem">
-Implement additional monitoring and alerting for similar suspicious activities involving LSASS and seclogon.dll to enhance detection capabilities.
+After containment, reduce recurrence risk by reviewing local administrator and debug-privilege exposure, LSASS protection such as RunAsPPL or Credential Guard where supported, and Secondary Logon service necessity on critical servers.
 </li>
 </ul>
 </div>
@@ -257,19 +310,16 @@ Implement additional monitoring and alerting for similar suspicious activities i
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_699"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-lsass-access-via-malseclogon.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_942"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-lsass-access-via-malseclogon.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
-<p>If enabling an EQL rule on a non-elastic-agent index (such as beats) for versions &lt;8.2,
-events will not define <code class="literal">event.ingested</code> and default fallback for EQL rules was not added until version 8.2.
-Hence for this rule to work effectively, users will need to add a custom ingest pipeline to populate
-<code class="literal">event.ingested</code> to @timestamp.
-For more details on adding a custom ingest pipeline refer - <a href="/guide/en/fleet/current/data-streams-pipeline-tutorial.html" class="ulink" target="_top">https://www.elastic.co/guide/en/fleet/current/data-streams-pipeline-tutorial.html</a></p>
+<p>This rule requires Sysmon telemetry to be enabled and ingested.</p>
+<p>Setup instructions: <a href="https://ela.st/sysmon-event-10-setup" class="ulink" target="_top">https://ela.st/sysmon-event-10-setup</a></p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1375"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-lsass-access-via-malseclogon.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1409"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-lsass-access-via-malseclogon.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -279,7 +329,7 @@ For more details on adding a custom ingest pipeline refer - <a href="/guide/en/f
    /* seclogon service accessing lsass */
   winlog.event_data.CallTrace : "*seclogon.dll*" and process.name : "svchost.exe" and
 
-   /* PROCESS_CREATE_PROCESS &amp; PROCESS_DUP_HANDLE &amp; PROCESS_QUERY_INFORMATION */
+   /* PROCESS_CREATE_PROCESS &amp; PROCESS_DUP_HANDLE &amp; PROCESS_QUERY_INFORMATION &amp; PROCESS_QUERY_LIMITED_INFORMATION */
   winlog.event_data.GrantedAccess == "0x14c0"</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>

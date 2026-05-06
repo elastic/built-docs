@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="modification-of-amsienable-registry-key"></a>Modification of AmsiEnable Registry Key</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/modification-of-amsienable-registry-key.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies modifications of the AmsiEnable registry key to 0, which disables the Antimalware Scan Interface (AMSI). An adversary can modify this key to disable AMSI protections.</p>
+<p>Identifies modifications of the AmsiEnable registry key to 0, which disables Windows Script AMSI scanning for the affected user. Adversaries can modify this key to bypass AMSI protections for Windows Script Host or JScript execution.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -197,7 +197,7 @@ Data Source: Crowdstrike
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 316</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 317</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -209,57 +209,75 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_734"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/modification-of-amsienable-registry-key.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_760"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/modification-of-amsienable-registry-key.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Modification of AmsiEnable Registry Key</strong></span></p>
-<p>The Windows Antimalware Scan Interface (AMSI) is a versatile interface standard that allows your applications and services to integrate with any antimalware product on a machine. AMSI integrates with multiple Windows components, ranging from User Account Control (UAC) to VBA macros and PowerShell.</p>
-<p>Since AMSI is widely used across security products for increased visibility, attackers can disable it to evade detections that rely on it.</p>
-<p>This rule monitors the modifications to the Software\Microsoft\Windows Script\Settings\AmsiEnable registry key.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Identify the user account that performed the action and whether it should perform this kind of action.
+Does the registry event prove Windows Script AMSI was disabled for a user hive?
 </li>
 <li class="listitem">
-Investigate the process execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+Focus: <code class="literal">registry.path</code>, <code class="literal">registry.value</code>, <code class="literal">registry.data.type</code>, and <code class="literal">registry.data.strings</code> for "Software\Microsoft\Windows Script\Settings\AmsiEnable" under "HKEY_USERS<p>Focus: <code class="literal">registry.path</code>, <code class="literal">registry.value</code>, <code class="literal">registry.data.type</code>, and <code class="literal">registry.data.strings</code> for "Software\Microsoft\Windows Script\Settings\AmsiEnable" under "HKEY_USERS\&lt;SID&gt;".</p>lt;SID&gt;".
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Implication: escalate true disablement when <code class="literal">registry.path</code> resolves to that user-hive value and <code class="literal">registry.data.strings</code> is "0" or "0x00000000"; lower suspicion only when the path or data does not disable AMSI, or same-host evidence proves controlled validation or image-build deliberately toggled Windows Script AMSI.
 </li>
 <li class="listitem">
-Investigate the execution of scripts and macros after the registry modification.
+Is the writing process a recognized validation tool or an abuse launcher?
 </li>
 <li class="listitem">
-Retrieve scripts or Microsoft Office files and determine if they are malicious:
+Focus: writer identity: <code class="literal">process.entity_id</code>, <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>. !{investigate{"description":"","label":"Process events for the writer","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Use a private sandboxed malware analysis system to perform analysis.
+Hint: reconstruct activity with <code class="literal">host.id</code> plus <code class="literal">process.entity_id</code>; if missing, use <code class="literal">host.id</code>, <code class="literal">process.pid</code>, and a tight time window.
 </li>
 <li class="listitem">
-Observe and collect information about the following activities:
+Implication: escalate when the writer is unsigned, untrusted, user-writable, renamed, script-launched, or writes "AmsiEnable" outside a recognized validation or image-build command line. Identity alone never clears the registry change.
 </li>
 <li class="listitem">
-Attempts to contact external domains and addresses.
+Does lineage and session explain the AMSI disablement?
 </li>
 <li class="listitem">
-File and registry access, modification, and creation activities.
+Focus: <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">process.Ext.session_info.logon_type</code>, and <code class="literal">user.id</code>.
 </li>
 <li class="listitem">
-Service creation and launch activities.
+Implication: escalate when lineage involves Office, a browser, script host, remote shell, scheduled task, unexpected service account, or a standard user context that does not fit script-control testing; lower suspicion only when parent, session, and <code class="literal">user.id</code> match controlled validation or image-build launch context.
 </li>
 <li class="listitem">
-Scheduled task creation.
+Did follow-on process activity use the disablement path?
 </li>
 <li class="listitem">
-Use the PowerShell Get-FileHash cmdlet to get the files' SHA-256 hash values.
+Focus: post-write process activity in the recovered process scope, especially <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, and <code class="literal">process.parent.command_line</code>. !{investigate{"description":"","label":"Child process events for the writer","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Search for the existence and reputation of the hashes in resources like VirusTotal, Hybrid-Analysis, CISCO Talos, Any.run, etc.
+Implication: escalate when the same lineage later launches or reopens "powershell.exe", "pwsh.exe", "wscript.exe", "cscript.exe", "mshta.exe", "wmic.exe", "regsvr32.exe", or Office-child script execution. A write followed by a second script open matches SharpShooter-style AMSI-stub behavior; activity confined to recognized validation is lower risk.
 </li>
 <li class="listitem">
-Use process name, command line, and file hash to search for occurrences on other hosts.
+Did the same process change related registry state for evasion, persistence, or cleanup?
+</li>
+<li class="listitem">
+Focus: same-process registry activity in the recovered process scope, with <code class="literal">registry.path</code>, <code class="literal">registry.value</code>, and <code class="literal">registry.data.strings</code>. !{investigate{"description":"","label":"Registry events for the writer","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"registry","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the process also weakens script policy, security-control, Run, Startup, COM, or other persistence-relevant keys, or quickly restores <code class="literal">registry.path</code> after script execution. Risk is narrower when surrounding registry writes stay limited to the Windows Script validation task and return to baseline.
+</li>
+<li class="listitem">
+If local evidence stays suspicious or unresolved, do related alerts broaden scope?
+</li>
+<li class="listitem">
+Focus: related alerts for the same <code class="literal">user.id</code> that show execution, persistence, delivery, or defense evasion. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: query related alerts for the same <code class="literal">host.id</code> to find adjacent script execution, persistence, related registry tampering, or other AMSI-bypass alerts. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope and urgency when either pivot shows related execution, persistence, or defense evasion; quiet related-alert pivots only lower urgency when local registry, process, and user evidence already supports one exact benign workflow.
+</li>
+<li class="listitem">
+Escalate when true AMSI disablement combines with suspicious writer, lineage, script follow-on, related registry weakening, or related alerts; close only when same-host registry and process evidence proves one controlled workflow, with outside confirmation when telemetry cannot prove legitimacy; preserve and escalate mixed or incomplete evidence.
 </li>
 </ul>
 </div>
@@ -267,15 +285,10 @@ Use process name, command line, and file hash to search for occurrences on other
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This modification should not happen legitimately. Any potential benign true positive (B-TP) should be mapped and monitored by the security team as these modifications expose the host to malware infections.
+Controlled security validation or golden-image build validation can legitimately toggle AMSI on lab, build, or pre-production assets. Confirm <code class="literal">registry.path</code>, <code class="literal">registry.value</code>, and <code class="literal">registry.data.strings</code> match the intended user hive; <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.code_signature.trusted</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code> align with that workflow; and surrounding process plus registry activity stays inside the task. Use change records, testing plans, owner confirmation, or toolchain confirmation only to verify telemetry-proven workflow, not override unresolved telemetry.
 </li>
-</ul>
-</div>
-<p><span class="strong strong"><strong>Related rules</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
 <li class="listitem">
-Microsoft Windows Defender Tampering - fe794edd-487f-4a90-b285-3ee54f2af2d3
+Base exceptions on the minimum confirmed workflow pattern: <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, <code class="literal">registry.path</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code>. Use prior alerts, when available, to validate stability. Avoid exceptions on the AmsiEnable value alone, on <code class="literal">user.name</code> alone, or on a host alone.
 </li>
 </ul>
 </div>
@@ -283,40 +296,19 @@ Microsoft Windows Defender Tampering - fe794edd-487f-4a90-b285-3ee54f2af2d3
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse any temporary containment and document the exact registry, process, parent, user, and host evidence that justified closure. Create an exception only when that confirmed pattern is specific enough to avoid suppressing lookalike AMSI tampering; use recurrence as supporting evidence when it exists.
 </li>
 <li class="listitem">
-Isolate the involved hosts to prevent further post-compromise behavior.
+If suspicious but unconfirmed, preserve the registry event, same-host process timeline, parent command line, related registry changes, and affected user and host before containment. Apply reversible containment first, such as heightened monitoring, temporary network restriction, or carefully scoped endpoint isolation based on host role; escalate to account action or stronger host isolation only if follow-on execution, related registry tampering, or broader alert scope is confirmed.
 </li>
 <li class="listitem">
-If the triage identified malware, search the environment for additional compromised hosts.
+If confirmed malicious, preserve the registry, process, user, host, and related-alert evidence plus any recovered script or payload identifiers before destructive action. Use endpoint isolation to stop follow-on execution while retaining telemetry, then terminate malicious processes or suspend accounts only after recording the process and user evidence needed for follow-up.
 </li>
 <li class="listitem">
-Implement temporary network rules, procedures, and segmentation to contain the malware.
+After scoping related <code class="literal">host.id</code>, <code class="literal">user.id</code>, <code class="literal">process.executable</code>, and <code class="literal">registry.path</code> evidence across affected assets, restore <code class="literal">registry.value</code> to the expected baseline and remove only the scripts, binaries, Run keys, COM changes, scheduled tasks, or other persistence artifacts identified during the investigation.
 </li>
 <li class="listitem">
-Stop suspicious processes.
-</li>
-<li class="listitem">
-Immediately block the identified indicators of compromise (IoCs).
-</li>
-<li class="listitem">
-Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
-</li>
-<li class="listitem">
-Remove and block malicious artifacts identified during triage.
-</li>
-<li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-</li>
-<li class="listitem">
-Delete or set the key to its default value.
-</li>
-<li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Post-incident hardening: restrict who can modify the Windows Script settings path, review controls around script hosts and Office macro execution, and retain the registry and process telemetry that proved the case.
 </li>
 </ul>
 </div>
@@ -324,11 +316,38 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_791"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/modification-of-amsienable-registry-key.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_472"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/modification-of-amsienable-registry-key.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-reg-setup" class="ulink" target="_top">Sysmon Registry Events</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_817"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/modification-of-amsienable-registry-key.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">registry where host.os.type == "windows" and event.type == "change" and
+<pre class="programlisting prettyprint lang-js">registry where host.os.type == "windows" and event.type in ("creation", "change") and
   registry.value : "AmsiEnable" and registry.data.strings: ("0", "0x00000000")
 
   /*

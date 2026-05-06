@@ -78,7 +78,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 10</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 11</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -90,144 +90,105 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_989"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-concatenated-dynamic-command-invocation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1020"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-concatenated-dynamic-command-invocation.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This guide was created by humans with the assistance of generative AI. While its contents have been manually curated to include the most valuable information, always validate assumptions and adjust procedures to match your internal runbooks and incident triage and response policies.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Potential PowerShell Obfuscation via Concatenated Dynamic Command Invocation</strong></span></p>
-<p>This rule identifies PowerShell script block content where a command is built from concatenated string literals and executed through dynamic invocation using the call operator (&amp;) or dot invocation (.). This technique can hide the true command name (for example, splitting cmdlet, function, alias, or script names into fragments) and is often paired with additional obfuscation to hinder quick review.</p>
-<p><span class="strong strong"><strong>Key alert fields to review</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-<code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">user.id</code>: Account execution context for correlation, prioritization, and scoping.
-</li>
-<li class="listitem">
-<code class="literal">host.name</code>, <code class="literal">host.id</code>: Host execution context for correlation, prioritization, and scoping.
-</li>
-<li class="listitem">
-<code class="literal">file.path</code>, <code class="literal">file.directory</code>, <code class="literal">file.name</code>: File-origin context when the script block is sourced from an on-disk file.
-</li>
-<li class="listitem">
-<code class="literal">powershell.file.script_block_text</code>: Script block content that matched the detection logic.
-</li>
-<li class="listitem">
-<code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, <code class="literal">powershell.total</code>: Script block metadata to pivot to other fragments or reconstruct full script content when split across multiple events.
-</li>
-<li class="listitem">
-<code class="literal">Esql.script_block_tmp</code>: Transformed script block where detection patterns replace original content with a marker to support scoring/counting and quickly spot match locations.
-</li>
-<li class="listitem">
-<code class="literal">Esql.script_block_pattern_count</code>: Count of matches for the detection pattern(s) observed in the script block content.
-</li>
-<li class="listitem">
-<code class="literal">powershell.file.script_block_entropy_bits</code>: Shannon entropy of the script block. Higher values may indicate obfuscation.
-</li>
-<li class="listitem">
-<code class="literal">powershell.file.script_block_surprisal_stdev</code>: Standard deviation of surprisal across the script block. Low values indicate uniform randomness. High values indicate mixed patterns and variability.
-</li>
-<li class="listitem">
-<code class="literal">powershell.file.script_block_unique_symbols</code>: Count of distinct characters present in the script block.
-</li>
-<li class="listitem">
-<code class="literal">powershell.file.script_block_length</code>: Script block length (size) context.
-</li>
-</ul>
-</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Establish scope and execution context:
+What did the alert preserve about the concatenated dynamic invocation?
 </li>
 <li class="listitem">
-Review <code class="literal">host.name</code> and <code class="literal">host.id</code> to understand where the script ran, and identify whether the host is an admin workstation, server, or user endpoint.
+Focus: <code class="literal">Esql.script_block_pattern_count</code>, <code class="literal">powershell.file.script_block_text</code>, and <code class="literal">powershell.file.script_block_id</code>.
 </li>
 <li class="listitem">
-Review <code class="literal">user.name</code>, <code class="literal">user.domain</code>, and <code class="literal">user.id</code> to understand who initiated the activity and whether PowerShell use is expected for that identity.
+Hint: use full-alert <code class="literal">Esql.script_block_tmp</code> only when you need the match-local slice.
 </li>
 <li class="listitem">
-Use the alert timestamp to bound the activity window for correlation and scoping.
+Implication: escalate faster when multiple call-operator or dot-sourced matches sit near download, reflection, credential, persistence, or execution logic; lower suspicion only when one short match resolves to a transparent helper and source recovery supports the same recognized workflow.
 </li>
 <li class="listitem">
-Reconstruct the dynamically invoked command(s):
+Can you reconstruct the full source 4104 script block before interpreting context?
 </li>
 <li class="listitem">
-Review <code class="literal">powershell.file.script_block_text</code> and use <code class="literal">Esql.script_block_tmp</code> to quickly locate the dynamic invocation expression(s) inside the script block.
+Why: PowerShell can split large script blocks, and this ES|QL alert keeps summary fields that do not replace source-event recovery.
 </li>
 <li class="listitem">
-Identify each invocation using <code class="literal">&amp;(...)</code> or <code class="literal">.(...)</code> where multiple quoted strings are joined with <code class="literal">+</code>.
+Focus: query PowerShell Operational source events with <code class="literal">host.id</code>, <code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, and <code class="literal">powershell.total</code>; order fragments and record source <code class="literal">process.pid</code> when recovered. !{investigate{"description":"","label":"Script block fragments for the same script","providers":[[{"excluded":false,"field":"powershell.file.script_block_id","queryType":"phrase","value":"{{powershell.file.script_block_id}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Concatenate the quoted string fragments in their observed order to derive the effective command/function/script name being invoked.
+Implication: incomplete fragments are unresolved, not benign; escalation is stronger when reconstruction exposes hidden stages, fileless delivery, or missing execution context.
 </li>
 <li class="listitem">
-Use <code class="literal">Esql.script_block_pattern_count</code> to prioritize review; multiple dynamic concatenation invocations in the same script block generally indicate stronger intent to obscure execution.
+What command or script does the concatenation resolve to, and does the operator expand impact?
 </li>
 <li class="listitem">
-Determine whether the operator changes execution semantics:
+Focus: reconstructed <code class="literal">powershell.file.script_block_text</code>, surrounding variable assignments, and call-operator versus dot-sourcing use.
 </li>
 <li class="listitem">
-For <code class="literal">&amp;(...)</code> (call operator), focus on the command being executed and any arguments passed immediately before/after the invocation.
+Implication: escalate when the resolved token hides invocation or LOLBin logic that the surrounding code then executes; lower suspicion when reconstruction leaves one readable helper inside a recognized module or compatibility wrapper.
 </li>
 <li class="listitem">
-For <code class="literal">.(...)</code> (dot invocation), assess whether the script is intended to run in the current scope (for example, to define or modify functions/variables) and whether that scope change is expected for the host and user context.
+Does the source event show a file-backed or fileless origin that fits this user and host?
 </li>
 <li class="listitem">
-Reassemble full script content when fragmented:
+Focus: recovered <code class="literal">file.path</code>, <code class="literal">user.id</code>, source-event <code class="literal">user.name</code>, source-event <code class="literal">user.domain</code>, and <code class="literal">host.id</code>.
 </li>
 <li class="listitem">
-Pivot on <code class="literal">powershell.file.script_block_id</code> to locate other fragments of the same script block.
+Implication: escalate when the script is fileless or sourced from temp, downloads, profiles, shares, or another user-writable path under an unexpected identity; lower suspicion when the file path and user-host pairing match the same recognized admin module or compatibility workflow.
 </li>
 <li class="listitem">
-If <code class="literal">powershell.total</code> indicates the content is split across multiple events, use <code class="literal">powershell.sequence</code> and <code class="literal">powershell.total</code> to reconstruct the full script block in order before making a determination.
+Hint: absent <code class="literal">file.path</code> after source recovery means interactive, pasted, or memory-only activity; require stronger corroboration before closure.
 </li>
 <li class="listitem">
-Identify script origin and persistence opportunities:
+Can you recover the PowerShell process launch chain?
 </li>
 <li class="listitem">
-If <code class="literal">file.path</code>, <code class="literal">file.directory</code>, or <code class="literal">file.name</code> are present, determine whether the script block is associated with an on-disk script and whether its location aligns with approved administrative tooling or known automation paths.
+Focus: source <code class="literal">process.pid</code> plus same-host process-start telemetry for recovered <code class="literal">process.entity_id</code>, <code class="literal">process.command_line</code>, and <code class="literal">process.parent.executable</code>.
 </li>
 <li class="listitem">
-Treat unusual user-writable or temporary locations as higher risk, especially when paired with high <code class="literal">Esql.script_block_pattern_count</code>.
+Hint: if endpoint process telemetry is unavailable, keep later pivots bounded to <code class="literal">host.id</code> plus <code class="literal">user.id</code> or <code class="literal">user.name</code> in the alert window rather than assuming process scope. !{investigate{"description":"","label":"Process events for the PowerShell instance","providers":[[{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Evaluate obfuscation characteristics and intent:
+Implication: escalate when PowerShell is launched by Office, a browser, an archive extractor, a LOLBin, an unexpected service, or a remote session; lower suspicion when the launch chain matches the same recognized management tool or scheduled task already supported by source evidence.
 </li>
 <li class="listitem">
-Use <code class="literal">powershell.file.script_block_entropy_bits</code>, <code class="literal">powershell.file.script_block_surprisal_stdev</code>, <code class="literal">powershell.file.script_block_unique_symbols</code>, and <code class="literal">powershell.file.script_block_length</code> to assess how atypical the content is compared to known-good scripts in your environment.
+Does the reconstructed script show layered obfuscation or payload-delivery logic beyond concatenation?
 </li>
 <li class="listitem">
-Review surrounding logic in <code class="literal">powershell.file.script_block_text</code> for additional obfuscation patterns (for example, layered string operations, indirect invocation, or hidden payload material) that may not be captured by this specific match.
+Focus: <code class="literal">powershell.file.script_block_entropy_bits</code>, <code class="literal">powershell.file.script_block_surprisal_stdev</code>, <code class="literal">powershell.file.script_block_length</code>, and reconstructed <code class="literal">powershell.file.script_block_text</code>; compare <code class="literal">powershell.file.script_block_length</code> against <code class="literal">Esql.script_block_pattern_count</code> to detect dead-code inflation around few match sites.
 </li>
 <li class="listitem">
-Correlate with adjacent endpoint activity (if available):
+Implication: escalate when concatenation sits beside encoding, reflection, decoder routines, download strings, hidden payload material, dead-code padding, or Get-Command wildcard resolution.
 </li>
 <li class="listitem">
-Pivot using <code class="literal">host.id</code> and the alert time window to identify the PowerShell host process, its parent process, and any child processes that indicate follow-on execution.
+Did the recovered process or host-window activity retrieve, stage, or execute follow-on content?
 </li>
 <li class="listitem">
-Review network, file, and registry activity on <code class="literal">host.id</code> around the same time for signs of payload retrieval, on-disk staging, persistence, or system configuration changes.
+Focus: child starts from recovered <code class="literal">process.entity_id</code>, same-PID 4104 blocks, and file, DNS, or connection side effects: <code class="literal">file.path</code>, <code class="literal">dns.question.name</code>, and <code class="literal">destination.ip</code>.
 </li>
 <li class="listitem">
-Review authentication activity associated with <code class="literal">user.id</code> around the same time window for anomalous logons, new session sources, or unusual access patterns.
+Hint: missing file, DNS, or network telemetry is unresolved, not benign; if <code class="literal">process.entity_id</code> was not recovered, scope only by <code class="literal">host.id</code> plus <code class="literal">user.id</code> or <code class="literal">user.name</code> in the alert window. !{investigate{"description":"","label":"Child process activity from the PowerShell instance","providers":[[{"excluded":false,"field":"process.parent.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}} !{investigate{"description":"","label":"File, network, and DNS events for the PowerShell PID","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"dns","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}} !{investigate{"description":"","label":"Script block events for the PowerShell PID","providers":[[{"excluded":false,"field":"event.code","queryType":"phrase","value":"4104","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Pivot on <code class="literal">user.id</code> to identify similar activity across other hosts, which may indicate shared automation, credential reuse, or lateral movement.
+Implication: escalate when the same process chain spawns shells, writes scripts or binaries, or reaches rare external destinations.
 </li>
 <li class="listitem">
-Capture and operationalize investigation artifacts:
+If local findings remain suspicious or unresolved, does related alert history change scope?
 </li>
 <li class="listitem">
-Document the reconstructed command strings, notable script fragments, and any referenced file locations (<code class="literal">file.path</code>) for escalation and threat hunting.
+Focus: related alerts for the same <code class="literal">user.id</code> in the last 48 hours, prioritizing repeated obfuscated PowerShell, the same resolved token, or script path. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Use those artifacts to search for additional occurrences across the environment, focusing on the same <code class="literal">user.id</code>, <code class="literal">host.id</code>, and similar <code class="literal">powershell.file.script_block_text</code> patterns.
+Hint: if the user view is sparse or shared, pivot to the same <code class="literal">host.id</code> in the last 48 hours. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden response when repeated obfuscation, AMSI tampering, encoded commands, download, credential-access, or persistence alerts cluster on the same user or host; keep scope local when the alert is isolated and local evidence resolves to one recognized workflow.
+</li>
+<li class="listitem">
+Escalate on intentionally hidden PowerShell execution across match details, reconstruction, origin, launch chain, layered obfuscation, or follow-on activity; close only when recovered script, resolved token, origin, user-host context, launch chain, and side-effect telemetry align with one recognized workflow; preserve artifacts and escalate when reconstruction, process recovery, or file/network visibility stays incomplete.
 </li>
 </ul>
 </div>
@@ -235,10 +196,10 @@ Use those artifacts to search for additional occurrences across the environment,
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Administrative scripts, modules, or internal frameworks that dynamically assemble short command names (cmdlets, functions, aliases) via string concatenation before invoking them for indirection or compatibility.
+Internal compatibility wrappers, module loaders, code-protected vendor scripts, or administrative scripts may concatenate or dot-source helper names. Confirm recovered <code class="literal">powershell.file.script_block_text</code>, resolved token, <code class="literal">file.path</code> or stable helper path, recovered parent executable, dot-sourced location, and <code class="literal">user.id</code> plus <code class="literal">host.id</code> all align with one recognized workflow, with child process, file, DNS, and network effects contained to it. If external records are unavailable, require the same <code class="literal">file.path</code> or helper path, resolved token, parent executable, and user-host pairing to recur across prior alerts from this rule.
 </li>
 <li class="listitem">
-Legitimate automation that uses dot invocation to load or execute helper logic in the current scope, including scripts that intentionally reduce readability for code protection.
+Before creating an exception, anchor it on stable <code class="literal">file.path</code>, resolved token, recovered parent executable, and relevant <code class="literal">host.id</code> or <code class="literal">user.id</code> scope. Avoid exceptions on <code class="literal">Esql.script_block_pattern_count</code>, <code class="literal">Esql.script_block_tmp</code>, <code class="literal">user.name</code>, or <code class="literal">powershell.file.script_block_text</code> alone.
 </li>
 </ul>
 </div>
@@ -246,49 +207,25 @@ Legitimate automation that uses dot invocation to load or execute helper logic i
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-If the activity is confirmed or strongly suspected to be malicious or unauthorized:
+If confirmed benign, reverse any temporary containment and document the evidence that proved one recognized workflow: resolved token, recovered <code class="literal">file.path</code>, launch chain, and <code class="literal">user.id</code> plus <code class="literal">host.id</code> scope. Create an exception only after the same pattern recurs consistently.
 </li>
 <li class="listitem">
-Contain the affected host identified by <code class="literal">host.id</code> to prevent further execution and potential lateral movement.
+If suspicious but unconfirmed, preserve the alert, reconstructed script fragments, recovered process identifiers, launch chain, staged file paths, DNS names, destination IPs, and case timeline before containment or cleanup.
 </li>
 <li class="listitem">
-Preserve evidence, including the full reconstructed <code class="literal">powershell.file.script_block_text</code> (using <code class="literal">powershell.sequence</code>/<code class="literal">powershell.total</code> if needed) and any associated on-disk script referenced by <code class="literal">file.path</code>.
+Apply reversible containment first: heightened monitoring, temporary outbound restrictions, or PowerShell restrictions on the affected <code class="literal">host.id</code>. Escalate to host isolation only when launch-chain or follow-on evidence indicates likely payload execution, lateral movement, or active command-and-control.
 </li>
 <li class="listitem">
-If an on-disk script is involved (<code class="literal">file.path</code> present):
+If confirmed malicious, isolate the endpoint or contain the account based on the identity, launch-chain, file, and network evidence. Before suspending or terminating PowerShell, record the recovered process entity ID, command line, parent chain, resolved token, reconstructed script fragments, and staged file or network indicators.
 </li>
 <li class="listitem">
-Acquire the referenced script file for analysis and validate its provenance.
+Review related hosts and users for the same resolved token, stable file path, parent executable, and destination indicators before removing artifacts so scoping completes before evidence is destroyed.
 </li>
 <li class="listitem">
-Remove or quarantine the script if it is unauthorized, and assess for additional copies using the same <code class="literal">file.name</code> or <code class="literal">file.path</code> patterns across hosts.
+Remove only the unauthorized scripts, dropped payloads, and persistence artifacts identified during the investigation, then remediate the delivery path or administrative-control gap that allowed obfuscated PowerShell execution.
 </li>
 <li class="listitem">
-If account misuse is suspected:
-</li>
-<li class="listitem">
-Scope recent activity for the implicated <code class="literal">user.id</code> across hosts, prioritize investigation for privileged accounts, and reset credentials per policy.
-</li>
-<li class="listitem">
-Review and reduce unnecessary privileges associated with the account, especially if PowerShell access is not required.
-</li>
-<li class="listitem">
-Eradication and recovery:
-</li>
-<li class="listitem">
-Identify and remediate follow-on artifacts discovered during scoping (for example, dropped scripts/binaries or persistence mechanisms) using established response procedures.
-</li>
-<li class="listitem">
-Increase monitoring for recurrence by hunting for similar dynamic concatenation patterns (high <code class="literal">Esql.script_block_pattern_count</code>) on the same <code class="literal">host.id</code> and <code class="literal">user.id</code>.
-</li>
-<li class="listitem">
-Post-incident hardening:
-</li>
-<li class="listitem">
-Ensure PowerShell Script Block Logging coverage is consistently enabled and centrally collected for systems where PowerShell use is permitted.
-</li>
-<li class="listitem">
-Limit PowerShell use to approved users and hosts, and review controls that reduce the impact of dynamic invocation and obfuscation in your environment.
+Post-incident hardening: retain Script Block Logging and endpoint process/file/network telemetry, restrict PowerShell where it is not required, and document the resolved token, script path, launch chain, and side-effect pattern that distinguished benign workflow from abuse.
 </li>
 </ul>
 </div>
@@ -296,7 +233,7 @@ Limit PowerShell use to approved users and hosts, and review controls that reduc
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_499"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-concatenated-dynamic-command-invocation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_663"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-concatenated-dynamic-command-invocation.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
 <p>PowerShell Script Block Logging must be enabled to generate the events used by this rule (e.g., 4104).
@@ -305,7 +242,7 @@ Setup instructions: <a href="https://ela.st/powershell-logging-setup" class="uli
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1052"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-concatenated-dynamic-command-invocation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1083"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-concatenated-dynamic-command-invocation.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -329,6 +266,7 @@ Setup instructions: <a href="https://ela.st/powershell-logging-setup" class="uli
     Esql.script_block_tmp,
     powershell.file.*,
     file.path,
+    process.pid,
     powershell.sequence,
     powershell.total,
     _id,

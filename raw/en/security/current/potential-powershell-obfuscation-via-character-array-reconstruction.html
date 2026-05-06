@@ -78,7 +78,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 10</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 11</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -90,100 +90,90 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_988"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-character-array-reconstruction.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1019"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-character-array-reconstruction.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This guide was created by humans with the assistance of generative AI. While its contents have been manually curated to include the most valuable information, always validate assumptions and adjust procedures to match your internal runbooks and incident triage and response policies.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Potential PowerShell Obfuscation via Character Array Reconstruction</strong></span></p>
-<p>This rule identifies PowerShell Script Block Logging content that reconstructs strings at runtime from character codes or character arrays. This technique is commonly used to conceal intent (for example, commands, URLs, or file paths) and can indicate attempts to evade static inspection.</p>
-<p>Focus triage on what strings are being rebuilt, who ran the script, where it ran, and whether the decoded content leads to follow-on activity.</p>
-<p><span class="strong strong"><strong>Key alert fields to review</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-<code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">user.id</code>: Account execution context for correlation, prioritization, and scoping.
-</li>
-<li class="listitem">
-<code class="literal">host.name</code>, <code class="literal">host.id</code>: Host execution context for correlation, prioritization, and scoping.
-</li>
-<li class="listitem">
-<code class="literal">file.path</code>, <code class="literal">file.directory</code>, <code class="literal">file.name</code>: File-origin context when the script block is sourced from an on-disk file.
-</li>
-<li class="listitem">
-<code class="literal">powershell.file.script_block_text</code>: Script block content that matched the detection logic.
-</li>
-<li class="listitem">
-<code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.sequence</code>, <code class="literal">powershell.total</code>: Script block metadata to pivot to other fragments or reconstruct full script content when split across multiple events.
-</li>
-<li class="listitem">
-<code class="literal">Esql.script_block_tmp</code>: Transformed script block where detection patterns replace original content with a marker to support scoring/counting and quickly spot match locations.
-</li>
-<li class="listitem">
-<code class="literal">Esql.script_block_pattern_count</code>: Count of matches for the detection pattern(s) observed in the script block content.
-</li>
-<li class="listitem">
-<code class="literal">powershell.file.script_block_entropy_bits</code>: Shannon entropy of the script block. Higher values may indicate obfuscation.
-</li>
-<li class="listitem">
-<code class="literal">powershell.file.script_block_surprisal_stdev</code>: Standard deviation of surprisal across the script block. Low values indicate uniform randomness. High values indicate mixed patterns and variability.
-</li>
-<li class="listitem">
-<code class="literal">powershell.file.script_block_unique_symbols</code>: Count of distinct characters present in the script block.
-</li>
-<li class="listitem">
-<code class="literal">powershell.file.script_block_length</code>: Script block length (size) context.
-</li>
-</ul>
-</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review <code class="literal">powershell.file.script_block_text</code> and use <code class="literal">Esql.script_block_tmp</code> to quickly spot the segments that triggered the match. Identify the reconstruction method (for example, <code class="literal">[char[]](...)</code>, repeated <code class="literal">([char]NN)+</code> concatenation, joins, or index-based lookups).
+What hidden text is reconstructed at the alert-marked sites?
 </li>
 <li class="listitem">
-If the script block is split, reconstruct the full content using <code class="literal">powershell.file.script_block_id</code> together with <code class="literal">powershell.sequence</code> and <code class="literal">powershell.total</code>. Verify that all expected sequences are present and in order before drawing conclusions.
+Focus: <code class="literal">powershell.file.script_block_text</code>, <code class="literal">powershell.file.script_block_length</code>, and alert-local <code class="literal">Esql.script_block_pattern_count</code> and <code class="literal">Esql.script_block_tmp</code> reconstruction markers.
 </li>
 <li class="listitem">
-If <code class="literal">powershell.total</code> indicates multiple fragments but one or more <code class="literal">powershell.sequence</code> values are missing, treat the script as incomplete context. Attempt to retrieve the missing fragments and consider the possibility of log gaps or ingestion delays.
+Implication: escalate when reconstructed strings reveal execution, download, staging, persistence, credential, or policy-control intent; lower concern only when decoded text is limited to static formatting, localization, or configuration constants in an otherwise readable generated script.
 </li>
 <li class="listitem">
-Deobfuscate the reconstructed strings by translating numeric character codes and arrays into their resulting text. Capture any decoded values that look like commands, script content, URLs, file paths, registry paths, or encoded blobs.
+Is the full source script block available for pivots?
 </li>
 <li class="listitem">
-After decoding, re-review the full script block content for additional obfuscation layers or execution logic that is not covered by the character reconstruction pattern (for example, secondary decoding steps or dynamically-invoked script).
+Why: ES|QL preserves alert evidence, but split 4104 events and omitted source fields can hide the decoded action or later pivot keys.
 </li>
 <li class="listitem">
-Use <code class="literal">Esql.script_block_pattern_count</code> as a quick measure of how heavily the script relies on this obfuscation pattern. Higher counts typically indicate more deliberate concealment and can help prioritize review.
+Focus: same <code class="literal">host.id</code> and <code class="literal">powershell.file.script_block_id</code>, ordered by <code class="literal">powershell.sequence</code> and checked against <code class="literal">powershell.total</code>, with each fragment&#8217;s <code class="literal">powershell.file.script_block_text</code>. !{investigate{"description":"","label":"Script block fragments for the same script","providers":[[{"excluded":false,"field":"powershell.file.script_block_id","queryType":"phrase","value":"{{powershell.file.script_block_id}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Use the script statistics to support prioritization and comparison against expected baselines: <code class="literal">powershell.file.script_block_entropy_bits</code>, <code class="literal">powershell.file.script_block_surprisal_stdev</code>, <code class="literal">powershell.file.script_block_unique_symbols</code>, and <code class="literal">powershell.file.script_block_length</code>. Look for unusually long, high-entropy, or highly variable content relative to known-good PowerShell activity in your environment.
+Hint: if fragments do not match <code class="literal">powershell.total</code>, query <code class="literal">logs-windows.powershell_operational*</code> before closing. Record source <code class="literal">process.pid</code> and <code class="literal">file.path</code>.
 </li>
 <li class="listitem">
-Review the execution context: <code class="literal">user.name</code>, <code class="literal">user.domain</code>, and <code class="literal">user.id</code> to understand who executed the script and whether the account matches expected administrative or automation usage for the <code class="literal">host.name</code> and <code class="literal">host.id</code> involved.
+Implication: escalate when complete reconstruction exposes hidden stages, payload material, or omitted execution context; keep unresolved when missing fragments or source fields could contain the decoded action or pivot key.
 </li>
 <li class="listitem">
-Review file origin indicators when present: <code class="literal">file.path</code>, <code class="literal">file.directory</code>, and <code class="literal">file.name</code>. Assess whether the script appears to originate from an expected location for your environment versus a user-writable, temporary, or unusual directory.
+Which source event and launch context explain this PowerShell?
 </li>
 <li class="listitem">
-Pivot to the source event using <code class="literal">_id</code> and <code class="literal">_index</code> to review the full event payload and confirm whether additional relevant <code class="literal">powershell.file.*</code> context is available for analysis.
+Why: endpoint launch context must be recovered before parentage or process-scoped pivots are trusted.
 </li>
 <li class="listitem">
-Scope for related activity by searching for additional script blocks that share the same <code class="literal">powershell.file.script_block_id</code>, similar <code class="literal">powershell.file.script_block_text</code> content, the same <code class="literal">file.path</code>, the same <code class="literal">user.id</code>, or the same <code class="literal">host.id</code> around the alert time window.
+Focus: if endpoint process telemetry is available, use source <code class="literal">process.pid</code> plus <code class="literal">host.id</code> around <code class="literal">@timestamp</code> to recover <code class="literal">process.entity_id</code>, <code class="literal">process.command_line</code>, and <code class="literal">process.parent.executable</code>. !{investigate{"description":"","label":"Process events for the PowerShell PID","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Correlate the alert timestamp with adjacent telemetry from the same host and user (process activity, network connections, file writes, registry modifications, and authentication events) to identify how PowerShell was launched (including the initiating/parent process) and what occurred immediately before and after the obfuscated content executed.
+Hint: do not require powershell.exe; hosted PowerShell can still produce 4104. If endpoint process telemetry is missing, bound later pivots to <code class="literal">host.id</code>, <code class="literal">user.id</code>, and a tight alert window.
 </li>
 <li class="listitem">
-If decoded content indicates external communication or secondary payload retrieval, identify potential indicators (domains, IPs, URLs, file names) and check for additional occurrences across other hosts and users.
+Implication: escalate when the script is fileless, sourced from user-writable or delivery paths, launched by a browser/document/remoting/scheduled-task parent, or run with a command line that does not fit the actor; lower concern only when recovered source and launch evidence identify one generator or updater workflow and decoded intent stays non-executing.
 </li>
 <li class="listitem">
-If decoded content indicates credential access, lateral movement, or persistence, expand the investigation to related accounts and hosts within the same timeframe and document the full execution chain.
+Does decoded content add obfuscation, execution, staging, or persistence?
+</li>
+<li class="listitem">
+Focus: <code class="literal">powershell.file.script_block_text</code>, decoded strings, source <code class="literal">file.path</code>, and, with endpoint file or registry telemetry, <code class="literal">registry.path</code>. Use same-PID artifact events around <code class="literal">@timestamp</code> to validate writes or registry changes. !{investigate{"description":"","label":"File and registry events for the PowerShell PID","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"registry","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: scope file or registry review with recovered <code class="literal">process.entity_id</code> or fallback <code class="literal">host.id</code> + <code class="literal">user.id</code> + tight alert window. Use <code class="literal">registry.data.strings</code> only after <code class="literal">registry.path</code> points to persistence or policy state.
+</li>
+<li class="listitem">
+Implication: escalate when decoded content feeds <code class="literal">Invoke-Expression</code>, reflection, Base64, decompression, dynamic member access, payload writes, or persistence/policy registry changes; lower concern only when decoded values are static data and available endpoint telemetry does not contradict that. Missing endpoint file or registry telemetry leaves follow-on activity unresolved.
+</li>
+<li class="listitem">
+Do decoded or recovered process destinations fit the decoded intent?
+</li>
+<li class="listitem">
+Focus: if endpoint network telemetry is available, DNS lookup_result and connection fields: <code class="literal">dns.question.name</code>, <code class="literal">dns.resolved_ip</code>, <code class="literal">destination.ip</code>, and <code class="literal">destination.port</code>.
+</li>
+<li class="listitem">
+Hint: scope network review with same-PID events around <code class="literal">@timestamp</code>, or with recovered <code class="literal">process.entity_id</code> where available. Correlate DNS <code class="literal">dns.resolved_ip</code> to connection <code class="literal">destination.ip</code>. Missing network telemetry is unresolved, not benign. !{investigate{"description":"","label":"Network and DNS events for the PowerShell PID","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"dns","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when decoded URLs, domains, or IPs lead to rare public infrastructure, direct IP access, nonstandard ports, or destinations unrelated to the recovered workflow; lower concern when destinations are internal, proxy, or vendor services aligned with the same generated-script or updater workflow.
+</li>
+<li class="listitem">
+If local evidence is suspicious or unresolved, does the pattern recur beyond this host or user?
+</li>
+<li class="listitem">
+Focus: related alerts for the same <code class="literal">user.id</code> in the last 48 hours, comparing decoded strings, reconstruction pattern, and <code class="literal">file.path</code>. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if the user view is sparse, pivot to same-<code class="literal">host.id</code> alerts and compare decoded indicators or source path. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when the same decoded indicator or reconstruction pattern appears on unrelated hosts or accounts; keep scope local when confined to one recovered workflow. Do not close solely because no prior alerts exist.
+</li>
+<li class="listitem">
+Escalate for hidden execution, download, staging, persistence, credential, policy-control, or defense-evasion behavior; close only when alert-local and recovered evidence bind one benign generated-script or updater workflow with no contradictions; preserve and escalate when decoding, fragments, or conditional endpoint telemetry remain incomplete.
 </li>
 </ul>
 </div>
@@ -191,16 +181,10 @@ If decoded content indicates credential access, lateral movement, or persistence
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Some benign scripts reconstruct strings from character codes for formatting, localization, or to safely represent special characters. These cases are often limited in scope and decode to human-readable, expected values.
+Generated build, packaging, localization, templating, vendor bootstrap, or updater scripts can legitimately rebuild strings from character codes. Confirm only when decoded content resolves to static data, expected generator output, installation, or update logic; <code class="literal">file.path</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code> fit that workflow; recovered <code class="literal">process.command_line</code> or <code class="literal">process.parent.executable</code> supports it; and any available destination evidence reaches vendor, proxy, or internal update services rather than staging infrastructure. Without change or ownership records, use telemetry-only confirmation: the same source path, actor/host scope, and decoded-string purpose recur across prior alerts from this rule. Recurrence can support a future exception, but should not be the primary reason to close the first alert.
 </li>
 <li class="listitem">
-Software deployment, management, or monitoring tooling may generate PowerShell dynamically and use string reconstruction as an implementation detail. Validate whether the script source (<code class="literal">file.path</code>) and execution context (<code class="literal">user.id</code>, <code class="literal">host.id</code>) align with known tooling behavior.
-</li>
-<li class="listitem">
-Internal scripts may use light obfuscation to reduce casual tampering or to embed configuration values. Treat unknown sources, unexpected accounts, or unusually high <code class="literal">Esql.script_block_pattern_count</code> / <code class="literal">powershell.file.script_block_entropy_bits</code> as higher risk until validated.
-</li>
-<li class="listitem">
-If determined benign, document the script source and expected execution context (account and host) and retain the decoded strings for faster triage of future alerts.
+Before creating an exception, anchor it to indexed alert fields such as <code class="literal">user.id</code>, <code class="literal">host.id</code>, file-backed <code class="literal">file.path</code>, and a tightly bounded <code class="literal">powershell.file.script_block_text</code> pattern that represents the confirmed generator or updater. Do not use <code class="literal">Esql.script_block_pattern_count</code> or <code class="literal">Esql.script_block_tmp</code> in exceptions because they are alert-local summaries rather than stable exception anchors.
 </li>
 </ul>
 </div>
@@ -208,25 +192,16 @@ If determined benign, document the script source and expected execution context 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-If malicious or suspicious activity is confirmed, contain the affected host to prevent additional execution and lateral movement. Consider restricting the involved account based on investigation results.
+If confirmed benign, record the evidence that proved the workflow first: decoded script purpose, validated <code class="literal">file.path</code> or repeated fileless pattern, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and any recovered endpoint process or destination evidence. Then reverse temporary containment and create a narrow exception only after the same workflow recurs consistently.
 </li>
 <li class="listitem">
-Preserve evidence: retain the full <code class="literal">powershell.file.script_block_text</code> and any reconstructed/decoded strings, along with related events for the same <code class="literal">powershell.file.script_block_id</code> (all <code class="literal">powershell.sequence</code> values).
+If suspicious but unconfirmed, preserve evidence first: export the alert, source 4104 event, ordered script fragments, decoded strings, source <code class="literal">process.pid</code>, and any recovered <code class="literal">process.entity_id</code>, command line, parent, file, registry, DNS, or destination artifacts. Apply reversible containment tied to the findings, such as heightened monitoring, temporary destination blocking, or host isolation when the host role allows it, then escalate before deleting artifacts or resetting accounts.
 </li>
 <li class="listitem">
-If the script originates from disk (<code class="literal">file.path</code> present), collect and quarantine the referenced file and review for additional related artifacts created or modified around the alert time window.
+If confirmed malicious, preserve the same script, source-event, process, artifact, and destination evidence before destructive actions. Isolate the host when business impact allows, record the malicious PowerShell <code class="literal">process.entity_id</code> before termination when it was recovered, block confirmed malicious domains, URLs, IPs, and hashes, and remove only files, registry changes, scheduled tasks, or other persistence tied to the decoded script. Reset credentials only when the investigation shows account misuse beyond local execution.
 </li>
 <li class="listitem">
-Identify and remediate follow-on actions indicated by the decoded content (for example, downloaded payloads, persistence mechanisms, or changes to system configuration).
-</li>
-<li class="listitem">
-Hunt for spread: search for the same decoded indicators, similar reconstruction patterns, and elevated <code class="literal">Esql.script_block_pattern_count</code> across other hosts and users.
-</li>
-<li class="listitem">
-If account misuse is suspected, perform appropriate credential hygiene and review recent authentication activity for the affected <code class="literal">user.id</code> and related accounts.
-</li>
-<li class="listitem">
-Review and strengthen PowerShell controls and monitoring based on findings (for example, ensure Script Block Logging is consistently enabled and that anti-malware scanning integration is functioning as expected).
+Post-incident hardening: retain PowerShell script-block logging and endpoint telemetry needed for process, file, registry, DNS, and network recovery; constrain PowerShell automation to signed or centrally managed workflows where feasible; record the benign workflow or malicious artifact set so repeat alerts can be handled with the same evidence standard.
 </li>
 </ul>
 </div>
@@ -234,7 +209,7 @@ Review and strengthen PowerShell controls and monitoring based on findings (for 
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_498"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-character-array-reconstruction.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_662"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-character-array-reconstruction.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
 <p>PowerShell Script Block Logging must be enabled to generate the events used by this rule (e.g., 4104).
@@ -243,7 +218,7 @@ Setup instructions: <a href="https://ela.st/powershell-logging-setup" class="uli
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1051"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-character-array-reconstruction.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1082"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-powershell-obfuscation-via-character-array-reconstruction.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -278,7 +253,8 @@ Setup instructions: <a href="https://ela.st/powershell-logging-setup" class="uli
     host.name,
     host.id,
     agent.id,
-    user.id
+    user.id,
+    process.pid
 
 // Filter for scripts that match the pattern at least once
 | where Esql.script_block_pattern_count &gt;= 1</pre>

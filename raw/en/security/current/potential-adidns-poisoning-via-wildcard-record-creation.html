@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="potential-adidns-poisoning-via-wildcard-record-creation"></a>Potential ADIDNS Poisoning via Wildcard Record Creation</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-adidns-poisoning-via-wildcard-record-creation.asciidoc">edit</a></div>
 </div></div></div>
-<p>Active Directory Integrated DNS (ADIDNS) is one of the core components of AD DS, leveraging AD&#8217;s access control and replication to maintain domain consistency. It stores DNS zones as AD objects, a feature that, while robust, introduces some security issues, such as wildcard records, mainly because of the default permission (Any authenticated users) to create DNS-named records. Attackers can create wildcard records to redirect traffic that doesn&#8217;t explicitly match records contained in the zone, becoming the Man-in-the-Middle and being able to abuse DNS similarly to LLMNR/NBNS spoofing.</p>
+<p>Active Directory Integrated DNS (ADIDNS) is one of the core components of AD DS, leveraging AD&#8217;s access control and replication to maintain domain consistency. It stores DNS zones as AD objects, a feature that, while robust, introduces some security issues, such as wildcard records, mainly because of the default permission (Any authenticated users) to create DNS-named records. Attackers can create wildcard records to redirect traffic for names that do not explicitly match records in the zone, positioning themselves as an adversary-in-the-middle and enabling credential interception or relay through ADIDNS manipulation similar in outcome to LLMNR/NBNS spoofing.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -107,7 +107,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 107</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 108</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -119,37 +119,90 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_861"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-adidns-poisoning-via-wildcard-record-creation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_889"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-adidns-poisoning-via-wildcard-record-creation.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Potential ADIDNS Poisoning via Wildcard Record Creation</strong></span></p>
-<p>Active Directory Integrated DNS (ADIDNS) is crucial for maintaining domain consistency by storing DNS zones as AD objects. However, its default permissions allow authenticated users to create DNS records, which adversaries can exploit by adding wildcard records. This enables them to redirect traffic and perform Man-in-the-Middle attacks. The detection rule identifies such abuse by monitoring specific directory service changes indicative of wildcard record creation.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the event logs on the affected Windows host to confirm the presence of event code 5137, which indicates a directory service object modification.
+What wildcard object did the alert create, and which ADIDNS scope can it affect?
 </li>
 <li class="listitem">
-Examine the ObjectDN field in the event data to identify the specific DNS zone where the wildcard record was created, ensuring it starts with "DC=*," to confirm the wildcard nature.
+Why: a leading <code class="literal">DC=*</code> object can answer otherwise unresolved names across that ADIDNS zone, so the zone and partition define the first impact boundary.
 </li>
 <li class="listitem">
-Check the user account associated with the event to determine if it is a legitimate account or potentially compromised, focusing on any unusual or unauthorized activity.
+Focus: <code class="literal">winlog.event_data.ObjectDN</code>, <code class="literal">winlog.event_data.ObjectGUID</code>, <code class="literal">winlog.event_data.DSName</code>, and <code class="literal">winlog.computer_name</code>.
 </li>
 <li class="listitem">
-Investigate recent changes in the DNS zone to identify any other suspicious modifications or patterns that could indicate further malicious activity.
+Hint: parse <code class="literal">winlog.event_data.ObjectDN</code> from left to right. In <code class="literal">DC=*,DC=example.com,CN=MicrosoftDNS,DC=DomainDnsZones,DC=example,DC=com</code>, <code class="literal">DC=*</code> is the wildcard node, <code class="literal">DC=example.com</code> is the DNS zone, and <code class="literal">DC=DomainDnsZones,...</code> identifies the AD DNS partition.
 </li>
 <li class="listitem">
-Correlate the event with network traffic logs to detect any unusual or redirected traffic patterns that could suggest a Man-in-the-Middle attack.
+Implication: escalate faster when the object is a wildcard dnsNode in a production domain or forest DNS partition; lower concern only when the same object, zone, and domain controller align with a defensive sinkhole or contained test candidate, then continue to session and change evidence before closure.
 </li>
 <li class="listitem">
-Assess the permissions and access controls on the DNS zones to ensure they are appropriately configured and restrict unnecessary modifications by authenticated users.
+Which account created the wildcard?
+</li>
+<li class="listitem">
+Focus: <code class="literal">user.name</code>, <code class="literal">user.id</code>, and <code class="literal">winlog.event_data.SubjectLogonId</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the creator is not a recognized zone-management, defensive sinkhole, or test identity for this object and zone; keep investigating when the account fits a known role because identity alone does not clear wildcard creation.
+</li>
+<li class="listitem">
+Where did the creating session originate?
+</li>
+<li class="listitem">
+Focus: 4624 events on the same <code class="literal">host.id</code> where <code class="literal">winlog.event_data.TargetLogonId</code> matches <code class="literal">winlog.event_data.SubjectLogonId</code>; review <code class="literal">source.ip</code>, <code class="literal">winlog.logon.type</code>, and <code class="literal">winlog.event_data.AuthenticationPackageName</code>.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Session origin (4624) for the wildcard-creating logon","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"winlog.event_data.TargetLogonId","queryType":"phrase","value":"{{winlog.event_data.SubjectLogonId}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"4624","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the source, logon type, or authentication method is unexpected for DC-side ADIDNS changes; missing 4624 origin data is unresolved, not benign.
+</li>
+<li class="listitem">
+What DNS attributes or neighboring objects changed in the same operation?
+</li>
+<li class="listitem">
+Focus: same-session 5136/5137 records keyed by <code class="literal">winlog.event_data.OpCorrelationID</code> or <code class="literal">winlog.event_data.SubjectLogonId</code>, then grouped by <code class="literal">winlog.event_data.ObjectGUID</code>; inspect <code class="literal">winlog.event_data.AttributeLDAPDisplayName</code> and <code class="literal">winlog.event_data.AttributeValue</code>.
+</li>
+<li class="listitem">
+Hint: query the same domain controller and alert window for matching directory-service changes. Treat <code class="literal">winlog.event_data.AttributeValue</code> for <code class="literal">dnsRecord</code> as a lead because Security logs may encode or truncate record data. If the target is unclear, retrieve the current ADIDNS object or DNS record and compare it to <code class="literal">ObjectDN</code>, <code class="literal">ObjectGUID</code>, and the event timeline because current state may differ from event-time state. Missing DNS record data is unresolved, not benign. Windows Security alone does not prove tool identity or client redirection.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Directory service changes from the wildcard-creating session","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"winlog.event_data.OpCorrelationID","queryType":"phrase","value":"{{winlog.event_data.OpCorrelationID}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"5136","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"winlog.event_data.SubjectLogonId","queryType":"phrase","value":"{{winlog.event_data.SubjectLogonId}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"5136","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"winlog.event_data.SubjectLogonId","queryType":"phrase","value":"{{winlog.event_data.SubjectLogonId}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"5137","valueType":"string"}]],"relativeFrom":"now-1h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when 5136 data shows a dnsRecord target or adjacent ADIDNS changes not tied to the same verified sinkhole or test object; if <code class="literal">winlog.event_data.AttributeValue</code> is opaque or absent, the target remains unresolved.
+</li>
+<li class="listitem">
+Did clients use the wildcard or authenticate to the recovered target?
+</li>
+<li class="listitem">
+Focus: DNS/client telemetry for names in the affected zone and downstream network or authentication events to the recovered target; compare <code class="literal">dns.question.name</code>, <code class="literal">dns.resolved_ip</code>, <code class="literal">source.ip</code>, and <code class="literal">destination.ip</code>.
+</li>
+<li class="listitem">
+Implication: escalate impact when clients query unresolved names that resolve to the wildcard target, then connect or authenticate to that target; missing DNS, network, or authentication telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+If object, session, or change-set evidence stays suspicious, do related alerts suggest broader AD abuse?
+</li>
+<li class="listitem">
+Focus: related alerts for <code class="literal">user.id</code> and <code class="literal">host.id</code> involving repeated directory-service changes, ADIDNS abuse, or credential access.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the domain controller","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when the same actor or domain controller shows related AD, relay, or credential-access activity; keep scope local only when related alerts are absent and object, session, and change-set evidence fit a recognized sinkhole or test.
+</li>
+<li class="listitem">
+Escalate when production wildcard scope, unrecognized creator/session, suspicious dnsRecord target, client-impact evidence, adjacent ADIDNS changes, or related AD-abuse alerts point to unrecognized wildcard creation; close only when all evidence fits the exact defensive sinkhole or contained test object; if mixed or incomplete, preserve and escalate.
 </li>
 </ul>
 </div>
@@ -157,19 +210,13 @@ Assess the permissions and access controls on the DNS zones to ensure they are a
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Routine administrative changes to DNS records by IT staff can trigger alerts. To manage this, create exceptions for known administrative accounts or specific ObjectDN patterns that correspond to legitimate changes.
+Wildcard records in AD-integrated DNS zones are an anti-pattern because they can replace NXDOMAIN behavior and redirect unresolved names. The plausible benign paths are narrow: an administrator-controlled defensive sinkhole or a contained red-team or penetration test. Confirm by verifying that <code class="literal">winlog.event_data.ObjectDN</code>, <code class="literal">winlog.event_data.ObjectGUID</code>, <code class="literal">winlog.event_data.DSName</code>, <code class="literal">user.id</code>, <code class="literal">winlog.event_data.SubjectLogonId</code>, and recovered 5136 attribute evidence all align with that exact object and scope.
 </li>
 <li class="listitem">
-Automated systems or scripts that update DNS records as part of regular maintenance may cause false positives. Identify these systems and exclude their activity from triggering alerts by filtering based on their unique identifiers or event sources.
+If independent confirmation of the sinkhole or test is unavailable, do not close as benign even when the Windows Security evidence is internally consistent.
 </li>
 <li class="listitem">
-Software installations or updates that modify DNS settings might be flagged. Monitor and document these activities, and consider excluding them if they are part of a recognized and secure process.
-</li>
-<li class="listitem">
-Changes made by trusted third-party services that integrate with ADIDNS could be misinterpreted as threats. Verify these services and whitelist their actions to prevent unnecessary alerts.
-</li>
-<li class="listitem">
-Temporary testing environments that mimic production settings might generate alerts. Ensure these environments are clearly documented and excluded from monitoring if they are known to perform non-threatening wildcard record creations.
+Before creating an exception, require the same wildcard object, authorized zone, creator identity, and defensive or test window to recur as one stable workflow. Avoid exceptions on <code class="literal">user.name</code>, <code class="literal">user.id</code>, or the domain partition alone because those would suppress lookalike wildcard creation.
 </li>
 </ul>
 </div>
@@ -177,25 +224,22 @@ Temporary testing environments that mimic production settings might generate ale
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected system from the network to prevent further exploitation or data exfiltration.
+If confirmed as an authorized defensive sinkhole or test, reverse any temporary containment, verify the wildcard is removed or retained according to that scope, and document <code class="literal">winlog.event_data.ObjectDN</code>, <code class="literal">winlog.event_data.ObjectGUID</code>, <code class="literal">winlog.event_data.DSName</code>, creating <code class="literal">user.id</code>, <code class="literal">winlog.event_data.SubjectLogonId</code>, <code class="literal">winlog.computer_name</code>, and the confirming scope.
 </li>
 <li class="listitem">
-Revoke any potentially compromised credentials associated with the affected system or user accounts involved in the alert.
+If suspicious but unconfirmed, export the AD object state, replication context, and related 5136/5137 Windows Security events before modifying the record or account. Then apply reversible containment tied to the evidence, such as restricting the creating account&#8217;s ADIDNS write path or temporarily limiting that account while scope is clarified.
 </li>
 <li class="listitem">
-Conduct a thorough review of DNS records in the affected zone to identify and remove any unauthorized wildcard entries.
+If confirmed malicious, preserve the exported AD object, 5136 attribute evidence, session-origin evidence, and related alerts before deletion. Remove the wildcard and any unauthorized ADIDNS objects from the same session, then verify removal replicated to all domain controllers.
 </li>
 <li class="listitem">
-Implement stricter access controls on DNS record creation, limiting permissions to only necessary administrative accounts.
+Disable or restrict the creating account after evidence preservation to prevent re-poisoning. Use <code class="literal">winlog.event_data.SubjectLogonId</code> and recovered <code class="literal">source.ip</code> to hand off the source system for endpoint investigation of ADIDNS tooling, credential capture, or follow-on authentication.
 </li>
 <li class="listitem">
-Monitor network traffic for signs of Man-in-the-Middle activity, focusing on unusual DNS queries or redirections.
+If separate response evidence proves client redirection through the wildcard, treat credentials active on affected systems as exposed. Reset those accounts, prioritizing privileged and service accounts, and investigate for relayed authentication or follow-on access.
 </li>
 <li class="listitem">
-Escalate the incident to the security operations center (SOC) for further investigation and to assess the potential impact on other systems.
-</li>
-<li class="listitem">
-Update detection mechanisms to include additional indicators of compromise related to ADIDNS abuse, enhancing future threat detection capabilities.
+Review ADIDNS permissions for the affected zone; reduce wildcard-creation opportunities, especially broadly delegated or authenticated-user create-child rights. Search all AD-integrated zones for additional wildcard or suspicious ADIDNS objects and document the final evidence set for future narrow exceptions.
 </li>
 </ul>
 </div>
@@ -203,26 +247,16 @@ Update detection mechanisms to include additional indicators of compromise relat
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_424"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-adidns-poisoning-via-wildcard-record-creation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_557"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-adidns-poisoning-via-wildcard-record-creation.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
-<p>The <em>Audit Directory Service Changes</em> logging policy must be configured for (Success, Failure).
-Steps to implement the logging policy with Advanced Audit Configuration:</p>
-<pre class="screen">Computer Configuration &gt;
-Policies &gt;
-Windows Settings &gt;
-Security Settings &gt;
-Advanced Audit Policies Configuration &gt;
-Audit Policies &gt;
-DS Access &gt;
-Audit Directory Service Changes (Success,Failure)</pre>
-<p>The above policy does not cover the target object by default (we still need it to be configured to generate events), so we need to set up an AuditRule using <a href="https://github.com/OTRF/Set-AuditRule" class="ulink" target="_top">https://github.com/OTRF/Set-AuditRule</a>.</p>
-<pre class="screen">Set-AuditRule -AdObjectPath 'AD:\CN=MicrosoftDNS,DC=DomainDNSZones,DC=Domain,DC=com' -WellKnownSidType WorldSid -Rights CreateChild -InheritanceFlags Descendents -AttributeGUID e0fa1e8c-9b45-11d0-afdd-00c04fd930c9 -AuditFlags Success</pre>
+<p>Audit Directory Service Changes must be enabled to generate the events used by this rule.
+Setup instructions: <a href="https://ela.st/audit-directory-service-changes" class="ulink" target="_top">https://ela.st/audit-directory-service-changes</a></p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_920"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-adidns-poisoning-via-wildcard-record-creation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_948"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-adidns-poisoning-via-wildcard-record-creation.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

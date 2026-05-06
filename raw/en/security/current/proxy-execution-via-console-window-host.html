@@ -134,7 +134,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 3</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 4</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -146,7 +146,7 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1129"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/proxy-execution-via-console-window-host.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1162"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/proxy-execution-via-console-window-host.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Proxy Execution via Console Window Host</strong></span></p>
@@ -154,19 +154,82 @@ Elastic
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the conhost child processes and the parent process to identify the initial vector.
+What command did the headless conhost instance proxy?
 </li>
 <li class="listitem">
-Identify the user account that performed the action and whether it should perform this kind of action.
+Why: <code class="literal">--headless</code> can hide the child window behind conhost, so command intent and child-process evidence outweigh conhost identity alone.
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Focus: <code class="literal">process.command_line</code> for <code class="literal">--headless</code> and the proxied family: shell, script host, retrieval, UNC, caret-escaped, batch, or scheduled-task action.
 </li>
 <li class="listitem">
-Validate the activity is not related to planned patches, updates, network administrator activity, or legitimate software installations.
+Implication: escalate when headless conhost proxies script execution, remote retrieval, scheduled-task changes, or lateral-path commands; lower suspicion only when command, launcher, user, and host match remote-admin console management, deployment automation, or installer/update helper use and later process evidence does not contradict it.
 </li>
 <li class="listitem">
-Assess whether this behavior is prevalent in the environment by looking for similar occurrences across hosts.
+Is this the native conhost binary or a masqueraded copy?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.hash.sha256</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>; compare the path with <code class="literal">C:\Windows\System32\conhost.exe</code>.
+</li>
+<li class="listitem">
+Implication: escalate when conhost is renamed, unsigned, user-writable, host-new by hash, or signed by an unexpected publisher; native signed identity lowers masquerade concern but not suspicious <code class="literal">--headless</code> proxy execution.
+</li>
+<li class="listitem">
+Which launcher produced headless conhost?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, and <code class="literal">process.parent.entity_id</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the launcher is Office, a browser, a script host, a temp or user-writable binary, another LOLBin, or a remote-management tool outside its console-management pattern; lower suspicion when the same parent is a stable console, deployment, or update path for the same <code class="literal">user.id</code> and <code class="literal">host.id</code>.
+</li>
+<li class="listitem">
+Do the user and session context fit the same admin or deployment use?
+</li>
+<li class="listitem">
+Focus: <code class="literal">user.id</code>, <code class="literal">host.id</code>, <code class="literal">process.Ext.session_info.logon_type</code>, and <code class="literal">process.Ext.authentication_id</code>.
+</li>
+<li class="listitem">
+Implication: escalate when session type, account, or authentication ID is unusual for that <code class="literal">host.id</code> and user cohort or ties to unrelated suspicious processes; lower suspicion when user, host cohort, session type, command, and lineage match the same remote-admin, deployment, or update use.
+</li>
+<li class="listitem">
+Did headless conhost spawn the command family named in the alert?
+</li>
+<li class="listitem">
+Focus: child process starts on <code class="literal">host.id</code> where <code class="literal">process.parent.entity_id</code> matches alert <code class="literal">process.entity_id</code>; read <code class="literal">process.name</code>, <code class="literal">process.executable</code>, and <code class="literal">process.command_line</code>. !{investigate{"description":"","label":"Child process starts from the same conhost instance","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if <code class="literal">process.entity_id</code> is absent, query the same <code class="literal">host.id</code> with alert <code class="literal">process.pid</code> in a tight alert-time window; treat matches as weaker because PID reuse is possible.
+</li>
+<li class="listitem">
+Implication: escalate when conhost spawns shell, script-host, downloader, scheduled-task, or payload-like children; keep scope local only when no child execution appears and earlier evidence fits the same named admin, deployment, or update use.
+</li>
+<li class="listitem">
+If local evidence is suspicious or unresolved, is this isolated or broader proxy execution?
+</li>
+<li class="listitem">
+Focus: process-start history for the same <code class="literal">host.id</code> and, if needed, <code class="literal">user.id</code>; compare <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, and child-process patterns.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Process history on the same host","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Process history for the same user","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: review related alerts for the same <code class="literal">host.id</code> and <code class="literal">user.id</code>, especially script execution, downloader, scheduled-task, credential-tool, or other proxy-execution activity.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate scope when the same host or user shows repeated headless conhost proxy execution, suspicious launchers, or related script, downloader, scheduled-task, or credential-tool processes; lack of history does not clear suspicious command, lineage, session, or child-process evidence.
+</li>
+<li class="listitem">
+Escalate on unauthorized headless proxy execution plus suspicious identity, launcher, session, child-process, or repeat-alert corroboration; close only when command, identity, lineage, session, and child-process evidence bind to one named benign use case below; preserve evidence and escalate when evidence is mixed or incomplete.
 </li>
 </ul>
 </div>
@@ -174,30 +237,33 @@ Assess whether this behavior is prevalent in the environment by looking for simi
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This is a dual-use tool, meaning its usage is not inherently malicious. Analysts can dismiss the alert if the administrator is aware of the activity, no other suspicious activity was identified.
+Remote-administration, console-management, deployment automation, installer, or update agents can launch headless conhost when a named tool uses console helpers. Confirm that native <code class="literal">process.executable</code>, stable <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.code_signature.subject_name</code>, <code class="literal">process.parent.code_signature.trusted</code>, parent and child <code class="literal">process.command_line</code>, <code class="literal">user.id</code>, <code class="literal">host.id</code>, <code class="literal">process.Ext.session_info.logon_type</code>, and child-process pattern all align with that tool or product path. Tool inventories, change records, or owner confirmation can corroborate telemetry-backed use, but should not replace missing or contradictory process evidence. If command, parent, session, or child evidence diverges, or the first cohort event includes retrieval, UNC, script-host, or scheduled-task behavior outside that path, treat it as unresolved or suspicious.
+</li>
+<li class="listitem">
+Before creating an exception, verify that native <code class="literal">process.executable</code>, parent identity, exact <code class="literal">process.command_line</code>, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and session type recur across prior alerts from this rule. Build the exception from that confirmed workflow pattern; avoid exceptions on <code class="literal">process.name</code>, the conhost filename, or <code class="literal">--headless</code> alone.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Response and Remediation</strong></span></p>
+<p><span class="strong strong"><strong>Response and remediation</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse temporary containment and record the command intent, native conhost identity, parent lineage, <code class="literal">user.id</code>, <code class="literal">host.id</code>, session type, and child-process evidence that justified closure. Create an exception only when that same admin, deployment, or update pattern recurs consistently across prior alerts.
 </li>
 <li class="listitem">
-Isolate the involved host to prevent further post-compromise behavior.
+If suspicious but unconfirmed, preserve the alert, process tree export, command lines, hash and signer details, <code class="literal">process.entity_id</code>, <code class="literal">process.parent.entity_id</code>, <code class="literal">process.Ext.authentication_id</code>, child-process events, and any scripts or task definitions named in the command line before containment. Apply reversible containment first, such as heightened monitoring or temporary restrictions on the affected <code class="literal">user.id</code>, <code class="literal">host.id</code>, or parent tool, and avoid process termination until scope is clearer.
 </li>
 <li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
+If confirmed malicious, contain the host or affected account when command intent, launcher lineage, session context, or child-process evidence establishes unauthorized proxy execution. Record the process identifiers, command lines, signer and hash evidence, user and host anchors, and child-process chain before terminating processes, deleting scripts, disabling scheduled tasks, or isolating accounts.
 </li>
 <li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
+Eradicate only the scripts, task definitions, copied tools, or persistence mechanisms identified during the investigation, then remediate the launcher, automation path, or access path that allowed headless conhost to proxy the command.
 </li>
 <li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
+Rotate credentials only when the user and session evidence or adjacent case evidence confirms account misuse, remote abuse, or privileged account compromise; otherwise keep identity action proportional to the confirmed process evidence.
 </li>
 <li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+After containment, scope other hosts and users for the same <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, <code class="literal">process.hash.sha256</code>, parent signer, or child-process pattern. Retain the process telemetry and response notes needed to distinguish repeat benign console automation from repeat proxy execution.
 </li>
 </ul>
 </div>
@@ -205,13 +271,62 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1197"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/proxy-execution-via-console-window-host.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_784"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/proxy-execution-via-console-window-host.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/audit-process-creation" class="ulink" target="_top">Windows Process Creation Logs</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1230"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/proxy-execution-via-console-window-host.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-js">process where host.os.type == "windows" and event.type == "start" and
  process.name : "conhost.exe" and process.args : "--headless" and
-  process.command_line : ("*powershell*", "*cmd *", "*cmd.exe *", "*script*", "*mshta*", "*curl *", "*curl.exe *", "*^*^*^*", "*.bat*", "*.cmd*", "*schtasks*", "*@SSL*", "*http*", "* \\\\*", "*.vbs*", "*.js*", "*mhsta*")</pre>
+  process.command_line : (
+    "*powershell*", "*cmd *", "*cmd.exe *", "*script*", "*mshta*", "*curl *", "*curl.exe *", "*^*^*^*",
+    "*.bat*", "*.cmd*", "*schtasks*", "*@SSL*", "*http*", "* \\\\*", "*.vbs*", "*.js*", "*mhsta*"
+  ) and
+  not (
+    /* Winget-AutoUpdate via ServiceUI */
+    process.parent.executable : "?:\\Program Files\\winget-autoupdate*\\serviceui.exe" or
+    /* Winget-AutoUpdate notification via Task Scheduler */
+    (
+      process.parent.executable : "?:\\Windows\\System32\\svchost.exe" and process.parent.args : "-s" and
+      process.parent.args : "Schedule" and process.command_line : "*WAU-Notify.ps1*"
+    ) or
+    /* Windows OpenSSH console host — SSH-specific detection handled by 8cd49fbc-a35a-4418-8688-133cc3a1e548 */
+    process.parent.executable : (
+      "?:\\Windows\\System32\\OpenSSH\\sshd.exe",
+      "?:\\Windows\\System32\\OpenSSH\\sshd-session.exe",
+      "?:\\Program Files\\OpenSSH*\\sshd.exe",
+      "?:\\Program Files\\OpenSSH*\\sshd-session.exe"
+    )
+  )</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

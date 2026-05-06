@@ -196,7 +196,7 @@ Data Source: Elastic Endgame
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 209</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 210</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -208,34 +208,75 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1198"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/script-execution-via-microsoft-html-application.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1231"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/script-execution-via-microsoft-html-application.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Script Execution via Microsoft HTML Application</strong></span></p>
-<p>Microsoft HTML Applications (HTA) allow scripts to run in a trusted environment, often using utilities like <code class="literal">rundll32.exe</code> or <code class="literal">mshta.exe</code>. Adversaries exploit this by executing malicious scripts under the guise of legitimate processes, bypassing defenses. The detection rule identifies suspicious script execution patterns, such as unusual command lines or execution from common download locations, to flag potential abuse.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the process command line details to identify any suspicious patterns or indicators of malicious activity, such as the presence of script execution commands like "eval", "GetObject", or "WScript.Shell".
+Which HTML-application proxy path did the alert capture?
 </li>
 <li class="listitem">
-Check the parent process executable path to determine if the process was spawned by a known legitimate application or if it deviates from expected behavior, especially if it is not from the specified exceptions like Citrix, Microsoft Office, or Quokka.Works GTInstaller.
+Why: proxy path determines the containment target.
 </li>
 <li class="listitem">
-Investigate the origin of the HTA file, particularly if it was executed from common download locations like the Downloads folder or temporary archive extraction paths, to assess if it was downloaded from the internet or extracted from an archive.
+Focus: <code class="literal">process.name</code>, <code class="literal">process.command_line</code>, and <code class="literal">process.args_count</code>: ".hta", ".htm", "vbscript:", "javascript:", "GetObject("script:")", "mshtml,RunHTMLApplication", "mshtml,#135", "http", "WScript.Shell", "StrReverse", "window.close(", or "Chr(".
 </li>
 <li class="listitem">
-Analyze the process arguments and count to identify any unusual or unexpected parameters that could indicate malicious intent, especially if the process name is "mshta.exe" and the command line does not include typical HTA or HTM file references.
+Implication: escalate on inline script, remote retrieval, obfuscation, "RunHTMLApplication", archive/temp execution, or non-HTA "mshta.exe"; lower concern only for one stable internal HTA/HTM path with no inline script, remote locator, or obfuscation.
 </li>
 <li class="listitem">
-Correlate the event with other security logs and alerts from data sources like Sysmon, SentinelOne, or Microsoft Defender XDR to gather additional context and determine if this activity is part of a broader attack pattern.
+Is the proxy binary a genuine Microsoft LOLBin or a masqueraded executable?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.hash.sha256</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>.
+</li>
+<li class="listitem">
+Implication: escalate when "mshta.exe" or "rundll32.exe" runs from a user-writable or non-Windows path, has a mismatched original filename, or lacks a trusted Microsoft signature; canonical Microsoft identity lowers masquerade risk but does not clear suspicious arguments.
+</li>
+<li class="listitem">
+What parent and user context explain the launch?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the parent is Office, a browser, archive utility, script host, user-writable executable, or a chain outside the rule&#8217;s excluded parents; lower concern when the same parent, user cohort, and host cohort repeatedly launch the same recognized HTA workflow.
+</li>
+<li class="listitem">
+What referenced HTA, scriptlet, URL, or path can be recovered?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.command_line</code>, <code class="literal">process.args</code>, and <code class="literal">process.working_directory</code>: literal HTA/HTM path, scriptlet URL, remote locator, archive/temp marker, or relative path; recover same-process file and network/DNS events when artifact or remote locator evidence exists. !{investigate{"description":"","label":"File events for the same proxy instance","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}} !{investigate{"description":"","label":"Network and DNS events for the same proxy instance","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"dns","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the locator points to Downloads, Temp, archive extraction, external URLs, scriptlet retrieval, alternate data stream-like syntax, or a single-user path; lower concern only for the same stable internal path from the same recognized workflow. Missing file, network, or DNS telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Did the proxy spawn follow-on code or payload execution?
+</li>
+<li class="listitem">
+Focus: child starts on <code class="literal">host.id</code> where <code class="literal">process.parent.entity_id</code> equals alert <code class="literal">process.entity_id</code>; inspect child <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>. !{investigate{"description":"","label":"Child process events for the same proxy instance","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if <code class="literal">process.entity_id</code> is absent, use <code class="literal">host.id</code> + <code class="literal">process.pid</code> + the tight alert window as a weaker fallback; treat PID reuse as unresolved ambiguity.
+</li>
+<li class="listitem">
+Implication: escalate when the proxy spawns shells, PowerShell, script hosts, "regsvr32.exe", another "rundll32.exe", unsigned payloads, or tooling unrelated to the parent workflow; lower concern when child activity stays within the same recognized signed application flow.
+</li>
+<li class="listitem">
+If evidence remains suspicious or incomplete, is it isolated?
+</li>
+<li class="listitem">
+Focus: <code class="literal">user.id</code>, <code class="literal">host.id</code>, stable <code class="literal">process.command_line</code> fragments, child <code class="literal">process.executable</code>, and child <code class="literal">process.command_line</code> recovered above. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}} !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when the same user, host, command fragment, or child process repeats across alerts or other hosts; keep scope local only when isolated and aligned with one recognized workflow.
+</li>
+<li class="listitem">
+Escalate on proxy script execution, masquerade, suspicious lineage, external/temporary sourcing, follow-on payloads, or recurrence; close only when command intent, binary identity, lineage, locator, child behavior, and scope align with one recognized internal HTA/HTM workflow; preserve artifacts and escalate when evidence is mixed or incomplete.
 </li>
 </ul>
 </div>
@@ -243,16 +284,10 @@ Correlate the event with other security logs and alerts from data sources like S
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Execution of legitimate scripts by enterprise applications like Citrix, Microsoft Office, or Quokka.Works GTInstaller can trigger false positives. Users can mitigate this by adding these applications to the exclusion list in the detection rule.
+Legacy internal HTA applications or support tools may use "mshta.exe" when identity, intent, and context align: canonical Microsoft <code class="literal">process.executable</code>, stable <code class="literal">process.parent.executable</code>, repeated <code class="literal">process.command_line</code> for one internal HTA/HTM path, consistent <code class="literal">user.id</code>/<code class="literal">host.id</code> cohort, and no child branching into shells or script hosts. If inventory, owner, or change records exist, require alignment with this telemetry; otherwise require recurrence of the same stable process pattern across prior alerts from this rule for the same cohort.
 </li>
 <li class="listitem">
-Scripts executed by mshta.exe that do not involve malicious intent, such as internal web applications or administrative scripts, may be flagged. Users should review these scripts and, if deemed safe, exclude them based on specific command line patterns or parent processes.
-</li>
-<li class="listitem">
-HTA files downloaded from trusted internal sources or vendors might be mistakenly identified as threats. Users can create exceptions for these sources by specifying trusted download paths or file hashes.
-</li>
-<li class="listitem">
-Temporary files created by legitimate software installations or updates in user temp directories can be misinterpreted as malicious. Users should monitor these activities and exclude known safe processes or directories from the detection rule.
+Vendor installers or deployment tools can trigger archive/temp HTA patterns when parent executable, signer context, command line, and bounded child chain match the same recognized package workflow. Do not close on parent name alone; contradictory locator, child process, user/host scope, or signer evidence stays suspicious. Exceptions should use the minimum confirmed pattern, such as <code class="literal">process.parent.executable</code> + stable <code class="literal">process.command_line</code> fragment + <code class="literal">host.id</code> or <code class="literal">user.id</code>, not <code class="literal">process.name</code>.
 </li>
 </ul>
 </div>
@@ -260,25 +295,40 @@ Temporary files created by legitimate software installations or updates in user 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected system from the network to prevent further spread of the malicious script or unauthorized access.
+If confirmed benign:
 </li>
 <li class="listitem">
-Terminate any suspicious processes identified by the detection rule, specifically those involving <code class="literal">rundll32.exe</code> or <code class="literal">mshta.exe</code> with unusual command lines.
+Reverse temporary containment and record the parent workflow, <code class="literal">process.command_line</code>, extracted locator/path, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and recurrence or business records that confirmed the recognized application path. Build exceptions only from the minimum stable workflow pattern, not from "mshta.exe" or "rundll32.exe" alone.
 </li>
 <li class="listitem">
-Conduct a thorough scan of the affected system using updated antivirus or endpoint detection and response (EDR) tools to identify and remove any malicious files or scripts.
+If suspicious but unconfirmed:
 </li>
 <li class="listitem">
-Review and analyze the command lines and scripts executed to understand the scope and intent of the attack, and identify any additional compromised systems.
+Preserve the alert event export, process tree, <code class="literal">process.entity_id</code>, <code class="literal">process.pid</code>, <code class="literal">process.command_line</code>, <code class="literal">process.args</code>, parent lineage, user/host context, recovered child process events, and literal URLs or paths extracted from the command line before cleanup.
 </li>
 <li class="listitem">
-Restore the affected system from a known good backup if malicious activity is confirmed and cannot be fully remediated.
+Apply reversible containment tied to the findings, such as temporary destination restrictions for remote locators, child-process blocking, or heightened monitoring on the affected <code class="literal">host.id</code> and <code class="literal">user.id</code>; use host isolation only when child-process or staging evidence indicates active payload execution and host criticality permits it.
 </li>
 <li class="listitem">
-Implement network segmentation to limit the ability of similar threats to propagate across the network in the future.
+If confirmed malicious:
 </li>
 <li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to determine if additional systems or data have been compromised.
+Isolate the host or contain the affected identity after preserving the process and child-process evidence that established malicious execution. Terminate the proxy and spawned payload processes only after recording their identifiers and command lines.
+</li>
+<li class="listitem">
+Block confirmed malicious command-line locators, child binaries, domains, and addresses identified during triage, then review other hosts and users for the same command fragment or child-process pattern before eradication.
+</li>
+<li class="listitem">
+Remove the malicious HTA, scriptlet, archive-extracted payload, or staged child artifacts identified during investigation; remediate the parent document, browser, archive, or script delivery path; investigate credential exposure if follow-on behavior suggests collection or lateral movement.
+</li>
+<li class="listitem">
+Post-incident hardening:
+</li>
+<li class="listitem">
+Restrict or monitor "mshta.exe" and unusual "rundll32.exe" script-execution paths where the business does not require them.
+</li>
+<li class="listitem">
+Retain process telemetry for these binaries and record any missing artifact, library, or destination visibility that limited the case so future triage can account for the gap.
 </li>
 </ul>
 </div>
@@ -286,7 +336,37 @@ Escalate the incident to the security operations center (SOC) or incident respon
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1265"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/script-execution-via-microsoft-html-application.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_837"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/script-execution-via-microsoft-html-application.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/audit-process-creation" class="ulink" target="_top">Windows Process Creation Logs</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1298"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/script-execution-via-microsoft-html-application.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
