@@ -9,7 +9,7 @@
 <link rel="home" href="index.html" title="Elastic Security [8.19]"/>
 <link rel="up" href="prebuilt-rules.html" title="Prebuilt rule reference"/>
 <link rel="prev" href="suspicious-sip-check-by-macos-application.html" title="Suspicious SIP Check by macOS Application"/>
-<link rel="next" href="suspicious-screenconnect-client-child-process.html" title="Suspicious ScreenConnect Client Child Process"/>
+<link rel="next" href="suspicious-suid-binary-execution-auditd-sequence.html" title="Suspicious SUID Binary Execution (Auditd Sequence)"/>
 <meta class="elastic" name="product_version" content="8.19"/>
 <meta class="elastic" name="product_name" content="Security"/>
 <meta class="elastic" name="website_area" content="documentation"/>
@@ -91,7 +91,7 @@
 <a href="suspicious-sip-check-by-macos-application.html">« Suspicious SIP Check by macOS Application</a>
 </span>
 <span class="next">
-<a href="suspicious-screenconnect-client-child-process.html">Suspicious ScreenConnect Client Child Process »</a>
+<a href="suspicious-suid-binary-execution-auditd-sequence.html">Suspicious SUID Binary Execution (Auditd Sequence) »</a>
 </span>
 </div>
 <div class="book" lang="en">
@@ -115,8 +115,8 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="suspicious-suid-binary-execution"></a>Suspicious SUID Binary Execution</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-suid-binary-execution.asciidoc">edit</a></div>
 </div></div></div>
-<p>Detects execution of common privilege elevation helpers (su, sudo, pkexec, passwd, chsh, newgrp) under the root effective user when the real user and parent user are not root, combined with minimal argument counts and suspicious parent context (interpreters, short shell -c invocations, or parents running from user-writable paths).</p>
-<p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
+<p>Detects execution of SUID binaries that may be used for privilege escalation under the root effective user when the real user and parent user are not root, combined with minimal argument counts and suspicious parent context (interpreters, short shell -c invocations, or parents running from user-writable paths) to indicate potential misuse of SUID binaries for privilege escalation.</p>
+<p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -161,7 +161,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 1</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 2</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -173,12 +173,11 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1395"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-suid-binary-execution.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1419"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-suid-binary-execution.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Suspicious SUID Binary Execution</strong></span></p>
-<p>Confirm whether the non-root real user should be invoking su, sudo, pkexec, or account utilities as root. Review the
-parent process tree, script path, and any preceding download or decode activity.</p>
+<p>Confirm whether the non-root real user should be invoking SUID binaries as root. Review the parent process tree, script path, and any preceding download or decode activity.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -205,24 +204,34 @@ If unauthorized, contain the session, revoke elevated access, and review sudoers
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1446"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-suid-binary-execution.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1470"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-suid-binary-execution.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">host.os.type:linux and event.category:process and event.action:"exec" and
-process.name:("su" or "sudo" or "pkexec" or "passwd" or "chsh" or "newgrp") and
-process.user.id:"0" and not process.real_user.id:"0" and
-not process.parent.user.id:"0" and
-(
-  (process.name:("sudo" or "pkexec") and process.args_count:1) or
-  (process.name:("su" or "passwd" or "chsh" or "newgrp") and process.args_count &lt;= 2)
+<pre class="programlisting prettyprint lang-js">process where host.os.type == "linux" and event.type == "start" and event.action == "exec" and (
+  (process.user.id == "0" and process.real_user.id != "0" and process.parent.user.id != "0") or
+  (process.group.id == "0" and process.real_group.id != "0" and process.parent.group.id != "0")
 ) and
 (
-  process.parent.name:(python* or perl* or ruby* or node or bun or java or php* or lua* or .*) or
-  process.parent.executable:(/tmp/* or /var/tmp/* or /dev/shm/* or /home/* or /run/user/*) or
-  (process.parent.name:(bash or sh or zsh or dash or fish or ksh) and
-   (process.parent.command_line: (-bash or -sh or -zsh or -dash or -fish or -ksh) or
-   (process.parent.args:("-c" or "--command" or "-ic" or "-ci") and process.parent.args_count &lt;= 4)))
+  (process.name in ("su", "passwd", "unix_chkpwd") and process.args_count &lt;= 2) or
+  (
+    process.name in ("sudo", "pkexec", "fusermount", "fusermount3", "mount", "umount", "newgrp", "chsh") and
+    process.args_count == 1
+  ) or
+  process.name in (
+    "sudoedit", "gpasswd", "chfn", "polkit-agent-helper-1", "dbus-daemon-launch-helper", "ssh-keysign",
+    "pam_extrausers_chkpwd", "expiry", "chage", "crontab", "wall", "bsd-write", "ssh-agent", "ping",
+    "ping6", "traceroute", "mtr", "ntfs-3g", "Xorg.wrap", "chrome-sandbox", "bwrap"
+  )
+) and
+(
+  process.parent.name like (".*", "python*", "perl*", "ruby*", "lua*", "php*", "node", "deno", "bun", "java") or
+  process.parent.executable like ("./*", "/tmp/*", "/var/tmp/*", "/dev/shm/*", "/run/user/*", "/var/run/user/*", "/home/*/*") or
+  (
+    process.parent.name in ("bash", "dash", "sh", "tcsh", "csh", "zsh", "ksh", "fish", "mksh") and
+    process.parent.args in ("-c", "-cl", "-lc", "--command", "-ic", "-ci", "-bash", "-sh", "-zsh", "-dash", "-fish", "-ksh", "-mksh") and
+    process.parent.args_count &lt;= 4
+  )
 )</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
@@ -303,7 +312,7 @@ Reference URL: <a href="https://attack.mitre.org/techniques/T1548/003/" class="u
 <a href="suspicious-sip-check-by-macos-application.html">« Suspicious SIP Check by macOS Application</a>
 </span>
 <span class="next">
-<a href="suspicious-screenconnect-client-child-process.html">Suspicious ScreenConnect Client Child Process »</a>
+<a href="suspicious-suid-binary-execution-auditd-sequence.html">Suspicious SUID Binary Execution (Auditd Sequence) »</a>
 </span>
 </div>
 

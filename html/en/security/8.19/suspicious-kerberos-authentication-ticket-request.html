@@ -151,6 +151,9 @@ winlogbeat-*
 <li class="listitem">
 <a href="https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4768" class="ulink" target="_top">https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4768</a>
 </li>
+<li class="listitem">
+<a href="https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4769" class="ulink" target="_top">https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4769</a>
+</li>
 </ul>
 </div>
 <p><span class="strong strong"><strong>Tags</strong></span>:</p>
@@ -167,9 +170,6 @@ OS: Windows
 </li>
 <li class="listitem">
 Use Case: Threat Detection
-</li>
-<li class="listitem">
-Tactic: Credential Access
 </li>
 <li class="listitem">
 Tactic: Lateral Movement
@@ -194,7 +194,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 4</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 5</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -206,29 +206,99 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1357"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-kerberos-authentication-ticket-request.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1381"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-kerberos-authentication-ticket-request.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Suspicious Kerberos Authentication Ticket Request</strong></span></p>
-<p>Kerberos is the default authentication protocol in Active Directory, designed to provide strong authentication for client/server applications by using secret-key cryptography.</p>
-<p>Domain-joined hosts usually perform Kerberos traffic using the <code class="literal">lsass.exe</code> process. This rule detects the occurrence of traffic on the Kerberos port (88) by processes other than <code class="literal">lsass.exe</code> to detect the unusual request and usage of Kerberos tickets.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the process execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+Which Timeline member events define this Kerberos sequence?
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Focus: Timeline members keyed by alert <code class="literal">source.ip</code> and <code class="literal">source.port</code>; recover source <code class="literal">process.executable</code>, Kerberos <code class="literal">destination.ip</code>, and auth <code class="literal">event.code</code>.
 </li>
 <li class="listitem">
-Check if the Destination IP is related to a Domain Controller.
+Hint: record <code class="literal">host.id</code> and <code class="literal">process.entity_id</code>; verify auth <code class="literal">winlog.computer_name</code> is the DC.
 </li>
 <li class="listitem">
-Review events ID 4769 and 4768 for suspicious ticket requests.
+Implication: escalate when one non-"lsass.exe" source process maps to a DC "4768" or "4769" event in the sequence window; lower concern for socket reuse, a different process, or non-DC destination.
 </li>
 <li class="listitem">
-Investigate potentially compromised accounts. Analysts can do this by searching for login events (for example, 4624) to the target host after the registry modification.
+Is the recovered source process a recognized Kerberos-capable client?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.hash.sha256</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>.
+</li>
+<li class="listitem">
+Hint: open process start with recovered <code class="literal">host.id</code> and <code class="literal">process.entity_id</code>; if absent, use <code class="literal">host.id</code>, <code class="literal">process.pid</code>, and sequence window.
+</li>
+<li class="listitem">
+Implication: escalate when the binary is unsigned, renamed, user-writable, signer-mismatched, or outside known AD audit, Kerberos diagnostic, or security-test tooling; lower concern only when path, signer, hash history, command, and parent converge on one known tool.
+</li>
+<li class="listitem">
+Does command-line and parentage show ticket-tool intent?
+</li>
+<li class="listitem">
+Focus: recovered <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, and broader process lineage when needed.
+</li>
+<li class="listitem">
+Implication: escalate on Bifrost-like verbs or flags such as asktgt, asktgs, s4u, ptt, kerberoast, service/SPN targets, hashes, keytabs, RC4, or base64 tickets, especially from shell or script parents; bounded diagnostics from a recognized admin tool reduce but do not clear concern.
+</li>
+<li class="listitem">
+Which ticket path and target account did the DC member event show?
+</li>
+<li class="listitem">
+Focus: recovered auth <code class="literal">event.code</code>, <code class="literal">winlog.event_data.TargetUserName</code>, and <code class="literal">winlog.event_data.TargetDomainName</code>.
+</li>
+<li class="listitem">
+Implication: escalate when "4769" shows service-ticket activity or "4768" shows TGT handling for privileged, service, machine, or delegation-sensitive targets from the unusual process; fan-out increases concern.
+</li>
+<li class="listitem">
+Does the source user and session context fit one bounded admin or audit source?
+</li>
+<li class="listitem">
+Focus: recovered <code class="literal">user.id</code>, <code class="literal">user.name</code>, <code class="literal">user.domain</code>, and <code class="literal">winlog.event_data.TargetUserName</code>.
+</li>
+<li class="listitem">
+Implication: escalate when privileged, service, or user-account tickets originate from a workstation, user session, or non-management tool; lower concern only when source host, user, process identity, command/parent, and target account recur as one bounded Kerberos diagnostic or audit pattern.
+</li>
+<li class="listitem">
+Do surrounding Kerberos events show repetition or account fan-out?
+</li>
+<li class="listitem">
+Focus: same-source Kerberos network and authentication events, checking additional "4768"/"4769" events and <code class="literal">winlog.event_data.TargetUserName</code>.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Kerberos network events from the same source IP","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"},{"excluded":false,"field":"source.ip","queryType":"phrase","value":"{{source.ip}}","valueType":"string"},{"excluded":false,"field":"destination.port","queryType":"phrase","value":"88","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Authentication events for the same source IP","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"authentication","valueType":"string"},{"excluded":false,"field":"source.ip","queryType":"phrase","value":"{{source.ip}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when requests repeat or fan out across accounts; a single bounded request narrows scope but does not close if process identity or command intent remains suspicious. Missing network or authentication telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Do later logon or explicit-credential events suggest ticket use?
+</li>
+<li class="listitem">
+Focus: same-source authentication results, checking later <code class="literal">event.code</code> "4624"/"4648", <code class="literal">winlog.event_data.TargetUserName</code>, and 4648 <code class="literal">winlog.event_data.TargetServerName</code>.
+</li>
+<li class="listitem">
+Implication: escalate when post-ticket logon or explicit-credential activity reaches sensitive accounts or servers from the same source; absence narrows impact but does not close if the ticket request remains suspicious. Missing same-source authentication telemetry leaves ticket use unresolved, not benign.
+</li>
+<li class="listitem">
+If local evidence remains suspicious or unresolved, does the same source show related alerts?
+</li>
+<li class="listitem">
+Focus: related alerts for <code class="literal">source.ip</code>; manually pivot on recovered <code class="literal">process.hash.sha256</code> or <code class="literal">winlog.event_data.TargetUserName</code> when locally suspicious. !{investigate{"description":"","label":"Alerts associated with the same source IP","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"source.ip","queryType":"phrase","value":"{{source.ip}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when credential-access, Kerberoasting, relay, or lateral-movement alerts share the source, process, or target account; keep local only when related alerts are absent and recovered evidence resolves cleanly.
+</li>
+<li class="listitem">
+Escalate when sequence recovery, source-process identity, command intent, DC ticket target, account context, or surrounding ticket/logon activity show unauthorized direct Kerberos; close only when telemetry binds one recognized tool, source host, user, and target account and outside confirmation verifies exact activity when telemetry cannot; preserve and escalate when visibility is incomplete or evidence conflicts.
 </li>
 </ul>
 </div>
@@ -236,7 +306,13 @@ Investigate potentially compromised accounts. Analysts can do this by searching 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Active Directory audit tools.
+AD audit tools, Kerberos diagnostics, interoperability testing, or security testing can request tickets directly instead of through "lsass.exe". Confirm only when process path, signer/hash, parent, command line, <code class="literal">source.ip</code>, <code class="literal">user.id</code>, <code class="literal">event.code</code>, and target account align with the same recognized tool on a dedicated admin, lab, or audit source; without outside records, require the same process identity, source host/user, target account, and bounded ticket pattern across prior alerts from this rule.
+</li>
+<li class="listitem">
+Treat partial matches as unresolved when process identity fits but the command targets unusual SPNs, privileged accounts, RC4/kerberoast behavior, or follow-on "4624"/"4648" activity. Do not close on signer, source IP, or event code alone when ticket target or command intent contradicts benign workflow.
+</li>
+<li class="listitem">
+Before creating an exception, anchor it to the minimum stable workflow: dedicated <code class="literal">source.ip</code> or source host, process signer/hash/path, parent workflow, <code class="literal">user.id</code>, target account, and bounded <code class="literal">event.code</code> pattern. Avoid exceptions on <code class="literal">source.port</code>, <code class="literal">event.code</code>, process name, or broad account patterns alone.
 </li>
 </ul>
 </div>
@@ -244,43 +320,22 @@ Active Directory audit tools.
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse temporary containment and document the recovered source host/IP, process identity, command line, source user, DC ticket event, and target account that proved the recognized workflow. Create an exception only after the same dedicated source and process pattern recurs consistently.
 </li>
 <li class="listitem">
-Isolate the involved host to prevent further post-compromise behavior.
+If suspicious but unconfirmed, preserve the alert, Timeline member events, suspicious process binary and command line, source socket, DC authentication record, and any follow-on "4624" or "4648" evidence before containment or process action.
 </li>
 <li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
+Apply reversible containment next: restrict the recovered source host&#8217;s Kerberos/DC access or isolate the host when its role tolerates isolation, and suspend the recovered process only after process and authentication artifacts are captured.
 </li>
 <li class="listitem">
-Ticket requests can be used to investigate potentially compromised accounts.
+If confirmed malicious, isolate the recovered source host, terminate or suspend the recovered process after recording its <code class="literal">process.entity_id</code>, expire exposed Kerberos tickets where operationally appropriate, and reset or rotate impacted credentials, prioritizing privileged, service, machine, and delegation-capable accounts.
 </li>
 <li class="listitem">
-If the triage identified malware, search the environment for additional compromised hosts.
+Before cleanup, search for the same source IP, recovered process hash, target account, and related credential-access, Kerberoasting, relay, or lateral-movement activity so scope is not limited to the first sequence.
 </li>
 <li class="listitem">
-Implement temporary network rules, procedures, and segmentation to contain the malware.
-</li>
-<li class="listitem">
-Stop suspicious processes.
-</li>
-<li class="listitem">
-Immediately block the identified indicators of compromise (IoCs).
-</li>
-<li class="listitem">
-Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
-</li>
-<li class="listitem">
-Remove and block malicious artifacts identified during triage.
-</li>
-<li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-</li>
-<li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+After containment, retain DC "4768"/"4769" auditing and endpoint network telemetry, restrict direct Kerberos tooling to controlled admin/testing hosts, and document the recovered tool pattern and any logging gaps in the case record.
 </li>
 </ul>
 </div>
@@ -288,20 +343,51 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1406"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-kerberos-authentication-ticket-request.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_994"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-kerberos-authentication-ticket-request.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-3-setup" class="ulink" target="_top">Sysmon Event ID 3 - Network Connection</a>
+</li>
+<li class="listitem">
+<a href="https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/audit-kerberos-authentication-service" class="ulink" target="_top">Audit Kerberos Authentication Service</a>
+</li>
+<li class="listitem">
+<a href="https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/audit-kerberos-service-ticket-operations" class="ulink" target="_top">Audit Kerberos Service Ticket Operations</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1430"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-kerberos-authentication-ticket-request.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-js">sequence by source.port, source.ip with maxspan=3s
  [network where host.os.type == "windows" and destination.port == 88 and
   process.executable != null and process.pid != 4 and
-  not process.executable :
-              ("?:\\Windows\\system32\\lsass.exe",
-               "\\device\\harddiskvolume*\\windows\\system32\\lsass.exe",
-               "\\device\\harddiskvolume*\\windows\\system32\\svchost.exe") and
-  not (process.executable : ("C:\\Windows\\System32\\svchost.exe",
-                             "C:\\Program Files\\VMware\\VMware View\\Server\\bin\\ws_TomcatService.exe",
-                             "F:\\IGEL\\RemoteManager\\*\\bin\\tomcat10.exe") and user.id in ("S-1-5-20", "S-1-5-18")) and
+  not process.executable : (
+        "?:\\Windows\\system32\\lsass.exe",
+        "\\device\\harddiskvolume*\\windows\\system32\\lsass.exe",
+        "\\device\\harddiskvolume*\\windows\\system32\\svchost.exe"
+  ) and
+  not (
+    process.executable : (
+      "C:\\Windows\\System32\\svchost.exe",
+      "C:\\Program Files\\VMware\\VMware View\\Server\\bin\\ws_TomcatService.exe",
+      "C:\\Program Files\\Omnissa\\Horizon\\Server\\bin\\ws_TomcatService.exe",
+      "F:\\IGEL\\RemoteManager\\*\\bin\\tomcat10.exe"
+    ) and
+    user.id in ("S-1-5-20", "S-1-5-18")
+  ) and
   source.ip != "127.0.0.1" and destination.ip != "::1" and destination.ip != "127.0.0.1"]
  [authentication where host.os.type == "windows" and event.code in ("4768", "4769")]</pre>
 </div>

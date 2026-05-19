@@ -104,7 +104,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 2</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 3</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -116,25 +116,87 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1398"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-seincreasebasepriorityprivilege-use.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1423"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-seincreasebasepriorityprivilege-use.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Suspicious SeIncreaseBasePriorityPrivilege Use</strong></span></p>
-<p>SeIncreaseBasePriorityPrivilege allows to increase the priority of processes running on the system so that the CPU scheduler allows them to pre-empt other lower priority processes when the higher priority process has something to do.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the process.executable reputation and it&#8217;s execution chain.
+What priority-change path did 4674 preserve?
 </li>
 <li class="listitem">
-Investiguate if the SubjectUserName is expected to perform this action.
+Why: this privilege manipulates process or thread priority; the target object matters as much as the requester.
 </li>
 <li class="listitem">
-Correlate the event with other security alerts or logs to identify any patterns or additional suspicious activities that might suggest a broader attack campaign.
+Focus: Security 4674 on <code class="literal">host.id</code>: <code class="literal">winlog.event_data.PrivilegeList</code>, <code class="literal">winlog.event_data.AccessMask</code>, <code class="literal">winlog.event_data.ProcessName</code>, <code class="literal">winlog.event_data.ObjectType</code>, and <code class="literal">winlog.event_data.ObjectName</code>.
 </li>
 <li class="listitem">
-Check the agent health status and verify if there is any tampering with endpoint security processes.
+Hint: sparse or numeric-only <code class="literal">winlog.event_data.ObjectName</code> is the main visibility gap; keep the target unresolved and use same-session Security records, not assumed self-tuning.
+</li>
+<li class="listitem">
+Implication: escalate when the object is a "Process" or "Thread" tied to security tooling, LSASS, or another user&#8217;s workload; lower suspicion only when requester, object, and <code class="literal">host.name</code> fit bounded tuning or testing.
+</li>
+<li class="listitem">
+Is the requesting image path expected for priority control on this host?
+</li>
+<li class="listitem">
+Focus: <code class="literal">winlog.event_data.ProcessName</code>, <code class="literal">winlog.event_data.ProcessId</code>, <code class="literal">winlog.event_data.SubjectUserSid</code>, <code class="literal">host.name</code>, and <code class="literal">@timestamp</code>.
+</li>
+<li class="listitem">
+Hint: <code class="literal">winlog.event_data.ProcessId</code> is hexadecimal; use it only inside a tight host/time window; PID reuse can mislead.
+</li>
+<li class="listitem">
+Implication: escalate when the path is user-writable, temporary, renamed, or unrelated to local tuning; treat a recurring full path and SID as identity support, not closure, until object and session evidence align.
+</li>
+<li class="listitem">
+Which subject and local session requested this privilege use?
+</li>
+<li class="listitem">
+Focus: <code class="literal">winlog.event_data.SubjectUserSid</code>, <code class="literal">winlog.event_data.SubjectUserName</code>, <code class="literal">winlog.event_data.SubjectDomainName</code>, and <code class="literal">winlog.event_data.SubjectLogonId</code>.
+</li>
+<li class="listitem">
+Implication: escalate when a normal user, rare admin, machine account, or service account lacks a clear scheduling-priority role; matching SID, domain, and session support benignity only with matching requester and object evidence.
+</li>
+<li class="listitem">
+Does the 4624 session origin fit a priority-tuning operator?
+</li>
+<li class="listitem">
+Focus: on the same <code class="literal">host.id</code>, match alert <code class="literal">winlog.event_data.SubjectLogonId</code> to 4624 <code class="literal">winlog.event_data.TargetLogonId</code>, then read <code class="literal">source.ip</code>, <code class="literal">winlog.logon.type</code>, and <code class="literal">winlog.event_data.AuthenticationPackageName</code>.
+</li>
+<li class="listitem">
+Hint: query <code class="literal">event.code</code> 4624 with alert <code class="literal">host.id</code> and <code class="literal">winlog.event_data.TargetLogonId</code>; search backward from <code class="literal">@timestamp</code> because the session can predate 4674. !{investigate{"description":"","label":"Linked logon for the priority-change session","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"4624","valueType":"string"},{"excluded":false,"field":"winlog.event_data.TargetLogonId","queryType":"phrase","value":"{{winlog.event_data.SubjectLogonId}}","valueType":"string"}]],"relativeFrom":"now-24h/h","relativeTo":"now"}} Missing 4624 or empty <code class="literal">source.ip</code> is unresolved, not benign.
+</li>
+<li class="listitem">
+Implication: escalate when source, logon type, or authentication method is rare for <code class="literal">host.name</code> or subject SID; matching origin supports authorized tuning only after requester path and target object fit.
+</li>
+<li class="listitem">
+Do surrounding Security records show repeated or multi-target priority use by the same requester?
+</li>
+<li class="listitem">
+Focus: Security events around <code class="literal">@timestamp</code> on the same <code class="literal">host.id</code>, grouped by <code class="literal">winlog.event_data.SubjectLogonId</code>, <code class="literal">winlog.event_data.ProcessId</code>, <code class="literal">winlog.event_data.ProcessName</code>, and <code class="literal">winlog.event_data.ObjectName</code>.
+</li>
+<li class="listitem">
+Hint: start in the alert window with <code class="literal">event.code</code> 4674 and alert <code class="literal">winlog.event_data.SubjectLogonId</code>; expand only if the same session continues around <code class="literal">@timestamp</code>. Add <code class="literal">event.outcome</code> to separate failed attempts from successful use. !{investigate{"description":"","label":"4674 priority-use events from this requester session","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"4674","valueType":"string"},{"excluded":false,"field":"winlog.event_data.SubjectLogonId","queryType":"phrase","value":"{{winlog.event_data.SubjectLogonId}}","valueType":"string"},{"excluded":false,"field":"winlog.event_data.ProcessId","queryType":"phrase","value":"{{winlog.event_data.ProcessId}}","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"4674","valueType":"string"},{"excluded":false,"field":"winlog.event_data.SubjectLogonId","queryType":"phrase","value":"{{winlog.event_data.SubjectLogonId}}","valueType":"string"},{"excluded":false,"field":"winlog.event_data.ProcessName","queryType":"phrase","value":"{{winlog.event_data.ProcessName}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when one session or requester touches multiple process/thread objects, repeats against security targets, or continues after failures; a single 4674 keeps scope local but still requires requester, object, and session answers for closure.
+</li>
+<li class="listitem">
+If local evidence is suspicious or unresolved, do related alerts expand scope or urgency?
+</li>
+<li class="listitem">
+Focus: related alerts for the same <code class="literal">host.id</code>, prioritizing privilege abuse, defense evasion, security-tool interference, service-control, or authentication findings. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if the subject remains suspicious, use the subject pivot; use the <code class="literal">user.id</code> provider only after confirming it maps to <code class="literal">winlog.event_data.SubjectUserSid</code>. !{investigate{"description":"","label":"Alerts associated with the subject","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"winlog.event_data.SubjectUserSid","queryType":"phrase","value":"{{winlog.event_data.SubjectUserSid}}","valueType":"string"}],[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when the host or user also shows privilege escalation, defense evasion, or unusual authentication; keep scope local when related alerts are absent and 4674/session evidence supports bounded work.
+</li>
+<li class="listitem">
+Escalate for unauthorized process/thread priority manipulation or security-tool interference; close only when object, requester, subject, session, and related alerts bind to one authorized tuning or troubleshooting workflow; preserve 4674 and recovered 4624 evidence and escalate when sparse object or session evidence leaves suspicious findings unresolved.
 </li>
 </ul>
 </div>
@@ -142,7 +204,13 @@ Check the agent health status and verify if there is any tampering with endpoint
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Administrative tasks involving legitimate CPU scheduling priority changes.
+Performance engineering, benchmark, QA, vendor, or internal support work can trigger when an administrator adjusts scheduling priority or CPU assignment for a test or latency-sensitive workload. Confirm only when <code class="literal">winlog.event_data.ProcessName</code>, <code class="literal">winlog.event_data.ObjectType</code>, <code class="literal">winlog.event_data.ObjectName</code>, <code class="literal">winlog.event_data.SubjectUserSid</code>, recovered <code class="literal">source.ip</code>, and <code class="literal">winlog.logon.type</code> align with the same recognized host, accounts, and workload. If records are unavailable, require telemetry-only recurrence of the same full requester path, SID, object family, and host class before treating as benign.
+</li>
+<li class="listitem">
+If the target object is sparse or numeric-only, do not close solely on tool name or user claim.
+</li>
+<li class="listitem">
+Before creating an exception, validate that <code class="literal">winlog.event_data.ProcessName</code>, <code class="literal">winlog.event_data.ObjectType</code>, <code class="literal">winlog.event_data.ObjectName</code>, <code class="literal">winlog.event_data.SubjectUserSid</code>, <code class="literal">host.id</code>, and recovered <code class="literal">source.ip</code> or <code class="literal">winlog.logon.type</code> stay stable across known-benign occurrences. Build the exception from that minimum confirmed pattern; avoid exceptions on <code class="literal">winlog.event_data.PrivilegeList</code> or <code class="literal">user.name</code> alone.
 </li>
 </ul>
 </div>
@@ -150,13 +218,25 @@ Administrative tasks involving legitimate CPU scheduling priority changes.
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected machine from the network to prevent further unauthorized access or lateral movement within the domain.
+If confirmed benign, reverse temporary containment and document the validated <code class="literal">winlog.event_data.ProcessName</code>, <code class="literal">winlog.event_data.ObjectType</code>, <code class="literal">winlog.event_data.ObjectName</code>, <code class="literal">winlog.event_data.SubjectUserSid</code>, recovered <code class="literal">source.ip</code>, <code class="literal">winlog.logon.type</code>, and <code class="literal">host.id</code> values proving the tuning or troubleshooting workflow. Create an exception only after the same pattern repeats benignly.
 </li>
 <li class="listitem">
-Terminate the processes involved in the execution chain.
+If suspicious but unconfirmed, preserve a case export of triggering 4674, recovered 4624 session record, surrounding same-session Security records, and related-alert links before containment. Record requester path and PID, subject SID, target object, session origin, and event time as case anchors.
 </li>
 <li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to ensure comprehensive remediation efforts are undertaken.
+If suspicious but unconfirmed, apply reversible containment first, such as restricting the subject&#8217;s remote access, pausing the support workflow, or raising monitoring on <code class="literal">host.id</code>. Escalate to host isolation or account disablement only if the target maps to a security-critical process, related alerts show additional privilege abuse or defense evasion, or the recovered session suggests credential misuse.
+</li>
+<li class="listitem">
+If confirmed malicious, isolate the host when the object, requester, session, or related-alert evidence shows unauthorized priority manipulation of a security-critical process or another user&#8217;s workload. Record the requester path and PID, subject SID, target object, recovered session origin, and event time before stopping processes or deleting tooling.
+</li>
+<li class="listitem">
+Reset or suspend the implicated account only when the recovered session and related alerts show likely credential misuse, and review other hosts for the same <code class="literal">winlog.event_data.ProcessName</code>, <code class="literal">winlog.event_data.ObjectName</code>, or <code class="literal">winlog.event_data.SubjectUserSid</code> before eradicating artifacts so scoping finishes before evidence is destroyed.
+</li>
+<li class="listitem">
+Eradicate only the unauthorized tuning or interference tooling and any persistence or launcher artifacts identified during the investigation, then restore affected security or service configurations to a known-good state.
+</li>
+<li class="listitem">
+Hardening: restrict assignment of "SeIncreaseBasePriorityPrivilege" to the smallest admin cohort, retain Security 4674 and 4624 visibility, and record visibility gaps that limited the case decision.
 </li>
 </ul>
 </div>
@@ -164,24 +244,16 @@ Escalate the incident to the security operations center (SOC) or incident respon
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_975"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-seincreasebasepriorityprivilege-use.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_1030"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-seincreasebasepriorityprivilege-use.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
-<p>Ensure advanced audit policies for Windows are enabled, specifically:
-Audit Sensitive Privilege Use <a href="https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4674" class="ulink" target="_top">Event ID 4674</a> (An operation was attempted on a privileged object.)</p>
-<pre class="screen">Computer Configuration &gt;
-Policies &gt;
-Windows Settings &gt;
-Security Settings &gt;
-Advanced Audit Policies Configuration &gt;
-Audit Policies &gt;
-Privilege Use &gt;
-Audit Sensitive Privilege Use (Success)</pre>
+<p>Audit Sensitive Privilege Use must be enabled to generate the events used by this rule.
+Setup instructions: <a href="https://ela.st/audit-sensitive-privilege-use" class="ulink" target="_top">https://ela.st/audit-sensitive-privilege-use</a></p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1449"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-seincreasebasepriorityprivilege-use.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1474"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-seincreasebasepriorityprivilege-use.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

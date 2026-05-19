@@ -175,9 +175,6 @@ Use Case: Threat Detection
 Tactic: Persistence
 </li>
 <li class="listitem">
-Tactic: Privilege Escalation
-</li>
-<li class="listitem">
 Use Case: Vulnerability
 </li>
 <li class="listitem">
@@ -203,7 +200,7 @@ Data Source: SentinelOne
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 318</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 319</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -215,74 +212,96 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_873"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/persistence-via-update-orchestrator-service-hijack.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_894"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/persistence-via-update-orchestrator-service-hijack.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Persistence via Update Orchestrator Service Hijack</strong></span></p>
-<p>Windows Update Orchestrator Service is a DCOM service used by other components to install Windows updates that are already downloaded. Windows Update Orchestrator Service was vulnerable to elevation of privileges (any user to local system) due to an improper authorization of the callers. The vulnerability affected the Windows 10 and Windows Server Core products. Fixed by Microsoft on Patch Tuesday June 2020.</p>
-<p>This rule will detect uncommon processes spawned by <code class="literal">svchost.exe</code> with <code class="literal">UsoSvc</code> as the command line parameters. Attackers can leverage this technique to elevate privileges or maintain persistence.</p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Note</strong></span>:
-This investigation guide uses the <a href="/guide/en/security/current/invest-guide-run-osquery.html" class="ulink" target="_top">Osquery Markdown Plugin</a> introduced in Elastic Stack version 8.5.0. Older Elastic Stack versions will display unrendered Markdown in this guide.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the process execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+What did UsoSvc actually launch, and does the child identity fit Windows or Office servicing?
 </li>
 <li class="listitem">
-Investigate any abnormal behavior by the subject process such as network connections, registry or file modifications, and any spawned child processes.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>.
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Hint: use <code class="literal">process.parent.command_line</code> to confirm svchost is hosting UsoSvc, not just sharing the name.
 </li>
 <li class="listitem">
-Assess whether this behavior is prevalent in the environment by looking for similar occurrences across hosts.
+Implication: escalate when UsoSvc launches a renamed, user-writable, unsigned, rare, or non-servicing child; lower concern only when path, signer, and parent service context match a recognized Windows Update or Click-to-Run component. Identity alone does not clear it.
 </li>
 <li class="listitem">
-Examine the host for derived artifacts that indicate suspicious activities:
+Does the command line show attacker-controlled work running with service-level privilege?
 </li>
 <li class="listitem">
-Analyze the process executable using a private sandboxed analysis system.
+Why: on unpatched hosts, CVE-2020-1313 ScheduleWork can queue signed System32 or Common Files binaries with attacker-controlled arguments.
 </li>
 <li class="listitem">
-Observe and collect information about the following activities in both the sandbox and the alert subject host:
+Focus: <code class="literal">process.command_line</code>, <code class="literal">process.Ext.token.integrity_level_name</code>, and <code class="literal">user.id</code>.
 </li>
 <li class="listitem">
-Attempts to contact external domains and addresses.
+Implication: escalate when "cmd.exe", "rundll32.exe", "regsvr32.exe", a scripting host, or another signed binary runs shell, download, staging, redirection, or persistence arguments under SYSTEM or high integrity; lower concern when arguments fit the exact servicing binary workflow.
 </li>
 <li class="listitem">
-Use the Elastic Defend network events to determine domains and addresses contacted by the subject process by filtering by the process' <code class="literal">process.entity_id</code>.
+If registry telemetry is available, was matching work queued under the Update Orchestrator UScheduler path?
 </li>
 <li class="listitem">
-Examine the DNS cache for suspicious or anomalous entries.
+Focus: same <code class="literal">host.id</code> registry events for <code class="literal">registry.path</code> under "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Orchestrator\UScheduler", with <code class="literal">registry.value</code>, <code class="literal">registry.data.strings</code>, and writer <code class="literal">process.executable</code>.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve DNS Cache","query":"SELECT * FROM dns_cache"}}
+Range: search several days before the alert; queued work can run overnight or after a multi-day service window.
 </li>
 <li class="listitem">
-Use the Elastic Defend registry events to examine registry keys accessed, modified, or created by the related processes in the process tree.
+Hint: interpret queued strings with <code class="literal">registry.data.type</code>, then compare them to <code class="literal">process.command_line</code> and <code class="literal">process.executable</code>; missing registry telemetry is unresolved, not benign.
 </li>
 <li class="listitem">
-Examine the host services for suspicious or anomalous entries.
+Implication: escalate when the queue names the same unusual child or arguments, especially from a non-servicing writer; absent queue history only limits this corroborator.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve All Services","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services"}}
+Did the child stage artifacts or spawn follow-on processes that extend the abuse?
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Services Running on User Accounts","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services WHERE\nNOT (user_account LIKE <em>%LocalSystem</em> OR user_account LIKE <em>%LocalService</em> OR user_account LIKE <em>%NetworkService</em> OR\nuser_account == null)\n"}}
+Focus: child starts from <code class="literal">process.entity_id</code>; if file telemetry exists, same-process <code class="literal">file.path</code>, <code class="literal">file.Ext.original.path</code>, and <code class="literal">file.origin_url</code>.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Service Unsigned Executables with Virustotal Link","query":"SELECT concat(<em><a href="https://www.virustotal.com/gui/file/" class="ulink" target="_top">https://www.virustotal.com/gui/file/</a></em>, sha1) AS VtLink, name, description, start_type, status, pid,\nservices.path FROM services JOIN authenticode ON services.path = authenticode.path OR services.module_path =\nauthenticode.path JOIN hash ON services.path = hash.path WHERE authenticode.result != <em>trusted</em>\n"}}
+!{investigate{"description":"","label":"Child process starts from the launched child","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Retrieve the files' SHA-256 hash values using the PowerShell <code class="literal">Get-FileHash</code> cmdlet and search for the existence and reputation of the hashes in resources like VirusTotal, Hybrid-Analysis, CISCO Talos, Any.run, etc.
+!{investigate{"description":"","label":"File events for the launched child","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Investigate potentially compromised accounts. Analysts can do this by searching for login events (for example, 4624) to the target host after the registry modification.
+Hint: scope file pivots with <code class="literal">host.id</code> plus <code class="literal">process.entity_id</code>; use <code class="literal">host.id</code> plus <code class="literal">process.pid</code> and a tight alert window only when entity ID is absent. Missing file telemetry limits artifact review, but child-process and command evidence can justify escalation.
+</li>
+<li class="listitem">
+Implication: escalate when the child writes executable or scriptable content to user-writable or deceptive paths, renames staged content, or launches written artifacts; lower concern when activity stays inside the recognized servicing path with no follow-on execution.
+</li>
+<li class="listitem">
+If network telemetry is available, does the child contact destinations consistent with servicing?
+</li>
+<li class="listitem">
+Focus: process-scoped DNS <code class="literal">dns.question.name</code> and <code class="literal">dns.resolved_ip</code>, then connections by <code class="literal">destination.ip</code>, <code class="literal">destination.port</code>, and <code class="literal">destination.as.organization.name</code>. !{investigate{"description":"","label":"Network events for the launched child","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: use "lookup_result" DNS events for populated <code class="literal">dns.resolved_ip</code>; scope with <code class="literal">host.id</code> plus <code class="literal">process.entity_id</code>, or <code class="literal">host.id</code> plus <code class="literal">process.pid</code> and a tight alert window. Infrastructure ownership is context, not a verdict; missing network telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Implication: escalate when the child reaches rare or public infrastructure unrelated to Microsoft servicing, the signer, or recovered queue; lower concern when destinations fit the signed binary&#8217;s normal update or repair endpoints.
+</li>
+<li class="listitem">
+If local evidence remains suspicious or unresolved, do related alerts change scope?
+</li>
+<li class="listitem">
+Focus: compare recent alerts for the same <code class="literal">process.executable</code>. !{investigate{"description":"","label":"Alerts involving the same child executable","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"process.executable","queryType":"phrase","value":"{{process.executable}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: review same <code class="literal">host.id</code> alerts only when child identity, command, queue, artifact, or destination evidence needs scope. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when the same child path or host shows repeated privilege-escalation, persistence, staging, or follow-on alerts; keep urgency local when isolated and no corroborating alert history appears.
+</li>
+<li class="listitem">
+Escalate on attacker-controlled UsoSvc child identity or command intent, using queue, artifact, destination, or related-alert evidence as corroboration; close only when alert-local and recovered evidence tie to one exact servicing or authorized validation workflow without contradictions; preserve artifacts and escalate when evidence is mixed, incomplete, or unavailable.
 </li>
 </ul>
 </div>
@@ -290,7 +309,10 @@ Investigate potentially compromised accounts. Analysts can do this by searching 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This activity is unlikely to happen legitimately. Benign true positives (B-TPs) can be added as exceptions if necessary.
+Windows Update, repair, or Office Click-to-Run servicing can trigger this rule when UsoSvc queues a servicing component outside the exclusions. Close from telemetry first: child path, signer, command line, parent service context, UScheduler queue content when available, artifacts, destinations, and <code class="literal">host.id</code> cohort must align with one recognized servicing workflow. Patch-window or change records may corroborate; prior alerts only prove exception stability after current evidence fits.
+</li>
+<li class="listitem">
+Authorized exploit-validation or adversary-emulation tests can exercise Update Orchestrator abuse. Confirm stable payload identity such as <code class="literal">process.hash.sha256</code>, <code class="literal">process.command_line</code>, expected <code class="literal">host.id</code> or <code class="literal">user.id</code> test scope, matching queue content when available, and no spread to unrelated production hosts. Use engagement records or prior test alerts only as corroboration, and do not exception on <code class="literal">process.parent.executable</code>, "UsoSvc", or <code class="literal">process.name</code> alone.
 </li>
 </ul>
 </div>
@@ -298,40 +320,34 @@ This activity is unlikely to happen legitimately. Benign true positives (B-TPs) 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign:
 </li>
 <li class="listitem">
-Isolate the involved host to prevent further post-compromise behavior.
+Record the exact evidence that proved the servicing or test workflow: child identity, command line, parent service context, queue content when available, same-process artifacts or destinations, and recurrence or records. Then reverse temporary containment and build any exception from that minimum pattern plus <code class="literal">host.id</code>, not from UsoSvc or a generic signed-binary condition.
 </li>
 <li class="listitem">
-If the triage identified malware, search the environment for additional compromised hosts.
+If suspicious but unconfirmed:
 </li>
 <li class="listitem">
-Implement temporary network rules, procedures, and segmentation to contain the malware.
+Preserve a case export with the alert process instance, process tree, command line, UScheduler queue values when available, writer-process details, written artifacts, destination indicators, and related-alert context before cleanup.
 </li>
 <li class="listitem">
-Stop suspicious processes.
+Apply reversible containment tied to the finding, such as blocking the child hash or destination, temporarily disabling the queued work after preservation, or increasing host monitoring. Escalate to host isolation only when host criticality allows it and artifacts, destinations, or related alerts show active follow-on behavior.
 </li>
 <li class="listitem">
-Immediately block the identified indicators of compromise (IoCs).
+If confirmed malicious:
 </li>
 <li class="listitem">
-Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
+Preserve the case export first: child <code class="literal">process.entity_id</code> or <code class="literal">process.pid</code>, command line, queue values, writer lineage, payload hashes, artifact paths, and destination indicators. Then isolate the host when the identity, command, queue, artifact, or destination evidence confirms unauthorized UsoSvc execution.
 </li>
 <li class="listitem">
-Remove and block malicious artifacts identified during triage.
+Remove the malicious queued work or restore the Update Orchestrator registry state to known-good, eradicate only payloads and persistence artifacts identified during triage, validate that UsoSvc returns to recognized servicing children, and review other hosts for the same child path or queue pattern before deleting preserved evidence.
 </li>
 <li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
+Post-incident hardening:
 </li>
 <li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-</li>
-<li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Apply the June 2020 or later Windows security updates where still applicable because the fix blocks untrusted caller queuing, retire unsupported builds, restrict write paths that can feed Update Orchestrator abuse, and retain registry/process telemetry for UScheduler queue changes.
 </li>
 </ul>
 </div>
@@ -339,7 +355,34 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_932"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/persistence-via-update-orchestrator-service-hijack.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_571"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/persistence-via-update-orchestrator-service-hijack.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/audit-process-creation" class="ulink" target="_top">Windows Process Creation Logs</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_953"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/persistence-via-update-orchestrator-service-hijack.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -472,6 +515,22 @@ ID: T1068
 </li>
 <li class="listitem">
 Reference URL: <a href="https://attack.mitre.org/techniques/T1068/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1068/</a>
+</li>
+</ul>
+</div>
+</li>
+<li class="listitem">
+<p>Technique:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Name: Hijack Execution Flow
+</li>
+<li class="listitem">
+ID: T1574
+</li>
+<li class="listitem">
+Reference URL: <a href="https://attack.mitre.org/techniques/T1574/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1574/</a>
 </li>
 </ul>
 </div>

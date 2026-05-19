@@ -170,7 +170,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 211</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 212</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -182,34 +182,78 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1137"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privilege-escalation-via-rogue-named-pipe-impersonation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1161"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privilege-escalation-via-rogue-named-pipe-impersonation.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Privilege Escalation via Rogue Named Pipe Impersonation</strong></span></p>
-<p>Named pipes in Windows facilitate inter-process communication, allowing data exchange between processes. Adversaries exploit this by creating rogue named pipes, tricking privileged processes into connecting and executing malicious actions under elevated privileges. The detection rule identifies suspicious named pipe creation events, focusing on patterns indicative of impersonation attempts, thus flagging potential privilege escalation activities.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the event logs for the specific named pipe creation event identified by the query, focusing on the file.name field to determine the exact named pipe path and assess its legitimacy.
+What rogue pipe path did the alert preserve?
 </li>
 <li class="listitem">
-Correlate the event with the process that created the named pipe by examining related process creation logs, identifying the process ID and executable responsible for the action.
+Why: the rule references PrintSpoofer and EfsPotato-style abuse, where a controlled pipe can be hidden inside a path that makes a privileged service connect to what appears to be its normal RPC pipe.
 </li>
 <li class="listitem">
-Investigate the user context under which the named pipe was created to determine if it aligns with expected behavior or if it indicates potential misuse of privileges.
+Focus: alert-local <code class="literal">file.name</code>, <code class="literal">file.path</code>, or <code class="literal">winlog.event_data.PipeName</code>, with <code class="literal">event.provider</code> and <code class="literal">event.code</code>.
 </li>
 <li class="listitem">
-Check for any recent changes or anomalies in the system&#8217;s configuration or user accounts that could suggest unauthorized access or privilege escalation attempts.
+Implication: escalate when the path embeds <code class="literal">\pipe\</code> after another path segment or mimics a service/RPC pipe tail; benign starts only when exact namespace, creator path, command line, account, and client evidence fit one repeated local IPC workflow on this <code class="literal">host.id</code>.
 </li>
 <li class="listitem">
-Analyze historical data for similar named pipe creation events to identify patterns or repeated attempts that could indicate a persistent threat or ongoing attack.
+Which process and account created the suspicious pipe?
+</li>
+<li class="listitem">
+Focus: same-host creator <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">user.name</code>, and <code class="literal">user.domain</code>.
+</li>
+<li class="listitem">
+Implication: escalate when a service, web worker, script host, or user-writable binary creates the pipe under a low-privileged service identity or account that should not host IPC servers; service-mimic pipe plus suspicious creator is enough while collecting client and impact evidence.
+</li>
+<li class="listitem">
+Hint: pivot by <code class="literal">process.entity_id</code>; if absent, pair <code class="literal">process.pid</code> with <code class="literal">host.id</code> in a tight window. !{investigate{"description":"","label":"Events for the pipe creator process","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Do surrounding events corroborate the creator or show a privileged client?
+</li>
+<li class="listitem">
+Focus: same-host Sysmon or Windows records for the same <code class="literal">file.name</code> or <code class="literal">winlog.event_data.PipeName</code>, reading <code class="literal">event.code</code>; pipe-connected events, when ingested, corroborate.
+</li>
+<li class="listitem">
+Hint: same pipe events on the host. !{investigate{"description":"","label":"Events for the same pipe on this host","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"file.name","queryType":"phrase","value":"{{file.name}}","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"winlog.event_data.PipeName","queryType":"phrase","value":"{{winlog.event_data.PipeName}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when surrounding records show the same creator maintaining the pipe or, if pipe-connected events exist, a SYSTEM, administrator, service-host, or service/RPC client touching it. Missing pipe-connect telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Range: alert window plus +/-5 minutes; expand only if the creator lived longer.
+</li>
+<li class="listitem">
+Was the pipe followed by elevated execution or token/session abuse?
+</li>
+<li class="listitem">
+Focus: same-host process starts after pipe creation: <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">user.name</code>, and <code class="literal">winlog.event_data.ElevatedToken</code> when Windows Security has token context.
+</li>
+<li class="listitem">
+Hint: process starts on the host around pipe creation. !{investigate{"description":"","label":"Process starts on the host near the pipe creation","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: elevated shell, script, service-control, SYSTEM, administrator, or elevated-token activity confirms impact; absence lowers impact only after the pipe path, creator, and client evidence fit one recognized workflow. Missing process-start or token telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Does the same rogue-pipe pattern show wider tooling or repeated attempts?
+</li>
+<li class="listitem">
+Focus: broaden only after suspicious or unresolved local evidence, using the suspicious <code class="literal">file.name</code> or <code class="literal">winlog.event_data.PipeName</code> pattern, creator <code class="literal">process.executable</code>, <code class="literal">host.id</code>, and <code class="literal">user.id</code>.
+</li>
+<li class="listitem">
+Hint: same pipe name or creator executable across recent events. !{investigate{"description":"","label":"Events for the same pipe or creator executable","providers":[[{"excluded":false,"field":"file.name","queryType":"phrase","value":"{{file.name}}","valueType":"string"}],[{"excluded":false,"field":"winlog.event_data.PipeName","queryType":"phrase","value":"{{winlog.event_data.PipeName}}","valueType":"string"}],[{"excluded":false,"field":"process.executable","queryType":"phrase","value":"{{process.executable}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: expand scope when the same embedded-pipe pattern, service/RPC-like tail, or creator executable appears across unrelated hosts or users; no recurrence limits scope but does not close the alert.
+</li>
+<li class="listitem">
+Escalate when pipe shape plus creator, client, or follow-on evidence supports impersonation; close only when available evidence aligns to one recognized IPC product or authorized test with no contradictory privileged-client or elevated-execution evidence; preserve evidence and escalate when telemetry is missing, mixed, or incomplete.
 </li>
 </ul>
 </div>
@@ -217,19 +261,13 @@ Analyze historical data for similar named pipe creation events to identify patte
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate software or system processes may create named pipes that match the detection pattern. Regularly review and whitelist known benign processes that frequently create named pipes to reduce noise.
+Recognized local IPC products, security tools, or in-house services can trigger when they use nested pipe namespaces with <code class="literal">\pipe\</code>. Confirm the exact namespace, creator path and command line, account, client process, and host cohort align to the same product, with no elevated follow-on outside that workflow.
 </li>
 <li class="listitem">
-System management tools and monitoring software might generate named pipe creation events as part of their normal operation. Identify these tools and exclude their events from triggering alerts.
+Authorized exploit validation can trigger this rule. Confirm test host, test account, time window, pipe namespace, and launched command match the test plan; privileged-client or elevated-execution evidence beyond the plan is suspicious.
 </li>
 <li class="listitem">
-Custom in-house applications that use named pipes for inter-process communication can trigger false positives. Work with development teams to document these applications and create exceptions for their activity.
-</li>
-<li class="listitem">
-Scheduled tasks or scripts that run with elevated privileges and create named pipes could be mistaken for malicious activity. Ensure these tasks are documented and excluded from the detection rule.
-</li>
-<li class="listitem">
-Security software or endpoint protection solutions may use named pipes for legitimate purposes. Verify these activities and adjust the rule to prevent unnecessary alerts.
+Build exceptions from the minimum confirmed workflow: exact pipe namespace or stable prefix, creator <code class="literal">process.executable</code> plus command-line pattern, expected <code class="literal">user.id</code>, and constrained <code class="literal">host.id</code> or host group. Avoid broad exceptions on <code class="literal">process.name</code>, service-like pipe tails, or generic <code class="literal">\pipe\</code>.
 </li>
 </ul>
 </div>
@@ -237,25 +275,22 @@ Security software or endpoint protection solutions may use named pipes for legit
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected system from the network to prevent further unauthorized access or lateral movement by the adversary.
+If confirmed benign, reverse temporary containment and record the pipe namespace, creator process, account, client process, host scope, and absence of unexpected elevated follow-on activity.
 </li>
 <li class="listitem">
-Terminate any suspicious processes associated with the rogue named pipe to halt any ongoing malicious activities.
+If suspicious but unconfirmed, preserve the alert record, relevant Timeline events, <code class="literal">file.name</code> or <code class="literal">winlog.event_data.PipeName</code>, creator <code class="literal">process.entity_id</code> or <code class="literal">process.pid</code>, process command lines, Windows Security records, and any spawned process identifiers before containment.
 </li>
 <li class="listitem">
-Conduct a thorough review of the system&#8217;s event logs, focusing on named pipe creation events, to identify any other potentially compromised processes or systems.
+Apply reversible containment before destructive action: isolate or restrict the affected host only when pipe, creator, client, or follow-on evidence indicates active abuse, and weigh critical host roles before isolation.
 </li>
 <li class="listitem">
-Reset credentials for any accounts that may have been exposed or used in the privilege escalation attempt to prevent further unauthorized access.
+If confirmed malicious, contain the host and involved account, then terminate or suspend malicious processes only after preserving identifiers and command lines. Reset credentials only when Windows Security or process evidence shows account misuse or exposed privileged sessions.
 </li>
 <li class="listitem">
-Apply security patches and updates to the affected system to address any vulnerabilities that may have been exploited.
+Eradicate only the exploit tools, scripts, service changes, or payloads identified during the investigation, then address the entry vector that let the creator process run with impersonation-capable privileges.
 </li>
 <li class="listitem">
-Implement enhanced monitoring for named pipe creation events across the network to detect and respond to similar threats in the future.
-</li>
-<li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to ensure comprehensive remediation efforts are undertaken.
+Post-incident, restrict the privileged service or service account that the investigation showed was coerced or exposed to unnecessary impersonation-capable privileges.
 </li>
 </ul>
 </div>
@@ -263,21 +298,16 @@ Escalate the incident to the security operations center (SOC) or incident respon
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_763"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privilege-escalation-via-rogue-named-pipe-impersonation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_803"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privilege-escalation-via-rogue-named-pipe-impersonation.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
-<p>Named Pipe Creation Events need to be enabled within the Sysmon configuration by including the following settings:
-<code class="literal">condition equal "contains" and keyword equal "pipe"</code></p>
-<p>If enabling an EQL rule on a non-elastic-agent index (such as beats) for versions &lt;8.2,
-events will not define <code class="literal">event.ingested</code> and default fallback for EQL rules was not added until version 8.2.
-Hence for this rule to work effectively, users will need to add a custom ingest pipeline to populate
-<code class="literal">event.ingested</code> to @timestamp.
-For more details on adding a custom ingest pipeline refer - <a href="/guide/en/fleet/current/data-streams-pipeline-tutorial.html" class="ulink" target="_top">https://www.elastic.co/guide/en/fleet/current/data-streams-pipeline-tutorial.html</a></p>
+<p>This rule requires Sysmon telemetry to be enabled and ingested.</p>
+<p>Setup instructions: <a href="https://ela.st/sysmon-event-pipe-setup" class="ulink" target="_top">https://ela.st/sysmon-event-pipe-setup</a></p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1203"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privilege-escalation-via-rogue-named-pipe-impersonation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1227"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privilege-escalation-via-rogue-named-pipe-impersonation.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

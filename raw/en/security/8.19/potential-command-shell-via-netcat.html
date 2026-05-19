@@ -85,7 +85,7 @@ Data Source: Elastic Defend
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 2</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 3</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -97,28 +97,81 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_907"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-command-shell-via-netcat.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_928"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-command-shell-via-netcat.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Potential Command Shell via NetCat</strong></span></p>
-<p>Attackers may abuse the NetCat utility to execute commands remotely using the builtin Windows Command Shell interpreters.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Verify if the user is authorized to use the Netcat utility.
+Which remote-shell mode does the alert-local process evidence show?
 </li>
 <li class="listitem">
-Investigate the process execution chain (parent process tree) and how the netcat binary was dropped.
+Focus: <code class="literal">process.parent.command_line</code>, <code class="literal">process.parent.args_count</code>, and <code class="literal">process.name</code>.
 </li>
 <li class="listitem">
-Review the network connections made by the parent process and check their reputation.
+Implication: escalate when "-e" wires "cmd.exe" or "powershell.exe" to an explicit IP, unusual port, or "-l"/"-p" listener; lower concern only when shell mode, port or destination, and child shell match a known lab, red-team, or break-glass workflow.
 </li>
 <li class="listitem">
-Investiguate all child processes spawned by the Cmd or Powershell instance.
+Does the parent binary identity fit a recognized NetCat-family tool instead of a renamed payload?
 </li>
 <li class="listitem">
-Examine the host for other alerts within the same period.
+Focus: <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.name</code>, and code signature.
+</li>
+<li class="listitem">
+Implication: escalate when the parent is unsigned, renamed, or runs from temp, downloads, archives, shares, or another user-writable path; identity lowers concern only when path and signer fit the same controlled tool, and never clears the <code class="literal">-e</code> shell behavior by itself.
+</li>
+<li class="listitem">
+Do recovered parent network events confirm a connect-back destination or exposed listener?
+</li>
+<li class="listitem">
+Focus: network events on <code class="literal">host.id</code> for <code class="literal">process.parent.entity_id</code>; separate DNS <code class="literal">dns.question.name</code> from <code class="literal">destination.ip</code>, <code class="literal">destination.port</code>, and <code class="literal">network.direction</code>. !{investigate{"description":"","label":"Network events for the netcat parent process","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.parent.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: network fields come from endpoint network events, not the process alert; compare any command-line IP or port with recovered connections.
+</li>
+<li class="listitem">
+Implication: escalate when recovered connections confirm a public or unexpected destination, or a listener is exposed on an unexpected asset; missing network telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Did the spawned shell launch operator commands after start?
+</li>
+<li class="listitem">
+Focus: child process starts where <code class="literal">process.parent.entity_id</code> matches the spawned shell <code class="literal">process.entity_id</code>; review <code class="literal">process.name</code>, <code class="literal">process.executable</code>, and <code class="literal">process.command_line</code>. !{investigate{"description":"","label":"Descendant processes from the spawned shell","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when descendants show reconnaissance, credential, download, persistence, staging, lateral movement, or cleanup; no descendants weakens operator-control evidence but does not make the remote-shell pattern benign.
+</li>
+<li class="listitem">
+Does the user and host context support the shell exposure?
+</li>
+<li class="listitem">
+Focus: <code class="literal">user.id</code>, <code class="literal">user.name</code>, <code class="literal">host.id</code>, <code class="literal">host.name</code>, and <code class="literal">process.parent.command_line</code>.
+</li>
+<li class="listitem">
+Implication: escalate when user-host pairing or account identity conflicts with expected testing or emergency use; lower concern only when the same user, host, and parent command fit one bounded authorized activity.
+</li>
+<li class="listitem">
+If local evidence is suspicious or unresolved, do surrounding alerts expand the scope?
+</li>
+<li class="listitem">
+Focus: alerts for the same <code class="literal">user.id</code>, especially execution, defense-evasion, persistence, credential-access, lateral-movement, or command-and-control tied to the same parent command or recovered destination. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: also check the same <code class="literal">host.id</code> to decide whether this remains one process on one asset or part of a broader compromise. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: expand response scope when surrounding alerts share the user, host, parent command, or recovered destination pattern; keep triage local when no corroborating alerts appear after the parent, network, and descendant checks.
+</li>
+<li class="listitem">
+What disposition is supported by shell mode, parent identity, descendant commands, network recovery, user-host context, and alert scope?
+</li>
+<li class="listitem">
+Focus: synthesize shell mode, parent identity, descendants, network recovery, user-host context, and alert scope.
+</li>
+<li class="listitem">
+Implication: escalate on alert-local "-e" behavior plus any corroborator: unrecognized parent, external or exposed network evidence, operator descendants, user-host conflict, or related alerts. Close only when all categories bind to one authorized security-testing or break-glass activity with no contradictions; if telemetry cannot prove legitimacy, require outside confirmation. Preserve artifacts and escalate when evidence is mixed or visibility is incomplete.
 </li>
 </ul>
 </div>
@@ -126,7 +179,10 @@ Examine the host for other alerts within the same period.
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-IT Support or system amdinistrator authorized activity using NetCat.
+NetCat "-e" shells are an operational anti-pattern outside confirmed security testing or break-glass support. Confirm benign use only when parent path and signer, exact parent command, shell mode, child shell, recovered destination or listen-port evidence, <code class="literal">user.id</code>, and <code class="literal">host.id</code> all align to the same bounded workflow. Use schedules, tickets, or owner confirmation only to corroborate that telemetry-matched activity; without them, require telemetry-only confirmation that the same user, host, parent command, and destination or port pattern recur for this rule. Any mismatch keeps the alert suspicious.
+</li>
+<li class="listitem">
+Before creating an exception, validate stability across prior alerts for the same <code class="literal">user.id</code> and <code class="literal">host.id</code>. Anchor the exception on <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, child <code class="literal">process.command_line</code>, user/host scope, and recovered destination or listen-port pattern. Avoid exceptions on <code class="literal">process.name</code>, parent basename, or shell name alone.
 </li>
 </ul>
 </div>
@@ -134,40 +190,19 @@ IT Support or system amdinistrator authorized activity using NetCat.
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse any temporary containment and document the parent identity, exact command, shell mode, child shell, user/host scope, and recovered destination or listen-port evidence that proved the workflow. Create an exception only if that same workflow is stable across prior alerts from this rule.
 </li>
 <li class="listitem">
-Isolate the involved host to prevent further post-compromise behavior.
+If suspicious but unconfirmed, preserve volatile state and case exports first: parent and child process entity IDs, command lines, descendant commands, parent binary path and signer, and recovered network indicators. Apply reversible containment tied to the findings, such as temporary destination blocks, firewall control of the exposed listener, or host isolation when interactive control or broader scope is likely and the host can tolerate it. Avoid process termination or deletion until evidence capture is complete.
 </li>
 <li class="listitem">
-If the triage identified malware, search the environment for additional compromised hosts.
+If confirmed malicious, first record <code class="literal">process.parent.entity_id</code>, <code class="literal">process.entity_id</code>, parent and child command lines, descendant commands, and recovered network indicators. Then isolate the host as appropriate, block recovered destination, domain, IP, or port indicators, and terminate the NetCat parent, spawned shell, and malicious descendants after evidence capture. Reset credentials only when descendant commands, user-host context, or related alerts show credential or administrator-command exposure.
 </li>
 <li class="listitem">
-Implement temporary network rules, procedures, and segmentation to contain the malware.
+Eradicate only artifacts found during the investigation: the NetCat binary or script wrapper, staged payloads, persistence, service or listener configuration, tunnels, and cleanup scripts. Then remediate the delivery path that placed the tool on the host.
 </li>
 <li class="listitem">
-Stop suspicious processes.
-</li>
-<li class="listitem">
-Immediately block the identified indicators of compromise (IoCs).
-</li>
-<li class="listitem">
-Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
-</li>
-<li class="listitem">
-Remove and block malicious artifacts identified during triage.
-</li>
-<li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-</li>
-<li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
-</li>
-<li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Post-incident hardening: restrict unauthorized NetCat-family binaries and "-e" shell usage, retain process and network telemetry, and document adjacent variants such as renamed utilities, relay mode without "-e", or delayed shell handoff in the case record for future response.
 </li>
 </ul>
 </div>
@@ -175,7 +210,16 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_966"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-command-shell-via-netcat.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_597"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-command-shell-via-netcat.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_987"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-command-shell-via-netcat.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

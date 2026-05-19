@@ -106,9 +106,6 @@ Use Case: Threat Detection
 Tactic: Persistence
 </li>
 <li class="listitem">
-Tactic: Defense Evasion
-</li>
-<li class="listitem">
 Resources: Investigation Guide
 </li>
 <li class="listitem">
@@ -131,7 +128,7 @@ Data Source: Crowdstrike
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 319</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 320</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -143,73 +140,84 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1403"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-startup-shell-folder-modification.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1428"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-startup-shell-folder-modification.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Suspicious Startup Shell Folder Modification</strong></span></p>
-<p>Techniques used within malware and by adversaries often leverage the Windows registry to store malicious programs for persistence. Startup shell folders are often targeted as they are not as prevalent as normal Startup folder paths so this behavior may evade existing AV/EDR solutions. These programs may also run with higher privileges which can be ideal for an attacker.</p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Note</strong></span>:
-This investigation guide uses the <a href="/guide/en/security/current/invest-guide-run-osquery.html" class="ulink" target="_top">Osquery Markdown Plugin</a> introduced in Elastic Stack version 8.5.0. Older Elastic Stack versions will display unrendered Markdown in this guide.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the process execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+What shell-folder scope changed, and which local path now receives Startup items?
 </li>
 <li class="listitem">
-Review the source process and related file tied to the Windows Registry entry.
+Why: <code class="literal">registry.value</code> separates per-user "Startup" from all-users "Common Startup"; all-users scope broadens persistence beyond one profile.
 </li>
 <li class="listitem">
-Validate if the activity is not related to planned patches, updates, network administrator activity, or legitimate software installations.
+Focus: <code class="literal">registry.path</code>, <code class="literal">registry.value</code>, <code class="literal">registry.hive</code>, <code class="literal">registry.data.type</code>, <code class="literal">registry.data.strings</code>.
 </li>
 <li class="listitem">
-Assess whether this behavior is prevalent in the environment by looking for similar occurrences across hosts.
+Implication: escalate when <code class="literal">registry.data.strings</code> points to a user-writable, hidden, deceptive, or all-users local path; lower concern here only for a recognized managed redirection target, then continue through process and user/host checks.
 </li>
 <li class="listitem">
-Examine the host for derived artifacts that indicate suspicious activities:
+Which process and lineage changed the shell-folder value?
 </li>
 <li class="listitem">
-Analyze the file using a private sandboxed analysis system.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">process.code_signature.subject_name</code>.
 </li>
 <li class="listitem">
-Observe and collect information about the following activities in both the sandbox and the alert subject host:
+Implication: escalate when the writer is a COM broker such as dllhost.exe, script host, LOLBin, renamed binary, user-writable executable, or unrelated parent chain; lower concern for management or packaging tooling only when command line and lineage explain this exact shell-folder write. Signed identity never clears the behavior by itself.
 </li>
 <li class="listitem">
-Attempts to contact external domains and addresses.
+Was a startup artifact staged or executed from the redirected path?
 </li>
 <li class="listitem">
-Use the Elastic Defend network events to determine domains and addresses contacted by the subject process by filtering by the process' <code class="literal">process.entity_id</code>.
+Why: the registry change can be setup only; persistence is proven by startup content in the redirected directory, and delayed staging or value reversion can hide the chain.
 </li>
 <li class="listitem">
-Examine the DNS cache for suspicious or anomalous entries.
+Focus: same-process activity, redirected-directory file events, and command lines referencing <code class="literal">registry.data.strings</code>.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve DNS Cache","query":"SELECT * FROM dns_cache"}}
+!{investigate{"description":"","label":"Activity from this process instance on this host","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-24h/h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Use the Elastic Defend registry events to examine registry keys accessed, modified, or created by the related processes in the process tree.
+!{investigate{"description":"","label":"File events in the redirected Startup path","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"file.directory","queryType":"phrase","value":"{{registry.data.strings}}","valueType":"string"}]],"relativeFrom":"now-24h/h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Examine the host services for suspicious or anomalous entries.
+!{investigate{"description":"","label":"Process command lines referencing the redirected path","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.command_line","queryType":"phrase","value":"{{registry.data.strings}}","valueType":"string"}]],"relativeFrom":"now-24h/h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve All Services","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services"}}
+Hint: if file telemetry is available, check file-event writes to that directory; missing file-event visibility is unresolved, not benign.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Services Running on User Accounts","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services WHERE\nNOT (user_account LIKE <em>%LocalSystem</em> OR user_account LIKE <em>%LocalService</em> OR user_account LIKE <em>%NetworkService</em> OR\nuser_account == null)\n"}}
+Implication: escalate when the modifier or later process writes, launches, or reverts around shortcuts, scripts, or binaries in the redirected directory.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Service Unsigned Executables with Virustotal Link","query":"SELECT concat(<em><a href="https://www.virustotal.com/gui/file/" class="ulink" target="_top">https://www.virustotal.com/gui/file/</a></em>, sha1) AS VtLink, name, description, start_type, status, pid,\nservices.path FROM services JOIN authenticode ON services.path = authenticode.path OR services.module_path =\nauthenticode.path JOIN hash ON services.path = hash.path WHERE authenticode.result != <em>trusted</em>\n"}}
+Does the creating identity and host context fit one recognized redirection workflow?
 </li>
 <li class="listitem">
-Retrieve the files' SHA-256 hash values using the PowerShell <code class="literal">Get-FileHash</code> cmdlet and search for the existence and reputation of the hashes in resources like VirusTotal, Hybrid-Analysis, CISCO Talos, Any.run, etc.
+Focus: <code class="literal">user.id</code>, <code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">host.id</code>, <code class="literal">host.name</code>.
 </li>
 <li class="listitem">
-Investigate potentially compromised accounts. Analysts can do this by searching for login events (for example, 4624) to the target host after the registry modification.
+Implication: escalate when an interactive or ad hoc identity changes Startup resolution on a host that does not normally customize shell folders; lower concern only when identity, host cohort, path, and lineage converge on one recognized management or packaging workflow.
+</li>
+<li class="listitem">
+If local evidence is suspicious or unresolved, does same-host activity change scope?
+</li>
+<li class="listitem">
+Why: sibling autostart <code class="literal">registry.path</code> changes can preserve persistence if the redirected Startup folder is noticed, restored, or cleaned.
+</li>
+<li class="listitem">
+Focus: use !{investigate{"description":"","label":"Recent activity on this host","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}} for the same <code class="literal">host.id</code>, then filter for the exact <code class="literal">registry.data.strings</code> path, sibling autostart <code class="literal">registry.path</code> changes, and process starts referencing the redirected path.
+</li>
+<li class="listitem">
+Implication: broaden response when the host shows additional shell-folder or Run-key changes, execution from the redirected path, or repeated attempts to use it; keep scope local only when the pivot finds no matching autostart or execution evidence.
+</li>
+<li class="listitem">
+Do the path, process, payload-use, and context findings support startup-folder evasion?
+</li>
+<li class="listitem">
+Implication: escalate for an unexpected process or actor, suspicious local path, shortcut/script/binary content, redirected-path execution, or same-host persistence/evasion; close only when telemetry narrows the case to one exact recognized workflow and outside confirmation verifies legitimacy where telemetry alone cannot; preserve and escalate when file visibility, process context, or workflow evidence is incomplete.
 </li>
 </ul>
 </div>
@@ -217,18 +225,10 @@ Investigate potentially compromised accounts. Analysts can do this by searching 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-There is a high possibility of benign legitimate programs being added to shell folders. This activity could be based on new software installations, patches, or other network administrator activity. Before undertaking further investigation, it should be verified that this activity is not benign.
-</li>
-</ul>
-</div>
-<p><span class="strong strong"><strong>Related rules</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-Startup or Run Key Registry Modification - 97fc44d3-8dae-4019-ae83-298c3015600f
+Managed shell-folder redirection or application packaging can repoint "Startup" or "Common Startup" to a nondefault local path, but this is operationally sensitive. Treat these explanations as benign only when alert-window telemetry proves the exact redirected folder, process lineage, expected startup content, and managed host cohort all match one management or packaging job. Use deployment records, management configuration, packaging job logs, or owner confirmation when telemetry alone cannot prove legitimacy; do not close on a management label without this evidence.
 </li>
 <li class="listitem">
-Persistent Scripts in the Startup Directory - f7c4dc5a-a58d-491d-9f14-9b66507121c0
+Before exceptioning, validate recurrence of the same <code class="literal">registry.value</code>, <code class="literal">registry.data.strings</code>, <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code> pattern after confirming the benign workflow. Build the exception from that minimum workflow, and avoid exceptions on all Startup shell-folder modifications, the whole Explorer shell-folder key family, or the rule name alone.
 </li>
 </ul>
 </div>
@@ -236,34 +236,16 @@ Persistent Scripts in the Startup Directory - f7c4dc5a-a58d-491d-9f14-9b66507121
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, record the exact registry path/value/data, process lineage, <code class="literal">user.id</code>, and <code class="literal">host.id</code> pattern that proved the recognized workflow, then reverse temporary containment. Keep any exception narrow and require recurrence of that same workflow.
 </li>
 <li class="listitem">
-Isolate the involved host to prevent further post-compromise behavior.
+If suspicious but unconfirmed, preserve the alert, Timeline or case exports, the current shell-folder value, process tree, command line, and redirected-directory contents or metadata when available before changing state. Apply reversible containment first, such as blocking execution from the redirected directory or increasing monitoring on the host. Restore the legitimate Startup path only after evidence capture, dependency review, and validation of the correct per-user or Common Startup path. Isolate the host only when payload execution or related alerts show active compromise.
 </li>
 <li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
+If confirmed malicious, collect staged shortcuts, scripts, binaries, hashes, and registry evidence before eradication. Contain the endpoint when its role allows, contain the creating account when the evidence shows account misuse, validate the correct per-user or Common Startup value, restore that value, and remove only the artifacts identified in the investigation. If direct response is unavailable, escalate with the preserved evidence to the team that can act on the host.
 </li>
 <li class="listitem">
-If the malicious file was delivered via phishing:
-</li>
-<li class="listitem">
-Block the email sender from sending future emails.
-</li>
-<li class="listitem">
-Block the malicious web pages.
-</li>
-<li class="listitem">
-Remove emails from the sender from mailboxes.
-</li>
-<li class="listitem">
-Consider improvements to the security awareness program.
-</li>
-<li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Before cleanup, review other user profiles and the all-users Startup scope for the same redirected path, then verify no process execution still points to that directory. After recovery, restrict shell-folder redirection to controlled management tooling, retain registry/process and available file telemetry needed to connect redirection to later payload staging, and document delayed-staging or value-reversion blind spots for future cases.
 </li>
 </ul>
 </div>
@@ -271,7 +253,34 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1454"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-startup-shell-folder-modification.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_1035"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-startup-shell-folder-modification.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-reg-setup" class="ulink" target="_top">Sysmon Registry Events</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1479"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-startup-shell-folder-modification.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

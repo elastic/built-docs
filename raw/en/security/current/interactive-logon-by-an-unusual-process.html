@@ -98,7 +98,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 108</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 109</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -110,34 +110,96 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_593"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/interactive-logon-by-an-unusual-process.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_603"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/interactive-logon-by-an-unusual-process.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Interactive Logon by an Unusual Process</strong></span></p>
-<p>Interactive logons in Windows environments typically involve standard processes like winlogon.exe. Adversaries may exploit alternate processes to create tokens, escalating privileges and bypassing controls. This detection rule identifies anomalies by flagging logons via non-standard executables, focusing on mismatched user SIDs and unusual process paths, thus highlighting potential privilege escalation attempts.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the process executable path to determine if it is a known or expected application for interactive logons. Investigate any unfamiliar or suspicious paths.
+Did Advapi create an interactive logon for a different target identity?
 </li>
 <li class="listitem">
-Examine the SubjectUserSid and TargetUserSid to identify the users involved in the logon attempt. Check for any discrepancies or unusual patterns in user activity.
+Focus: <code class="literal">winlog.logon.type</code>, <code class="literal">winlog.event_data.LogonProcessName</code>, <code class="literal">winlog.event_data.SubjectUserSid</code>, <code class="literal">winlog.event_data.TargetUserSid</code>, and <code class="literal">host.id</code>.
 </li>
 <li class="listitem">
-Analyze the event logs around the time of the alert to identify any related or preceding events that might indicate how the unusual process was initiated.
+Implication: escalate when Advapi creates a different Target session without recognized credential-switch use; lower suspicion only for bounded runas or helper use on this host. Subject initiated the action; Target received the session or token.
 </li>
 <li class="listitem">
-Investigate the system for any signs of compromise, such as unexpected changes in system files, unauthorized software installations, or other indicators of malicious activity.
+Which process requested the alternate-credential session?
 </li>
 <li class="listitem">
-Check for any recent privilege escalation attempts or access token manipulations that might correlate with the alert, using the MITRE ATT&amp;CK framework references for guidance.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.name</code>, <code class="literal">process.pid</code>, <code class="literal">winlog.event_data.SubjectUserName</code>, and <code class="literal">winlog.event_data.SubjectDomainName</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the requester is user-writable, temporary, renamed, or unrelated to credential switching; lower suspicion only for System32 runas.exe or a recognized helper tied to the same Subject. Process identity alone does not clear token creation.
+</li>
+<li class="listitem">
+Did the Target session create privileged or linked-token access?
+</li>
+<li class="listitem">
+Focus: <code class="literal">winlog.event_data.TargetUserSid</code>, <code class="literal">winlog.event_data.TargetLogonId</code>, <code class="literal">winlog.event_data.TargetLinkedLogonId</code>, <code class="literal">winlog.event_data.ElevatedToken</code>, and <code class="literal">winlog.event_data.ImpersonationLevel</code>.
+</li>
+<li class="listitem">
+Implication: escalate on a privileged or unusual Target account, elevated token, linked session, or impersonation-capable token. Keep unresolved when the Target cannot be tied to the requesting Subject and process; a recognized requester does not clear elevated Target token state.
+</li>
+<li class="listitem">
+Did explicit-credential records show who supplied Target credentials?
+</li>
+<li class="listitem">
+Focus: same-host 4648 records using <code class="literal">winlog.event_data.SubjectLogonId</code>; read <code class="literal">winlog.event_data.TargetUserName</code>, <code class="literal">winlog.event_data.TargetDomainName</code>, <code class="literal">winlog.event_data.TargetServerName</code>, and <code class="literal">source.ip</code>.
+</li>
+<li class="listitem">
+Hint: make-token tooling may leave only Advapi, different Subject/Target SIDs, and Target session fields; do not require endpoint command-line evidence before escalation. !{investigate{"description":"","label":"Explicit-credential events from the subject session","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"4648","valueType":"string"},{"excluded":false,"field":"winlog.event_data.SubjectLogonId","queryType":"phrase","value":"{{winlog.event_data.SubjectLogonId}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when 4648 shows the same Subject session presenting Target credentials to an unexpected server or non-local origin. Local or absent <code class="literal">source.ip</code> can occur in make-token cases and must be weighed with requester, identity pair, and token state; missing Security telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Did the created Target session show follow-on success or authentication-method signals?
+</li>
+<li class="listitem">
+Focus: same-host 4624 and 4634 records using <code class="literal">winlog.event_data.TargetLogonId</code>; read <code class="literal">winlog.event_data.TargetUserSid</code>, <code class="literal">winlog.event_data.AuthenticationPackageName</code>, and <code class="literal">source.ip</code>.
+</li>
+<li class="listitem">
+Implication: escalate on unexpected authentication package use, repeated successful session activity, or a non-local origin that contradicts local workflow; absent or local source details should be weighed with Target-token evidence. Missing 4624/4634 telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Target logon records for the created session","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"4624","valueType":"string"},{"excluded":false,"field":"winlog.event_data.TargetLogonId","queryType":"phrase","value":"{{winlog.event_data.TargetLogonId}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Target logoff records for the created session","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"4634","valueType":"string"},{"excluded":false,"field":"winlog.event_data.TargetLogonId","queryType":"phrase","value":"{{winlog.event_data.TargetLogonId}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+What activity is tied to the created Target logon session?
+</li>
+<li class="listitem">
+Focus: same-host events carrying <code class="literal">winlog.event_data.TargetLogonId</code>, especially process, privilege, or authentication records tied to the Target identity. !{investigate{"description":"","label":"Events for the created target logon session","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"winlog.event_data.TargetLogonId","queryType":"phrase","value":"{{winlog.event_data.TargetLogonId}}","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"winlog.logon.id","queryType":"phrase","value":"{{winlog.event_data.TargetLogonId}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the Target session performs privileged operations, starts unexpected processes, or chains authentication; no follow-on telemetry narrows activity only when the requester, identity pair, and token state are otherwise explained.
+</li>
+<li class="listitem">
+If local evidence remains suspicious or unresolved, do related alerts change scope?
+</li>
+<li class="listitem">
+Focus: recent alerts for the same <code class="literal">host.id</code>, Subject SID, and Target SID.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the subject identity","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"winlog.event_data.SubjectUserSid","queryType":"phrase","value":"{{winlog.event_data.SubjectUserSid}}","valueType":"string"}],[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{winlog.event_data.SubjectUserSid}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the target identity","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"winlog.event_data.TargetUserSid","queryType":"phrase","value":"{{winlog.event_data.TargetUserSid}}","valueType":"string"}],[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{winlog.event_data.TargetUserSid}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when related alerts show credential access, privilege escalation, persistence, or lateral movement tied to the host or either identity; quiet alert history cannot close unresolved token/session evidence.
+</li>
+<li class="listitem">
+Escalate on unauthorized Subject-to-Target token creation; close only when the identity pair, requester, Target token, and Security records all bind to one recognized workflow; if mixed, preserve records and use related alerts plus recent session activity to scope the case.
 </li>
 </ul>
 </div>
@@ -145,16 +207,10 @@ Check for any recent privilege escalation attempts or access token manipulations
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate administrative tools or scripts may trigger this rule if they use non-standard executables for logon processes. To manage this, identify and whitelist these known tools by adding their executable paths to the exception list.
+Recognized runas, enterprise PAM or credential-broker helpers, and authorized assessment can trigger this rule from monitored admin hosts. Confirm <code class="literal">process.executable</code>, Subject and Target identities, <code class="literal">host.id</code>, and explicit-credential or session records bind to the same workflow or validation scope; contradictory Target token details block benign closure.
 </li>
 <li class="listitem">
-Custom applications developed in-house that require interactive logon might be flagged. Review these applications and, if verified as safe, exclude their executable paths from the detection rule.
-</li>
-<li class="listitem">
-Automated tasks or services that use alternate credentials for legitimate purposes can cause false positives. Analyze these tasks and, if they are part of regular operations, adjust the rule to exclude their specific user SIDs or executable paths.
-</li>
-<li class="listitem">
-Security software or monitoring tools that perform logon actions for scanning or auditing purposes may be incorrectly flagged. Confirm their legitimacy and add them to the exception list to prevent unnecessary alerts.
+Build exceptions only from the minimum confirmed pattern, such as <code class="literal">process.executable</code> plus <code class="literal">winlog.event_data.SubjectUserSid</code>, <code class="literal">winlog.event_data.TargetUserSid</code>, and a bounded <code class="literal">host.id</code> or host group. Avoid exceptions on <code class="literal">process.name</code>, <code class="literal">user.name</code>, or the Target account alone.
 </li>
 </ul>
 </div>
@@ -162,25 +218,22 @@ Security software or monitoring tools that perform logon actions for scanning or
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected system from the network to prevent further unauthorized access or lateral movement.
+If confirmed benign, document the evidence categories, reverse temporary containment, and create only the narrow exception described above.
 </li>
 <li class="listitem">
-Terminate any suspicious processes identified as executing from non-standard paths that are not part of the legitimate Windows system processes.
+If suspicious but unconfirmed, export the alert and surrounding Windows Security records, preserve the requesting process image and Subject-to-Target session context, and collect the referenced executable before containment.
 </li>
 <li class="listitem">
-Revoke any tokens or credentials associated with the anomalous logon session to prevent further misuse.
+Apply reversible containment first: restrict the affected account or host session, increase monitoring on the involved <code class="literal">host.id</code> and identities, and weigh host criticality before isolation.
 </li>
 <li class="listitem">
-Conduct a thorough review of user accounts involved, focusing on any unauthorized privilege escalations or changes in permissions, and reset passwords as necessary.
+If confirmed malicious, preserve the executable referenced by <code class="literal">process.executable</code>, session records, and Subject/Target identifiers, then contain involved hosts or accounts and invalidate active sessions.
 </li>
 <li class="listitem">
-Analyze the system for any signs of persistence mechanisms or additional malware, and remove any identified threats.
+Reset or rotate Target credentials only when compromise or unauthorized use is supported; treat Subject as the operator or requesting context before disabling it.
 </li>
 <li class="listitem">
-Restore the system from a known good backup if any unauthorized changes or malware are detected that cannot be easily remediated.
-</li>
-<li class="listitem">
-Report the incident to the appropriate internal security team or management for further investigation and potential escalation to law enforcement if necessary.
+Eradicate only confirmed token-abuse tooling or credential material, review local privilege assignments that allowed the session, and retain Windows Security events needed to reconstruct Subject-to-Target token creation.
 </li>
 </ul>
 </div>
@@ -188,15 +241,16 @@ Report the incident to the appropriate internal security team or management for 
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_354"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/interactive-logon-by-an-unusual-process.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_367"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/interactive-logon-by-an-unusual-process.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
-<p>Audit event 4624 is needed to trigger this rule.</p>
+<p>Audit Logon must be enabled to generate the events used by this rule.
+Setup instructions: <a href="https://ela.st/audit-logon" class="ulink" target="_top">https://ela.st/audit-logon</a></p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_633"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/interactive-logon-by-an-unusual-process.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_643"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/interactive-logon-by-an-unusual-process.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

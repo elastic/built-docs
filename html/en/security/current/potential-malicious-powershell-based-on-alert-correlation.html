@@ -147,7 +147,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 5</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 7</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -159,106 +159,87 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_985"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-malicious-powershell-based-on-alert-correlation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1006"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-malicious-powershell-based-on-alert-correlation.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This guide was created by humans with the assistance of generative AI. While its contents have been manually curated to include the most valuable information, always validate assumptions and adjust procedures to match your internal runbooks and incident triage and response policies.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Potential Malicious PowerShell Based on Alert Correlation</strong></span></p>
-<p>This alert groups multiple PowerShell-related detections that reference the same ScriptBlock identifier. When several independent detections fire on a single script block, it often indicates a single execution chain combining multiple suspicious behaviors. Treat the contributing alerts as the primary evidence and use this correlation to prioritize investigation and scoping.</p>
-<p>Investigation goals:
-- Identify affected endpoints and users by pivoting to the contributing alerts.
-- Recover the complete script content associated with the ScriptBlock identifier and understand its intent.
-- Identify follow-on behavior (process, network, persistence) and scope the activity across the environment.</p>
-<p><span class="strong strong"><strong>Key alert fields to review</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-<code class="literal">Esql.script_block_id</code>: The ScriptBlock identifier used to correlate multiple alerts.
-</li>
-<li class="listitem">
-<code class="literal">Esql.kibana_alert_rule_name_count_distinct</code>: The number of distinct PowerShell-related rule names that contributed to the correlation.
-</li>
-<li class="listitem">
-<code class="literal">Esql.kibana_alert_rule_name_values</code>: The contributing rule names; use this list to quickly understand what detection logic was triggered.
-</li>
-<li class="listitem">
-<code class="literal">Esql._id_values</code>: The contributing alert document IDs; pivot to these source alerts for full context and supporting evidence.
-</li>
-</ul>
-</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Understand what drove the correlation:
+What does the ES|QL grouped alert preserve about the suspicious PowerShell mix?
 </li>
 <li class="listitem">
-Review <code class="literal">Esql.kibana_alert_rule_name_count_distinct</code> to gauge overall confidence and urgency.
+Focus: treat <code class="literal">Esql.script_block_id</code>, <code class="literal">Esql.kibana_alert_rule_name_values</code>, <code class="literal">Esql._id_values</code>, preserved <code class="literal">host.id</code> / <code class="literal">user.id</code>, and <code class="literal">Esql.kibana_alert_rule_name_count_distinct</code> as search clues, not evidence.
 </li>
 <li class="listitem">
-Review <code class="literal">Esql.kibana_alert_rule_name_values</code> and group the contributing detections by behavior (for example, obfuscation/encoding, suspicious execution, network retrieval, or persistence-related activity). Use this grouping to decide what evidence is most important to validate first.
+Implication: escalate if rule names span obfuscation, download, execution, persistence, credential access, or defense evasion for one host/user; lower suspicion only when recovered source alerts/events show one recognized detection-validation script or controlled encoded-content automation pattern.
 </li>
 <li class="listitem">
-Pivot to the contributing alerts and capture execution context:
+Do the contributing alerts bind the summary to one script execution?
 </li>
 <li class="listitem">
-Use <code class="literal">Esql._id_values</code> to open each contributing alert and collect the affected host and user context, along with the earliest and latest timestamps across the set.
+Focus: recover contributing alerts around grouped-alert time using preserved host/user, <code class="literal">Esql.kibana_alert_rule_name_values</code>, and script-block ID; use <code class="literal">Esql._id_values</code> only when alert search supports those IDs.
 </li>
 <li class="listitem">
-Confirm the contributing alerts represent the same ScriptBlock ID and are not unrelated alerts that happen to share similar message content.
+Hint: recover contributing alerts before interpreting grouped behavior; ES|QL grouped alerts lack member-event Timeline pivots and reliable source-event time, PID, or entity anchors.
 </li>
 <li class="listitem">
-Identify whether the activity is limited to a single endpoint or appears on multiple endpoints. Multiple endpoints can indicate script reuse, distribution, or remote execution.
+Implication: treat as one execution chain only when source alerts and events align to one host, one user, one source-event window, and one script-block ID; keep unresolved if timestamps, script evidence, PID reuse risk, or entity scope conflict.
 </li>
 <li class="listitem">
-Reconstruct the full script block content:
+Can you reconstruct and interpret the source PowerShell script block?
 </li>
 <li class="listitem">
-Using <code class="literal">Esql.script_block_id</code>, locate all available records (alerts and/or underlying telemetry referenced by the contributing alerts) tied to the same identifier.
+Focus: using recovered source-event host, process, and time, query PowerShell 4104 or source events; match <code class="literal">powershell.file.script_block_id</code>, order <code class="literal">powershell.sequence</code> / <code class="literal">powershell.total</code>, and read script-block text.
 </li>
 <li class="listitem">
-If the script content is split across multiple fragments, reconstruct it in the correct order before assessing intent.
+Implication: escalate when reconstructed text shows encoded/decoded stages, download cradles, reflection, hosted System.Management.Automation execution, credential access, persistence, or defense evasion; missing fragments or source PowerShell telemetry are unresolved, not benign.
 </li>
 <li class="listitem">
-Identify any decoded/deobfuscated output that the script generates during execution and capture it as evidence for scoping.
+Which process and launch chain executed the script block?
 </li>
 <li class="listitem">
-Assess intent and capability based on the recovered script:
+Focus: use recovered time, <code class="literal">host.id</code>, and process identifiers to find the process start; collect <code class="literal">process.entity_id</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.command_line</code>, and <code class="literal">process.Ext.authentication_id</code>.
 </li>
 <li class="listitem">
-Look for evidence of staged execution, such as multiple layers of decoding, dynamic code generation, or invocation of additional code.
+Hint: if no process start appears, expand time first; if still missing, scope later file, registry, and network review to recovered source-event host/user/process/time.
 </li>
 <li class="listitem">
-Identify indicators that can be used for scoping (for example, external destinations, file locations, created services, or suspicious child process activity referenced by the contributing alerts).
+Implication: escalate when the launcher is a document, browser, remote-management tool, scheduled task, unexpected script or .NET host, or command line with encoded, hidden, bypass, download, or dynamic evaluation; lower suspicion only when the same parent, command, user, and host bind to the exact recovered benign workflow.
 </li>
 <li class="listitem">
-Correlate with adjacent activity during the same timeframe:
+Did the process stage payloads, persistence, or security-impacting changes?
 </li>
 <li class="listitem">
-Process activity: check for unusual parent-child relationships involving PowerShell and unexpected child processes following the script block execution.
+Focus: scope file and registry events to recovered <code class="literal">process.entity_id</code> or fallback source-event host/PID/time context; review <code class="literal">file.path</code>, <code class="literal">file.origin_url</code>, <code class="literal">registry.path</code>, <code class="literal">registry.value</code>, and <code class="literal">registry.data.strings</code>.
 </li>
 <li class="listitem">
-Network activity: review outbound connections and DNS activity that align with the execution window, especially first-time or rare destinations.
+Implication: escalate when the script writes executable or scriptable content to user-writable or startup paths, leaves internet provenance, modifies persistence or security keys, or later executes staged content; lower suspicion only when artifacts stay inside the exact recovered benign workflow. Missing file or registry telemetry does not clear the alert.
 </li>
 <li class="listitem">
-File and registry activity: look for payload staging, configuration changes, or persistence artifacts created near the execution window.
+Did network or session evidence fit offensive PowerShell use?
 </li>
 <li class="listitem">
-Authentication activity: review for suspicious logons or account changes that coincide with the script execution, especially if activity spans multiple endpoints.
+Focus: scope DNS/connections to recovered <code class="literal">process.entity_id</code> or source-event host/PID/time context; read <code class="literal">dns.question.name</code>, <code class="literal">destination.ip</code>, and <code class="literal">destination.port</code>; when origin matters, bridge <code class="literal">process.Ext.authentication_id</code> to <code class="literal">winlog.event_data.TargetLogonId</code>.
 </li>
 <li class="listitem">
-Scope and hunt for additional occurrences:
+Implication: escalate when the script reaches rare or public destinations, pulls content, contacts infrastructure unrelated to the recovered workflow, or runs from an unexpected remote session; missing network or Windows Security telemetry is unresolved, not benign.
 </li>
 <li class="listitem">
-Search for other alerts containing the same <code class="literal">Esql.script_block_id</code> to determine if the script was reused or executed repeatedly.
+If local evidence is suspicious or unresolved, does the same pattern recur elsewhere enough to change scope?
 </li>
 <li class="listitem">
-Use indicators and behaviors observed in the contributing alerts to identify related activity in other alerts and telemetry sources, and establish first-seen/last-seen boundaries.
+Focus: related alerts for preserved <code class="literal">user.id</code> over 48 hours, looking for the same <code class="literal">Esql.kibana_alert_rule_name_values</code>, reconstructed script fragment, launch context, or extracted indicators. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if user-scoped alerts are quiet or ambiguous, compare related alerts for preserved <code class="literal">host.id</code> over 48 hours. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden response when the same script body, rule-name mix, or indicators appear on unrelated hosts or users; keep scope local when recurrence stays on the host under review, but do not close from recurrence alone.
+</li>
+<li class="listitem">
+Weigh contributing-alert alignment, reconstructed script, launch chain, artifacts, destinations, and host/user scope; escalate for offensive tooling, unauthorized execution, staged payloads, persistence, or suspicious destinations; close only when source evidence binds to one exact benign workflow, using outside confirmation only for facts telemetry cannot prove; preserve artifacts and escalate on conflicts or missing telemetry.
 </li>
 </ul>
 </div>
@@ -266,10 +247,13 @@ Use indicators and behaviors observed in the contributing alerts to identify rel
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate administrative automation can produce multiple detections if it uses dynamic script generation, embedded encoded content, or downloads content at runtime. Validate whether the affected hosts, users, and timing align with an approved maintenance activity.
+Authorized red-team, lab, or detection-validation can trigger several PowerShell rules on one script. Confirm alert mix, reconstructed script, launch chain, <code class="literal">user.id</code>, and <code class="literal">host.id</code> match exact test scope; if records are unavailable, recurrence can support scoping but cannot close the alert.
 </li>
 <li class="listitem">
-If the same ScriptBlock content repeatedly maps to a known benign workflow, document the expected behavior and tune upstream detections to better distinguish that workflow, rather than suppressing this correlation rule.
+Endpoint management or deployment automation can trigger multiple detections through encoded content, dynamic script generation, or controlled downloads. Confirm <code class="literal">powershell.file.script_block_text</code>, parent/child command lines, artifacts, and destinations align with one managed workflow. If script body, destinations, or follow-on artifacts diverge, do not close as benign.
+</li>
+<li class="listitem">
+Before an exception, validate stable benign anchors: <code class="literal">user.id</code>, <code class="literal">host.id</code>, parent/child command lines, script fragment, and destination or artifact pattern. Avoid exceptions on ES|QL summary fields or <code class="literal">Esql.script_block_id</code>; they are alert-local or execution-specific.
 </li>
 </ul>
 </div>
@@ -277,37 +261,16 @@ If the same ScriptBlock content repeatedly maps to a known benign workflow, docu
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-If the activity is confirmed or strongly suspected to be malicious:
+If confirmed benign, document the alert mix, reconstructed script, launch chain, and recovered host/user context before reversing containment. Build exceptions from stable recovered workflow anchors, not ES|QL summary fields alone.
 </li>
 <li class="listitem">
-Contain impacted endpoints to prevent additional execution and follow-on actions.
+If suspicious but unconfirmed, preserve contributing alerts, <code class="literal">Esql._id_values</code>, <code class="literal">Esql.script_block_id</code>, rule-name values, reconstructed script text, recovered parent/child command lines, file/registry paths, and DNS/destination indicators before cleanup. Apply reversible containment first, such as temporary destination restrictions or heightened monitoring on recovered <code class="literal">host.id</code> and <code class="literal">user.id</code>; isolate or strengthen account action only if the script is still executing, staging payloads, or reaching suspicious destinations and host role allows.
 </li>
 <li class="listitem">
-Restrict, reset, or rotate credentials for involved accounts as appropriate, especially for privileged or shared accounts.
+If confirmed malicious, record entity IDs, command lines, and indicators, then isolate the host when lateral-movement or active-payload risk is present. Stop the PowerShell process or descendants only after preserving evidence; if direct response is unavailable, escalate with the evidence set. Block confirmed malicious destinations, URLs, hashes, and script paths; eradicate only tied files, registry changes, tasks, services, and payloads; remediate the launch path; and review related hosts/users before destructive cleanup.
 </li>
 <li class="listitem">
-Remove identified artifacts and persistence mechanisms (for example, suspicious services or dropped binaries) and remediate any affected systems.
-</li>
-<li class="listitem">
-Block or monitor indicators identified from the contributing alerts (external destinations, file locations, or other observable artifacts) to prevent reinfection and support hunting.
-</li>
-<li class="listitem">
-Validation and recovery:
-</li>
-<li class="listitem">
-Use <code class="literal">Esql.script_block_id</code> and the contributing alert set in <code class="literal">Esql._id_values</code> to verify that the activity has ceased and to identify any additional impacted endpoints.
-</li>
-<li class="listitem">
-Continue monitoring for recurrence of the same ScriptBlock ID or the contributing behaviors to confirm remediation effectiveness.
-</li>
-<li class="listitem">
-Post-incident:
-</li>
-<li class="listitem">
-Preserve the recovered script content and the full set of contributing alerts as evidence.
-</li>
-<li class="listitem">
-Identify and address the initial execution mechanism indicated by the contributing alerts and improve preventative controls and logging coverage to reduce recurrence.
+Post-incident hardening: preserve or expand PowerShell 4104 logging, source-alert retention, endpoint process telemetry, and Windows Security logs when gaps limited recovery; where operations allow, restrict high-risk PowerShell through signed scripts, Constrained Language Mode, JEA, or WinRM controls. Document the rule-name mix, observables, and adjacent variants such as indirect System.Management.Automation execution.
 </li>
 </ul>
 </div>
@@ -315,7 +278,7 @@ Identify and address the initial execution mechanism indicated by the contributi
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1041"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-malicious-powershell-based-on-alert-correlation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1062"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-malicious-powershell-based-on-alert-correlation.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -329,17 +292,24 @@ Identify and address the initial execution mechanism indicated by the contributi
 | where Esql.script_block_id is not null
 
 // keep relevant fields for further processing
-| keep kibana.alert.rule.name, Esql.script_block_id, _id
+| keep kibana.alert.rule.name, Esql.script_block_id, _id, user.id, process.pid, host.id
 
 // count distinct alerts and filter for matches above the threshold
 | stats
     Esql.kibana_alert_rule_name_count_distinct = count_distinct(kibana.alert.rule.name),
     Esql.kibana_alert_rule_name_values = values(kibana.alert.rule.name),
-    Esql._id_values = values(_id)
+    Esql._id_values = values(_id),
+    Esql.user_id_values = values(user.id),
+    Esql.process_pid_values = values(process.pid),
+    Esql.host_id_values = values(host.id)
   by Esql.script_block_id
 
 // Apply detection threshold
-| where Esql.kibana_alert_rule_name_count_distinct &gt;= 5</pre>
+| where Esql.kibana_alert_rule_name_count_distinct &gt;= 5
+| eval user.id = MV_MIN(Esql.user_id_values),
+       process.pid = MV_MIN(Esql.process_pid_values),
+       host.id = MV_MIN(Esql.host_id_values)
+| keep host.id, user.id, process.pid, Esql.*</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

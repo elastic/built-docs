@@ -103,9 +103,6 @@ Use Case: Threat Detection
 Tactic: Initial Access
 </li>
 <li class="listitem">
-Tactic: Execution
-</li>
-<li class="listitem">
 Data Source: Elastic Endgame
 </li>
 <li class="listitem">
@@ -125,7 +122,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 3</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 4</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -137,36 +134,75 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1621"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/windows-server-update-service-spawning-suspicious-processes.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1646"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/windows-server-update-service-spawning-suspicious-processes.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Windows Server Update Service Spawning Suspicious Processes</strong></span></p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Examine the child process details, focusing on the process names and original file names such as cmd.exe, powershell.exe, pwsh.exe, and powershell_ise.exe, to identify any unauthorized or unexpected command-line activity.
+What does the alert-local WSUS parent-child path show?
 </li>
 <li class="listitem">
-Investigate the timeline of events leading up to the alert, including any preceding or subsequent processes, to understand the context and potential impact of the suspicious activity.
+Focus: child <code class="literal">process.executable</code> and <code class="literal">process.command_line</code>, plus <code class="literal">process.parent.name</code>, <code class="literal">process.parent.executable</code>, and <code class="literal">process.parent.args</code>, especially "w3wp.exe" with "WsusPool" or "WsusService.exe".
 </li>
 <li class="listitem">
-Check for any associated network activity or connections initiated by the suspicious processes to identify potential data exfiltration or communication with external command and control servers.
+Implication: escalate when a WSUS web or service component launches a shell, PowerShell, "rundll32.exe", or "curl.exe" for interpreter, download, or proxy-execution behavior; lower suspicion only when the parent-child pair and arguments match a narrow recognized WSUS setup, cleanup, or repair pattern.
 </li>
 <li class="listitem">
-Review recent changes or access logs on the affected  server to identify any unauthorized access attempts or modifications that could indicate exploitation or the presence of a web shell.
+Does the child command and binary identity fit bounded WSUS maintenance?
 </li>
 <li class="listitem">
-Correlate the alert with other security events or logs from data sources like Elastic Endgame, Elastic Defend, Sysmon, Microsoft Defender XDR, or SentinelOne to gather additional context and corroborate findings.
+Why: WSUS children can inherit service context; visible user fields may not prove human initiation.
 </li>
 <li class="listitem">
-Assess the risk and impact of the detected activity, considering the severity and risk score, and determine appropriate response actions, such as isolating the affected system or conducting a deeper forensic analysis.
+Focus: <code class="literal">process.command_line</code>, <code class="literal">process.executable</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>/<code class="literal">trusted</code>, and child processes. !{investigate{"description":"","label":"Child processes of the suspicious WSUS child","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: for PowerShell with script-block telemetry, anchor on <code class="literal">host.id</code> + <code class="literal">process.entity_id</code> or <code class="literal">host.id</code> + <code class="literal">process.pid</code> in a tight alert window. Reconstruct <code class="literal">powershell.file.script_block_id</code>, <code class="literal">powershell.total</code>, <code class="literal">powershell.sequence</code>, and <code class="literal">powershell.file.script_block_text</code>; missing script-block telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Implication: escalate on encoded script content, external retrieval, discovery, archive, remote-admin, temp-path DLL activity, or a renamed/unsigned/mismatched child; lower suspicion only when command scope, path, PE identity, and signer all match the same narrow WSUS task. Identity alone does not clear the launch chain.
+</li>
+<li class="listitem">
+Did the child stage payloads or WSUS-content artifacts?
+</li>
+<li class="listitem">
+Focus: process-scoped file <code class="literal">file.path</code>, <code class="literal">file.Ext.original.path</code>, <code class="literal">file.origin_url</code>, and <code class="literal">file.Ext.windows.zone_identifier</code>; missing file telemetry is unresolved, not benign. !{investigate{"description":"","label":"File events for the suspicious child process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: scope by <code class="literal">host.id</code> + <code class="literal">process.entity_id</code>, or <code class="literal">host.id</code> + <code class="literal">process.pid</code> if absent; check later starts where <code class="literal">process.executable</code> equals the written path.
+</li>
+<li class="listitem">
+Implication: escalate when the child writes scripts, DLLs, EXEs, archives, or renamed content under WSUS, IIS, temp, or user-writable paths, especially if later executed; lower suspicion only when writes stay inside the same narrow WSUS maintenance path.
+</li>
+<li class="listitem">
+Did the child retrieve tooling, call back, or reach destinations outside the WSUS role?
+</li>
+<li class="listitem">
+Focus: process-scoped DNS <code class="literal">event.action</code>, <code class="literal">dns.question.name</code>, <code class="literal">dns.resolved_ip</code>, and connection <code class="literal">destination.ip</code>/<code class="literal">destination.port</code>; missing network telemetry is unresolved, not benign. !{investigate{"description":"","label":"Network events for the suspicious child process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: scope by <code class="literal">host.id</code> + <code class="literal">process.entity_id</code>, or <code class="literal">host.id</code> + <code class="literal">process.pid</code> if absent. Compare DNS "lookup_result" <code class="literal">dns.resolved_ip</code> with later <code class="literal">destination.ip</code> from the same process.
+</li>
+<li class="listitem">
+Implication: escalate when the child retrieves tools from public infrastructure, connects to rare or unrelated systems, or uses destinations inconsistent with WSUS update distribution; lower suspicion when the same process reaches only recognized internal mirrors, proxies, or vendor services that fit command and parent context.
+</li>
+<li class="listitem">
+If local findings are suspicious or unresolved, does same-host scope show broader WSUS compromise?
+</li>
+<li class="listitem">
+Focus: related alerts on the same <code class="literal">host.id</code>, especially repeated WSUS-spawned tools and complementary webshell, credential-access, discovery, archive, or lateral-movement activity. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Range: start with the alert window; expand to 48 hours only if parent-child, command, artifact, or destination evidence remains suspicious or incomplete.
+</li>
+<li class="listitem">
+Implication: broaden containment when related alerts corroborate WSUS compromise or post-exploitation; keep scope local when surrounding activity is limited to one fully explained maintenance action.
+</li>
+<li class="listitem">
+Escalate for unexplained service-side execution, payload staging, suspicious destinations, or broader WSUS compromise; close only when parent-child path, command intent, service context, binary identity, artifacts, destinations, and same-host scope prove one exact recognized WSUS maintenance or validation workflow; preserve artifacts and escalate when evidence is mixed or optional telemetry is missing.
 </li>
 </ul>
 </div>
@@ -174,7 +210,10 @@ Assess the risk and impact of the detected activity, considering the severity an
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This behavior is rare and should be treated with high suspicion.
+WSUS installation, post-install repair, cleanup, health-check, migration, or authorized CVE validation can launch bounded shell or PowerShell children from "WsusPool" or "WsusService.exe". Close only when parent <code class="literal">process.parent.name</code>/<code class="literal">process.parent.args</code>, child command, path, hash or signer, <code class="literal">user.id</code>, and <code class="literal">host.id</code> prove the same narrow task; artifact and destination telemetry should corroborate when available, and missing recovery that leaves staging or callback unresolved requires confirmation or escalation.
+</li>
+<li class="listitem">
+Before creating an exception, validate stability across prior alerts for the same WSUS server: parent context, child path/hash/signer, exact <code class="literal">process.command_line</code>, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and any bounded artifact or destination pattern. Avoid exceptions on "WsusService.exe", "w3wp.exe", <code class="literal">process.name</code>, or <code class="literal">host.id</code> alone.
 </li>
 </ul>
 </div>
@@ -182,25 +221,13 @@ This behavior is rare and should be treated with high suspicion.
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected Server from the network to prevent further unauthorized access or lateral movement.
+If confirmed benign, reverse temporary containment and document the parent context, child <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, signer or hash, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and bounded artifact or destination evidence that proved the WSUS workflow. Create an exception only from that full stable pattern.
 </li>
 <li class="listitem">
-Terminate any suspicious processes identified as being spawned by w3wp.exe, such as cmd.exe or powershell.exe, to halt any ongoing malicious activity.
+If suspicious but unconfirmed, preserve the case export, process tree, child <code class="literal">process.entity_id</code>, <code class="literal">process.pid</code>, <code class="literal">process.command_line</code>, parent context, <code class="literal">user.id</code>, <code class="literal">host.id</code>, recovered staged paths, recovered DNS or destination indicators, and related-alert identifiers before containment. Apply reversible containment first: block confirmed malicious destinations, restrict inbound WSUS exposure on ports 8530/8531, limit external access to the affected service, or increase monitoring. Isolate the host only when artifact, destination, or related-alert evidence shows active compromise and the server role can tolerate disruption.
 </li>
 <li class="listitem">
-Conduct a thorough review of the server&#8217;s application pools and web directories to identify and remove any unauthorized web shells or scripts.
-</li>
-<li class="listitem">
-Restore the server from a known good backup taken before the suspicious activity was detected to ensure system integrity.
-</li>
-<li class="listitem">
-Apply the latest security patches and updates to the Server to mitigate known vulnerabilities and prevent exploitation.
-</li>
-<li class="listitem">
-Monitor network traffic and server logs for any signs of continued or attempted exploitation, focusing on unusual outbound connections or repeated access attempts.
-</li>
-<li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to determine if additional systems have been compromised.
+If confirmed malicious, isolate the WSUS host or terminate the malicious child only after preserving process identifiers, command lines, parent context, hashes, staged paths, destination indicators, and related-alert evidence. Then disable the exposed WSUS service path or block inbound 8530/8531 until patched, scope other servers and accounts for confirmed indicators, remove only artifacts identified during triage, restore WSUS/IIS content, rotate exposed credentials if configuration material was accessed, apply the relevant Microsoft WSUS update, and retain case logs.
 </li>
 </ul>
 </div>
@@ -208,7 +235,31 @@ Escalate the incident to the security operations center (SOC) or incident respon
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1641"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/windows-server-update-service-spawning-suspicious-processes.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_1224"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/windows-server-update-service-spawning-suspicious-processes.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1666"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/windows-server-update-service-spawning-suspicious-processes.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

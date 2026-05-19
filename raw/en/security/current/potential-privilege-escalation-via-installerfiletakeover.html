@@ -95,7 +95,7 @@ Data Source: Elastic Defend
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 115</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 116</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -107,74 +107,81 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1036"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-privilege-escalation-via-installerfiletakeover.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1057"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-privilege-escalation-via-installerfiletakeover.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Potential Privilege Escalation via InstallerFileTakeOver</strong></span></p>
-<p>InstallerFileTakeOver is a weaponized escalation of privilege proof of concept (EoP PoC) to the CVE-2021-41379 vulnerability. Upon successful exploitation, an unprivileged user will escalate privileges to SYSTEM/NT AUTHORITY.</p>
-<p>This rule detects the default execution of the PoC, which overwrites the <code class="literal">elevation_service.exe</code> DACL and copies itself to the location to escalate privileges. An attacker is able to still take over any file that is not in use (locked), which is outside the scope of this rule.</p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Note</strong></span>:
-This investigation guide uses the <a href="/guide/en/security/current/invest-guide-run-osquery.html" class="ulink" target="_top">Osquery Markdown Plugin</a> introduced in Elastic Stack version 8.5.0. Older Elastic Stack versions will display unrendered Markdown in this guide.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the process execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+Which alert path fired: a suspect service binary or a service-spawned child?
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Focus: alert-local <code class="literal">process.name</code>, <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, and <code class="literal">process.Ext.token.integrity_level_name</code>.
 </li>
 <li class="listitem">
-Look for additional processes spawned by the process, command lines, and network communications.
+Implication: escalate when SYSTEM "elevation_service.exe" runs outside "%ProgramFiles% or %ProgramFiles(x86)%\Microsoft\Edge\Application<p>Implication: escalate when SYSTEM "elevation_service.exe" runs outside "%ProgramFiles% or %ProgramFiles(x86)%\Microsoft\Edge\Application\&lt;version&gt;\elevation_service.exe" or starts "cmd.exe", "powershell.exe", or "rundll32.exe"; lower suspicion only for a genuine Edge service start with no shell child.</p>lt;version&gt;\elevation_service.exe" or starts "cmd.exe", "powershell.exe", or "rundll32.exe"; lower suspicion only for a genuine Edge service start with no shell child.
 </li>
 <li class="listitem">
-Assess whether this behavior is prevalent in the environment by looking for similar occurrences across hosts.
+Is the elevation service binary genuine Microsoft content?
 </li>
 <li class="listitem">
-Examine the host for derived artifacts that indicate suspicious activities:
+Focus: compare service <code class="literal">process.executable</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.hash.sha256</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>; for child alerts, recover the parent service start on <code class="literal">host.id</code> with <code class="literal">process.parent.entity_id</code> and compare those fields there.
 </li>
 <li class="listitem">
-Analyze the file using a private sandboxed analysis system.
+Hint: if a child alert lacks parent hash or signer details, recover the parent service process start with entity or PID fallback. !{investigate{"description":"","label":"Parent elevation service process start","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.parent.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.parent.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Observe and collect information about the following activities in both the sandbox and the alert subject host:
+Implication: escalate when original filename is not "elevation_service.exe", signer is not Microsoft, trust fails, or the same hash appears from a user-writable path; lower suspicion only when path, filename, signer, trust, and hash history fit the expected Microsoft Edge service.
 </li>
 <li class="listitem">
-Attempts to contact external domains and addresses.
+Does lineage show Windows Installer takeover rather than normal Edge servicing?
 </li>
 <li class="listitem">
-Use the Elastic Defend network events to determine domains and addresses contacted by the subject process by filtering by the process' <code class="literal">process.entity_id</code>.
+Focus: <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">process.parent.code_signature.subject_name</code>, <code class="literal">process.parent.code_signature.trusted</code>, and broader process lineage when needed.
 </li>
 <li class="listitem">
-Examine the DNS cache for suspicious or anomalous entries.
+Implication: escalate when an MSI, temp, or user-session chain leads to the SYSTEM service or shell; lower suspicion when Microsoft-signed Edge installer or updater lineage starts the genuine service with servicing arguments and no shell.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve DNS Cache","query":"SELECT * FROM dns_cache"}}
+Do recovered file events show service overwrite or PoC staging artifacts?
 </li>
 <li class="listitem">
-Use the Elastic Defend registry events to examine registry keys accessed, modified, or created by the related processes in the process tree.
+Focus: if file telemetry exists, open host-scoped file events, then filter to the recovered service or child <code class="literal">process.entity_id</code>; if entity IDs are absent, use <code class="literal">host.id</code> plus service <code class="literal">process.pid</code> or <code class="literal">process.parent.pid</code> and the alert window. Review <code class="literal">file.path</code>, <code class="literal">file.Ext.original.path</code>, and writing <code class="literal">process.executable</code>. !{investigate{"description":"","label":"File events on this host near the alert","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Examine the host services for suspicious or anomalous entries.
+Range: start 30 minutes before the alert because MSI administrative-install staging can precede service execution.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve All Services","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services"}}
+Implication: escalate when the Edge service path is overwritten or PoC artifacts such as the "microsoft plz" temp folder, temp MSI, or "elevation_service.exe" file creation cluster around the alert; treat those names as corroborators, not required evidence. Missing file telemetry is unresolved, not benign.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Services Running on User Accounts","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services WHERE\nNOT (user_account LIKE <em>%LocalSystem</em> OR user_account LIKE <em>%LocalService</em> OR user_account LIKE <em>%NetworkService</em> OR\nuser_account == null)\n"}}
+Hint: modified variants may omit PoC names; keep this centered on service replacement and MSI staging when names differ.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Service Unsigned Executables with Virustotal Link","query":"SELECT concat(<em><a href="https://www.virustotal.com/gui/file/" class="ulink" target="_top">https://www.virustotal.com/gui/file/</a></em>, sha1) AS VtLink, name, description, start_type, status, pid,\nservices.path FROM services JOIN authenticode ON services.path = authenticode.path OR services.module_path =\nauthenticode.path JOIN hash ON services.path = hash.path WHERE authenticode.result != <em>trusted</em>\n"}}
+What did the SYSTEM service or spawned child do next?
 </li>
 <li class="listitem">
-Retrieve the files' SHA-256 hash values using the PowerShell <code class="literal">Get-FileHash</code> cmdlet and search for the existence and reputation of the hashes in resources like VirusTotal, Hybrid-Analysis, CISCO Talos, Any.run, etc.
+Focus: descendant process starts on the same <code class="literal">host.id</code> from <code class="literal">process.entity_id</code> or <code class="literal">process.parent.entity_id</code>, especially <code class="literal">process.name</code>, <code class="literal">process.command_line</code>, and <code class="literal">process.Ext.token.integrity_level_name</code>. !{investigate{"description":"","label":"Child process starts from the alert process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Investigate potentially compromised accounts. Analysts can do this by searching for login events (for example, 4624) to the target host after the registry modification.
+Implication: escalate when SYSTEM context launches credential-access, persistence, payload staging, or remote-execution tooling; keep scope near the privilege-escalation event only when the service or shell produces no follow-on SYSTEM activity.
+</li>
+<li class="listitem">
+If local findings remain suspicious or unresolved, do related alerts show broader exploitation?
+</li>
+<li class="listitem">
+Focus: related alerts for the same <code class="literal">host.id</code> in the last 48 hours, especially service tampering, suspicious MSI, credential access, or follow-on execution. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: compare <code class="literal">user.id</code> only when it identifies a non-SYSTEM actor; otherwise keep broadened review host-scoped and use lineage to avoid over-attributing the operator. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden response when the same host or user shows privilege-escalation or post-exploitation alerts; quiet related-alert review does not close unresolved local evidence.
+</li>
+<li class="listitem">
+Escalate on identity mismatch, MSI/user lineage, service overwrite, SYSTEM shell, or follow-on activity; close only when all evidence fits genuine Microsoft Edge service identity with no shell behavior or verified validation/detonation; preserve artifacts and escalate when evidence is mixed or telemetry is missing.
 </li>
 </ul>
 </div>
@@ -182,15 +189,10 @@ Investigate potentially compromised accounts. Analysts can do this by searching 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Verify whether a digital signature exists in the executable, and if it is valid.
+Authorized exploit validation, red-team work, detection-content testing, malware research, or incident-response detonation can trigger this rule on lab or disposable analysis hosts. Confirm <code class="literal">process.hash.sha256</code>, service <code class="literal">process.executable</code>, parent <code class="literal">process.parent.executable</code>, child <code class="literal">process.command_line</code>, recovered temp-artifact pattern, and bounded <code class="literal">host.id</code> cohort match the same test kit or analysis-host cohort. If change, test, or sandbox records are unavailable, require the same telemetry pattern across prior alerts from this rule before closing as benign.
 </li>
-</ul>
-</div>
-<p><span class="strong strong"><strong>Related rules</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
 <li class="listitem">
-Suspicious DLL Loaded for Persistence or Privilege Escalation - bfeaf89b-a2a7-48a3-817f-e41829dc61ee
+Before creating an exception, keep <code class="literal">process.hash.sha256</code>, <code class="literal">process.executable</code>, <code class="literal">process.parent.executable</code>, child <code class="literal">process.command_line</code>, <code class="literal">host.id</code>, and the recovered temp-artifact pattern stable across prior alerts from this rule. Avoid exceptions on <code class="literal">process.name</code>, <code class="literal">process.parent.name</code>, or "elevation_service.exe" alone because those values overlap real service abuse.
 </li>
 </ul>
 </div>
@@ -198,40 +200,16 @@ Suspicious DLL Loaded for Persistence or Privilege Escalation - bfeaf89b-a2a7-48
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse temporary containment and record the validation or analysis workflow that matched the alert, including the stable <code class="literal">process.hash.sha256</code>, service <code class="literal">process.executable</code>, parent <code class="literal">process.parent.executable</code>, child <code class="literal">process.command_line</code>, recovered artifact pattern, and bounded <code class="literal">host.id</code> cohort. Create an exception only after the same pattern recurs across prior alerts from this rule.
 </li>
 <li class="listitem">
-Isolate the involved host to prevent further post-compromise behavior.
+If suspicious but unconfirmed, preserve the case export, process tree with service and child entity IDs, service binary and hash identity, spawned-shell command line, and recovered service-overwrite or temp-artifact timeline before containment or cleanup. Apply reversible containment first, such as heightened monitoring or host isolation when the asset role permits it; terminate the spawned shell only after capture, and escalate to isolation if follow-on SYSTEM activity or spread appears.
 </li>
 <li class="listitem">
-If the triage identified malware, search the environment for additional compromised hosts.
+If confirmed malicious, use the preserved identity, lineage, artifact, and follow-on evidence to isolate the endpoint or escalate to the team that can contain it. Before replacing or deleting files, collect the overwritten service binary, temp MSI or recovered PoC artifacts, and spawned-shell timeline. Review related hosts and users for the same hash or service-path pattern, then restore the genuine Edge elevation service binary and remove only attacker payloads, persistence, or configuration changes identified during scoping.
 </li>
 <li class="listitem">
-Implement temporary network rules, procedures, and segmentation to contain the malware.
-</li>
-<li class="listitem">
-Stop suspicious processes.
-</li>
-<li class="listitem">
-Immediately block the identified indicators of compromise (IoCs).
-</li>
-<li class="listitem">
-Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
-</li>
-<li class="listitem">
-Remove and block malicious artifacts identified during triage.
-</li>
-<li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-</li>
-<li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
-</li>
-<li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Post-incident hardening: verify Windows Installer and Edge components are patched, restrict unnecessary MSI administrative-install paths where possible, retain process and file telemetry long enough to reconstruct service replacement, and record the service-path, temp-artifact, and child-shell pattern for future response.
 </li>
 </ul>
 </div>
@@ -239,19 +217,16 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_679"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-privilege-escalation-via-installerfiletakeover.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_710"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-privilege-escalation-via-installerfiletakeover.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
-<p>If enabling an EQL rule on a non-elastic-agent index (such as beats) for versions &lt;8.2,
-events will not define <code class="literal">event.ingested</code> and default fallback for EQL rules was not added until version 8.2.
-Hence for this rule to work effectively, users will need to add a custom ingest pipeline to populate
-<code class="literal">event.ingested</code> to @timestamp.
-For more details on adding a custom ingest pipeline refer - <a href="/guide/en/fleet/current/data-streams-pipeline-tutorial.html" class="ulink" target="_top">https://www.elastic.co/guide/en/fleet/current/data-streams-pipeline-tutorial.html</a></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1099"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-privilege-escalation-via-installerfiletakeover.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1120"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-privilege-escalation-via-installerfiletakeover.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

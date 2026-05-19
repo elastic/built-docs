@@ -8,7 +8,7 @@
 <link rel="home" href="index.html" title="Elastic Security [8.19]"/>
 <link rel="up" href="prebuilt-rules.html" title="Prebuilt rule reference"/>
 <link rel="prev" href="microsoft-exchange-server-um-writing-suspicious-files.html" title="Microsoft Exchange Server UM Writing Suspicious Files"/>
-<link rel="next" href="microsoft-graph-request-email-access-by-unusual-user-and-client.html" title="Microsoft Graph Request Email Access by Unusual User and Client"/>
+<link rel="next" href="microsoft-graph-multi-category-reconnaissance-burst.html" title="Microsoft Graph Multi-Category Reconnaissance Burst"/>
 <meta class="elastic" name="product_version" content="8.19"/>
 <meta class="elastic" name="product_name" content="Security"/>
 <meta class="elastic" name="website_area" content="documentation"/>
@@ -22,7 +22,7 @@
 <a href="microsoft-exchange-server-um-writing-suspicious-files.html">« Microsoft Exchange Server UM Writing Suspicious Files</a>
 </span>
 <span class="next">
-<a href="microsoft-graph-request-email-access-by-unusual-user-and-client.html">Microsoft Graph Request Email Access by Unusual User and Client »</a>
+<a href="microsoft-graph-multi-category-reconnaissance-burst.html">Microsoft Graph Multi-Category Reconnaissance Burst »</a>
 </span>
 </div>
 <div class="book" lang="en">
@@ -106,9 +106,6 @@ Use Case: Threat Detection
 Tactic: Initial Access
 </li>
 <li class="listitem">
-Tactic: Execution
-</li>
-<li class="listitem">
 Data Source: Elastic Endgame
 </li>
 <li class="listitem">
@@ -128,7 +125,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 315</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 316</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -140,40 +137,96 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_751"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/microsoft-exchange-worker-spawning-suspicious-processes.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_771"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/microsoft-exchange-worker-spawning-suspicious-processes.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Microsoft Exchange Worker Spawning Suspicious Processes</strong></span></p>
-<p>Microsoft Exchange Server uses the worker process (w3wp.exe) to handle web requests, often running under specific application pools. Adversaries exploit this by executing malicious scripts or commands, potentially via web shells, to gain unauthorized access or execute arbitrary code. The detection rule identifies unusual child processes like command-line interpreters spawned by w3wp.exe, signaling possible exploitation or backdoor activity.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the alert details to confirm the parent process is w3wp.exe and check if the process arguments include "MSExchange*AppPool" to ensure the alert is relevant to Microsoft Exchange.
+What Exchange worker-child path did the alert capture?
 </li>
 <li class="listitem">
-Examine the child process details, focusing on the process names and original file names such as cmd.exe, powershell.exe, pwsh.exe, and powershell_ise.exe, to identify any unauthorized or unexpected command-line activity.
+Focus: child <code class="literal">process.executable</code> and <code class="literal">process.command_line</code>; worker <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.args</code>, and <code class="literal">process.parent.command_line</code>; exact MSExchange app pool.
 </li>
 <li class="listitem">
-Investigate the timeline of events leading up to the alert, including any preceding or subsequent processes, to understand the context and potential impact of the suspicious activity.
+Implication: escalate when an Exchange app pool launches shell/PowerShell for execution, download, discovery, or staging; lower suspicion only when parent arguments and child command match one narrow maintenance task with no webshell or RCE indicators.
 </li>
 <li class="listitem">
-Check for any associated network activity or connections initiated by the suspicious processes to identify potential data exfiltration or communication with external command and control servers.
+What intent does the shell or PowerShell command show?
 </li>
 <li class="listitem">
-Review recent changes or access logs on the affected Exchange server to identify any unauthorized access attempts or modifications that could indicate exploitation or the presence of a web shell.
+Focus: <code class="literal">process.command_line</code>; encoded or inline execution, download cradles, archive/export, discovery, Set-OabVirtualDirectory, mailbox access, or FrontEnd\HttpProxy, aspnet_client, web.config, and applicationHost.config paths.
 </li>
 <li class="listitem">
-Correlate the alert with other security events or logs from data sources like Elastic Endgame, Elastic Defend, Sysmon, Microsoft Defender XDR, or SentinelOne to gather additional context and corroborate findings.
+Implication: escalate on payload retrieval, web-root staging, credential access, account changes, mailbox export, cleanup, or lateral movement; lower suspicion only for one bounded recognized Exchange maintenance or validation action.
 </li>
 <li class="listitem">
-Assess the risk and impact of the detected activity, considering the severity and risk score, and determine appropriate response actions, such as isolating the affected system or conducting a deeper forensic analysis.
+Does token and session context support human administration or service-context abuse?
+</li>
+<li class="listitem">
+Why: w3wp.exe children often inherit app-pool or service identity, so user fields alone do not prove human administration.
+</li>
+<li class="listitem">
+Focus: <code class="literal">user.id</code>, <code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">process.Ext.session_info.logon_type</code>, and <code class="literal">process.Ext.authentication_id</code>.
+</li>
+<li class="listitem">
+Implication: escalate when a service, app-pool, or unexpected logon context launches interactive shell behavior or remote administration; lower suspicion only when identity, session type, and command scope match the same recognized workflow.
+</li>
+<li class="listitem">
+Is the child binary expected or masqueraded?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.hash.sha256</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the child is renamed, user-writable, unsigned or untrusted, hash-new for the server, or mismatched to PE original name; a trusted Microsoft shell lowers identity concern but does not clear the unusual chain.
+</li>
+<li class="listitem">
+If process evidence is suspicious or unresolved, did file evidence show webshells or artifacts?
+</li>
+<li class="listitem">
+Focus: with endpoint file telemetry, scope by <code class="literal">host.id</code> + <code class="literal">process.entity_id</code>, or <code class="literal">host.id</code> + <code class="literal">process.pid</code> + tight alert window if absent; inspect <code class="literal">file.path</code>, <code class="literal">file.Ext.original.path</code>, <code class="literal">file.origin_url</code>, and <code class="literal">file.Ext.windows.zone_identifier</code> for ASPX, scripts, binaries, DLLs, archives, or output under Exchange/IIS paths. !{investigate{"description":"","label":"File events for the suspicious child process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: check whether a written <code class="literal">file.path</code> later appears as <code class="literal">process.executable</code>; missing file telemetry limits proof but is not benign.
+</li>
+<li class="listitem">
+Implication: escalate when the child writes new or modified ASPX, scripts, binaries, DLLs, archives, or output under Exchange FrontEnd\HttpProxy, IIS aspnet_client, temp, or web-root paths; lower suspicion only when file activity stays inside the exact maintenance path with no web-content or payload staging.
+</li>
+<li class="listitem">
+If process evidence is suspicious or unresolved, did network evidence show retrieval or callback?
+</li>
+<li class="listitem">
+Focus: with endpoint network telemetry, scope DNS and connections by <code class="literal">host.id</code> + <code class="literal">process.entity_id</code>, or <code class="literal">host.id</code> + <code class="literal">process.pid</code> + tight alert window if absent; read DNS (<code class="literal">dns.question.name</code>, <code class="literal">dns.resolved_ip</code>) separately from connections (<code class="literal">destination.ip</code>, <code class="literal">destination.port</code>). !{investigate{"description":"","label":"Network events for the suspicious child process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: map <code class="literal">dns.resolved_ip</code> to <code class="literal">destination.ip</code> before deciding whether the same process reached it. Missing network telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Implication: escalate when the child downloads tools, reaches public staging or callback infrastructure, or connects to systems unrelated to the Exchange task; lower suspicion only when destinations are internal, proxy, or vendor services fitting the same bounded workflow.
+</li>
+<li class="listitem">
+Does same-worker or same-host scope show broader Exchange compromise?
+</li>
+<li class="listitem">
+Focus: surrounding same-worker process starts and related alerts on <code class="literal">host.id</code> or <code class="literal">user.id</code>, especially <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.args</code>, <code class="literal">process.command_line</code>, and <code class="literal">process.hash.sha256</code> for repeated w3wp.exe descendants, credential dumping, account changes, archiving, cleanup, or side-loading chains.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Process events from the same Exchange worker","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.parent.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate scope when the host shows credential dumping, account changes, archive creation, cleanup, lateral movement, or repeated Exchange worker children; keep local only when surrounding process evidence and related alerts stay confined to the same recognized maintenance window.
+</li>
+<li class="listitem">
+Escalate on unexplained server-side execution, suspicious command intent, payload staging, suspicious destinations, or broader host compromise; close only when all available evidence aligns with one recognized Exchange workflow on this host; preserve artifacts and escalate when evidence is mixed or visibility incomplete.
 </li>
 </ul>
 </div>
@@ -181,19 +234,10 @@ Assess the risk and impact of the detected activity, considering the severity an
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Routine administrative tasks may trigger the rule if administrators use command-line tools like cmd.exe or powershell.exe for legitimate maintenance. To manage this, create exceptions for known administrative accounts or specific IP addresses that regularly perform these tasks.
+Recognized Exchange maintenance or controlled validation is the bounded benign path. Confirm only when <code class="literal">process.parent.args</code>, child <code class="literal">process.command_line</code>, <code class="literal">process.executable</code>, <code class="literal">process.hash.sha256</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code> align with one task, and any <code class="literal">file.path</code>, <code class="literal">dns.question.name</code>, or <code class="literal">destination.ip</code> evidence shows no payload staging or external callback. Use change records as corroboration; otherwise require recurring prior alerts with the same parent arguments, command pattern, child identity, user, host, and no contradictory artifacts or destinations.
 </li>
 <li class="listitem">
-Scheduled tasks or scripts that run under the MSExchangeAppPool context might spawn command-line interpreters as part of their normal operation. Identify these tasks and exclude them by specifying their unique process arguments or command lines.
-</li>
-<li class="listitem">
-Monitoring or backup software that interacts with Exchange Server could inadvertently trigger the rule. Review the software&#8217;s documentation to confirm its behavior and exclude its processes by name or hash if they are verified as safe.
-</li>
-<li class="listitem">
-Custom applications or integrations that interact with Exchange Server and use command-line tools for automation may also cause false positives. Work with application developers to understand these interactions and exclude them based on process names or specific command-line patterns.
-</li>
-<li class="listitem">
-If a known security tool or script is used to test Exchange Server&#8217;s security posture, it might mimic suspicious behavior. Document these tools and exclude their processes during scheduled testing periods to avoid false alerts.
+Build exceptions only from the minimum confirmed pattern: <code class="literal">process.parent.args</code>, child <code class="literal">process.executable</code> or <code class="literal">process.hash.sha256</code>, <code class="literal">process.code_signature.subject_name</code>, stable <code class="literal">process.command_line</code> fragment, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and any bounded artifact or destination pattern distinguishing the benign task. Avoid exceptions on "w3wp.exe", <code class="literal">process.name</code>, or <code class="literal">host.id</code> alone.
 </li>
 </ul>
 </div>
@@ -201,25 +245,19 @@ If a known security tool or script is used to test Exchange Server&#8217;s secur
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected Microsoft Exchange Server from the network to prevent further unauthorized access or lateral movement.
+If confirmed benign, reverse temporary containment and document the exact evidence that validated the workflow: <code class="literal">process.parent.args</code>, child <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and any bounded artifact or destination pattern. Create an exception only after the same pattern is stable across prior alerts from this rule.
 </li>
 <li class="listitem">
-Terminate any suspicious processes identified as being spawned by w3wp.exe, such as cmd.exe or powershell.exe, to halt any ongoing malicious activity.
+If suspicious but unconfirmed, preserve the alert, process tree, child <code class="literal">process.entity_id</code> or <code class="literal">process.pid</code>, <code class="literal">process.command_line</code>, parent <code class="literal">process.parent.entity_id</code>, <code class="literal">process.parent.args</code>, child hash and signer, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and any staged artifacts, destinations, or IIS/Exchange log snippets before containment. Apply reversible containment first: block confirmed malicious destinations, restrict external access to the implicated Exchange service, or increase monitoring. Isolate only when active compromise evidence and server criticality justify disruption.
 </li>
 <li class="listitem">
-Conduct a thorough review of the server&#8217;s application pools and web directories to identify and remove any unauthorized web shells or scripts.
+If confirmed malicious, contain the Exchange server or exposed service path based on the process, artifact, destination, and same-host evidence already preserved. Record process and artifact identifiers before terminating the child, then block confirmed malicious domains, IPs, and hashes.
 </li>
 <li class="listitem">
-Restore the server from a known good backup taken before the suspicious activity was detected to ensure system integrity.
+Eradicate only the webshells, scripts, archives, scheduled tasks, dropped utilities, and configuration changes identified during triage. Restore modified Exchange or IIS content from known-good state, patch the Exchange server, review the virtual directories and app pools implicated by <code class="literal">process.parent.args</code>, and rotate Exchange, application, or service credentials if credential access, configuration theft, or mailbox export was involved.
 </li>
 <li class="listitem">
-Apply the latest security patches and updates to the Microsoft Exchange Server to mitigate known vulnerabilities and prevent exploitation.
-</li>
-<li class="listitem">
-Monitor network traffic and server logs for any signs of continued or attempted exploitation, focusing on unusual outbound connections or repeated access attempts.
-</li>
-<li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to determine if additional systems have been compromised.
+Retain the related process, file, network, IIS, and Exchange logs that supported the decision. Document any adjacent variant or telemetry gap, such as missing endpoint file/network events or unavailable IIS request logs, for the detection engineering team.
 </li>
 </ul>
 </div>
@@ -227,7 +265,31 @@ Escalate the incident to the security operations center (SOC) or incident respon
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_808"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/microsoft-exchange-worker-spawning-suspicious-processes.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_482"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/microsoft-exchange-worker-spawning-suspicious-processes.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_828"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/microsoft-exchange-worker-spawning-suspicious-processes.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -396,7 +458,7 @@ Reference URL: <a href="https://attack.mitre.org/techniques/T1505/003/" class="u
 <a href="microsoft-exchange-server-um-writing-suspicious-files.html">« Microsoft Exchange Server UM Writing Suspicious Files</a>
 </span>
 <span class="next">
-<a href="microsoft-graph-request-email-access-by-unusual-user-and-client.html">Microsoft Graph Request Email Access by Unusual User and Client »</a>
+<a href="microsoft-graph-multi-category-reconnaissance-burst.html">Microsoft Graph Multi-Category Reconnaissance Burst »</a>
 </span>
 </div>
 </body>

@@ -197,7 +197,7 @@ Data Source: Crowdstrike
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 316</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 317</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -209,23 +209,84 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_284"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/creation-of-a-hidden-local-user-account.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_288"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/creation-of-a-hidden-local-user-account.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Creation of a Hidden Local User Account</strong></span></p>
-<p>Attackers can create accounts ending with a <code class="literal">$</code> symbol to make the account hidden to user enumeration utilities and bypass detections that identify computer accounts by this pattern to apply filters.</p>
-<p>This rule uses registry events to identify the creation of local hidden accounts.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Identify the user account that performed the action and whether it should perform this kind of action.
+What hidden local account did the SAM write create?
 </li>
 <li class="listitem">
-Investigate the process execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+Why: a <code class="literal">$</code> suffix is ambiguous in many logs, but <code class="literal">registry.path</code> under <code class="literal">SAM\SAM\Domains\Account\Users\Names</code> is a local account-name entry and can be omitted from casual <code class="literal">net user</code> review.
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Focus: <code class="literal">registry.hive</code>, <code class="literal">registry.path</code>, <code class="literal">registry.key</code>, and <code class="literal">@timestamp</code> for the exact account name and creation time.
+</li>
+<li class="listitem">
+Implication: high concern unless the exact <code class="literal">$</code>-suffixed account, <code class="literal">host.id</code>, and time fit one narrowly recognized provisioning or recovery workflow; lower concern only when creator, use, and scope checks do not contradict it.
+</li>
+<li class="listitem">
+Which process and parent caused the SAM entry?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.entity_id</code>, <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, and <code class="literal">process.parent.command_line</code>.
+</li>
+<li class="listitem">
+Implication: escalate for shells, script interpreters, remote-service launchers such as sc.exe, service-created cmd/net user chains, PsExec-like tools, user-writable binaries, or mismatched parents; lower concern only when creator path, parent, and arguments match one recognized account-management workflow.
+</li>
+<li class="listitem">
+Did the creator or its children perform other account, privilege, or persistence actions?
+</li>
+<li class="listitem">
+Why: remote account creation can surface as a service-launched command, and the decisive <code class="literal">net user</code>, local-group, or cleanup action may be in the creator&#8217;s process tree rather than the registry event alone.
+</li>
+<li class="listitem">
+Focus: same-host registry and process activity for creator <code class="literal">process.entity_id</code> and child <code class="literal">process.parent.entity_id</code>: <code class="literal">process.command_line</code>, <code class="literal">registry.path</code>, <code class="literal">registry.value</code>, and <code class="literal">registry.data.strings</code>. !{investigate{"description":"","label":"Creator process and child activity on this host","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"registry","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"registry","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-24h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if the parent is service-control or PsExec-like, keep service-created cmd/net user children in scope even when signed.
+</li>
+<li class="listitem">
+Implication: escalate when the tree adds local-group membership, touches extra SAM or LSA paths, deletes staging commands, or creates other persistence; lower concern when activity stays limited to the recovered account inside the same recognized workflow.
+</li>
+<li class="listitem">
+Was the hidden account used by later process activity after creation?
+</li>
+<li class="listitem">
+Why: remote or service use of <code class="literal">$</code>-suffixed accounts may leave little profile evidence, so process and session context carries more weight than profile artifacts.
+</li>
+<li class="listitem">
+Focus: extract the account leaf from <code class="literal">registry.path</code>, then search same-host process starts after <code class="literal">@timestamp</code> where <code class="literal">user.name</code> matches it, reading <code class="literal">process.Ext.session_info.logon_type</code>, <code class="literal">process.executable</code>, and <code class="literal">process.command_line</code>.
+</li>
+<li class="listitem">
+Hint: this pivot is manual unless the account name is normalized into a standalone alert field; avoid using the full SAM registry path as an account value.
+</li>
+<li class="listitem">
+Implication: account use after creation strongly escalates when the account runs processes, appears in remote-interactive, network, service, or batch sessions, or launches administrative tooling; lower concern only when no process use appears and creator evidence fits a recognized provisioning path.
+</li>
+<li class="listitem">
+If local evidence is suspicious or unresolved, do recent same-actor or same-host alerts change scope?
+</li>
+<li class="listitem">
+Focus: related alerts for creating <code class="literal">user.id</code> and <code class="literal">host.id</code>: account abuse, privilege escalation, remote execution, credential access, or additional persistence.
+</li>
+<li class="listitem">
+Hint: use the creating-identity alert pivot. !{investigate{"description":"","label":"Alerts associated with the creating identity","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: use the host alert pivot. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden response when the same actor or host has related account, persistence, or privilege alerts; keep local when history is clean and local evidence already fits one recognized workflow.
+</li>
+<li class="listitem">
+What disposition is supported?
+</li>
+<li class="listitem">
+Escalate for unexpected account or creator lineage, privilege or cleanup activity, later account use, or wider scope; close only when same-host telemetry proves one exact recognized workflow, using records only as corroboration; preserve evidence and escalate when answers stay mixed or incomplete.
 </li>
 </ul>
 </div>
@@ -233,7 +294,13 @@ Investigate other alerts associated with the user/host during the past 48 hours.
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This activity is unlikely to happen legitimately. Benign true positive (B-TPs) can be added as exceptions if necessary.
+A pre-established local support-account provisioning or recovery workflow can create a <code class="literal">$</code>-suffixed local account, but close only on a complete telemetry match: exact <code class="literal">registry.path</code>, creator <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, parent process, <code class="literal">user.id</code>, and <code class="literal">host.id</code>, with no extra SAM, LSA, privilege-grant, or cleanup activity outside it. Use build, vendor, or maintenance records only to corroborate that match; never close or exception on records alone.
+</li>
+<li class="listitem">
+Treat one-off interactive creation, remote service-created cmd.exe or net.exe, script-driven creation, and creation on ordinary workstations or servers as suspicious by default. Hidden support accounts elsewhere or a signed creator binary are not enough to close.
+</li>
+<li class="listitem">
+Build exceptions only from the minimum confirmed workflow: exact hidden-account <code class="literal">registry.path</code>, stable creator executable and command pattern, parent workflow, <code class="literal">user.id</code>, and bounded <code class="literal">host.id</code> cohort. Avoid exceptions on all <code class="literal">$</code>-suffixed names, the SAM hive, <code class="literal">process.name</code> alone, or the rule name.
 </li>
 </ul>
 </div>
@@ -241,22 +308,16 @@ This activity is unlikely to happen legitimately. Benign true positive (B-TPs) c
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse temporary containment and record the exact account path, creator lineage, user, and host cohort that proved the recurring workflow. Keep any exception as narrow as that confirmed pattern.
 </li>
 <li class="listitem">
-Isolate the involved hosts to prevent further post-compromise behavior.
+If suspicious but unconfirmed, export the alert, the triggering registry event, creator process details, current hidden-account state, privilege evidence found in process or registry review, and any process or session use by the hidden account before containment. Apply reversible actions first: disable the account, restrict its logon rights, or increase monitoring on the affected <code class="literal">host.id</code> and creating <code class="literal">user.id</code>; avoid deleting the account until evidence is preserved.
 </li>
 <li class="listitem">
-Delete the hidden account.
+If confirmed malicious, preserve account state, creator process lineage, and related registry or process artifacts first. Then isolate the host when its role allows, disable the hidden account, and contain the creating identity or remote source when the evidence identifies one. After preservation and containment, remove unauthorized privilege, SAM, LSA, service, or scheduled-task changes introduced around the same time.
 </li>
 <li class="listitem">
-Review the privileges assigned to the involved users to ensure that the least privilege principle is being followed.
-</li>
-<li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Post-incident hardening: restrict hidden support-account creation to controlled management tooling, audit the host for other local accounts ending in <code class="literal">$</code>, retain registry and process telemetry needed to reconstruct future account creation, and document blind spots around preexisting hidden accounts or later privilege grants.
 </li>
 </ul>
 </div>
@@ -264,11 +325,38 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_296"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/creation-of-a-hidden-local-user-account.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_139"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/creation-of-a-hidden-local-user-account.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-reg-setup" class="ulink" target="_top">Sysmon Registry Events</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_300"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/creation-of-a-hidden-local-user-account.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">registry where host.os.type == "windows" and event.type == "change" and
+<pre class="programlisting prettyprint lang-js">registry where host.os.type == "windows" and event.type in ("change", "creation") and
   registry.path : (
     "HKLM\\SAM\\SAM\\Domains\\Account\\Users\\Names\\*$\\",
     "\\REGISTRY\\MACHINE\\SAM\\SAM\\Domains\\Account\\Users\\Names\\*$\\",

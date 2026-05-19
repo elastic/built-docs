@@ -175,12 +175,6 @@ Use Case: Threat Detection
 Tactic: Persistence
 </li>
 <li class="listitem">
-Tactic: Defense Evasion
-</li>
-<li class="listitem">
-Tactic: Execution
-</li>
-<li class="listitem">
 Resources: Investigation Guide
 </li>
 <li class="listitem">
@@ -203,7 +197,7 @@ Data Source: Microsoft Defender XDR
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 215</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 216</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -215,37 +209,87 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_865"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/persistence-via-hidden-run-key-detected.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_886"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/persistence-via-hidden-run-key-detected.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Persistence via Hidden Run Key Detected</strong></span></p>
-<p>The Windows Registry is a critical system database that stores configuration settings. Adversaries exploit it for persistence by creating hidden registry keys using native APIs, making them invisible to standard tools like regedit. The detection rule identifies changes in specific registry paths associated with startup programs, flagging null-terminated keys that suggest stealthy persistence tactics.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the specific registry path where the change was detected to determine if it matches any of the paths listed in the query, such as "HKEY_USERS\*\Software\Microsoft\Windows\CurrentVersion\Run\" or "HKLM\Software\Microsoft\Windows\CurrentVersion\Run\".
+Does the registry event support hidden or null-terminated Run-value semantics, and what would it launch?
 </li>
 <li class="listitem">
-Check the timestamp of the registry change event to correlate it with other system activities or user actions that occurred around the same time.
+Why: trailing Run-key <code class="literal">registry.path</code> with launch data can indicate a null-prefixed value name created through NtSetValueKey; raw telemetry can preserve it when regedit does not.
 </li>
 <li class="listitem">
-Investigate the process that made the registry change by examining process creation logs or using tools like Sysmon to identify the responsible process and its parent process.
+Focus: <code class="literal">registry.path</code>, <code class="literal">registry.hive</code>, <code class="literal">registry.value</code>, <code class="literal">registry.data.type</code>, and <code class="literal">registry.data.strings</code>.
 </li>
 <li class="listitem">
-Analyze the content of the registry key value that was modified or created to determine if it points to a legitimate application or a potentially malicious executable.
+Hint: trust the registry event over GUI rendering; record exact <code class="literal">registry.data.strings</code> before tools normalize the hidden value name.
 </li>
 <li class="listitem">
-Cross-reference the detected registry change with known threat intelligence sources to identify if the key or value is associated with known malware or adversary techniques.
+Implication: escalate when raw evidence supports hidden-value semantics and an unexpected command; lower suspicion only when exact raw value, payload, user, and host match authorized hidden-registry testing. The alert indicates a hiding technique, not one tool.
 </li>
 <li class="listitem">
-Assess the affected system for additional indicators of compromise, such as unusual network connections, file modifications, or other persistence mechanisms.
+Which hive and logon scope would activate the hidden autorun?
+</li>
+<li class="listitem">
+Focus: <code class="literal">registry.hive</code>, <code class="literal">registry.path</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code>.
+</li>
+<li class="listitem">
+Implication: prioritize host-wide containment for machine hives and user-focused containment for user hives; lower urgency only when raw value evidence supports a constrained test user or lab host.
+</li>
+<li class="listitem">
+Which process wrote the hidden value, and does its identity and launch chain fit the expected test or validation workflow?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.entity_id</code>, <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>.
+</li>
+<li class="listitem">
+Hint: use the writer&#8217;s process-start event on <code class="literal">host.id</code> and <code class="literal">process.entity_id</code> to confirm command line, parent, and signer. !{investigate{"description":"","label":"Process events for the registry writer","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the writer is a script host, document child, remote-admin tool, unsigned/untrusted binary, user-writable executable, or SharpHide-like command line; lower suspicion when signer, path, parent, command line, user, and host align with the same recognized test or validation component.
+</li>
+<li class="listitem">
+Did the hidden autorun command execute after logon or spawn suspicious follow-on activity?
+</li>
+<li class="listitem">
+Focus: post-alert process starts on <code class="literal">host.id</code> where <code class="literal">process.executable</code> or <code class="literal">process.command_line</code> matches the <code class="literal">registry.data.strings</code> payload.
+</li>
+<li class="listitem">
+Hint: for user-hive paths, include <code class="literal">user.id</code>; for machine-hive paths, check the next interactive logon. Use <code class="literal">process.parent.name</code> and <code class="literal">process.parent.executable</code> to identify the launcher. !{investigate{"description":"","label":"Process starts matching the hidden Run payload","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.command_line","queryType":"phrase","value":"{{registry.data.strings}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the payload launches after logon, runs through a shell, script host, LOLBin, user-writable path, or obfuscated chain, or creates unusual children; no later launch leaves execution unproven, not benign, unless the value and writer are fully explained.
+</li>
+<li class="listitem">
+Did the same writer modify other startup or hidden-registry locations around the alert time?
+</li>
+<li class="listitem">
+Focus: writer-scoped registry events, especially <code class="literal">registry.path</code>, <code class="literal">registry.key</code>, <code class="literal">registry.value</code>, and <code class="literal">registry.data.strings</code> for Run, RunOnce, Policies\Explorer\Run, or related startup paths.
+</li>
+<li class="listitem">
+Hint: start with <code class="literal">host.id</code> and <code class="literal">process.entity_id</code>, then widen only to the same host and startup-path family. !{investigate{"description":"","label":"Registry events from the writer process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"registry","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the process spreads persistence across startup keys, rewrites the same path, or creates additional hidden or malformed values; a single bounded change lowers scope only after writer and payload are independently explained.
+</li>
+<li class="listitem">
+If local evidence remains suspicious or unresolved, do same-user or same-host alerts show broader activity?
+</li>
+<li class="listitem">
+Focus: recent same-<code class="literal">user.id</code> alerts tied to persistence, defense evasion, credential access, or lateral movement. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: review same-<code class="literal">host.id</code> alerts when local evidence is suspicious or incomplete. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden containment when related alerts show precursor access, more persistence, credential abuse, or follow-on movement; keep local only when related alerts are absent and the hidden value is otherwise exactly explained.
+</li>
+<li class="listitem">
+Escalate when hidden Run semantics pair with a suspicious writer, payload, later execution, adjacent persistence, or related alerts; close only when same-host telemetry and corroborating test or validation records explain the exact value, writer, payload, user, and host with no contradictions; preserve registry, process, and payload evidence and escalate when answers remain mixed or incomplete.
 </li>
 </ul>
 </div>
@@ -253,19 +297,13 @@ Assess the affected system for additional indicators of compromise, such as unus
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate software installations or updates may create registry keys in the specified paths, leading to false positives. Users can monitor the installation process and temporarily disable the rule during known software updates to prevent unnecessary alerts.
+Authorized adversary emulation, detection validation, or security-product testing can create hidden Run values to test detection of regedit-hidden startup entries. Close only when <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.command_line</code>, <code class="literal">registry.path</code>, <code class="literal">registry.data.strings</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code> match the same authorized test chain, and any later <code class="literal">process.command_line</code> stays bounded to it. Without validation records, do not close on recurrence alone; keep suspicious or unresolved until exact test scope is verified.
 </li>
 <li class="listitem">
-System administrators may intentionally configure startup programs for maintenance or monitoring purposes. Document these configurations and create exceptions in the detection rule to avoid flagging them as threats.
+Routine software installation can explain ordinary Run-key writes, but should not require a hidden or null-terminated value name. Treat installer or support claims as insufficient unless telemetry proves the exact hidden value, writer, payload, and execution pattern belong to a recognized lab, validation, or product-test workflow.
 </li>
 <li class="listitem">
-Some security software may use similar techniques to ensure their components start with the system. Verify the legitimacy of such software and whitelist their registry changes to prevent false alarms.
-</li>
-<li class="listitem">
-Custom scripts or automation tools used within an organization might modify registry keys for operational reasons. Identify these scripts and exclude their activities from the detection rule to reduce false positives.
-</li>
-<li class="listitem">
-Regularly review and update the list of known safe applications and processes that interact with the registry paths in question, ensuring that the detection rule remains relevant and accurate.
+Before an exception, require a verified test or validation workflow, then confirm the same <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">registry.path</code>, <code class="literal">registry.data.strings</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code> pattern recurs across prior alerts from this rule. Build the exception from that minimum confirmed workflow; avoid exceptions on Run paths alone, <code class="literal">process.name</code> alone, payload strings alone, or the rule name alone.
 </li>
 </ul>
 </div>
@@ -273,25 +311,19 @@ Regularly review and update the list of known safe applications and processes th
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected system from the network to prevent further unauthorized access or lateral movement by the adversary.
+If confirmed benign, reverse any temporary containment and record the <code class="literal">process.executable</code>, signer, <code class="literal">process.command_line</code>, <code class="literal">registry.path</code>, exact <code class="literal">registry.data.strings</code>, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and later logon execution pattern that proved the authorized workflow. Keep any exception narrow and tied to the recurring workflow.
 </li>
 <li class="listitem">
-Use a trusted tool to manually inspect and remove the hidden registry keys identified in the alert from the specified registry paths to eliminate the persistence mechanism.
+If suspicious but unconfirmed, first preserve the raw registry event, affected Run-key hive with the hidden value intact when possible, writer <code class="literal">process.entity_id</code>, writer command line, process lineage, payload string from <code class="literal">registry.data.strings</code>, and related-alert context. Then apply reversible containment tied to those findings, such as isolating the host if its role tolerates it, temporarily preventing the affected user from logging back in, or blocking execution of the referenced payload.
 </li>
 <li class="listitem">
-Conduct a thorough scan of the affected system using updated antivirus or endpoint detection and response (EDR) tools to identify and remove any additional malicious files or processes associated with the threat.
+If confirmed malicious, preserve the same registry and process evidence before destructive action. Use tooling that can enumerate null-prefixed value names to remove the hidden autorun, collect or quarantine the referenced payload artifact, and review the same <code class="literal">process.entity_id</code>, <code class="literal">registry.path</code>, and startup-key family for additional hidden or visible autoruns before cleanup. Terminate a recovered payload process only after recording its <code class="literal">process.entity_id</code> and command line.
 </li>
 <li class="listitem">
-Review recent user activity and system logs to identify any unauthorized access or changes made by the adversary, and reset credentials for any compromised accounts.
+After containment, review other hosts and users for the same <code class="literal">registry.data.strings</code>, startup-path family, signer, or payload path before deleting artifacts, then verify that no additional Run or RunOnce locations reference the same payload.
 </li>
 <li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further analysis and to determine if additional systems are affected.
-</li>
-<li class="listitem">
-Implement enhanced monitoring on the affected system and similar endpoints to detect any recurrence of the threat, focusing on registry changes and process execution.
-</li>
-<li class="listitem">
-Update and reinforce endpoint security configurations to prevent similar persistence techniques, such as enabling registry auditing and restricting access to critical registry paths.
+Post-incident hardening: restrict startup-key modifications to recognized installers and management tools, retain registry and process telemetry needed to correlate hidden Run-key writes with writer lineage and logon execution, and record any adjacent hidden-registry or startup-persistence variant in case notes.
 </li>
 </ul>
 </div>
@@ -299,12 +331,40 @@ Update and reinforce endpoint security configurations to prevent similar persist
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_924"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/persistence-via-hidden-run-key-detected.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_564"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/persistence-via-hidden-run-key-detected.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-reg-setup" class="ulink" target="_top">Sysmon Registry Events</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_945"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/persistence-via-hidden-run-key-detected.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">/* Registry Path ends with backslash */
-registry where host.os.type == "windows" and event.type == "change" and length(registry.data.strings) &gt; 0 and
+<pre class="programlisting prettyprint lang-js">registry where host.os.type == "windows" and event.type == "change" and length(registry.data.strings) &gt; 0 and
+
+  /* Registry Path ends with backslash */
   registry.path : "*\\Run\\" and
   registry.path : (
     "*\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\",

@@ -178,9 +178,6 @@ Use Case: Threat Detection
 Tactic: Initial Access
 </li>
 <li class="listitem">
-Tactic: Execution
-</li>
-<li class="listitem">
 Data Source: Elastic Endgame
 </li>
 <li class="listitem">
@@ -206,7 +203,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 210</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 211</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -218,37 +215,86 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1229"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/screenconnect-server-spawning-suspicious-processes.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1253"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/screenconnect-server-spawning-suspicious-processes.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating ScreenConnect Server Spawning Suspicious Processes</strong></span></p>
-<p>ScreenConnect, a remote support tool, allows administrators to control systems remotely. Adversaries may exploit this by executing unauthorized commands or scripts, potentially using it as a backdoor. The detection rule identifies unusual child processes like command shells spawned by the ScreenConnect service, signaling possible exploitation or web shell activity, thus aiding in early threat detection.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the alert details to confirm the parent process is ScreenConnect.Service.exe and identify the suspicious child process name, such as cmd.exe or powershell.exe.
+Does the alert prove ScreenConnect application-server execution rather than client-side remote command use?
 </li>
 <li class="listitem">
-Check the timestamp of the process start event to determine when the suspicious activity occurred and correlate it with any other unusual activities or alerts around the same time.
+Why: the reference separates server compromise from routine client deployment; server-side abuse uses "ScreenConnect.Service.exe", while client-side commands usually involve "ScreenConnect.ClientService.exe".
 </li>
 <li class="listitem">
-Investigate the user account associated with the process to determine if it is a legitimate user or potentially compromised.
+Focus: alert-local <code class="literal">process.parent.name</code>, <code class="literal">process.parent.executable</code>, <code class="literal">process.name</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">host.id</code>, and <code class="literal">host.name</code>.
 </li>
 <li class="listitem">
-Examine the command line arguments of the spawned process to identify any malicious or unauthorized commands being executed.
+Implication: escalate sooner when "ScreenConnect.Service.exe" on the application server spawned "cmd.exe", PowerShell, or "csc.exe"; lower suspicion only when parent or host evidence proves this is not server-side execution, then resolve the mismatch before applying this guide.
 </li>
 <li class="listitem">
-Review network logs for any unusual outbound connections initiated by the ScreenConnect service or the suspicious child process, which may indicate data exfiltration or communication with a command and control server.
+Is the spawned child the genuine Windows tool expected by its name?
 </li>
 <li class="listitem">
-Analyze the system for any additional indicators of compromise, such as unexpected file modifications or the presence of web shells, to assess the extent of the potential breach.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.hash.sha256</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the child runs from a user-writable or ScreenConnect content path, is unsigned or untrusted, or PE metadata does not match the shell, PowerShell, or compiler name; confirmed identity says what ran, not that the launch is benign.
+</li>
+<li class="listitem">
+What intent is visible in the child command line and service context?
+</li>
+<li class="listitem">
+Why: ScreenConnect server exploitation often inherits the service identity, so SYSTEM or the expected service account does not reduce risk by itself.
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.command_line</code>, <code class="literal">process.parent.command_line</code>, and <code class="literal">user.id</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the command shows encoded PowerShell, download or staging, account creation, service changes, webshell-style shell use, or "csc.exe" compiling from temporary or ScreenConnect content paths; lower suspicion only for narrow maintenance, extension, or vendor-support action and later evidence agrees.
+</li>
+<li class="listitem">
+Do ScreenConnect server artifacts corroborate authentication bypass, extension traversal, or webshell staging?
+</li>
+<li class="listitem">
+Why: the reference describes CVE-2024-1709 admin-user changes in "Users.xml" and CVE-2024-1708 web-accessible ASP.NET content under "App_Extensions".
+</li>
+<li class="listitem">
+Focus: if file telemetry exists, query file events on <code class="literal">host.id</code> where <code class="literal">process.entity_id</code> equals server service <code class="literal">process.parent.entity_id</code>; if absent, pivot on <code class="literal">host.id</code>, service PID, and alert time, then review <code class="literal">file.path</code> and <code class="literal">file.name</code> for "Users.xml", "App_Extensions", ASP.NET files, or extension archives. !{investigate{"description":"","label":"File events for the ScreenConnect server process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.parent.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if file telemetry is unavailable or empty, inspect those server paths directly; missing file telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Implication: escalate when "Users.xml" shows an unexpected admin, "App_Extensions" contains a lone ASP.NET file, or extension content appears outside GUID-scoped folders; lower suspicion only when artifacts stay inside expected extension paths and process evidence supports the same workflow.
+</li>
+<li class="listitem">
+Did the spawned child make network connections consistent with follow-on tooling or external control?
+</li>
+<li class="listitem">
+Focus: if network telemetry exists, query <code class="literal">host.id</code> and child <code class="literal">process.entity_id</code>; if absent, pivot on <code class="literal">host.id</code>, <code class="literal">process.pid</code>, and alert time, separating DNS <code class="literal">dns.question.name</code> from connection <code class="literal">destination.ip</code>, <code class="literal">destination.port</code>, and <code class="literal">destination.as.organization.name</code>. !{investigate{"description":"","label":"Network events for the spawned child process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: Missing network telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Implication: escalate when the shell, PowerShell, or compiler reaches a public destination with no ScreenConnect/vendor relationship, a staging domain, or any destination inconsistent with the recovered command; lower suspicion for absent destinations only after telemetry is verified and local process/artifact evidence resolve cleanly.
+</li>
+<li class="listitem">
+Do related host alerts change scope when local findings are suspicious or unresolved?
+</li>
+<li class="listitem">
+Focus: child process starts, additional children from the same ScreenConnect service parent, plus related alerts for <code class="literal">host.id</code>, especially webshell, persistence, credential-access, service-creation, or secondary-RMM alerts. !{investigate{"description":"","label":"Child process events from the suspicious child","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+!{investigate{"description":"","label":"Process events from the same ScreenConnect service","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.parent.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+!{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden response scope when the ScreenConnect server also shows exploitation, persistence, credential access, or secondary remote-access activity; keep scope local only when this alert is isolated and process, artifact, and destination evidence all resolve to one exact benign workflow.
+</li>
+<li class="listitem">
+Escalate when server-side parentage combines with suspicious child identity or command intent, or artifacts, destinations, or related alerts support compromise; close only when process evidence and recovery tie to one exact ScreenConnect maintenance, extension, or vendor-support workflow with no contradictions; preserve artifacts and escalate when evidence is mixed or visibility is incomplete.
 </li>
 </ul>
 </div>
@@ -256,19 +302,13 @@ Analyze the system for any additional indicators of compromise, such as unexpect
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate administrative tasks using command shells or scripting tools like cmd.exe or powershell.exe may trigger the rule. To manage this, create exceptions for known administrative scripts or tasks that are regularly executed by trusted users.
+ScreenConnect server maintenance, extension installation, or vendor troubleshooting can legitimately spawn "powershell.exe", "cmd.exe", or "csc.exe". Confirm the same workflow across child identity, signer or hash, command intent, <code class="literal">host.id</code>, <code class="literal">user.id</code>, recovered server artifacts, and destinations when network telemetry exists. Use change records or vendor cases as corroboration, not a replacement for telemetry gaps.
 </li>
 <li class="listitem">
-Automated maintenance scripts that utilize ScreenConnect for legitimate purposes can be mistaken for suspicious activity. Identify these scripts and whitelist their execution paths or specific process names to prevent false alerts.
+Do not treat generic administrative scripting or compile activity as benign on a ScreenConnect server. Confirm only narrow recurring service workflow: same parent path, child identity, command pattern, <code class="literal">user.id</code>, and quiet artifact or destination pattern on the same <code class="literal">host.id</code> across prior alerts or source events when external records are unavailable. One-off shells, downloaders, account changes, or root-level "App_Extensions" files remain suspicious.
 </li>
 <li class="listitem">
-Software updates or installations that require command line execution through ScreenConnect might be flagged. Document these processes and exclude them from the rule by specifying the associated process names or hashes.
-</li>
-<li class="listitem">
-Security tools or monitoring solutions that interact with ScreenConnect for legitimate scanning or logging purposes may inadvertently trigger the rule. Verify these tools and add them to an exception list based on their process identifiers or parent-child process relationships.
-</li>
-<li class="listitem">
-Training or demonstration sessions using ScreenConnect to showcase command line features could be misinterpreted as threats. Schedule these sessions and temporarily adjust the rule sensitivity or disable it during the known timeframes to avoid false positives.
+Before creating an exception, build it from the minimum confirmed workflow pattern: <code class="literal">process.parent.executable</code>, <code class="literal">process.executable</code>, a constrained <code class="literal">process.command_line</code> pattern, stable signer or hash, <code class="literal">host.id</code>, and the specific ScreenConnect maintenance or extension context. Avoid exceptions on <code class="literal">process.name</code> or "ScreenConnect.Service.exe" alone.
 </li>
 </ul>
 </div>
@@ -276,25 +316,22 @@ Training or demonstration sessions using ScreenConnect to showcase command line 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Isolate the affected system from the network to prevent further unauthorized access or lateral movement by the adversary.
+Before restriction or cleanup in suspicious cases, preserve a case export of the alert process and parent records, recovered file and network events, ScreenConnect and IIS logs around the alert time, "Users.xml", the "App_Extensions" tree, suspicious extension archives or ASP.NET files, and staged payloads.
 </li>
 <li class="listitem">
-Terminate any suspicious processes identified as being spawned by ScreenConnect.Service.exe, such as cmd.exe or powershell.exe, to halt any ongoing malicious activity.
+If confirmed benign, reverse temporary restrictions and document evidence proving the workflow: parent and child identity, command intent, server scope, expected ScreenConnect artifacts, and expected destinations if present. Build a narrow exception only after the same workflow recurs consistently.
 </li>
 <li class="listitem">
-Conduct a thorough review of recent ScreenConnect session logs to identify unauthorized access or unusual activity patterns, and revoke any compromised credentials.
+If suspicious but unconfirmed, apply reversible containment tied to the findings: restrict public access to the ScreenConnect web interface, temporarily limit egress from the affected <code class="literal">host.id</code>, or suspend a newly created ScreenConnect admin account where operationally safe. Weigh server criticality before full host isolation.
 </li>
 <li class="listitem">
-Scan the affected system for additional indicators of compromise, such as web shells or other malware, using endpoint detection and response tools.
+If confirmed malicious, preserve the artifacts above before terminating processes or deleting files. Then isolate the server or disable public exposure, remove malicious admin accounts, webshells, extensions, secondary RMM services, and other persistence found during the investigation, and rotate compromised ScreenConnect, service, or domain credentials.
 </li>
 <li class="listitem">
-Apply security patches and updates to the ScreenConnect server and any other vulnerable applications to mitigate exploitation risks.
+Patch ScreenConnect to a fixed version and review whether the attacker used the server to reach managed clients or create admin or service accounts.
 </li>
 <li class="listitem">
-Restore the system from a known good backup if evidence of compromise is confirmed, ensuring that the backup is free from malicious artifacts.
-</li>
-<li class="listitem">
-Report the incident to the appropriate internal security team or external authorities if required, providing them with detailed findings and evidence for further investigation.
+After containment, retain process, file, and network telemetry needed for future ScreenConnect investigations, restrict who can manage extensions or internet exposure, and document any telemetry gaps that limited this investigation.
 </li>
 </ul>
 </div>
@@ -302,14 +339,44 @@ Report the incident to the appropriate internal security team or external author
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1296"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/screenconnect-server-spawning-suspicious-processes.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_880"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/screenconnect-server-spawning-suspicious-processes.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/audit-process-creation" class="ulink" target="_top">Windows Process Creation Logs</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1320"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/screenconnect-server-spawning-suspicious-processes.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-js">process where host.os.type == "windows" and event.type == "start" and
   process.parent.name : "ScreenConnect.Service.exe" and
   (process.name : ("cmd.exe", "powershell.exe", "pwsh.exe", "powershell_ise.exe", "csc.exe") or
-  ?process.pe.original_file_name in ("Cmd.Exe", "PowerShell.EXE", "pwsh.dll", "powershell_ise.EXE"))</pre>
+  ?process.pe.original_file_name in ("Cmd.Exe", "PowerShell.EXE", "pwsh.dll", "powershell_ise.EXE", "csc.exe"))</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

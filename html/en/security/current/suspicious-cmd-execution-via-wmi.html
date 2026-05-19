@@ -206,7 +206,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 321</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 322</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -218,37 +218,81 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1321"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-cmd-execution-via-wmi.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1345"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-cmd-execution-via-wmi.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Suspicious Cmd Execution via WMI</strong></span></p>
-<p>Windows Management Instrumentation (WMI) is a powerful framework for managing data and operations on Windows systems. Adversaries exploit WMI for lateral movement by executing commands remotely, often using cmd.exe. The detection rule identifies such activity by monitoring for cmd.exe processes initiated by WmiPrvSE.exe with specific arguments, indicating potential misuse for executing commands on remote hosts.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the process details to confirm the parent-child relationship between WmiPrvSE.exe and cmd.exe, ensuring that cmd.exe was indeed initiated by WmiPrvSE.exe.
+Does the alert-local command line match the Impacket-style WMI output-capture shape?
 </li>
 <li class="listitem">
-Examine the command-line arguments used by cmd.exe, specifically looking for the presence of "\\127.0.0.1\*" and redirection operators like "2&gt;&amp;1" or "1&gt;", to understand the nature of the command executed.
+Focus: <code class="literal">process.command_line</code> for quiet execution, stdout/stderr redirection, temp or loopback admin-share output paths, <code class="literal">__*</code> names, and "-encodehex".
 </li>
 <li class="listitem">
-Investigate the source and destination IP addresses involved in the WMI activity to determine if the remote host is legitimate or potentially compromised.
+Implication: escalate when WMI-brokered output capture writes to temp or loopback admin-share paths; lower concern only when the same exact capture shape recurs for one recognized RMM, SCCM, backup, or helpdesk workflow on this <code class="literal">host.id</code>.
 </li>
 <li class="listitem">
-Check for any related alerts or logs from the same host or user account around the same timeframe to identify any patterns or additional suspicious activities.
+Are "cmd.exe" and "WmiPrvSE.exe" the expected binaries in the expected launch context?
 </li>
 <li class="listitem">
-Correlate the event with user activity logs to determine if the command execution aligns with expected user behavior or if it appears anomalous.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.code_signature.trusted</code>, <code class="literal">process.parent.executable</code>, and <code class="literal">process.parent.command_line</code>.
 </li>
 <li class="listitem">
-Consult threat intelligence sources to see if the command or pattern matches known adversary techniques or campaigns.
+Implication: escalate when either binary is unsigned, renamed, path-abnormal, or WMI broker context does not fit a management service; Microsoft-signed binaries reduce masquerade concern but do not clear output capture.
+</li>
+<li class="listitem">
+What operation does the captured command perform?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.command_line</code> for nested interpreters, discovery commands, copy/archive tools, service or scheduled-task verbs, and defense-evasion tokens.
+</li>
+<li class="listitem">
+Implication: escalate when the command stages execution, changes services or tasks, performs discovery at scale, invokes secondary interpreters or LOLBins, copies payloads, or hides output; lower concern for one bounded diagnostic or inventory command.
+</li>
+<li class="listitem">
+Does the user, host, and any session metadata fit controlled WMI administration?
+</li>
+<li class="listitem">
+Focus: <code class="literal">user.id</code>, <code class="literal">user.domain</code>, <code class="literal">host.id</code>, <code class="literal">process.Ext.session_info.logon_type</code>, and <code class="literal">process.Ext.session_info.authentication_package</code>.
+</li>
+<li class="listitem">
+Hint: when <code class="literal">process.Ext.authentication_id</code> or session details exist, pivot to same-host Windows Security 4624/4648 and match logon/session ID to recover source workstation, source IP, and account context. Missing authentication telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Hint: if session metadata is absent, decide from recurring <code class="literal">user.id</code>, <code class="literal">host.id</code>, parent executable, command line, child lineage, and related-alert pattern; missing session metadata is unresolved, not benign.
+</li>
+<li class="listitem">
+Implication: escalate when a standard user, unusual domain context, network/service session, or unexpected NTLM context drives WMI command execution on this host; lower concern when the same account, host, and parent-command pattern recur as controlled administration.
+</li>
+<li class="listitem">
+Did the WMI-launched command become a launcher for follow-on execution?
+</li>
+<li class="listitem">
+Focus: child process events from <code class="literal">process.entity_id</code>, reading child <code class="literal">process.name</code>, <code class="literal">process.executable</code>, and <code class="literal">process.command_line</code>. !{investigate{"description":"","label":"Child processes from WMI launched via Cmd.exe","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if <code class="literal">process.entity_id</code> is missing, use <code class="literal">host.id</code> plus alert <code class="literal">process.pid</code> as child <code class="literal">process.parent.pid</code> in a tight alert window; treat this as weaker than entity-linked lineage.
+</li>
+<li class="listitem">
+Implication: escalate when child processes include secondary interpreters, "rundll32.exe", "regsvr32.exe", "schtasks.exe", "sc.exe", copy tools, archivers, or other LOLBins; keep scope narrower when the cmd instance exits after one bounded command and no suspicious child appears.
+</li>
+<li class="listitem">
+If local process evidence stays suspicious or unresolved, do related alerts show the same user or host in lateral-movement activity?
+</li>
+<li class="listitem">
+Focus: same-<code class="literal">user.id</code> alerts that reuse WMI output-capture fragments, WMI parentage, SMB, WinRM, service-install, scheduled-task, or matching command-line patterns. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if the user view is quiet or ambiguous, compare same-<code class="literal">host.id</code> alerts. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when the same user, host, or command pattern appears in adjacent remote-execution alerts; keep the case local when related alerts are absent and the local process evidence already explains the activity.
+</li>
+<li class="listitem">
+Escalate when output capture combines with suspicious identity, command intent, session, child, or related-alert evidence; close only when exact command shape, parent, user/host scope, child lineage, and recurrence bind to one recognized workflow on this <code class="literal">host.id</code>; preserve evidence and escalate when answers conflict or remain incomplete.
 </li>
 </ul>
 </div>
@@ -256,19 +300,13 @@ Consult threat intelligence sources to see if the command or pattern matches kno
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate administrative tasks using WMI may trigger this rule. System administrators often use WMI for remote management, which can include executing scripts or commands. To handle this, identify and whitelist known administrative accounts or specific scripts that are regularly used for maintenance.
+Remote-management, software distribution, backup, and helpdesk workflows can run "cmd.exe" through WMI and capture output to temp or loopback admin-share paths. Confirm only when parent executable, command line, <code class="literal">user.id</code>, <code class="literal">host.id</code>, process-side session context, and child behavior align with one workflow. Inventories, change records, and owner confirmation can corroborate but not replace telemetry; without them, require recurrence of the same anchors across prior alerts from this rule.
 </li>
 <li class="listitem">
-Automated scripts or software that rely on WMI for legitimate operations might also cause false positives. Review and document these processes, then create exceptions for them in the detection rule to prevent unnecessary alerts.
+Bounded diagnostic WMI commands can be legitimate when an admin account runs one inventory or support command and the tree ends there. Do not close on Microsoft-signed "cmd.exe" or "WmiPrvSE.exe" alone; require exact output-capture shape, account, host scope, and no suspicious child processes to match the recognized workflow.
 </li>
 <li class="listitem">
-Security software or monitoring tools that utilize WMI for system checks can inadvertently match the rule&#8217;s criteria. Verify these tools and exclude their specific processes or arguments from the rule to reduce noise.
-</li>
-<li class="listitem">
-Scheduled tasks or system updates that use WMI for execution might be flagged. Regularly review scheduled tasks and update the rule to exclude these known benign activities.
-</li>
-<li class="listitem">
-Internal network monitoring or testing tools that simulate attacks for security assessments may trigger alerts. Ensure these activities are logged and excluded from the rule to avoid confusion during security evaluations.
+Build exceptions from the minimum confirmed pattern: stable <code class="literal">process.parent.executable</code>, specific output-capture command shape, <code class="literal">user.id</code>, and <code class="literal">host.id</code>. Avoid exceptions on <code class="literal">process.name</code>, "cmd.exe", "WmiPrvSE.exe", or temp-path fragments alone.
 </li>
 </ul>
 </div>
@@ -276,25 +314,19 @@ Internal network monitoring or testing tools that simulate attacks for security 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Isolate the affected host immediately to prevent further lateral movement and potential data exfiltration. Disconnect it from the network while maintaining power to preserve volatile data for forensic analysis.
+If confirmed benign, reverse any temporary containment and document the command, WMI broker path, account, host, session context, child-process result, and recurrence evidence that validated the workflow. Create an exception only for that same recurring pattern.
 </li>
 <li class="listitem">
-Terminate any suspicious cmd.exe processes initiated by WmiPrvSE.exe to halt any ongoing malicious activities.
+If suspicious but unconfirmed, export the alert, process tree, command line, parent context, child-process lineage, temp/admin-share output path fragments, and related-alert results before containment. Apply reversible containment first, such as heightened monitoring or temporary WMI restriction for the affected account or host where business impact permits; isolate the host only if child execution, destructive command intent, or related alerts suggest active compromise.
 </li>
 <li class="listitem">
-Conduct a thorough review of the affected system&#8217;s WMI subscriptions and scripts to identify and remove any unauthorized or malicious entries.
+If confirmed malicious, isolate the host when its role can tolerate isolation, or terminate the alerting "cmd.exe" and malicious child processes only after preserving their command lines and entity IDs. Disable or rotate the affected credentials when user/session evidence or related alerts show account misuse.
 </li>
 <li class="listitem">
-Reset credentials for any accounts that were used in the suspicious activity to prevent further unauthorized access.
+After containment, remove only the temp outputs, staged payloads, services, scheduled tasks, or WMI persistence changes identified during the investigation, then verify no related alerts remain for the same <code class="literal">user.id</code>, <code class="literal">host.id</code>, or <code class="literal">process.command_line</code> pattern.
 </li>
 <li class="listitem">
-Apply security patches and updates to the affected system to address any vulnerabilities that may have been exploited.
-</li>
-<li class="listitem">
-Enhance monitoring and logging for WMI activities across the network to detect similar threats in the future, ensuring that logs are retained for an adequate period for forensic purposes.
-</li>
-<li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to determine if additional systems have been compromised.
+Post-incident hardening: restrict remote WMI to recognized admin hosts and accounts, reduce local administrator exposure, and retain process telemetry that distinguishes this output-capture pattern from adjacent WinRM or SMB service-based remote execution.
 </li>
 </ul>
 </div>
@@ -302,7 +334,37 @@ Escalate the incident to the security operations center (SOC) or incident respon
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1369"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-cmd-execution-via-wmi.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_963"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-cmd-execution-via-wmi.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/audit-process-creation" class="ulink" target="_top">Windows Process Creation Logs</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1393"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-cmd-execution-via-wmi.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

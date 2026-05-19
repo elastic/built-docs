@@ -137,7 +137,7 @@ logs-endpoint.events.process-*
 <a href="https://gist.github.com/xpn/a057a26ec81e736518ee50848b9c2cd6" class="ulink" target="_top">https://gist.github.com/xpn/a057a26ec81e736518ee50848b9c2cd6</a>
 </li>
 <li class="listitem">
-<a href="https://blog.didierstevens.com/2017/03/20/" class="ulink" target="_top">https://blog.didierstevens.com/2017/03/20/</a>
+<a href="https://blog.didierstevens.com/2017/03/20/that-is-not-my-child-process/" class="ulink" target="_top">https://blog.didierstevens.com/2017/03/20/that-is-not-my-child-process/</a>
 </li>
 <li class="listitem">
 <a href="https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute" class="ulink" target="_top">https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute</a>
@@ -170,7 +170,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 11</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 12</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -182,57 +182,90 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1144"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privileges-elevation-via-parent-process-pid-spoofing.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1168"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privileges-elevation-via-parent-process-pid-spoofing.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Privileges Elevation via Parent Process PID Spoofing</strong></span></p>
-<p>Parent Process ID (PPID) spoofing is a technique where adversaries manipulate the PPID of a process to disguise its origin, often to bypass security measures or gain elevated privileges. This is particularly concerning in Windows environments where processes can inherit permissions from their parent. The detection rule identifies suspicious process creation patterns, such as unexpected PPID values and elevated user IDs, while filtering out known legitimate processes and trusted signatures, to flag potential privilege escalation attempts.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the process creation event details, focusing on the process.parent.Ext.real.pid and user.id fields to confirm if the PPID spoofing led to privilege escalation to SYSTEM.
+Does the alert show a SYSTEM child with a spoofed parent relationship?
 </li>
 <li class="listitem">
-Examine the process.executable and process.parent.executable paths to determine if the process is known or expected in the environment, and check against the list of excluded legitimate processes.
+Focus: <code class="literal">user.id</code>, token integrity, <code class="literal">process.parent.pid</code>, <code class="literal">process.parent.Ext.real.pid</code>, and <code class="literal">process.parent.executable</code>.
 </li>
 <li class="listitem">
-Investigate the process.code_signature fields to verify if the process is signed by a trusted entity and if the signature is valid, especially if the process is not excluded by the rule.
+Implication: escalate when a SYSTEM child has a nonzero real-creator PID that differs from the reported parent, especially when that parent gives trusted system, service, or desktop cover; treat a recognized broker or authorized test as only a candidate benign path until creator and child intent are checked.
 </li>
 <li class="listitem">
-Check the historical activity of the involved user.id and process.parent.executable to identify any unusual patterns or recent changes in behavior.
+Why: PPID spoofing can make process-tree views show the selected parent instead of the process that requested creation.
 </li>
 <li class="listitem">
-Correlate the alert with other security events or logs to identify any related suspicious activities or potential lateral movement attempts within the network.
+Which process actually requested the spoofed launch?
+</li>
+<li class="listitem">
+Focus: recovered creator for <code class="literal">process.parent.Ext.real.pid</code>: <code class="literal">process.entity_id</code>, <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, signer, and trust state.
+</li>
+<li class="listitem">
+Implication: escalate when the creator is unsigned, user-writable, a shell or script launcher, or unrelated to the reported parent; lower suspicion only for a stable signed vendor, update, accessibility, audit, or test component tied to the same workflow.
+</li>
+<li class="listitem">
+Why: the Windows parent-process attribute can select a parent handle, so the recovered creator is the actor path the visible parent may hide.
+</li>
+<li class="listitem">
+Hint: search the same <code class="literal">host.id</code> around <code class="literal">@timestamp</code> for <code class="literal">process.pid</code> = <code class="literal">process.parent.Ext.real.pid</code>; keep PID windows tight because PIDs are reused. !{investigate{"description":"","label":"Real creator process event","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.parent.Ext.real.pid}}","valueType":"string"}]],"relativeFrom":"now-15m","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Does the SYSTEM child identity and command line fit the recovered creator workflow?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.pe.original_file_name</code>, signer, and trust state.
+</li>
+<li class="listitem">
+Implication: escalate when the child is a shell, script host, renamed binary, user-writable executable, unsigned or untrusted, or has commands that do not belong to the recovered creator; trusted signing reduces identity concern but does not clear PPID spoofing without launch-context fit.
+</li>
+<li class="listitem">
+Did the spoofed SYSTEM child launch follow-on activity?
+</li>
+<li class="listitem">
+Focus: child process events from <code class="literal">process.entity_id</code>, reviewing <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, and <code class="literal">user.id</code>. !{investigate{"description":"","label":"Descendant process events for the spoofed child","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when it spawns shells, scripting, credential, service, or lateral-movement tooling under SYSTEM; no descendants lowers immediate impact but does not clear a suspicious creator or child identity.
+</li>
+<li class="listitem">
+Hint: if <code class="literal">process.entity_id</code> is unavailable, fall back to <code class="literal">host.id</code>, <code class="literal">process.pid</code>, and a tight alert-time window.
+</li>
+<li class="listitem">
+If escalation is likely, what is the immediate scope?
+</li>
+<li class="listitem">
+Focus: prior process alerts for <code class="literal">host.id</code> and <code class="literal">user.id</code> with matching child executable or hash, reported parent, and real-creator PID.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: expand containment and scoping when the same child or creator appears on other hosts or unrelated users; keep scope local when the tuple is isolated and no descendant activity contradicts it. Do not use recurrence alone to close.
+</li>
+<li class="listitem">
+Range: use a lookback that fits endpoint retention.
 </li>
 </ul>
 </div>
+<p>Disposition: escalate when PPID spoofing to SYSTEM has an unrecognized creator, suspicious child, misleading parent, SYSTEM follow-on activity, or cross-host scope. Close only when alert and recovered telemetry tie the event to one exact recognized broker or authorized test and no descendant evidence contradicts it; preserve evidence and escalate when recovery is incomplete or evidence conflicts.</p>
 <p><span class="strong strong"><strong>False positive analysis</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Processes related to Windows Error Reporting such as WerFault.exe and Wermgr.exe can trigger false positives. These are legitimate system processes and can be excluded by verifying their signatures and paths.
+Signed broker cases require the exact telemetry tuple: child path, signer, and command; reported parent path; recovered creator path, signer, and command; and host/user cohort. Authorized PPID-spoofing tests require exact host, time, tester, test binary, parent PID, real creator PID, and child command line. Without that tie to one product or test, treat as suspicious because the rule already filters common Windows Error Reporting, update, accessibility, remote-support, and Netwrix patterns.
 </li>
 <li class="listitem">
-Logon utilities like Utilman.exe spawning processes such as osk.exe, Narrator.exe, or Magnify.exe may appear suspicious but are often legitimate. Exclude these by confirming their usage context and ensuring they are executed by trusted users.
-</li>
-<li class="listitem">
-Third-party software like TeamViewer, Cisco WebEx, and Dell Inc. may cause false positives due to their legitimate use of process creation. Verify the code signature and trust status to exclude these processes.
-</li>
-<li class="listitem">
-Windows Update processes involving MpSigStub.exe and wuauclt.exe can be mistakenly flagged. Confirm these are part of regular update activities and exclude them based on their known paths and parent processes.
-</li>
-<li class="listitem">
-Remote support and management tools such as LogMeIn, GoToAssist, and Chrome Remote Desktop may be flagged. Ensure these are installed and used by authorized personnel and exclude them by their executable paths.
-</li>
-<li class="listitem">
-Netwrix Corporation&#8217;s processes like adcrcpy.exe may be flagged if they are part of legitimate auditing activities. Verify the code signature and exclude these processes if they are part of authorized Netwrix Auditor operations.
+Build exceptions only from the minimum confirmed tuple: <code class="literal">process.hash.sha256</code> or <code class="literal">process.code_signature.thumbprint_sha256</code>, <code class="literal">process.executable</code>, <code class="literal">process.parent.executable</code>, recovered creator identity, <code class="literal">host.id</code> or managed host group, and the test or product command pattern. Avoid exceptions on <code class="literal">process.name</code>, <code class="literal">process.parent.name</code>, or signer alone.
 </li>
 </ul>
 </div>
@@ -240,25 +273,19 @@ Netwrix Corporation&#8217;s processes like adcrcpy.exe may be flagged if they ar
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Isolate the affected system from the network to prevent further unauthorized access or lateral movement by the adversary.
+If confirmed benign: document the exact child, reported parent, real creator, signer, command line, host, and user evidence that proved the workflow; reverse any temporary containment and create only a narrow exception for the same tuple.
 </li>
 <li class="listitem">
-Terminate any suspicious processes identified by the alert, especially those with spoofed PPIDs or elevated privileges, to stop potential malicious activities.
+If suspicious but unconfirmed: preserve the alert, process event, recovered creator and descendant process records, process entity IDs and PIDs, command lines, hashes, signers, and current process state before containment. Use reversible containment such as host isolation or temporary policy controls based on host criticality; avoid killing the child or creator until evidence is preserved.
 </li>
 <li class="listitem">
-Review and revoke any unauthorized user accounts or privileges that may have been created or escalated during the incident.
+If confirmed malicious: isolate the affected host when identity, lineage, or descendant evidence shows unauthorized SYSTEM execution. Before termination, record <code class="literal">process.entity_id</code>, <code class="literal">process.parent.Ext.real.pid</code>, <code class="literal">process.command_line</code>, and <code class="literal">process.hash.sha256</code>; then terminate malicious child or descendant processes and remove only the binaries, scripts, services, or persistence found during follow-on investigation.
 </li>
 <li class="listitem">
-Conduct a thorough forensic analysis of the affected system to identify any additional indicators of compromise or persistence mechanisms.
+Reset or rotate credentials only for accounts, services, or remote-access paths whose misuse is confirmed by additional evidence. Do not treat SYSTEM context alone as proof that a named user credential was compromised.
 </li>
 <li class="listitem">
-Restore the system from a known good backup if necessary, ensuring that all malicious artifacts are removed and system integrity is maintained.
-</li>
-<li class="listitem">
-Implement additional monitoring and logging on the affected system and network to detect any recurrence of similar activities.
-</li>
-<li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to determine if broader organizational impacts exist.
+Post-incident hardening: restrict administrative paths that can obtain parent-process creation privileges, review who can run PPID-spoofing test tools, and document the confirmed tuple or malicious artifact set so future analysts can separate repeated product behavior from repeated abuse.
 </li>
 </ul>
 </div>
@@ -266,7 +293,16 @@ Escalate the incident to the security operations center (SOC) or incident respon
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1210"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privileges-elevation-via-parent-process-pid-spoofing.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_810"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privileges-elevation-via-parent-process-pid-spoofing.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1234"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privileges-elevation-via-parent-process-pid-spoofing.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -324,10 +360,9 @@ process where host.os.type == "windows" and event.action == "start" and
                     "?:\\Program Files (x86)\\GoToAssist Remote Support Customer\\*\\g2ax_comm_customer.exe") and
  not (
     process.code_signature.trusted == true and process.code_signature.subject_name == "Netwrix Corporation" and
-    process.name : "adcrcpy.exe" and process.parent.executable : (
-      "?:\\Program Files (x86)\\Netwrix Auditor\\Active Directory Auditing\\Netwrix.ADA.EventCollector.exe",
-      "?:\\Program Files (x86)\\Netwrix Auditor\\Active Directory Auditing\\Netwrix.ADA.Analyzer.exe",
-      "?:\\Netwrix Auditor\\Active Directory Auditing\\Netwrix.ADA.EventCollector.exe"
+    process.name : "adcrcpy.exe" and process.parent.name : (
+      "Netwrix.ADA.EventCollector.exe",
+      "Netwrix.ADA.Analyzer.exe"
     )
  )</pre>
 </div>

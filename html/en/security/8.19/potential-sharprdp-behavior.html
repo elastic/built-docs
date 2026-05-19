@@ -173,7 +173,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 112</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 113</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -185,37 +185,78 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1078"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-sharprdp-behavior.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1101"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-sharprdp-behavior.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Potential SharpRDP Behavior</strong></span></p>
-<p>Remote Desktop Protocol (RDP) enables users to connect to and control remote systems, facilitating legitimate administrative tasks. However, adversaries can exploit RDP for lateral movement within a network. SharpRDP, a tool for executing commands on remote systems via RDP, can be misused for unauthorized access. The detection rule identifies suspicious RDP activity by monitoring network connections, registry changes, and process executions, flagging potential misuse indicative of SharpRDP behavior.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the network logs to confirm the presence of incoming RDP connections on port 3389, specifically looking for connections initiated by IP addresses other than localhost (127.0.0.1 or ::1).
+Do Timeline source events form one target-side SharpRDP chain?
 </li>
 <li class="listitem">
-Examine the registry changes to identify any new RunMRU string values set to cmd, powershell, taskmgr, or tsclient, which could indicate command execution attempts.
+Focus: same-<code class="literal">host.id</code> events: inbound <code class="literal">source.ip</code>, RunMRU <code class="literal">registry.data.strings</code>, child <code class="literal">process.parent.name</code>, and child <code class="literal">process.command_line</code>.
 </li>
 <li class="listitem">
-Investigate the process execution logs to verify if any processes were started with parent processes like cmd.exe, powershell.exe, or taskmgr.exe, and ensure these are not legitimate administrative actions.
+Hint: record the RunMRU time and child <code class="literal">process.entity_id</code>; the sequence alert may not preserve stage-specific process or registry fields.
 </li>
 <li class="listitem">
-Correlate the timestamps of the RDP connection, registry change, and process execution to determine if they align within the 1-minute window specified by the detection rule.
+Implication: suspicious when non-loopback RDP to port 3389 is followed by a RunMRU shell, Task Manager, or "\tsclient\" command and child execution; lower suspicion only when all recovered members fit one recognized interactive RDP maintenance action. Missing member events are unresolved, not benign.
 </li>
 <li class="listitem">
-Check the source IP address of the RDP connection against known threat intelligence feeds to assess if it is associated with any malicious activity.
+Which RunMRU method launched execution?
 </li>
 <li class="listitem">
-Analyze user account activity associated with the RDP session to determine if the account was compromised or if the actions were authorized.
+Focus: RunMRU <code class="literal">registry.path</code>, <code class="literal">registry.data.strings</code>, child <code class="literal">process.parent.name</code>, and child <code class="literal">process.command_line</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the RunMRU data selects a shell, Task Manager, or "\tsclient\" mapped-drive payload and the child process matches that method; normal Run-dialog use is lower risk only when it launches a bounded support utility or installer without shell staging.
+</li>
+<li class="listitem">
+Does the source and user context fit legitimate RDP use on this target?
+</li>
+<li class="listitem">
+Focus: inbound <code class="literal">source.ip</code>, launched-process <code class="literal">user.id</code>, and <code class="literal">user.name</code>.
+</li>
+<li class="listitem">
+Implication: escalate when an unusual source uses an end-user or privileged account to start shells, Task Manager, or mapped-drive binaries over RDP; treat a recognized source-user pairing as context only until the RunMRU command and child identity also match the exact RDP task.
+</li>
+<li class="listitem">
+What ran on the target, and does its identity fit the expected RDP workflow?
+</li>
+<li class="listitem">
+Focus: child <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the command stages scripts, remote-admin tooling, credential access, or unsigned/user-writable payloads; lower suspicion only when binary identity and command line match the same bounded support or deployment workflow. A trusted signer does not clear suspicious command intent.
+</li>
+<li class="listitem">
+Did the launched child or its descendants create follow-on activity?
+</li>
+<li class="listitem">
+Focus: same-host endpoint events scoped to recovered child <code class="literal">process.entity_id</code>: descendant <code class="literal">process.parent.entity_id</code>, persistence <code class="literal">registry.path</code>, DNS-event <code class="literal">dns.question.name</code>, and connection-event <code class="literal">destination.ip</code>.
+</li>
+<li class="listitem">
+Hint: query process and registry events tied to the child ID; review DNS and connection events separately because <code class="literal">dns.question.name</code> and <code class="literal">destination.ip</code> live on different network event subtypes.
+</li>
+<li class="listitem">
+Implication: escalate when descendants, registry changes, DNS lookups, or outbound connections show staging, persistence, command-and-control, or more lateral movement; absence of process-scoped DNS or connection telemetry narrows the case only when other evidence is clean. Missing network telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Do related target-host alerts change scope?
+</li>
+<li class="listitem">
+Focus: related RDP, remote-service, credential, and execution alerts for the same <code class="literal">host.id</code>. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if recovered <code class="literal">source.ip</code> maps to an enrolled internal asset, follow up on outbound RDP to <code class="literal">destination.port</code> 3389 from a non-standard RDP client; missing source-host telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Implication: broaden scope when target-host alerts or caveated source-host follow-up show lateral movement beyond one recovered session; keep local only when the suspicious pattern stays confined to this target and the recovered source workflow is otherwise clean.
+</li>
+<li class="listitem">
+Using RDP source, RunMRU command, child lineage and identity, user context, follow-on process/registry/network evidence, and related alerts, escalate RDP-driven command execution or "\tsclient\" payload launch without a coherent benign workflow; close only when all categories align to one exact recognized RDP workflow and no contradictory host or source evidence remains; preserve artifacts and escalate when evidence is mixed or visibility is incomplete.
 </li>
 </ul>
 </div>
@@ -223,16 +264,13 @@ Analyze user account activity associated with the RDP session to determine if th
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate administrative tasks using RDP may trigger the rule if they involve command execution through cmd, powershell, or taskmgr. To manage this, create exceptions for known administrative IP addresses or user accounts frequently performing these tasks.
+Helpdesk or administrator RDP support can trigger when an operator uses Win+R, Task Manager, or a mapped drive to launch a diagnostic or installer. Confirm <code class="literal">source.ip</code>, <code class="literal">host.id</code>, <code class="literal">user.id</code>, <code class="literal">registry.data.strings</code>, <code class="literal">process.parent.name</code>, and <code class="literal">process.executable</code>/<code class="literal">process.command_line</code> match one task with no suspicious descendant activity. Without telemetry proof, require operator or ticket confirmation; do not close from historical pattern alone.
 </li>
 <li class="listitem">
-Automated scripts or software updates that modify the RunMRU registry key with benign commands can be mistaken for SharpRDP behavior. Identify and exclude these processes or scripts from the detection rule.
+TSClient drive-redirection deployment can explain <code class="literal">\tsclient\</code> execution only when a known installer or utility launches with stable <code class="literal">process.hash.sha256</code> or <code class="literal">process.code_signature.subject_name</code>, matching <code class="literal">process.parent.name</code>, <code class="literal">source.ip</code>, and <code class="literal">host.id</code>. Do not close if registry, DNS, connection, or descendant evidence contradicts it.
 </li>
 <li class="listitem">
-Remote management tools that use RDP and execute commands as part of their normal operation might be flagged. Whitelist these tools by their process names or specific command patterns to prevent false positives.
-</li>
-<li class="listitem">
-Internal network scanning or monitoring tools that simulate RDP connections for security assessments could be misinterpreted. Exclude these tools by their source IP addresses or network behavior signatures.
+Before creating an exception, anchor on: <code class="literal">source.ip</code>, <code class="literal">host.id</code>, <code class="literal">user.id</code>, exact <code class="literal">registry.data.strings</code>, <code class="literal">process.parent.name</code>, and <code class="literal">process.executable</code> or <code class="literal">process.hash.sha256</code>. Avoid exceptions on <code class="literal">destination.port</code>, <code class="literal">process.name</code>, or RunMRU path alone.
 </li>
 </ul>
 </div>
@@ -240,25 +278,25 @@ Internal network scanning or monitoring tools that simulate RDP connections for 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected host from the network to prevent further lateral movement and unauthorized access.
+If confirmed benign, reverse any temporary containment and document the exact <code class="literal">source.ip</code>, <code class="literal">user.id</code>, <code class="literal">registry.data.strings</code>, <code class="literal">process.executable</code>, and <code class="literal">host.id</code> that established the confirmed workflow. Create an exception only after the exact activity is confirmed and the exception can be pinned to the narrow workflow pattern.
 </li>
 <li class="listitem">
-Terminate any suspicious processes identified in the alert, such as those initiated by cmd.exe, powershell.exe, or taskmgr.exe, to halt any ongoing malicious activity.
+If suspicious but unconfirmed, export the Timeline source events, capture the launched child process record and parent command line, save the RunMRU value data, and collect staged payloads, persistence key/value snapshots, DNS names, and connection destinations before containment or cleanup.
 </li>
 <li class="listitem">
-Review and revert any unauthorized registry changes, particularly those related to the RunMRU registry path, to restore system integrity.
+If suspicious but unconfirmed, after preservation apply reversible containment: end the active RDP session, temporarily restrict new RDP connections from the recovered <code class="literal">source.ip</code>, or increase monitoring on the affected <code class="literal">host.id</code>. Escalate to host isolation only when follow-on activity shows broader abuse and the host role can tolerate isolation.
 </li>
 <li class="listitem">
-Conduct a thorough examination of the affected host for additional indicators of compromise, such as unauthorized user accounts or scheduled tasks, and remove any found.
+If confirmed malicious, isolate the host when feasible, suspend or block the RDP access path or account that established the session, and terminate the launched child process plus suspicious descendants only after preserving the process and command evidence.
 </li>
 <li class="listitem">
-Reset credentials for any accounts that were accessed or potentially compromised during the incident to prevent further unauthorized access.
+Review other hosts and users tied to the same <code class="literal">source.ip</code>, <code class="literal">user.id</code>, or distinctive <code class="literal">process.command_line</code> pattern before deleting artifacts or resetting credentials so scoping completes before evidence is destroyed.
 </li>
 <li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to determine if additional systems are affected.
+Remove staged payloads, persistence changes, or follow-on tooling identified during the investigation, then reset or reissue credentials only when the process, user, and source evidence shows likely account misuse or credential exposure.
 </li>
 <li class="listitem">
-Implement enhanced monitoring and logging for RDP connections and registry changes to detect and respond to similar threats more effectively in the future.
+Post-incident hardening: restrict RDP access to controlled jump hosts, limit drive redirection where it is not required, retain process plus registry plus network telemetry on RDP targets, and document any adjacent detection gaps for the detection engineering team.
 </li>
 </ul>
 </div>
@@ -266,7 +304,16 @@ Implement enhanced monitoring and logging for RDP connections and registry chang
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1142"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-sharprdp-behavior.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_747"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-sharprdp-behavior.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1165"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-sharprdp-behavior.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

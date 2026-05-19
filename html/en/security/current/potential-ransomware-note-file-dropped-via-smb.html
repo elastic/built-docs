@@ -157,7 +157,7 @@ Data Source: Elastic Defend
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 7</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 8</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -169,31 +169,81 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1054"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-ransomware-note-file-dropped-via-smb.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1077"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-ransomware-note-file-dropped-via-smb.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<p><span class="strong strong"><strong>Performance</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-This rule may cause medium to high performance impact due to logic scoping all icoming SMB network events.
-</li>
-</ul>
-</div>
+<p><span class="strong strong"><strong>Investigating Potential Ransomware Note File Dropped via SMB</strong></span></p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the source.ip address connecting to port 445 on this host.
+What do the sequence member events show about the accepted SMB session and note-file burst?
 </li>
 <li class="listitem">
-Identify the user account that performed the file creation via SMB.
+Why: this sequence can omit stage-specific values from the combined alert; disposition depends on recovered source events.
 </li>
 <li class="listitem">
-If the number of files is too high and source.ip connecting over SMB is unusual isolate the host and block the used credentials.
+Focus: Timeline member events: network-stage <code class="literal">source.ip</code>, then file-stage <code class="literal">user.id</code>, <code class="literal">file.path</code>, <code class="literal">file.name</code>, and <code class="literal">file.extension</code>.
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Implication: escalate when one remote source is followed within one second by repeated note-like creations under user-profile paths; lower concern only when recovered source, identity, names, and paths form one bounded, neutral file-copy pattern for validation.
+</li>
+<li class="listitem">
+Hint: <code class="literal">process.pid</code> value "4" is target-side kernel SMB I/O, not the remote executable; use <code class="literal">user.name</code> only as a readable label for the file-stage identity.
+</li>
+<li class="listitem">
+Do recovered <code class="literal">source.ip</code> and writing identity match a stable SMB pattern for this host?
+</li>
+<li class="listitem">
+Why: the target-side kernel process does not identify the remote operator; source and SMB identity carry attribution value.
+</li>
+<li class="listitem">
+Focus: surrounding and historical SMB "connection_accepted" events for <code class="literal">host.id</code> and recovered <code class="literal">source.ip</code>, plus file-stage <code class="literal">user.id</code> and <code class="literal">user.name</code>. !{investigate{"description":"","label":"SMB connection events on the host","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"},{"excluded":false,"field":"event.action","queryType":"phrase","value":"connection_accepted","valueType":"string"},{"excluded":false,"field":"destination.port","queryType":"phrase","value":"445","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the source is new for this host, appears only in a short burst, or pairs with an unusual SMB identity; lower concern when the same source and identity recur as one bounded backup, migration, or maintenance pattern. Missing SMB history is unresolved, not benign.
+</li>
+<li class="listitem">
+Do created files indicate broad ransom-note staging rather than routine instructions?
+</li>
+<li class="listitem">
+Focus: recovered <code class="literal">file.path</code>, <code class="literal">file.name</code>, <code class="literal">file.extension</code>, <code class="literal">file.size</code>, and <code class="literal">file.Ext.header_bytes</code>; repeated names across multiple "C:\Users\" profile paths.
+</li>
+<li class="listitem">
+Implication: escalate when identical or near-identical note files land in multiple profiles, use ".hta" or HTML variants, or are small text/HTML artifacts meant for user visibility; lower concern when files stay in one bounded application or migration folder and match stable instruction-file naming for the same source.
+</li>
+<li class="listitem">
+Does same-window SMB file activity show broader destructive or staging behavior?
+</li>
+<li class="listitem">
+Why: note drops often accompany remote rename, delete, or other drop activity that this rule does not capture directly.
+</li>
+<li class="listitem">
+Focus: file events in the same SMB window: <code class="literal">event.action</code>, <code class="literal">file.path</code>, <code class="literal">file.extension</code>, <code class="literal">file.Ext.original.path</code>, and <code class="literal">file.Ext.original.extension</code>. !{investigate{"description":"","label":"File events for SMB server writes on this host","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the same window shows mass rename, delete, extension-change, or extra drop behavior in user or shared paths; lower concern when activity stays limited to the small note set with no follow-on churn.
+</li>
+<li class="listitem">
+If local SMB evidence remains suspicious or unresolved, does impact context stay local or show source fan-out?
+</li>
+<li class="listitem">
+Why: ransomware may place notes apart from encryption or recovery inhibition, and SMB ransomware can fan out with valid accounts or admin shares.
+</li>
+<li class="listitem">
+Focus: same-host impact alerts over 48 hours, then other SMB events keyed by recovered <code class="literal">source.ip</code> with matching note-like <code class="literal">file.name</code>, <code class="literal">file.path</code>, or impact <code class="literal">event.action</code>. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the host shows rename, shadow-copy, backup-tamper, or destructive alerts, or when one source fans out to multiple hosts with matching note-drop or impact signals; keep the case local only when the source is confined to one bounded file-copy pattern. Missing cross-host SMB telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Hint: start with <code class="literal">source.ip</code> plus <code class="literal">destination.port</code> 445, then join returned hosts to note-like file creations by time.
+</li>
+<li class="listitem">
+What disposition do the recovered SMB source, identity, note pattern, file churn, and scope support?
+</li>
+<li class="listitem">
+Escalate for remote note staging plus unexpected SMB identity, destructive file activity, recovery inhibition, or multi-host spread; close only for one stable bounded file-copy pattern with neutral names and no contradictory impact evidence; if purpose still depends on records, preserve artifacts until telemetry resolves it.
 </li>
 </ul>
 </div>
@@ -201,27 +251,13 @@ Investigate other alerts associated with the user/host during the past 48 hours.
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Remote file creation with similar file naming convention via SMB.
-</li>
-</ul>
-</div>
-<p><span class="strong strong"><strong>Related rules</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-Third-party Backup Files Deleted via Unexpected Process - 11ea6bec-ebde-4d71-a8e9-784948f8e3e9
+Bulk backup, migration, or endpoint-management jobs can place repeated text or HTML instruction files over SMB. Confirm the same recovered <code class="literal">source.ip</code>, <code class="literal">user.id</code>, <code class="literal">user.name</code>, neutral <code class="literal">file.name</code> family, and bounded <code class="literal">file.path</code> recurs for this <code class="literal">host.id</code> without rename, delete, shadow-copy, backup-tamper, or cross-host note-drop spread. Change records can corroborate, not replace, telemetry alignment.
 </li>
 <li class="listitem">
-Volume Shadow Copy Deleted or Resized via VssAdmin - b5ea4bfe-a1b2-421f-9d47-22a75a6f2921
+Case-driven incident response, legal-hold, or notification activity can write readme-style files remotely. Confirm recovered <code class="literal">source.ip</code>, <code class="literal">user.id</code>, <code class="literal">user.name</code>, <code class="literal">file.path</code>, and <code class="literal">file.extension</code> stay bounded to intended case or communication folders, use neutral notice/readme naming rather than decrypt, recover, lock, or payment language, and do not coincide with broader rename or delete activity from <code class="literal">process.pid</code> value "4". If case records are unavailable, require recurrence of the same source, identity, and path family without spread.
 </li>
 <li class="listitem">
-Volume Shadow Copy Deletion via PowerShell - d99a037b-c8e2-47a5-97b9-170d076827c4
-</li>
-<li class="listitem">
-Volume Shadow Copy Deletion via WMIC - dc9c1f74-dac3-48e3-b47f-eb79db358f57
-</li>
-<li class="listitem">
-Suspicious File Renamed via SMB - 78e9b5d5-7c07-40a7-a591-3dbbf464c386
+Before creating an exception, validate recurrence across prior alerts from this rule. Build the exception from the minimum pattern: recovered <code class="literal">source.ip</code>, <code class="literal">user.id</code> or <code class="literal">user.name</code>, representative <code class="literal">file.name</code>, bounded <code class="literal">file.path</code> family, and affected host cohort. Avoid exceptions on <code class="literal">file.name</code>, <code class="literal">host.id</code>, or <code class="literal">process.pid</code> alone.
 </li>
 </ul>
 </div>
@@ -229,28 +265,19 @@ Suspicious File Renamed via SMB - 78e9b5d5-7c07-40a7-a591-3dbbf464c386
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse temporary containment and record the confirmed <code class="literal">source.ip</code>, <code class="literal">user.id</code> or <code class="literal">user.name</code>, representative <code class="literal">file.name</code>, and bounded <code class="literal">file.path</code> pattern. Create an exception only after that same pattern recurs consistently across prior alerts from this rule.
 </li>
 <li class="listitem">
-Consider isolating the involved host to prevent destructive behavior, which is commonly associated with this activity.
+If suspicious but unconfirmed, preserve the alert, Timeline member-event export, copies or hashes of representative note files, recovered source and user identifiers, surrounding file-action evidence, and same-host alert identifiers before containment. Apply reversible containment first, such as temporarily blocking SMB from the recovered source to the target or restricting the recovered user for SMB access. Use host isolation only if note drops continue, spread to additional hosts, or the target role can tolerate interruption.
 </li>
 <li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
+If confirmed malicious, isolate the recovered source host when it is managed and the source, SMB identity, note-file pattern, and impact evidence confirm active ransomware behavior. If direct endpoint response is unavailable on the source, hand off the preserved artifacts to the team that can block the SMB path or contain the source system. Before deleting files, terminating processes, or restoring data, export the member events, related impact alerts, note files, and affected host list.
 </li>
 <li class="listitem">
-If any other destructive action was identified on the host, it is recommended to prioritize the investigation and look for ransomware preparation and execution activities.
+After confirmed malicious scoping identifies affected hosts and accounts, rotate or reset the SMB credentials that were used or exposed, review other hosts touched by the same recovered <code class="literal">source.ip</code>, then remove dropped notes and restore affected data from known-good backups.
 </li>
 <li class="listitem">
-If any backups were affected:
-</li>
-<li class="listitem">
-Perform data recovery locally or restore the backups from replicated copies (cloud, other servers, etc.).
-</li>
-<li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Post-incident hardening: restrict unnecessary SMB administrative access, protect backup and shadow-copy workflows, retain endpoint network and file telemetry needed to reconstruct remote file activity, and record the confirmed benign workflow or malicious source-and-path pattern for future cases.
 </li>
 </ul>
 </div>
@@ -258,7 +285,16 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1118"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-ransomware-note-file-dropped-via-smb.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_728"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-ransomware-note-file-dropped-via-smb.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1141"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-ransomware-note-file-dropped-via-smb.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

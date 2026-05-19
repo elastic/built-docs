@@ -74,7 +74,7 @@ winlogbeat-*
 <a href="https://github.com/atc-project/atc-data/blob/master/docs/Logging_Policies/LP_0025_windows_audit_directory_service_changes.md" class="ulink" target="_top">https://github.com/atc-project/atc-data/blob/master/docs/Logging_Policies/LP_0025_windows_audit_directory_service_changes.md</a>
 </li>
 <li class="listitem">
-<a href="https://labs.f-secure.com/tools/sharpgpoabuse" class="ulink" target="_top">https://labs.f-secure.com/tools/sharpgpoabuse</a>
+<a href="https://labs.withsecure.com/tools/sharpgpoabuse" class="ulink" target="_top">https://labs.withsecure.com/tools/sharpgpoabuse</a>
 </li>
 </ul>
 </div>
@@ -107,7 +107,7 @@ Data Source: Windows Security Event Logs
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 214</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 215</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -119,22 +119,99 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_553"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/group-policy-abuse-for-privilege-addition.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_563"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/group-policy-abuse-for-privilege-addition.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Group Policy Abuse for Privilege Addition</strong></span></p>
-<p>Group Policy Objects (GPOs) can be used to add rights and/or modify Group Membership on GPOs by changing the contents of an INF file named GptTmpl.inf, which is responsible for storing every setting under the Security Settings container in the GPO. This file is unique for each GPO, and only exists if the GPO contains security settings. Example Path: "\\DC.com\SysVol\DC.com\Policies{PolicyGUID}\Machine\Microsoft\Windows NT\SecEdit\GptTmpl.inf"</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This attack abuses a legitimate mechanism of Active Directory, so it is important to determine whether the activity is legitimate and the administrator is authorized to perform this operation.
+What GPO extension change was preserved?
 </li>
 <li class="listitem">
-Retrieve the contents of the <code class="literal">GptTmpl.inf</code> file, and under the <code class="literal">Privilege Rights</code> section, look for potentially dangerous high privileges, for example: SeTakeOwnershipPrivilege, SeEnableDelegationPrivilege, etc.
+Focus: <code class="literal">winlog.event_data.AttributeLDAPDisplayName</code>, <code class="literal">winlog.event_data.AttributeValue</code>, <code class="literal">winlog.event_data.OperationType</code>, <code class="literal">winlog.event_data.ObjectDN</code>, and <code class="literal">winlog.event_data.ObjectGUID</code> confirm the 5136 "gPCMachineExtensionNames" GPO change.
 </li>
 <li class="listitem">
-Inspect the user security identifiers (SIDs) associated with these privileges, and if they should have these privileges.
+Implication: escalate when the value enables Security CSE GUID "827D319E-6EAC-11D2-A4EA-00C04F79F83A" plus Computer Restricted Groups GUID "803E14A0-B4FB-11D0-A0D0-00A0C90F574B" on an unexpected GPO; lower concern only when artifacts/scope confirm a recognized hardening refresh.
+</li>
+<li class="listitem">
+Who changed the GPO, and from where?
+</li>
+<li class="listitem">
+Focus: identify the writer: <code class="literal">winlog.event_data.SubjectUserSid</code>, <code class="literal">winlog.event_data.SubjectUserName</code>, <code class="literal">winlog.event_data.SubjectLogonId</code>, and <code class="literal">winlog.computer_name</code>.
+</li>
+<li class="listitem">
+Hint: on <code class="literal">winlog.computer_name</code>, find "4624" where <code class="literal">winlog.event_data.TargetLogonId</code> equals the 5136 <code class="literal">winlog.event_data.SubjectLogonId</code>; search "4648" on <code class="literal">winlog.event_data.SubjectLogonId</code> for explicit credentials, then check <code class="literal">source.ip</code>, <code class="literal">winlog.logon.type</code>, <code class="literal">winlog.event_data.TargetUserName</code>, and <code class="literal">winlog.event_data.TargetServerName</code>. Missing logon telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Linked logon for the GPO writer","providers":[[{"excluded":false,"field":"winlog.computer_name","queryType":"phrase","value":"{{winlog.computer_name}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"4624","valueType":"string"},{"excluded":false,"field":"winlog.event_data.TargetLogonId","queryType":"phrase","value":"{{winlog.event_data.SubjectLogonId}}","valueType":"string"}]],"relativeFrom":"now-24h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Explicit-credential events for the GPO writer","providers":[[{"excluded":false,"field":"winlog.computer_name","queryType":"phrase","value":"{{winlog.computer_name}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"4648","valueType":"string"},{"excluded":false,"field":"winlog.event_data.SubjectLogonId","queryType":"phrase","value":"{{winlog.event_data.SubjectLogonId}}","valueType":"string"}]],"relativeFrom":"now-24h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the writer is outside GPO admin cohort, uses an unusual source or direct domain-controller session, or shows alternate-credential use; lower concern when account/session match a recognized GPO administration path.
+</li>
+<li class="listitem">
+Do surrounding directory changes show a coordinated GPO update?
+</li>
+<li class="listitem">
+Why: "5136" can record related object modifications; <code class="literal">winlog.event_data.OpCorrelationID</code> separates one GPO edit from directory noise.
+</li>
+<li class="listitem">
+Focus: reconstruct surrounding "5136" records from the same domain controller with <code class="literal">winlog.event_data.OpCorrelationID</code>, <code class="literal">winlog.event_data.SubjectLogonId</code>, <code class="literal">winlog.event_data.ObjectGUID</code>, changed attribute, and operation type.
+</li>
+<li class="listitem">
+Hint: prefer one <code class="literal">winlog.event_data.OpCorrelationID</code>; if absent, use the same <code class="literal">winlog.event_data.SubjectLogonId</code> plus tight <code class="literal">@timestamp</code> and <code class="literal">winlog.record_id</code> ordering. !{investigate{"description":"","label":"5136 events in this GPO change operation","providers":[[{"excluded":false,"field":"winlog.computer_name","queryType":"phrase","value":"{{winlog.computer_name}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"5136","valueType":"string"},{"excluded":false,"field":"winlog.event_data.OpCorrelationID","queryType":"phrase","value":"{{winlog.event_data.OpCorrelationID}}","valueType":"string"}],[{"excluded":false,"field":"winlog.computer_name","queryType":"phrase","value":"{{winlog.computer_name}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"5136","valueType":"string"},{"excluded":false,"field":"winlog.event_data.SubjectLogonId","queryType":"phrase","value":"{{winlog.event_data.SubjectLogonId}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the operation touches other sensitive GPO attributes or combines this privilege path with GPO execution or persistence; lower concern when the 5136 set stays narrow and artifact/scope checks confirm one recognized security-template task.
+</li>
+<li class="listitem">
+What grants and recipients does the SYSVOL template define?
+</li>
+<li class="listitem">
+Why: the alert proves machine security extensions were enabled; rights or local group membership live in "GptTmpl.inf" under the SYSVOL policy folder.
+</li>
+<li class="listitem">
+Focus: use the policy GUID from the CN portion of <code class="literal">winlog.event_data.ObjectDN</code> with <code class="literal">winlog.event_data.DSName</code> to inspect "Machine/Microsoft/Windows NT/SecEdit/GptTmpl.inf"; map SIDs/groups to admin tier, service-account role, and whether <code class="literal">winlog.event_data.SubjectUserSid</code> benefits. Treat <code class="literal">winlog.event_data.ObjectGUID</code> as the AD object pivot, not the SYSVOL folder name, unless it matches the CN.
+</li>
+<li class="listitem">
+Hint: if SYSVOL is unavailable, preserve <code class="literal">winlog.event_data.ObjectDN</code>, <code class="literal">winlog.event_data.ObjectGUID</code>, <code class="literal">winlog.event_data.DSName</code>, and expected policy path; suspicious writer/session or companion 5136 evidence makes the missing grant an evidence gap.
+</li>
+<li class="listitem">
+Implication: escalate when "[Privilege Rights]" grants high-impact rights ("SeDebugPrivilege", "SeTakeOwnershipPrivilege", "SeEnableDelegationPrivilege", or "SeImpersonatePrivilege"), when "[Group Membership]" adds broad/unexpected identities to local Administrators ("S-1-5-32-544"), or when the writer benefits; lower concern when entries and recipients match the recognized baseline for that GPO.
+</li>
+<li class="listitem">
+Which computers consume the changed GPO?
+</li>
+<li class="listitem">
+Why: GPO privilege abuse scales with link scope, security filtering, WMI filters, and reach to admin workstations, servers, or domain controllers.
+</li>
+<li class="listitem">
+Focus: use <code class="literal">winlog.event_data.ObjectDN</code> and the recovered policy-folder GUID to review GPO links, security filtering, WMI filters, and roles.
+</li>
+<li class="listitem">
+Hint: if scope data is unavailable, preserve <code class="literal">winlog.event_data.ObjectDN</code> and <code class="literal">winlog.event_data.ObjectGUID</code>; do not assume narrow scope, and escalate if writer/session, companion-change, or grant evidence is suspicious.
+</li>
+<li class="listitem">
+Implication: prioritize escalation when the GPO reaches domain controllers, admin workstations, servers, or broad workstations; lower urgency only when scope matches the recognized maintenance/test population established by the grant evidence.
+</li>
+<li class="listitem">
+If evidence remains suspicious or unresolved, do related events show broader abuse?
+</li>
+<li class="listitem">
+Focus: after confirming <code class="literal">user.id</code> is the writer, review recent modifying-account activity. !{investigate{"description":"","label":"Recent events associated with the source account","providers":[[{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: compare with activity scoped to the same <code class="literal">winlog.event_data.ObjectGUID</code>. !{investigate{"description":"","label":"Events associated with the modified GPO","providers":[[{"excluded":false,"field":"winlog.event_data.ObjectGUID","queryType":"phrase","value":"{{winlog.event_data.ObjectGUID}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate scope when the writer or same GPO appears in other GPO abuse, credential access, privilege escalation, or lateral movement; quiet history only narrows scope and cannot close unresolved grant or blast-radius questions.
+</li>
+<li class="listitem">
+Escalate for unexpected writer/session, companion change, high-impact grant, sensitive scope, or related abuse; close only when the same GPO, writer/session, recovered grants, and scope prove one recognized hardening or restricted-groups workflow; if evidence stays mixed or incomplete, preserve GPO artifacts and escalate.
 </li>
 </ul>
 </div>
@@ -142,7 +219,10 @@ Inspect the user security identifiers (SIDs) associated with these privileges, a
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Inspect whether the user that has done the modifications should be allowed to. The user name can be found in the <code class="literal">winlog.event_data.SubjectUserName</code> field.
+Authorized GPO hardening, restricted-groups maintenance, red-team, or detection-validation can update "gPCMachineExtensionNames" and "GptTmpl.inf". Confirm only when writer/session, GPO object, <code class="literal">winlog.event_data.OpCorrelationID</code>, recovered template entries, and linked scope match the admin tier, change window, template, or test plan. Quiet history supports but cannot replace that proof; if any anchor diverges, do not close as benign.
+</li>
+<li class="listitem">
+For exceptions, validate one authorized workflow matching writer SID, GPO object, grant pattern, and linked OU/host scope. Build the exception from that pattern, not broad <code class="literal">event.code</code>, "gPCMachineExtensionNames", or GPO modification activity.
 </li>
 </ul>
 </div>
@@ -161,16 +241,19 @@ Startup/Logon Script added to Group Policy Object - 16fac1a1-21ee-4ca6-b720-458e
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse temporary containment and document writer SID, GPO object, logon/correlation IDs, recovered "GptTmpl.inf", and OU/host scope matching the workflow. Keep exceptions narrow and tied to that stable pattern.
 </li>
 <li class="listitem">
-The investigation and containment must be performed in every computer controlled by the GPO, where necessary.
+If suspicious but unconfirmed, preserve the "5136" event, object and writer/session IDs, <code class="literal">winlog.event_data.OpCorrelationID</code>, <code class="literal">winlog.computer_name</code>, exported "GptTmpl.inf", available SYSVOL metadata, linked "4624"/"4648" events, and related activity before containment. Use reversible controls first: restrict affected-GPO edits, limit the writer&#8217;s GPO admin path, or monitor linked systems during scoping. Disable accounts or roll back GPOs only if follow-on abuse or malicious grants are confirmed.
 </li>
 <li class="listitem">
-Remove the script from the GPO.
+If confirmed malicious, preserve evidence first, remove unauthorized "[Privilege Rights]" or "[Group Membership]" entries, roll the GPO back to known-good state, and verify exported SYSVOL metadata before forcing policy refresh. Use identity/endpoint response to contain the writer account and admin workstation identified by <code class="literal">source.ip</code> or <code class="literal">winlog.logon.type</code>; if unavailable, escalate with writer/session, GPO, correlation, and SYSVOL artifacts.
 </li>
 <li class="listitem">
-Check if other GPOs have suspicious scripts attached.
+Review linked OUs and affected computers before deleting artifacts or forcing "gpupdate"; complete scoping before evidence changes.
+</li>
+<li class="listitem">
+Harden: restrict GPO edit rights to dedicated admin tiers, retain "5136" auditing, keep security-template baselines, and document abuse variants or visibility gaps for detection engineering.
 </li>
 </ul>
 </div>
@@ -178,24 +261,16 @@ Check if other GPOs have suspicious scripts attached.
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_324"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/group-policy-abuse-for-privilege-addition.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_335"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/group-policy-abuse-for-privilege-addition.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
-<p>The <em>Audit Directory Service Changes</em> audit policy must be configured (Success Failure).
-Steps to implement the logging policy with Advanced Audit Configuration:</p>
-<pre class="screen">Computer Configuration &gt;
-Policies &gt;
-Windows Settings &gt;
-Security Settings &gt;
-Advanced Audit Policies Configuration &gt;
-Audit Policies &gt;
-DS Access &gt;
-Audit Directory Service Changes (Success,Failure)</pre>
+<p>Audit Directory Service Changes must be enabled to generate the events used by this rule.
+Setup instructions: <a href="https://ela.st/audit-directory-service-changes" class="ulink" target="_top">https://ela.st/audit-directory-service-changes</a></p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_595"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/group-policy-abuse-for-privilege-addition.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_605"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/group-policy-abuse-for-privilege-addition.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

@@ -125,7 +125,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 315</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 316</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -137,37 +137,93 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1056"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-desktop-shadowing-activity.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1079"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-desktop-shadowing-activity.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Potential Remote Desktop Shadowing Activity</strong></span></p>
-<p>Remote Desktop Shadowing allows administrators to view or control active RDP sessions, aiding in support and troubleshooting. However, adversaries can exploit this feature to monitor or hijack user sessions without consent. The detection rule identifies suspicious modifications to RDP Shadow registry settings and the execution of specific processes linked to shadowing, signaling potential misuse.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the registry event details to confirm if there was a modification to the RDP Shadow registry path, specifically checking for changes in "HKLM\Software\Policies\Microsoft\Windows NT\Terminal Services\Shadow".
+Which RDP shadowing path fired?
 </li>
 <li class="listitem">
-Investigate the process events to identify if "RdpSaUacHelper.exe" or "RdpSaProxy.exe" were started by "svchost.exe", which could indicate unauthorized shadowing activity.
+Focus: <code class="literal">event.category</code>, <code class="literal">process.name</code>, <code class="literal">process.command_line</code>, <code class="literal">registry.path</code>, <code class="literal">registry.data.strings</code>.
 </li>
 <li class="listitem">
-Check for any instances of "mstsc.exe" being executed with the "/shadow:*" argument, as this could signify an attempt to shadow an RDP session.
+Implication: escalate faster for active "mstsc.exe /shadow" use or a <code class="literal">Shadow</code> policy value that removes consent; lower suspicion only when alert-local evidence matches recognized helpdesk, training, or policy-setting activity with consent retained.
 </li>
 <li class="listitem">
-Correlate the identified processes and registry changes with user activity logs to determine if the actions were authorized or expected as part of legitimate administrative tasks.
+Do process identity and lineage fit RDP shadowing components?
 </li>
 <li class="listitem">
-Analyze network logs for any unusual remote connections or lateral movement patterns that coincide with the timing of the detected shadowing activity.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.code_signature.trusted</code>, <code class="literal">process.parent.command_line</code>.
 </li>
 <li class="listitem">
-Consult endpoint security solutions like Microsoft Defender XDR or SentinelOne for additional context or alerts related to the same host or user account involved in the shadowing activity.
+Hint: for registry alerts, recover same-process starts for lineage or command-line detail. !{investigate{"description":"","label":"Process events for the same process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when "mstsc.exe", "RdpSaUacHelper.exe", or "RdpSaProxy.exe" runs from a user-writable path, has an unexpected signer, or has a parent inconsistent with Remote Desktop Services or a support launcher. A trusted Microsoft binary confirms identity, not authorization.
+</li>
+<li class="listitem">
+If the <code class="literal">Shadow</code> registry value fired, did the new setting remove consent or allow control?
+</li>
+<li class="listitem">
+Focus: <code class="literal">registry.path</code>, <code class="literal">registry.data.strings</code> (decimal or hex: <code class="literal">1</code>/<code class="literal">0x00000001</code> = full control with consent, <code class="literal">2</code>/<code class="literal">0x00000002</code> = full control without consent, <code class="literal">3</code>/<code class="literal">0x00000003</code> = view only with consent, <code class="literal">4</code>/<code class="literal">0x00000004</code> = view only without consent), and <code class="literal">process.executable</code>.
+</li>
+<li class="listitem">
+Implication: escalate when <code class="literal">registry.data.strings</code> is <code class="literal">2</code>/<code class="literal">0x00000002</code> (full control, no consent) or <code class="literal">4</code>/<code class="literal">0x00000004</code> (view, no consent) because these allow silent shadowing; treat <code class="literal">1</code>/<code class="literal">0x00000001</code> or <code class="literal">3</code>/<code class="literal">0x00000003</code> as weaker setup evidence because the user is prompted, unless active shadowing or unexplained lineage appears.
+</li>
+<li class="listitem">
+If a process event fired, does it show active session shadowing?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.name</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.name</code>, <code class="literal">process.parent.executable</code>.
+</li>
+<li class="listitem">
+Hint: if <code class="literal">process.command_line</code> is truncated or normalized, verify "/shadow", "/control", and "/noConsentPrompt" boundaries with <code class="literal">process.args</code> before lowering suspicion.
+</li>
+<li class="listitem">
+Implication: escalate when "mstsc.exe" includes "/shadow" with "/control" or "/noConsentPrompt". Treat "RdpSaUacHelper.exe" or "RdpSaProxy.exe" under a service host as active target-side shadowing that escalates when paired with no-consent/control, unexplained lineage, or unrecognized user-host context; a plain "mstsc.exe" launch without shadowing arguments is not enough.
+</li>
+<li class="listitem">
+Does user, host, and session context fit recognized support or training?
+</li>
+<li class="listitem">
+Focus: <code class="literal">user.id</code>, <code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">host.id</code>, <code class="literal">process.Ext.session_info.logon_type</code>.
+</li>
+<li class="listitem">
+Implication: escalate when <code class="literal">user.id</code> targets an unusual workstation, privileged session, or host with no matching shadow-support pattern; lower suspicion only when user-host pairing, session type, and branch evidence match the same recognized workflow.
+</li>
+<li class="listitem">
+Did the same actor prepare, persist, or extend the host-side shadowing activity?
+</li>
+<li class="listitem">
+Focus: <code class="literal">user.id</code>, <code class="literal">process.entity_id</code>, <code class="literal">process.command_line</code>, <code class="literal">registry.path</code>, <code class="literal">registry.data.strings</code>.
+</li>
+<li class="listitem">
+Hint: start with recovered same-process events; expand to same-host process and registry events only when local capability or context remains suspicious. !{investigate{"description":"","label":"Registry events on the host near the alert","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"registry","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the same user or lineage enumerates sessions, prepares alternate-token launch, changes Terminal Services or RDP state, launches admin tooling, or persists shadow settings; absent process or registry evidence narrows the case but does not clear the alert.
+</li>
+<li class="listitem">
+If local findings stay suspicious or unresolved, do related alerts expand scope?
+</li>
+<li class="listitem">
+Focus: related alerts for the same <code class="literal">user.id</code> and <code class="literal">host.id</code>, especially remote-access, credential, remote-service, and persistence alerts.
+</li>
+<li class="listitem">
+Hint: review same-user alerts when local branch and capability questions remain suspicious. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: review same-host alerts when host preparation or follow-on activity remains unresolved. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when related alerts show the same user or host in remote-access, credential, or persistence activity; keep scope narrow only when local evidence fits a recognized workflow and related alerts do not contradict it.
+</li>
+<li class="listitem">
+Using branch, capability, identity, lineage, user-host fit, host-side activity, and related alerts, escalate unauthorized no-consent/control shadowing or stealthy policy relaxation; close only when evidence binds to one recognized support, training, or policy workflow with no contradictions; if mixed or incomplete, preserve process and registry artifacts and escalate.
 </li>
 </ul>
 </div>
@@ -175,16 +231,13 @@ Consult endpoint security solutions like Microsoft Defender XDR or SentinelOne f
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate administrative activities may trigger alerts when IT staff use RDP Shadowing for support. To manage this, create exceptions for known IT administrator accounts or specific IP addresses.
+Helpdesk support, training labs, and supervised administration can legitimately use "mstsc.exe /shadow" or target-side "RdpSa*" helpers. Confirm <code class="literal">process.command_line</code>, <code class="literal">process.name</code>, <code class="literal">process.parent.name</code>, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and any <code class="literal">Shadow</code> value align with the same authorized workflow, without contradictory <code class="literal">process.command_line</code> or <code class="literal">registry.path</code> evidence. Without ticketing or support rosters, require telemetry-only recurrence of the same command pattern, user-host pairing, consent mode, and quiet follow-on profile before closing as benign.
 </li>
 <li class="listitem">
-Scheduled maintenance or automated scripts that modify RDP Shadow registry settings can be mistaken for malicious activity. Identify and exclude these processes or scripts from the detection rule.
+Group Policy or endpoint management tooling can legitimately change <code class="literal">Shadow</code>. Confirm stable <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.parent.command_line</code>, exact <code class="literal">registry.path</code>, and resulting <code class="literal">registry.data.strings</code> match the host class. Without change records or GPO inventories, require quiet recurrence of the same process and registry pattern for the same management scope before closing.
 </li>
 <li class="listitem">
-Security software or monitoring tools that interact with RDP sessions might mimic shadowing behavior. Verify these tools and whitelist their processes to prevent false alerts.
-</li>
-<li class="listitem">
-Training sessions or remote support tools that use RDP Shadowing features can generate alerts. Document and exclude these activities by identifying their unique process names or arguments.
+Before creating an exception, anchor it on the minimum confirmed workflow: <code class="literal">event.category</code>, exact <code class="literal">process.command_line</code> or <code class="literal">registry.path</code>, <code class="literal">registry.data.strings</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code>. Avoid exceptions on <code class="literal">process.name</code>, <code class="literal">registry.value</code>, or <code class="literal">Shadow</code> alone.
 </li>
 </ul>
 </div>
@@ -192,25 +245,25 @@ Training sessions or remote support tools that use RDP Shadowing features can ge
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected system from the network to prevent further unauthorized access or lateral movement.
+If confirmed benign, reverse temporary containment and document the exact <code class="literal">event.category</code>, <code class="literal">process.command_line</code> or <code class="literal">registry.path</code>, <code class="literal">registry.data.strings</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code> that proved the support, training, or policy workflow. Create an exception only after the same narrow pattern recurs.
 </li>
 <li class="listitem">
-Terminate any suspicious processes identified in the alert, such as RdpSaUacHelper.exe, RdpSaProxy.exe, or mstsc.exe with shadowing arguments, to stop potential session hijacking.
+If suspicious but unconfirmed, preserve a case export with the process tree, <code class="literal">process.entity_id</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">registry.path</code>, <code class="literal">registry.value</code>, <code class="literal">registry.data.strings</code>, affected <code class="literal">user.id</code>, affected <code class="literal">host.id</code>, and surrounding preparation or follow-on evidence before changing host state.
 </li>
 <li class="listitem">
-Revert any unauthorized changes to the RDP Shadow registry settings to their default or secure state to prevent further exploitation.
+Apply reversible containment next: restore the <code class="literal">Shadow</code> policy to the pre-change value, disable shadowing with <code class="literal">0</code>, require consent with <code class="literal">1</code> or <code class="literal">3</code>, or restrict the involved account on the affected <code class="literal">host.id</code>. Escalate to host isolation only when shadowing is part of broader session abuse and the host role can tolerate isolation.
 </li>
 <li class="listitem">
-Conduct a thorough review of user accounts and permissions on the affected system to ensure no unauthorized changes have been made, and reset passwords for any compromised accounts.
+If confirmed malicious, isolate the host when feasible, then terminate active "mstsc.exe" or "RdpSa*" shadowing processes after recording their process identifiers and command lines. Revert unauthorized <code class="literal">Shadow</code> and related Terminal Services or RDP shadow permission changes after preservation.
 </li>
 <li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to determine if additional systems are affected.
+Scope other hosts and users tied to the same <code class="literal">user.id</code>, <code class="literal">process.command_line</code>, <code class="literal">registry.path</code>, or <code class="literal">registry.data.strings</code> before removing artifacts or resetting access.
 </li>
 <li class="listitem">
-Implement enhanced monitoring and logging for RDP activities across the network to detect and respond to similar threats more quickly in the future.
+Remove malicious helper scripts or tooling found during scoping, revert unauthorized RDP service or policy changes, and reset credentials that may have been exposed in the shadowed session.
 </li>
 <li class="listitem">
-Review and update RDP access policies and configurations to ensure they align with best practices, such as enforcing multi-factor authentication and limiting RDP access to only necessary users and systems.
+Post-incident hardening: keep <code class="literal">Shadow</code> at the least permissive accepted setting, restrict who can shadow sessions, review RDP-Tcp shadow permissions, and retain process and registry telemetry needed to distinguish support use from no-consent shadowing.
 </li>
 </ul>
 </div>
@@ -218,7 +271,34 @@ Review and update RDP access policies and configurations to ensure they align wi
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1120"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-desktop-shadowing-activity.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_730"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-desktop-shadowing-activity.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-reg-setup" class="ulink" target="_top">Sysmon Registry Events</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1143"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-remote-desktop-shadowing-activity.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -236,8 +316,10 @@ any where host.os.type == "windows" and
 
   ) or
   (event.category == "process" and event.type == "start" and
-     (process.name : ("RdpSaUacHelper.exe", "RdpSaProxy.exe") and process.parent.name : "svchost.exe") or
-     (?process.pe.original_file_name : "mstsc.exe" and process.args : "/shadow:*")
+    (
+      (process.name : ("RdpSaUacHelper.exe", "RdpSaProxy.exe") and process.parent.name : "svchost.exe") or
+      (?process.pe.original_file_name : "mstsc.exe" and process.args : "/shadow:*")
+    )
   )
 )</pre>
 </div>

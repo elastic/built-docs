@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="suspicious-execution-from-a-webdav-share"></a>Suspicious Execution from a WebDav Share</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-execution-from-a-webdav-share.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies attempt to execute Windows scripts from a remote WebDav Share. Adversaries may abuse this method to evade dropping malicious files to victim file system.</p>
+<p>Identifies attempts to execute or invoke content from remote WebDAV shares. Adversaries may abuse WebDAV paths, public tunnels, or host@port UNC paths to run tools or scripts while reducing local staging on the victim file system.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -196,7 +196,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 3</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 4</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -208,7 +208,7 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1338"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-execution-from-a-webdav-share.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1362"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-execution-from-a-webdav-share.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Suspicious Execution from a WebDav Share</strong></span></p>
@@ -216,25 +216,90 @@ Elastic
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Check if the remote webdav server is autorized by the organization.
+Does the alert command line show direct WebDAV execution, and external delivery vs internal transfer?
 </li>
 <li class="listitem">
-Check all the downloaded files from the remote server and their content.
+Focus: <code class="literal">process.command_line</code>, <code class="literal">process.name</code>, and <code class="literal">process.executable</code>; separate public tunnel or tenant paths from internal host@port UNC, "@SSL", "DavWWWRoot", or high-port paths.
 </li>
 <li class="listitem">
-Investigate the process execution chain (parent process tree) to identify the initial vector.
+Implication: escalate when a script host, installer, shell, transfer tool, or net.exe points to public WebDAV content or an unrelated internal transfer host; lower concern when path maps to one recognized internal tenant, vendor, or deployment namespace for that role.
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 5 minutes.
+Do the launcher identity and parent lineage match that exact workflow?
 </li>
 <li class="listitem">
-Identify the user account that performed the action and whether it should perform this kind of action.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.code_signature.trusted</code>, <code class="literal">process.parent.executable</code>, and <code class="literal">process.parent.command_line</code>.
 </li>
 <li class="listitem">
-Identify the target computer and its role in the IT environment.
+Implication: escalate when a signed utility proxies execution from a browser, Office app, chat client, archive tool, or unexplained service context. Public paths from user-facing parents suggest user delivery; internal host@port paths or net.exe share activity suggest lateral transfer. Lower concern when signer, parent, path, host, and user recur as one recognized collaboration, deployment, or support workflow; identity alone does not clear remote execution.
 </li>
 <li class="listitem">
-Investigate what commands were run, and assess whether this behavior is prevalent in the environment by looking for similar occurrences across hosts.
+Did the alerting process spawn follow-on execution or share-mount activity?
+</li>
+<li class="listitem">
+Focus: child or sibling process starts on <code class="literal">host.id</code> where <code class="literal">process.parent.entity_id</code> matches <code class="literal">process.entity_id</code>; check shells, downloaders, installers, schedulers, net.exe, or user-writable <code class="literal">process.executable</code> paths. !{investigate{"description":"","label":"Child process events from the WebDAV launcher","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if <code class="literal">process.entity_id</code> is unavailable, use <code class="literal">host.id</code>, <code class="literal">process.pid</code>, and a tight alert-time window; PID lineage is weaker because of reuse.
+</li>
+<li class="listitem">
+Implication: escalate when the launcher spawns download, install, persistence, or share-mapping tied to the same path; narrow scope when the chain ends cleanly inside one recognized workflow.
+</li>
+<li class="listitem">
+Did file telemetry show local staging or later execution from the WebDAV launch?
+</li>
+<li class="listitem">
+Focus: if file telemetry exists, query <code class="literal">host.id</code> plus <code class="literal">process.entity_id</code> for <code class="literal">file.path</code>, <code class="literal">file.origin_url</code>, <code class="literal">file.Ext.windows.zone_identifier</code>, and later starts where <code class="literal">process.executable</code> matches a written path. !{investigate{"description":"","label":"File events from the WebDAV launcher","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if WebDAV content is copied locally or to a mapped drive before execution, treat it as the same delivery chain and keep original-process scope.
+</li>
+<li class="listitem">
+Range: start with the alert window; expand only after a suspicious write to confirm later execution.
+</li>
+<li class="listitem">
+Implication: escalate when the chain writes scripts, installers, renamed payloads, or startup material in user-writable paths. Missing file telemetry is unresolved, not benign; direct WebDAV execution may leave few local artifacts.
+</li>
+<li class="listitem">
+Did DNS or connection telemetry confirm the WebDAV endpoint or delivery infrastructure?
+</li>
+<li class="listitem">
+Focus: if network telemetry exists, separate DNS events (<code class="literal">dns.question.name</code>, <code class="literal">dns.resolved_ip</code>) from connection events (<code class="literal">destination.ip</code>, <code class="literal">destination.port</code>) for the same <code class="literal">host.id</code> and <code class="literal">process.entity_id</code>. !{investigate{"description":"","label":"Network events from the WebDAV launcher","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: use DNS lookup_result events to map <code class="literal">dns.resolved_ip</code> to later <code class="literal">destination.ip</code> before tying a domain to a connection. Missing network telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Implication: escalate when the process reaches public tunnels, rare external domains, high-port WebDAV services, or destinations unrelated to the signer and parent workflow; lower concern when the endpoint matches the command line&#8217;s recognized tenant, internal share, or vendor.
+</li>
+<li class="listitem">
+If local evidence is suspicious or unresolved, do related alerts show the same WebDAV delivery or transfer pattern?
+</li>
+<li class="listitem">
+Focus: related alerts for <code class="literal">user.id</code> over 48 hours, checking reused WebDAV path, launcher, destination, or follow-on artifact. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if user scope is quiet or ambiguous, check <code class="literal">host.id</code> for whether the path stays local or appears with other execution or download alerts. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when the same path, domain, launcher, or artifact pattern appears beyond one recognized workflow; keep the case local when related-alert history is confined to that workflow.
+</li>
+<li class="listitem">
+Escalate on direct remote WebDAV execution plus suspicious launcher, lineage, child, artifact, destination, or related-alert evidence; close only when process evidence and recovery align to one exact recognized workflow; preserve and escalate when answers conflict or visibility is incomplete.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>False positive analysis</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Tenant collaboration portals, internal WebDAV shares, and vendor content portals can trigger when <code class="literal">process.command_line</code> namespace, <code class="literal">process.parent.executable</code>, <code class="literal">process.executable</code>, signer, <code class="literal">user.id</code>, and <code class="literal">host.id</code> converge on one recognized workflow. Close only when telemetry shows parent, path, utility, user, and host stable across prior rule alerts and no child, artifact, or destination evidence contradicts the portal workflow. Use portal allowlists or owner records as corroboration, not substitutes.
+</li>
+<li class="listitem">
+Deployment or remote-support tooling can run msiexec.exe, powershell.exe, cmd.exe, or bitsadmin.exe against WebDAV-hosted packages. Confirm only when a management-agent or support-console parent, utility identity, signer, package namespace, written-artifact pattern, and host/user scope fit the same workflow. Public tunnel paths, renamed payloads, unexpected children, or one-off standard-user launches remain suspicious unless externally confirmed with no telemetry contradictions.
+</li>
+<li class="listitem">
+Before creating an exception, use the minimum confirmed workflow pattern: stable <code class="literal">process.code_signature.subject_name</code> or <code class="literal">process.executable</code>, <code class="literal">process.parent.executable</code>, specific <code class="literal">process.command_line</code> namespace or destination pattern, and proving <code class="literal">user.id</code> or <code class="literal">host.id</code> scope. Avoid exceptions on <code class="literal">process.name</code>, <code class="literal">user.name</code>, "@SSL", or "DavWWWRoot" alone.
 </li>
 </ul>
 </div>
@@ -242,25 +307,19 @@ Investigate what commands were run, and assess whether this behavior is prevalen
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse temporary containment and document the command-line namespace, parent launcher, utility identity, signer, available destination or artifact evidence, and <code class="literal">user.id</code> / <code class="literal">host.id</code> scope that validated the workflow. Create an exception only after the same scoped pattern is stable across prior rule alerts.
 </li>
 <li class="listitem">
-Isolate the involved hosts to prevent further post-compromise behavior.
+If suspicious but unconfirmed, preserve the alert export, process tree, <code class="literal">process.entity_id</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.command_line</code>, remote path, staged artifacts, and destination indicators before containment. First apply reversible containment, such as temporarily blocking the confirmed WebDAV namespace or increasing monitoring on affected <code class="literal">host.id</code> and <code class="literal">user.id</code>; avoid termination or deletion until child execution, payload staging, or repeated suspicious destinations indicate active compromise.
 </li>
 <li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
+If confirmed malicious, isolate the host when feasible or terminate the alerting process after evidence capture. If identity evidence suggests account misuse, contain or reset the affected account with identity owners. If direct endpoint response is unavailable, hand off preserved process, artifact, destination, host, and user evidence to the team able to contain the host or account.
 </li>
 <li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
+Block confirmed malicious domains, destination IPs, hashes, executable paths, and staged artifact paths. Review other hosts and users for the same <code class="literal">process.parent.executable</code> plus <code class="literal">process.command_line</code> plus destination pattern, then remove only staged scripts, installers, startup material, or persistence changes tied to the chain.
 </li>
 <li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Review the privileges assigned to the user to ensure that the least privilege principle is being followed.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Post-incident hardening: restrict unnecessary WebDAV and WebClient usage, limit direct execution from remote shares by script hosts and installers, use application control or attack surface reduction where feasible, retain file and network telemetry for this workflow, and document variants such as mapped-drive execution, copied-local execution, and alternate script-host launchers.
 </li>
 </ul>
 </div>
@@ -268,7 +327,37 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1386"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-execution-from-a-webdav-share.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_977"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-execution-from-a-webdav-share.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/audit-process-creation" class="ulink" target="_top">Windows Process Creation Logs</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1410"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-execution-from-a-webdav-share.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

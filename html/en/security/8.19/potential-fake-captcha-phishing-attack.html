@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="potential-fake-captcha-phishing-attack"></a>Potential Fake CAPTCHA Phishing Attack</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-fake-captcha-phishing-attack.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies potential fake CAPTCHA phishing attack based on PowerShell or Cmd argument values. Adversaries employ this technique via compromised websites with browser injects, posing either as fake CAPTCHAs to access the site or as a page loading error requiring a fix to display the page. The victim is instructed to copy and past a malicious command to the Windows Run dialog box.</p>
+<p>Identifies potential fake CAPTCHA phishing attacks based on PowerShell, Cmd, or Mshta command-line values. Adversaries employ this technique via compromised websites with browser injects, posing either as fake CAPTCHAs to access the site or as a page loading error requiring a fix to display the page. The victim is instructed to copy and paste a malicious command to the Windows Run dialog box.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -190,7 +190,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 3</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 4</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -202,33 +202,93 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_949"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-fake-captcha-phishing-attack.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_970"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-fake-captcha-phishing-attack.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Potential Fake CAPTCHA Phishing Attack</strong></span></p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the process command line and arguments to identify any malicious intent.
+What does the pasted command do after the CAPTCHA or verification text?
 </li>
 <li class="listitem">
-Review web activity preceeding the alert to identify the initial vector.
+Why: lure text is the wrapper; payload behavior separates clickfix execution from testing or inert copy text.
 </li>
 <li class="listitem">
-Investigate any network activity or child processes from the suspected process.
+Focus: <code class="literal">process.name</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.name</code>, and <code class="literal">process.parent.command_line</code> for URLs, encoded content, inline script, archive handling, or handoff to "mshta.exe", "cmd.exe", or "powershell.exe".
 </li>
 <li class="listitem">
-Correlate the event with other security alerts or logs from the same host or user to identify patterns or additional indicators of compromise.
+Hint: fake-update or page-fix wording is the same abuse path when the command downloads, decodes, or hands execution to another utility.
 </li>
 <li class="listitem">
-Assess the risk and impact of the detected activity by considering the context of the environment, such as the presence of sensitive data or critical systems that might be affected.
+Implication: escalate when the command downloads content, rebuilds a payload, invokes another script host, or hides work after CAPTCHA wording; lower suspicion only for a bounded authorized simulation or lab command with no second-stage behavior.
+</li>
+<li class="listitem">
+Is the shell or proxy binary and launch context consistent with paste-and-run clickfix?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, and <code class="literal">user.id</code>.
+</li>
+<li class="listitem">
+Implication: escalate faster when the binary is renamed, user-writable, or launched from an unusual parent context for the user; a native shell path confirms identity but does not clear suspicious command content.
+</li>
+<li class="listitem">
+Do children from the alerting instance show payload execution or follow-on tooling?
+</li>
+<li class="listitem">
+Focus: child starts where <code class="literal">process.parent.entity_id</code> maps to <code class="literal">process.entity_id</code>, reviewing child <code class="literal">process.executable</code> and <code class="literal">process.command_line</code>. !{investigate{"description":"","label":"Child process starts from the same alerting instance","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if <code class="literal">process.entity_id</code> is absent, recover children with <code class="literal">host.id</code> + <code class="literal">process.pid</code> in a tight alert-time window and treat the match as weaker.
+</li>
+<li class="listitem">
+Implication: escalate when the same shell or "mshta.exe" starts installers, script hosts, archive tools, credential tooling, or more shells; no children reduce scope only if command intent and artifact/destination evidence also stay bounded.
+</li>
+<li class="listitem">
+If file telemetry is available, did the process stage scripts, HTAs, archives, or payloads?
+</li>
+<li class="listitem">
+Focus: process-scoped file events using <code class="literal">host.id</code> + <code class="literal">process.entity_id</code>, or <code class="literal">host.id</code> + <code class="literal">process.pid</code> as fallback, reviewing <code class="literal">file.path</code>, <code class="literal">file.origin_url</code>, and <code class="literal">file.Ext.windows.zone_identifier</code>. !{investigate{"description":"","label":"File activity for the alerting instance","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when artifacts land in temp, downloads, desktop, public, startup, or other user-writable paths, carry internet provenance, or later execute; missing file telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+If network telemetry is available, did the process retrieve payloads or contact callbacks?
+</li>
+<li class="listitem">
+Focus: process-scoped network events using <code class="literal">host.id</code> + <code class="literal">process.entity_id</code>, separating DNS <code class="literal">dns.question.name</code> from connection <code class="literal">destination.ip</code> / <code class="literal">destination.port</code>. !{investigate{"description":"","label":"Network activity for the alerting instance","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if <code class="literal">process.entity_id</code> is absent, use <code class="literal">host.id</code> + <code class="literal">process.pid</code> and a tight alert-time window. Missing network telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Implication: escalate when the same process reaches rare public domains, direct IPs, paste/file hosts, or service ports fitting retrieval or callback behavior; lower suspicion only when destinations belong to the same authorized simulation or lab workflow.
+</li>
+<li class="listitem">
+Do surrounding process events explain the lure path into "explorer.exe"?
+</li>
+<li class="listitem">
+Focus: same <code class="literal">host.id</code> and <code class="literal">user.id</code> process timeline, especially browser, chat, mail, archive, or download-manager starts in <code class="literal">process.name</code>, <code class="literal">process.parent.executable</code>, and <code class="literal">process.parent.command_line</code>. !{investigate{"description":"","label":"Process timeline for the host and user","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when a browser/chat/download chain immediately precedes the paste-run shell or no controlled source explains the lure; lower suspicion when the sequence matches a planned awareness platform or lab harness and the command remains bounded.
+</li>
+<li class="listitem">
+If local findings stay suspicious or unresolved, do related alerts change scope?
+</li>
+<li class="listitem">
+Focus: recent alerts for the same <code class="literal">host.id</code>, then <code class="literal">user.id</code>, emphasizing reuse of the command fragment, shell/proxy binary, recovered artifact, destination, or persistence chain. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: use the user view after the host view, or when a shared host needs actor scoping for the command or lure pattern. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden response when related alerts show the same lure-driven execution pattern on this host or user; quiet alert history does not close the case without a telemetry-backed benign workflow.
+</li>
+<li class="listitem">
+Escalate on clickfix command intent plus suspicious children, staged artifacts, process-scoped destinations, delivery context, or related alerts; close only when alert-local evidence and recovery bind one authorized simulation or lab workflow with no contradiction; if evidence is mixed or visibility incomplete, preserve evidence and escalate.
 </li>
 </ul>
 </div>
@@ -236,7 +296,13 @@ Assess the risk and impact of the detected activity by considering the context o
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate administrative scripts containing the suspicious keywords such as CAPTCHA.
+Security-awareness, phishing-simulation, red-team, malware-analysis, browser-security, and QA labs can intentionally execute fake CAPTCHA samples. Confirm one exact workflow: stable <code class="literal">process.command_line</code> fragment, expected <code class="literal">process.executable</code> and <code class="literal">process.parent.name</code>, bounded <code class="literal">user.id</code> / <code class="literal">host.id</code>, and recovered children, artifacts, and destinations that stay inside the exercise or lab set.
+</li>
+<li class="listitem">
+Without exercise or lab records, close only when telemetry proves the same command fragment, parent context, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and recovered evidence stayed bounded across prior alerts from this rule. Do not close when child execution, artifact staging, destination activity, or related alerts contradict the expected workflow.
+</li>
+<li class="listitem">
+Build exceptions only from the minimum confirmed workflow: command fragment, process identity, parent context, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and any recovered artifact or destination pattern. Avoid exceptions on lure text, "explorer.exe", <code class="literal">process.name</code>, or a user alone.
 </li>
 </ul>
 </div>
@@ -244,25 +310,19 @@ Legitimate administrative scripts containing the suspicious keywords such as CAP
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected system from the network to prevent further spread or communication with potential command and control servers.
+If confirmed benign, reverse temporary containment and record the command, process identity, parent context, <code class="literal">user.id</code>, <code class="literal">host.id</code>, and recovered supporting evidence that proved the authorized simulation or lab workflow. Create an exception only when that exact workflow recurs.
 </li>
 <li class="listitem">
-Terminate any suspicious processes identified by the detection rule to halt ongoing malicious activities.
+If suspicious but unconfirmed, export the alert, process tree, <code class="literal">process.entity_id</code>, <code class="literal">process.command_line</code>, child command lines, volatile state, and any recovered artifact paths, domains, IPs, or ports before containment. Apply reversible controls first, such as temporary destination blocks, browser-session reset, heightened monitoring, or endpoint isolation when retrieval, staging, or second-stage execution makes continued connectivity risky.
 </li>
 <li class="listitem">
-Conduct a thorough scan of the affected system using updated antivirus or endpoint detection and response (EDR) tools to identify and remove any malicious payloads or scripts.
+If confirmed malicious, isolate the host when command intent plus child, artifact, or destination evidence establishes compromise. Terminate the malicious shell, "mshta.exe", or follow-on children only after evidence is recorded, then block confirmed domains, IPs, hashes, or URLs and reset credentials only if the investigation shows account misuse.
 </li>
 <li class="listitem">
-Review and clean up any unauthorized changes to system configurations or scheduled tasks that may have been altered by the malicious PowerShell activity.
+Eradicate only the staged scripts, HTAs, archives, payloads, or persistence artifacts found during the investigation, then remediate the web, chat, mail, or download path that led the user to run the lure.
 </li>
 <li class="listitem">
-Restore any affected files or system components from known good backups to ensure system integrity and functionality.
-</li>
-<li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further analysis and to determine if additional systems are compromised.
-</li>
-<li class="listitem">
-Implement additional monitoring and logging for PowerShell activities across the network to enhance detection of similar threats in the future.
+Post-incident hardening: retain process, file, and network telemetry needed for future clickfix triage; review browser protections, clipboard/paste execution controls, and user-awareness coverage; record the confirmed lure wording and paste-run chain in the case notes.
 </li>
 </ul>
 </div>
@@ -270,7 +330,37 @@ Implement additional monitoring and logging for PowerShell activities across the
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1005"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-fake-captcha-phishing-attack.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_633"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-fake-captcha-phishing-attack.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/audit-process-creation" class="ulink" target="_top">Windows Process Creation Logs</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1026"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-fake-captcha-phishing-attack.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

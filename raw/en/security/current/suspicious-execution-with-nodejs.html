@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="suspicious-execution-with-nodejs"></a>Suspicious Execution with NodeJS</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-execution-with-nodejs.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies suspicious execution patterns using NodeJS interpeter like process path and arguments.</p>
+<p>Identifies suspicious Node.js execution patterns, including user-writable runtimes, preload arguments, and inline eval, decode, or child-process usage.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -89,7 +89,10 @@ winlogbeat-*
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<a href="https://nodejs.org" class="ulink" target="_top">https://nodejs.org</a>
+<a href="https://nodejs.org/api/child_process.html" class="ulink" target="_top">https://nodejs.org/api/child_process.html</a>
+</li>
+<li class="listitem">
+<a href="https://nodejs.org/api/globals.html#atobdata" class="ulink" target="_top">https://nodejs.org/api/globals.html#atobdata</a>
 </li>
 </ul>
 </div>
@@ -134,7 +137,7 @@ Data Source: Crowdstrike
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 3</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 4</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -146,34 +149,93 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1342"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-execution-with-nodejs.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1366"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-execution-with-nodejs.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Suspicious Execution with NodeJS</strong></span></p>
-<p>Windows scripts, often used for legitimate automation tasks, can be exploited by adversaries to execute malicious code. Attackers may download scripts via browsers or file utilities, then execute them using scripting tools like wscript or mshta. The detection rule identifies such threats by monitoring script creation from internet sources and subsequent execution, focusing on unusual parent-child process relationships and script attributes.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Analyze the execution event of the scripting utility (node.exe) to identify the command-line arguments used, which may provide insight into the script&#8217;s intended actions.
+Which Node execution path did the alert capture?
 </li>
 <li class="listitem">
-Review node.exe network, files and child process events for any suspicious activity.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.name</code>, and <code class="literal">process.pe.original_file_name</code>.
 </li>
 <li class="listitem">
-Verify parent and grand parent processes to assess persence of persistence and the potential initial vector.
+Implication: escalate faster when the match is a user-writable AppData "node.exe", PowerShell-launched preload, or inline decode/spawn pattern; lower suspicion when parent and command-line evidence show a recognized version-manager, IDE, package-manager, or test-runner pattern.
 </li>
 <li class="listitem">
-Check the user account associated with the script execution to determine if the activity is expected for that user or if it indicates a compromised account.
+Do the runtime identity and launcher context fit recognized Node use?
 </li>
 <li class="listitem">
-Look for any additional related alerts or logs on the host that might indicate further malicious activity or lateral movement following the script execution.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.code_signature.trusted</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the runtime is unsigned, renamed, mismatched to "node.exe", staged from Temp/AppData outside a recognized toolchain, or launched by PowerShell, Office, a browser, an archive utility, or a download path without matching IDE/package/build context; lower suspicion only when runtime identity and parent chain fit the same recurring Node workflow for that user or host. Identity alone does not clear suspicious arguments.
+</li>
+<li class="listitem">
+What do the arguments show about preload, script, or inline execution intent?
+</li>
+<li class="listitem">
+Why: "-r" / "--require" preloads a module at startup; "child_process" enables OS subprocess creation.
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.command_line</code> and the script or preload path parsed from it.
+</li>
+<li class="listitem">
+Implication: escalate when Node preloads an unexpected module, decodes inline content with <em>atob(</em> or <em>eval(</em>, or references "child_process"; lower suspicion when the target is a recognized preload such as a test harness, transpiler, or source-map helper inside the same project tree.
+</li>
+<li class="listitem">
+If endpoint file telemetry is available, what provenance exists for the script or preload module?
+</li>
+<li class="listitem">
+Focus: recover file events with <code class="literal">host.id</code> + <code class="literal">process.entity_id</code>, or <code class="literal">host.id</code> + <code class="literal">process.pid</code> + a tight alert window as weaker fallback; inspect <code class="literal">file.path</code>, <code class="literal">file.origin_url</code>, <code class="literal">file.Ext.windows.zone_identifier</code>, and <code class="literal">file.Ext.original.path</code>. !{investigate{"description":"","label":"File events for the Node process","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: missing file telemetry is unresolved, not benign; use parsed command-line paths and parent context as weaker evidence.
+</li>
+<li class="listitem">
+Implication: escalate when the script or module was downloaded, extracted, renamed, or staged into AppData/Temp shortly before execution; lower suspicion when it stays in a stable repository, package cache, or product install tree consistent with the parent workflow.
+</li>
+<li class="listitem">
+If child-process or endpoint network telemetry is available, what did Node do next?
+</li>
+<li class="listitem">
+Focus: recover child and network events with <code class="literal">host.id</code> + <code class="literal">process.entity_id</code>, or <code class="literal">host.id</code> + <code class="literal">process.pid</code> + the post-start window as weaker fallback; inspect child <code class="literal">process.name</code> / <code class="literal">process.executable</code>, DNS <code class="literal">dns.question.name</code>, and connection <code class="literal">destination.ip</code> / <code class="literal">destination.port</code>.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Child processes spawned by Node","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Network events for the Node process","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: separate DNS events from connection events before interpreting destinations; missing child or network telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Implication: escalate when Node quickly launches shells, LOLBins, archivers, credential tooling, or reaches externally routable destinations unrelated to the workflow; lower suspicion when child activity and destinations stay bounded to recognized local development, build, package-registry, or deployment services.
+</li>
+<li class="listitem">
+If local evidence stays suspicious or unresolved, do related alerts show broader scripting, download, persistence, or beaconing activity?
+</li>
+<li class="listitem">
+Focus: same-<code class="literal">user.id</code> related alerts or process events, especially PowerShell, archive, downloader, persistence, and outbound-connection activity.
+</li>
+<li class="listitem">
+Hint: if <code class="literal">user.id</code> is missing or ambiguous, review same-host alerts and process events for <code class="literal">host.id</code> in the last 48 hours.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: expand scope when the host or user shows staged payload delivery, repeated Node misuse, persistence, or beaconing; keep scope local when behavior is isolated and local evidence supports one recognized workflow.
+</li>
+<li class="listitem">
+Escalate when branch, runtime, argument, lineage, or recovered artifact/child/network evidence shows staged script, unrecognized preload, inline decode, or spawn abuse; close only when those categories tightly support one recognized workflow with no contradictions; preserve artifacts and escalate when evidence is mixed or incomplete.
 </li>
 </ul>
 </div>
@@ -181,19 +243,10 @@ Look for any additional related alerts or logs on the host that might indicate f
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate script automation tools may trigger this rule if they download and execute scripts from the internet. Users can create exceptions for known safe tools by excluding specific file paths or process names.
+Developer tooling, version managers, IDEs, package managers, and build/test runners can legitimately run "node.exe" from user-space paths or use "-r" preloads. Confirm one workflow: runtime path/hash/signer, parent, command line, and referenced script or preload path all align with the same toolchain. Without inventory or build records, telemetry-only closure requires exact workflow recurrence for the same <code class="literal">user.id</code> or <code class="literal">host.id</code> cohort plus no contradictory file, child-process, or network evidence; do not close on recurrence alone.
 </li>
 <li class="listitem">
-Software updates or installations that download scripts as part of their process might be flagged. To handle this, users can whitelist specific origin URLs or referrer URLs associated with trusted software vendors.
-</li>
-<li class="listitem">
-Internal scripts distributed via corporate intranet sites could be misidentified as threats. Users should consider excluding scripts with known internal origin URLs or specific user IDs associated with IT operations.
-</li>
-<li class="listitem">
-Browser extensions or plugins that automate tasks using scripts may cause false positives. Users can exclude these by identifying and excluding the specific browser process names or file extensions involved.
-</li>
-<li class="listitem">
-Frequent use of file utilities like winrar or 7zFM for legitimate script handling can be excluded by specifying trusted file paths or user IDs that regularly perform these actions.
+Treat partial matches as unresolved. An OpenJS signer, "node.exe" name, or familiar parent does not explain AppData execution, inline decode/eval, or child-process behavior by itself. Before creating an exception, validate recurrence of the same Node binary, argument pattern, parent context, and script or preload path; avoid exceptions on <code class="literal">process.name</code> or <code class="literal">process.code_signature.subject_name</code> alone.
 </li>
 </ul>
 </div>
@@ -201,25 +254,19 @@ Frequent use of file utilities like winrar or 7zFM for legitimate script handlin
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Isolate the affected system from the network to prevent further execution of potentially malicious scripts and lateral movement.
+If confirmed benign, reverse temporary containment and document the exact Node workflow: runtime path/hash/signer, parent launcher, command line, script or preload path, and <code class="literal">user.id</code> / <code class="literal">host.id</code> scope. Create an exception only when the same workflow recurs consistently across prior alerts from this rule.
 </li>
 <li class="listitem">
-Terminate any suspicious processes identified in the alert, such as wscript.exe or mshta.exe, to stop the execution of the downloaded script.
+If suspicious but unconfirmed, preserve the process start event, command line, binary hash/signature, script or preload artifact, child process chain, and any recovered DNS or connection events before containment. Apply reversible containment tied to the finding, such as temporary destination blocking, script quarantine, or heightened monitoring on the affected <code class="literal">host.id</code> and <code class="literal">user.id</code>. Escalate to host isolation only when follow-on execution, persistence, or outbound activity confirms broader compromise and host criticality allows interruption.
 </li>
 <li class="listitem">
-Quarantine the downloaded script file and any associated files to prevent further execution and facilitate forensic analysis.
+If confirmed malicious, preserve <code class="literal">process.entity_id</code> or <code class="literal">process.pid</code> with <code class="literal">host.id</code> and time, parent process context, <code class="literal">process.command_line</code>, <code class="literal">process.hash.sha256</code>, referenced script or preload paths, child-process lineage, and confirmed network indicators before terminating Node or isolating the host. If direct endpoint response is unavailable, hand off that artifact set to the team that can isolate the system or block destinations.
 </li>
 <li class="listitem">
-Conduct a thorough scan of the affected system using updated antivirus or endpoint detection and response (EDR) tools to identify and remove any additional malicious files or remnants.
+Scope related hosts and users for the same runtime hash, suspicious command-line pattern, script/preload paths, child-process lineage, and network indicators before deleting scripts, modules, or staged payloads. Then remove only the malicious artifacts identified during triage and remediate the delivery path or launcher that led to Node execution.
 </li>
 <li class="listitem">
-Review and analyze the origin URL and referrer URL of the downloaded script to identify potential malicious websites or compromised sources, and block these URLs at the network level.
-</li>
-<li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to determine if additional systems are affected.
-</li>
-<li class="listitem">
-Implement application whitelisting to restrict the execution of unauthorized scripts and scripting utilities, reducing the risk of similar threats in the future.
+Post-incident hardening: restrict unrecognized "node.exe" execution from user-writable paths, retain process-start, file-provenance, and network telemetry, and document adjacent variants found during triage, such as renamed Node runtimes, packaged Electron launchers, alternate preload patterns, or <code class="literal">--require</code> abuse without PowerShell.
 </li>
 </ul>
 </div>
@@ -227,7 +274,37 @@ Implement application whitelisting to restrict the execution of unauthorized scr
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1391"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-execution-with-nodejs.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_981"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-execution-with-nodejs.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/audit-process-creation" class="ulink" target="_top">Windows Process Creation Logs</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1415"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-execution-with-nodejs.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -236,7 +313,7 @@ Implement application whitelisting to restrict the execution of unauthorized scr
 (process.name : "node.exe" or ?process.pe.original_file_name == "node.exe" or ?process.code_signature.subject_name : "OpenJS Foundation") and
 
 (
-  (process.executable : ("?:\\Users\\*\\AppData\\*\\node.exe", "\\Device\\HarddiskVolume?\\\\Users\\*\\AppData\\*\\node.exe") and process.args : "*.js") or
+  (process.executable : ("?:\\Users\\*\\AppData\\*\\node.exe", "\\Device\\HarddiskVolume*\\Users\\*\\AppData\\*\\node.exe") and process.args : "*.js") or
 
   (process.args : "-r" and process.parent.name : "powershell.exe") or
 

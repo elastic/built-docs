@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="privilege-escalation-via-named-pipe-impersonation"></a>Privilege Escalation via Named Pipe Impersonation</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privilege-escalation-via-named-pipe-impersonation.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies a privilege escalation attempt via named pipe impersonation. An adversary may abuse this technique by utilizing a framework such Metasploit&#8217;s meterpreter getsystem command.</p>
+<p>Identifies a privilege escalation attempt via named pipe impersonation. An adversary may abuse this technique by utilizing a framework such as Metasploit&#8217;s meterpreter getsystem command.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -140,7 +140,7 @@ Data Source: Crowdstrike
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 318</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 319</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -152,71 +152,75 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1136"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privilege-escalation-via-named-pipe-impersonation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1160"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privilege-escalation-via-named-pipe-impersonation.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Privilege Escalation via Named Pipe Impersonation</strong></span></p>
-<p>A named pipe is a type of inter-process communication (IPC) mechanism used in operating systems like Windows, which allows two or more processes to communicate with each other by sending and receiving data through a well-known point.</p>
-<p>Attackers can abuse named pipes to elevate their privileges by impersonating the security context in which they execute code. Metasploit, for example, creates a service and a random pipe, and then uses the service to connect to the pipe and impersonate the service security context, which is SYSTEM.</p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Note</strong></span>:
-This investigation guide uses the <a href="/guide/en/security/current/invest-guide-run-osquery.html" class="ulink" target="_top">Osquery Markdown Plugin</a> introduced in Elastic Stack version 8.5.0. Older Elastic Stack versions will display unrendered Markdown in this guide.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the process execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+Did the alert process act as a named-pipe client for a SYSTEM-token handoff?
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Why: GetSystem-style abuse pairs a service-context client with a named-pipe server so the server can impersonate the client token; the shell pipe-write is the client-side marker.
 </li>
 <li class="listitem">
-Inspect the host for suspicious or abnormal behavior in the alert timeframe.
+Focus: <code class="literal">process.name</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.command_line</code>, <code class="literal">host.id</code>, and <code class="literal">user.id</code>.
 </li>
 <li class="listitem">
-Investigate any abnormal behavior by the subject process such as network connections, registry or file modifications, and any spawned child processes.
+Implication: escalate when cmd or PowerShell sends a short marker into a named pipe before token impersonation; lower suspicion only when the same pipe name, marker, host, and user match a stable validation pattern.
 </li>
 <li class="listitem">
-Examine the host for derived artifacts that indicate suspicious activities:
+Does the parent and token context fit a service-driven impersonation attempt?
 </li>
 <li class="listitem">
-If any suspicious processes were found, examine the process executable using a private sandboxed analysis system.
+Focus: <code class="literal">process.parent.name</code>, <code class="literal">process.parent.command_line</code>, broader process lineage when needed, <code class="literal">process.Ext.token.integrity_level_name</code>, and <code class="literal">process.Ext.token.elevation_level</code>. !{investigate{"description":"","label":"Process starts on the host near the pipe write","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Observe and collect information about the following activities in both the sandbox and the alert subject host:
+Implication: escalate when services.exe, service-creation command lines, or an unexplained launcher starts the pipe write under high or SYSTEM context; absent or ambiguous token context cannot close the alert without matching identity and follow-on evidence.
 </li>
 <li class="listitem">
-Attempts to contact external domains and addresses.
+Is the launching binary the expected Windows shell or a masqueraded copy?
 </li>
 <li class="listitem">
-Use the Elastic Defend network events to determine domains and addresses contacted by the subject process by filtering by the process' <code class="literal">process.entity_id</code>.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.hash.sha256</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>.
 </li>
 <li class="listitem">
-Examine the DNS cache for suspicious or anomalous entries.
+Implication: escalate when the shell runs from a user-writable or deceptive path, has an untrusted signer, or mismatches its original file name; signed System32 cmd or PowerShell confirms identity only and does not clear the pipe-write behavior.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve DNS Cache","query":"SELECT * FROM dns_cache"}}
+Did the pipe writer launch or enable follow-on SYSTEM activity?
 </li>
 <li class="listitem">
-Use the Elastic Defend registry events to examine registry keys accessed, modified, or created by the related processes in the process tree.
+Focus: child process events from <code class="literal">process.entity_id</code>; review <code class="literal">process.name</code>, <code class="literal">process.command_line</code>, and <code class="literal">process.Ext.token.integrity_level_name</code>. !{investigate{"description":"","label":"Child process starts from the pipe writer","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Examine the host services for suspicious or anomalous entries.
+Implication: escalate when a shell, tool, service helper, or credential-access process follows under high or SYSTEM integrity; absence of child process evidence lowers only follow-on confidence when pipe syntax or service parentage remains suspicious.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve All Services","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services"}}
+Hint: if <code class="literal">process.entity_id</code> is unavailable, use <code class="literal">host.id</code> plus <code class="literal">process.pid</code> in a tight alert-time window and treat matches as weaker.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Services Running on User Accounts","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services WHERE\nNOT (user_account LIKE <em>%LocalSystem</em> OR user_account LIKE <em>%LocalService</em> OR user_account LIKE <em>%NetworkService</em> OR\nuser_account == null)\n"}}
+Is this isolated, or part of repeated named-pipe impersonation behavior?
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Service Unsigned Executables with Virustotal Link","query":"SELECT concat(<em><a href="https://www.virustotal.com/gui/file/" class="ulink" target="_top">https://www.virustotal.com/gui/file/</a></em>, sha1) AS VtLink, name, description, start_type, status, pid,\nservices.path FROM services JOIN authenticode ON services.path = authenticode.path OR services.module_path =\nauthenticode.path JOIN hash ON services.path = hash.path WHERE authenticode.result != <em>trusted</em>\n"}}
+Focus: process starts sharing <code class="literal">host.id</code> or <code class="literal">user.id</code>, marker behavior in <code class="literal">process.command_line</code>, and either <code class="literal">process.parent.name</code> or <code class="literal">process.hash.sha256</code>.
 </li>
 <li class="listitem">
-Retrieve the files' SHA-256 hash values using the PowerShell <code class="literal">Get-FileHash</code> cmdlet and search for the existence and reputation of the hashes in resources like VirusTotal, Hybrid-Analysis, CISCO Talos, Any.run, etc.
+!{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate scope when repeats cross hosts, users, hashes, or parent chains; keep response local only when all repeats stay inside the same process-evidenced validation pattern.
+</li>
+<li class="listitem">
+Range: start with the alert window; expand only if local evidence is suspicious or unresolved.
+</li>
+<li class="listitem">
+Escalate on suspicious pipe-write syntax, parent/token context, binary identity, follow-on process activity, or host/user scope; close only when all evidence matches a stable validation pattern with no contradictions; preserve artifacts and escalate when evidence is mixed or incomplete.
 </li>
 </ul>
 </div>
@@ -224,7 +228,25 @@ Retrieve the files' SHA-256 hash values using the PowerShell <code class="litera
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This activity is unlikely to happen legitimately. Benign true positives (B-TPs) can be added as exceptions if necessary.
+Routine administration should not require shell echo redirection into a named pipe for privilege escalation. Controlled security validation is the narrow benign path; process evidence must prove the exact pattern:
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Identity</strong></span>: <code class="literal">process.executable</code>, <code class="literal">process.hash.sha256</code>, signer, and <code class="literal">process.parent.command_line</code> match the validation toolchain.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Pipe syntax</strong></span>: <code class="literal">process.command_line</code> shows the expected pipe name, echo value, and wrapper syntax for that test.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Scope</strong></span>: <code class="literal">host.id</code> and <code class="literal">user.id</code> stay inside the known test target and operator scope.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Follow-on</strong></span>: child process starts do not show unexpected high or SYSTEM activity outside the test plan.
+</li>
+<li class="listitem">
+If telemetry cannot prove the test scope or toolchain, outside confirmation can corroborate the case but cannot override contradictory process evidence; otherwise preserve and escalate.
+</li>
+<li class="listitem">
+Build exceptions only from the minimum confirmed validation pattern: stable <code class="literal">process.hash.sha256</code>, <code class="literal">process.executable</code>, <code class="literal">process.parent.command_line</code>, constrained <code class="literal">host.id</code> or <code class="literal">user.id</code>, and the specific pipe-write shape in <code class="literal">process.command_line</code>. Avoid exceptions on <code class="literal">process.name</code>, cmd or PowerShell alone, or a pipe name alone.
 </li>
 </ul>
 </div>
@@ -232,40 +254,49 @@ This activity is unlikely to happen legitimately. Benign true positives (B-TPs) 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign:
 </li>
 <li class="listitem">
-Isolate the involved host to prevent further post-compromise behavior.
+Reverse any temporary containment and document the evidence that confirmed the validation workflow: pipe syntax, parent/token context, binary identity, <code class="literal">host.id</code>, <code class="literal">user.id</code>, and lack of unexpected follow-on SYSTEM activity.
 </li>
 <li class="listitem">
-If the triage identified malware, search the environment for additional compromised hosts.
+If suspicious but unconfirmed:
 </li>
 <li class="listitem">
-Implement temporary network rules, procedures, and segmentation to contain the malware.
+Preserve the alert, process tree, command lines, parent and child process records, <code class="literal">process.entity_id</code>, <code class="literal">process.pid</code>, hashes, and the named-pipe string before termination, cleanup, or credential actions.
 </li>
 <li class="listitem">
-Stop suspicious processes.
+Apply reversible containment tied to the findings, such as isolating the endpoint after weighing host criticality or restricting the affected account/session while investigation continues.
 </li>
 <li class="listitem">
-Immediately block the identified indicators of compromise (IoCs).
+Do not terminate cmd, PowerShell, or child processes until the process identifiers, command lines, and any volatile state needed by responders are captured.
 </li>
 <li class="listitem">
-Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
+If confirmed malicious:
 </li>
 <li class="listitem">
-Remove and block malicious artifacts identified during triage.
+Isolate the endpoint after preservation when parent/token, identity, or follow-on process evidence confirms unauthorized SYSTEM activity.
 </li>
 <li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
+Suspend or terminate the pipe writer and follow-on processes only after recording their entity IDs, PIDs, command lines, hashes, and parent relationships.
 </li>
 <li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
+Reset credentials or revoke sessions for affected users only when process/session evidence indicates account misuse or credential exposure.
 </li>
 <li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
+Eradicate only malicious tools, service definitions, binaries, scripts, and configuration changes confirmed during the investigation, then remediate the entry vector that allowed the named-pipe impersonation attempt.
 </li>
 <li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Post-incident hardening:
+</li>
+<li class="listitem">
+Restrict local admin and service-creation rights that allow untrusted tooling to create SYSTEM service clients.
+</li>
+<li class="listitem">
+Retain command-line, parent/child process, and token-integrity telemetry because those fields distinguish testing from GetSystem abuse.
+</li>
+<li class="listitem">
+Document the confirmed benign validation pattern or malicious artifact set so future analysts can separate repeat testing from repeat abuse.
 </li>
 </ul>
 </div>
@@ -273,7 +304,37 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1202"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privilege-escalation-via-named-pipe-impersonation.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_802"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privilege-escalation-via-named-pipe-impersonation.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/crowdstrike-integration" class="ulink" target="_top">CrowdStrike</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/audit-process-creation" class="ulink" target="_top">Windows Process Creation Logs</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1226"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/privilege-escalation-via-named-pipe-impersonation.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

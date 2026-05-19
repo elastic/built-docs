@@ -191,7 +191,7 @@ Data Source: SentinelOne
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 207</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 208</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -203,26 +203,86 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1495"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-execution-via-microsoft-common-console-file.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1520"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-execution-via-microsoft-common-console-file.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Unusual Execution via Microsoft Common Console File</strong></span></p>
+<p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the source of the MSC file.
+What ".msc" path and immediate child process triggered the alert?
 </li>
 <li class="listitem">
-Investigate the process execution chain (all spawned child processes and their descendants).
+Focus: <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.args</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">process.executable</code>, and <code class="literal">process.command_line</code>.
 </li>
 <li class="listitem">
-Investigate the process and it&#8217;s descendants network and file events.
+Implication: escalate when "mmc.exe" opens a user-writable, download, cloud-sync, archive-extraction, or document-like ".msc" and the child is a shell, script host, "mshta.exe", "schtasks.exe", or another LOLBin; lower suspicion only when the exact ".msc" path and child command fit a recognized administrative console workflow on this host.
 </li>
 <li class="listitem">
-Identify the user account that performed the action and whether it should perform this kind of action.
+Does the child command line expose second-stage or persistence intent?
 </li>
 <li class="listitem">
-Contact the account owner and confirm whether they are aware of this activity.
+Focus: <code class="literal">process.command_line</code>, checking for "WScript.Shell", "schtasks /create", "OneDriveUpdate", "wscript.exe /b", "start /min", "mshta", ".hta", remote URLs, or script/batch names.
+</li>
+<li class="listitem">
+Hint: review same-child file and network events for staged scripts, task artifacts, or remote retrieval. Missing network telemetry is unresolved, not benign. !{investigate{"description":"","label":"File and network events for the MMC-launched child","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the command creates tasks, hides/minimizes execution, starts script hosts, or embeds remote retrieval; lower suspicion only when the arguments perform a narrow helper action expected from the same console.
+</li>
+<li class="listitem">
+Does the child identity and session context fit expected administration?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.code_signature.trusted</code>, <code class="literal">process.Ext.relative_file_creation_time</code>, and the <code class="literal">user.id</code> + <code class="literal">host.id</code> pair.
+</li>
+<li class="listitem">
+Implication: escalate when the child runs from a user-writable or recently created path, has a signer mismatch, or appears under an unexpected administrative user/session; identity confirmation alone never clears an unsafe command line.
+</li>
+<li class="listitem">
+Do descendants continue the MSC-launched chain into scripting, tasks, or delayed execution?
+</li>
+<li class="listitem">
+Why: MSC lures can store task commands that create a scheduled task, run VBS, then launch HTA through "mshta.exe"; the first child may be only the handoff.
+</li>
+<li class="listitem">
+Focus: descendant starts on the same <code class="literal">host.id</code>, linked by <code class="literal">process.parent.entity_id</code> or <code class="literal">process.Ext.ancestry</code>, checking <code class="literal">process.name</code> and <code class="literal">process.command_line</code>. !{investigate{"description":"","label":"Descendant processes from the MMC-launched child","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if entity linkage is absent, match <code class="literal">process.parent.pid</code> to the alerting <code class="literal">process.pid</code> within a tight alert-time window and treat matches as weaker.
+</li>
+<li class="listitem">
+Hint: after a suspicious descendant, expand that descendant&#8217;s file and network events from Timeline.
+</li>
+<li class="listitem">
+Implication: escalate when descendants show "cmd.exe", "wscript.exe", "cscript.exe", "mshta.exe", "powershell.exe", "pwsh.exe", "schtasks.exe", repeated shells, Microsoft-themed task names, or command-line URLs; lower suspicion when the tree ends at one expected helper with no delayed script or task process.
+</li>
+<li class="listitem">
+If local evidence remains suspicious or unresolved, what related alerts change scope or containment?
+</li>
+<li class="listitem">
+Focus: related alerts for the same <code class="literal">user.id</code>, especially document delivery, script execution, task creation, or outbound staging. !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: review same-<code class="literal">host.id</code> alerts to separate one-host lure execution from repeated activity across assets. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden containment when the same user or host also shows initial-access, script-host, scheduled-task, or outbound-staging alerts; keep response local when those alerts are absent, but leave benign closure to the process-chain synthesis.
+</li>
+<li class="listitem">
+Escalate for lure-driven ".msc" execution, script staging, scheduled-task creation, remote retrieval, or suspicious descendants; close only when alert-local evidence and process recovery bind one exact recognized console workflow with no contradictory descendants; preserve artifacts and escalate when evidence is mixed or visibility incomplete.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>False positive analysis</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Custom administrative consoles, vendor MMC snap-ins, or IT troubleshooting bundles stored outside default Windows console paths can launch helpers, browsers, viewers, or support utilities. Confirm that <code class="literal">process.parent.args</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code> all align with one exact console package or affected cohort. If inventory, ticketing, or owner confirmation is unavailable, close only when process and descendant telemetry still prove that helper workflow with no unresolved script, task, hidden execution, or remote-retrieval behavior.
+</li>
+<li class="listitem">
+Before creating an exception, validate prior alerts from this rule for the same ".msc" path in <code class="literal">process.parent.args</code>, child <code class="literal">process.executable</code>, signer in <code class="literal">process.code_signature.subject_name</code>, stable <code class="literal">process.command_line</code>, and bounded <code class="literal">user.id</code> and <code class="literal">host.id</code> scope. Build the exception from that full workflow pattern; avoid exceptions on <code class="literal">process.parent.name</code> value "mmc.exe" or the child <code class="literal">process.executable</code> alone.
 </li>
 </ul>
 </div>
@@ -230,40 +290,19 @@ Contact the account owner and confirm whether they are aware of this activity.
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign, reverse any temporary containment and document the exact ".msc" path, child command pattern, signer, <code class="literal">user.id</code>, and <code class="literal">host.id</code>. Create an exception only after the same workflow pattern recurs consistently across prior alerts from this rule.
 </li>
 <li class="listitem">
-Isolate the involved host to prevent further post-compromise behavior.
+If suspicious but unconfirmed, preserve a case export for the alerting process instance (<code class="literal">host.id</code> plus <code class="literal">process.entity_id</code> or <code class="literal">process.pid</code> and alert time), the parent MSC path, child and descendant command lines, executable hash/signer, task names, script names, and URLs visible in command lines before making destructive changes. Apply reversible containment first, such as temporary URL/domain blocking, disabling a newly created scheduled task after preserving its command, or heightened monitoring on the affected <code class="literal">host.id</code> and <code class="literal">user.id</code>.
 </li>
 <li class="listitem">
-If the triage identified malware, search the environment for additional compromised hosts.
+If confirmed malicious, isolate the host or contain the affected account only after preserving the process chain, scheduled-task names, script names, hashes, and command-line indicators. Terminate malicious child or descendant processes after preservation, block confirmed command-line URLs or domains, and hand off the preserved artifact set if endpoint response is unavailable.
 </li>
 <li class="listitem">
-Implement temporary network rules, procedures, and segmentation to contain the malware.
+Eradicate only the malicious ".msc", scripts, scheduled tasks, and staged payloads identified during the investigation, then remediate the delivery path that let the lure execute. Review related hosts and users for the same <code class="literal">process.parent.args</code> path or descendant <code class="literal">process.command_line</code> pattern before broad cleanup.
 </li>
 <li class="listitem">
-Stop suspicious processes.
-</li>
-<li class="listitem">
-Immediately block the identified indicators of compromise (IoCs).
-</li>
-<li class="listitem">
-Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
-</li>
-<li class="listitem">
-Remove and block malicious artifacts identified during triage.
-</li>
-<li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
-</li>
-<li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
-</li>
-<li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Post-incident hardening: restrict or warn on ".msc" launches from user-writable, download, archive-extraction, or cloud-sync paths, and retain process lineage and command-line telemetry needed to distinguish future admin consoles from MSC lures.
 </li>
 </ul>
 </div>
@@ -271,7 +310,31 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1551"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-execution-via-microsoft-common-console-file.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_1115"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-execution-via-microsoft-common-console-file.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1576"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unusual-execution-via-microsoft-common-console-file.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

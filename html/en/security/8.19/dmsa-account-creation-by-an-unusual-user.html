@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="dmsa-account-creation-by-an-unusual-user"></a>dMSA Account Creation by an Unusual User</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/dmsa-account-creation-by-an-unusual-user.asciidoc">edit</a></div>
 </div></div></div>
-<p>Detects the creation of a delegated Managed Service Account by an unusual subject account. Attackers can abuse the dMSA account migration feature to elevate privileges abusing weak persmission allowing users child objects rights or msDS-DelegatedManagedServiceAccount rights.</p>
+<p>Detects creation of a delegated Managed Service Account by an unusual subject account. Attackers can abuse weak child-object or msDS-DelegatedManagedServiceAccount rights during account migration to elevate privileges.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: new_terms</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -173,7 +173,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 4</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 5</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -185,7 +185,7 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1629"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/dmsa-account-creation-by-an-unusual-user.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1654"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/dmsa-account-creation-by-an-unusual-user.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating dMSA Account Creation by an Unusual User</strong></span></p>
@@ -193,16 +193,76 @@ Elastic
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Examine the winlog.event_data.SubjectUserName field and verify if he is allowed and used to create dMSA accounts.
+What dMSA object did the alert show, and where was it created?
 </li>
 <li class="listitem">
-Examine all Active Directory modifications performed by the winlog.event_data.SubjectUserName.
+Focus: use <code class="literal">winlog.event_data.ObjectClass</code>, <code class="literal">winlog.event_data.ObjectDN</code>, <code class="literal">winlog.event_data.ObjectGUID</code>, <code class="literal">winlog.event_data.SubjectUserName</code>, and <code class="literal">winlog.computer_name</code> to identify the new msDS-DelegatedManagedServiceAccount, new-to-this-rule writer, and controller.
 </li>
 <li class="listitem">
-Investigate the history of the identified user account to determine if there are any other suspicious activities or patterns of behavior.
+Implication: escalate when the object is in a privileged service, sync, backup, DC, or identity-infrastructure path, or when name or writer lacks a narrow service-account purpose; lower only when DN, writer, and controller match one exact planned dMSA rollout or lab path.
 </li>
 <li class="listitem">
-Collaborate with the IT or security team to determine if the changes were authorized or if further action is needed to secure the environment.
+Did the same dMSA receive migration or privilege-enabling attributes?
+</li>
+<li class="listitem">
+Why: BadSuccessor-style abuse elevates creation with <code class="literal">5136</code> changes such as msDS-ManagedAccountPrecededByLink, msDS-DelegatedMSAState, SPNs, delegation attributes, or gMSA membership.
+</li>
+<li class="listitem">
+Focus: review same-object <code class="literal">5136</code> and <code class="literal">5137</code> records on this controller with <code class="literal">winlog.event_data.ObjectGUID</code>, comparing <code class="literal">winlog.event_data.AttributeLDAPDisplayName</code>, <code class="literal">winlog.event_data.AttributeValue</code>, and <code class="literal">winlog.event_data.ObjectDN</code>. !{investigate{"description":"","label":"Directory changes for the same dMSA object on this controller","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"winlog.event_data.ObjectGUID","queryType":"phrase","value":"{{winlog.event_data.ObjectGUID}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"5137","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"winlog.event_data.ObjectGUID","queryType":"phrase","value":"{{winlog.event_data.ObjectGUID}}","valueType":"string"},{"excluded":false,"field":"event.code","queryType":"phrase","value":"5136","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if same-controller results have gaps, repeat the <code class="literal">winlog.event_data.ObjectGUID</code> search across DC Windows Security logs before treating missing follow-on changes as lower risk.
+</li>
+<li class="listitem">
+Implication: escalate when values link the dMSA to a privileged predecessor, advance migration state, or add SPN/delegation material; lower suspicion only when attributes form one bounded migration to the intended legacy service account.
+</li>
+<li class="listitem">
+Who created the dMSA, and what session reached the domain controller?
+</li>
+<li class="listitem">
+Focus: identify writer and session with <code class="literal">winlog.event_data.SubjectUserSid</code> and <code class="literal">winlog.event_data.SubjectLogonId</code>, then recover <code class="literal">source.ip</code>, <code class="literal">winlog.logon.type</code>, and <code class="literal">winlog.event_data.AuthenticationPackageName</code>. !{investigate{"description":"","label":"Authentication events for the writer session on this controller","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"winlog.event_data.TargetLogonId","queryType":"phrase","value":"{{winlog.event_data.SubjectLogonId}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: this pivot uses <code class="literal">winlog.event_data.TargetLogonId</code> for <code class="literal">4624</code> or <code class="literal">4634</code>; search <code class="literal">4648</code> separately with <code class="literal">winlog.event_data.SubjectLogonId</code> when explicit-credential use matters. Missing authentication telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+Implication: escalate for an unexpected human, helpdesk account, low-privilege service identity, unusual source, interactive/RDP session, or explicit-credential path; lower suspicion only when actor and source match the narrow identity-management path for this object.
+</li>
+<li class="listitem">
+Did the same session touch other directory objects?
+</li>
+<li class="listitem">
+Focus: compare surrounding <code class="literal">5137</code> and <code class="literal">5136</code> records on the same <code class="literal">host.id</code> for <code class="literal">winlog.event_data.SubjectLogonId</code>, reading <code class="literal">winlog.event_data.ObjectDN</code>, <code class="literal">winlog.event_data.ObjectClass</code>, and <code class="literal">winlog.event_data.AttributeLDAPDisplayName</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the session creates multiple dMSAs, edits ACLs, changes delegation, or touches unrelated privileged users, computers, groups, or service accounts; lower when every change stays tied to one bounded dMSA rollout.
+</li>
+<li class="listitem">
+Did the new dMSA get used from systems that should not touch it?
+</li>
+<li class="listitem">
+Focus: derive the dMSA from the CN in <code class="literal">winlog.event_data.ObjectDN</code>, confirm it in <code class="literal">winlog.event_data.TargetUserName</code>, then review <code class="literal">4624</code> records for <code class="literal">source.ip</code>, <code class="literal">winlog.logon.type</code>, and <code class="literal">winlog.event_data.AuthenticationPackageName</code>; search <code class="literal">4648</code> separately for explicit credential use.
+</li>
+<li class="listitem">
+Hint: absent dMSA authentication is a timing or visibility gap, not proof creation is harmless.
+</li>
+<li class="listitem">
+Implication: escalate when the dMSA authenticates from unexpected servers, workstations, jump hosts, or non-service logon types; lower suspicion only when use stays inside the exact service host set for the confirmed rollout.
+</li>
+<li class="listitem">
+If local evidence is suspicious or incomplete, do related Windows Security events show broader AD abuse?
+</li>
+<li class="listitem">
+Focus: review events for writer <code class="literal">user.id</code>, then compare records referencing the new <code class="literal">winlog.event_data.ObjectGUID</code>. !{investigate{"description":"","label":"Windows Security events associated with the modifying account","providers":[[{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}],[{"excluded":false,"field":"winlog.event_data.SubjectUserSid","queryType":"phrase","value":"{{winlog.event_data.SubjectUserSid}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: use the object-event view for shadow credentials, delegation abuse, unusual service changes, or other AD tampering tied to the same dMSA. !{investigate{"description":"","label":"Windows Security events associated with the new dMSA object","providers":[[{"excluded":false,"field":"winlog.event_data.ObjectGUID","queryType":"phrase","value":"{{winlog.event_data.ObjectGUID}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate and expand scope when either entity is tied to privilege abuse, directory tampering, or suspicious authentication; keep scope to this object when related events are quiet, but do not close solely because no other event exists.
+</li>
+<li class="listitem">
+Escalate for sensitive placement, privileged migration links, unexpected writer/session context, broader directory edits, unexpected dMSA authentication, or related AD-abuse events; close only when telemetry and outside confirmation prove one exact planned migration or lab activity; if mixed or incomplete, preserve directory-change and session evidence and escalate.
 </li>
 </ul>
 </div>
@@ -210,7 +270,13 @@ Collaborate with the IT or security team to determine if the changes were author
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Migration of legacy service accounts using delegated managed service account.
+Planned dMSA rollout or service-account migration can legitimately create msDS-DelegatedManagedServiceAccount objects. Confirm expected <code class="literal">winlog.event_data.ObjectDN</code>, same-object <code class="literal">5136</code> attributes limited to the intended legacy service account, and <code class="literal">winlog.event_data.SubjectUserSid</code>, recovered <code class="literal">source.ip</code>, and <code class="literal">winlog.logon.type</code> matching the narrow migration account and host path. If change records, migration tickets, or owner confirmation are unavailable, leave unresolved unless telemetry proves the exact authorized workflow.
+</li>
+<li class="listitem">
+Lab validation or staged service-account modernization can also trigger this rule. Confirm <code class="literal">winlog.event_data.ObjectDN</code> stays in the test/staging OU, the same <code class="literal">winlog.event_data.SubjectLogonId</code> avoids unrelated privileged objects, and any <code class="literal">winlog.event_data.TargetUserName</code>, <code class="literal">source.ip</code>, or <code class="literal">winlog.logon.type</code> activity stays limited to designated test systems. If test scope lacks outside confirmation, treat the alert as unresolved.
+</li>
+<li class="listitem">
+Before creating an exception, validate exact writer <code class="literal">winlog.event_data.SubjectUserSid</code>, dMSA path pattern, bounded same-object <code class="literal">5136</code> attributes, controller path, and recovered source. Use a temporary or tightly scoped exception for one-time migrations, and avoid exceptions on event <code class="literal">5137</code>, all msDS-DelegatedManagedServiceAccount objects, or all dMSA creation activity.
 </li>
 </ul>
 </div>
@@ -218,19 +284,19 @@ Migration of legacy service accounts using delegated managed service account.
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately disable the winlog.event_data.SubjectUserName account and revert all changes performed by that account.
+If confirmed benign, reverse any temporary containment and document the evidence that proved the authorized workflow: <code class="literal">winlog.event_data.SubjectUserSid</code>, <code class="literal">winlog.event_data.ObjectDN</code>, same-object <code class="literal">5136</code> sequence, recovered <code class="literal">source.ip</code>, <code class="literal">winlog.logon.type</code>, and exact rollout or lab scope.
 </li>
 <li class="listitem">
-Identify and isolate the source machines from where the SubjectUserName is authenticating.
+If suspicious but unconfirmed, preserve a case export with the triggering <code class="literal">5137</code>, related same-object <code class="literal">5136</code> records, recovered <code class="literal">4624</code> or <code class="literal">4648</code> records, and key object/session identifiers before containment. Apply reversible containment first, such as temporary DC access restrictions for the recovered source or heightened monitoring on the writer and dMSA. Disable the writer or isolate the source host only if privileged follow-on changes, unexpected authentication, or related events appear.
 </li>
 <li class="listitem">
-Reset passwords for all accounts that were potentially affected or had their permissions altered, focusing on privileged accounts to prevent adversaries from regaining access.
+If confirmed malicious, preserve the same directory-change and session evidence first, then remove the unauthorized dMSA and roll back related msDS-ManagedAccountPrecededByLink, msDS-DelegatedMSAState, SPN, delegation, or membership changes found in the same-object sequence. Isolate the recovered source host when endpoint response is available and host criticality permits, then disable or reset the compromised writer and any linked service accounts.
 </li>
 <li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to determine the scope of the breach, including identifying any other compromised systems or accounts.
+Before deleting objects or closing the case, review hosts and services that used the new dMSA, verify rollback replication across domain controllers, then rotate affected secrets or restore service bindings.
 </li>
 <li class="listitem">
-Review and update access control policies and security configurations to prevent similar attacks, ensuring that only authorized personnel have the ability to modify critical Active Directory objects or create OU child objects.
+Post-incident hardening: restrict who can create dMSAs or start service-account migration, review CreateChild and delegated managed service account rights on service-account OUs, retain <code class="literal">5136</code>, <code class="literal">5137</code>, <code class="literal">4624</code>, and <code class="literal">4648</code> coverage on domain controllers, and record the confirmed workflow or BadSuccessor evidence pattern for future triage.
 </li>
 </ul>
 </div>
@@ -238,7 +304,16 @@ Review and update access control policies and security configurations to prevent
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1651"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/dmsa-account-creation-by-an-unusual-user.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_1232"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/dmsa-account-creation-by-an-unusual-user.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>Audit Directory Service Changes must be enabled to generate the events used by this rule.
+Setup instructions: <a href="https://ela.st/audit-directory-service-changes" class="ulink" target="_top">https://ela.st/audit-directory-service-changes</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1676"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/dmsa-account-creation-by-an-unusual-user.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

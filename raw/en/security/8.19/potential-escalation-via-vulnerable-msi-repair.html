@@ -122,7 +122,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 206</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 207</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -134,37 +134,90 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_940"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-escalation-via-vulnerable-msi-repair.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_961"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-escalation-via-vulnerable-msi-repair.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Potential Escalation via Vulnerable MSI Repair</strong></span></p>
-<p>Windows Installer (MSI) is a service used for software installation and maintenance. Adversaries exploit vulnerabilities in MSI repair functions to gain elevated privileges. This detection rule identifies suspicious activity by monitoring browser processes accessing Microsoft Help pages, followed by elevated process creation, indicating potential privilege escalation attempts.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the alert details to identify the specific browser process that accessed the Microsoft Help page, noting the process name and command line details.
+What did the elevated browser parent launch?
 </li>
 <li class="listitem">
-Check the user domain associated with the process to confirm if it matches "NT AUTHORITY", "AUTORITE NT", or "AUTORIDADE NT", which may indicate a system-level account was used.
+Why: MSI repair abuse can expose a SYSTEM browser through a help-link redirect; a non-browser child marks the privilege-escalation boundary.
 </li>
 <li class="listitem">
-Investigate the parent process of the browser to determine if it was expected or if it shows signs of compromise or unusual behavior.
+Focus: <code class="literal">process.parent.command_line</code>, <code class="literal">process.name</code>, <code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, and <code class="literal">process.Ext.token.integrity_level_name</code>.
 </li>
 <li class="listitem">
-Examine the timeline of events to see if an elevated process was spawned shortly after the browser accessed the Microsoft Help page, indicating potential exploitation.
+Implication: escalate when a Microsoft Help-tied browser launches a SYSTEM or high-integrity shell, script host, installer, admin utility, file manager, or user-writable binary; lower concern only when the command line shows a browser-internal role, path and signer match the parent browser family, and no non-browser child appears in the alert window.
 </li>
 <li class="listitem">
-Correlate the event with other security logs or alerts from data sources like Elastic Endgame, Sysmon, or Microsoft Defender XDR to gather additional context or evidence of malicious activity.
+Does the lineage fit an MSI repair-to-help-link path?
 </li>
 <li class="listitem">
-Assess the risk and impact of the elevated process by identifying its actions and any changes made to the system, such as modifications to critical files or registry keys.
+Focus: <code class="literal">process.parent.entity_id</code>, <code class="literal">process.parent.pid</code>, surrounding <code class="literal">process.name</code>, and <code class="literal">process.command_line</code>.
+</li>
+<li class="listitem">
+Implication: escalate when ancestry or surrounding starts show MSI repair, installer custom actions, console activity, or an unexpected SYSTEM browser before the child; lower concern when the chain stays inside browser self-maintenance without repair, console, or custom-action ancestry.
+</li>
+<li class="listitem">
+Hint: recover the parent browser event first. If parentage is incomplete, inspect <code class="literal">process.Ext.ancestry</code>; if entity IDs are absent, use <code class="literal">host.id</code>, <code class="literal">process.parent.pid</code>, and a tight alert window. !{investigate{"description":"","label":"SYSTEM browser parent process event","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.parent.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Is the child process identity expected for the host and signer?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>, <code class="literal">process.code_signature.trusted</code>, and <code class="literal">process.Ext.relative_file_creation_time</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the child runs from a user-writable or temporary path, has a mismatched original file name, lacks a trusted signer, or was recently created; lower concern only when signer, path, age, and browser parent context all fit the same recognized component.
+</li>
+<li class="listitem">
+What follow-on process activity came from the same SYSTEM browser or spawned child?
+</li>
+<li class="listitem">
+Focus: same-host starts from the browser <code class="literal">process.parent.entity_id</code> or child <code class="literal">process.entity_id</code>: <code class="literal">process.name</code>, <code class="literal">process.command_line</code>, and <code class="literal">process.Ext.token.integrity_level_name</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the browser or child launches shells, scripts, persistence or administration tools, additional installers, or chained SYSTEM processes; keep scope local when activity stops at browser helpers with no privileged child chain.
+</li>
+<li class="listitem">
+Hint: prefer <code class="literal">host.id</code> plus parent or child <code class="literal">process.entity_id</code>; use <code class="literal">host.id</code>, <code class="literal">process.pid</code>, and a tight window only when entity IDs are absent.
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Process starts from the SYSTEM browser parent","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.parent.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+!{investigate{"description":"","label":"Process starts from the launched child","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Does the user and session context support interactive exploitation?
+</li>
+<li class="listitem">
+Focus: <code class="literal">user.id</code>, <code class="literal">user.name</code>, <code class="literal">user.domain</code>, <code class="literal">process.Ext.authentication_id</code>, and <code class="literal">process.Ext.session_info.logon_type</code>.
+</li>
+<li class="listitem">
+Implication: escalate when a low-privileged or unexpected interactive session is tied to the SYSTEM browser-to-child chain; a pre-existing user browser usually breaks the SYSTEM child path, so a SYSTEM or high-integrity child tied to an interactive session is severity-changing. Lower concern only when process evidence maps to controlled repair validation or browser-helper behavior.
+</li>
+<li class="listitem">
+Does process telemetry show the same SYSTEM-browser-to-tool pattern beyond this process instance?
+</li>
+<li class="listitem">
+Focus: same <code class="literal">process.parent.command_line</code> redirect fragment, suspicious <code class="literal">process.name</code> or <code class="literal">process.executable</code>, <code class="literal">user.id</code>, and <code class="literal">host.id</code> across recent starts.
+</li>
+<li class="listitem">
+Implication: broaden when recent starts show the same non-browser child pattern across unrelated hosts or users; keep response scoped when telemetry shows only this browser parent, child command line, and no repeated non-browser descendants.
+</li>
+<li class="listitem">
+Hint: run this pivot only if child intent, lineage, or session context remains suspicious or unresolved. !{investigate{"description":"","label":"Recent process starts with the same child executable","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"},{"excluded":false,"field":"process.executable","queryType":"phrase","value":"{{process.executable}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Based on the evidence gathered, what disposition is supported?
+</li>
+<li class="listitem">
+Escalate on SYSTEM or high-integrity browser-to-tool execution, MSI repair lineage, suspicious child identity, interactive session linkage, or repeated scope; close only for same-browser helper behavior with no non-browser descendants or an authorized test whose process facts exactly match scope. Preserve evidence and escalate when child intent, lineage, or session context is mixed or incomplete.
 </li>
 </ul>
 </div>
@@ -172,16 +225,13 @@ Assess the risk and impact of the elevated process by identifying its actions an
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate software updates or installations may trigger the rule if they involve browser-based help documentation. To manage this, identify and whitelist known software update processes that frequently access Microsoft Help pages.
+Browser helper, renderer, GPU, updater, or crash subprocesses can trigger after a SYSTEM browser opens a Microsoft Help link. Confirm a browser-internal role, same browser family, installed-browser path and signer, and no shell, installer, file manager, or admin tool from the same parent.
 </li>
 <li class="listitem">
-Automated scripts or administrative tools that use browsers to access Microsoft Help for legitimate purposes can cause false positives. Exclude these scripts or tools by specifying their unique command-line patterns or process names.
+Authorized MSI repair security validation is benign only when <code class="literal">@timestamp</code>, <code class="literal">host.id</code>, <code class="literal">user.id</code>, the SYSTEM browser parent command line, and child command line match the exact exercise; outside records may corroborate but not replace process facts.
 </li>
 <li class="listitem">
-User-initiated troubleshooting or help-seeking behavior that involves accessing Microsoft Help pages might be misinterpreted as suspicious. Educate users on safe browsing practices and consider excluding specific user accounts or domains that are known to frequently engage in such activities.
-</li>
-<li class="listitem">
-Security tools or monitoring solutions that simulate browser activity for testing purposes may inadvertently trigger the rule. Identify these tools and create exceptions based on their process names or command-line arguments to prevent unnecessary alerts.
+Build exceptions from the minimum confirmed workflow: browser family and signer, exact redirect parent context, expected child executable or command pattern, <code class="literal">host.id</code>, and tightly scoped test or managed-repair cohort. Avoid exceptions on <code class="literal">user.domain</code>, browser name, or redirect URL alone.
 </li>
 </ul>
 </div>
@@ -189,25 +239,22 @@ Security tools or monitoring solutions that simulate browser activity for testin
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected system from the network to prevent further exploitation or lateral movement by the adversary.
+If confirmed benign, document the process evidence that proved the browser-helper or validation workflow, reverse any temporary containment, and create only the narrow exception described above if the same workflow recurs.
 </li>
 <li class="listitem">
-Terminate any suspicious elevated processes that were spawned following the browser&#8217;s navigation to the Microsoft Help page to halt potential privilege escalation activities.
+If suspicious but unconfirmed, preserve the alert and Timeline/export records for the browser parent, child, ancestor chain, host, and user. Record command lines, <code class="literal">process.entity_id</code>, <code class="literal">process.parent.entity_id</code>, <code class="literal">host.id</code>, <code class="literal">user.id</code>, and any visible MSI package or vulnerable-application names before containment or process termination.
 </li>
 <li class="listitem">
-Conduct a thorough review of the affected system&#8217;s event logs and process creation history to identify any unauthorized changes or additional indicators of compromise.
+Apply reversible containment first when findings remain suspicious: isolate the host if its business role allows, or restrict the affected account/session while preserving endpoint telemetry. Do not terminate the child process until its command line, parentage, and spawned descendants are recorded.
 </li>
 <li class="listitem">
-Apply the latest security patches and updates to the Windows Installer service and any other vulnerable components to mitigate the exploited vulnerability.
+If confirmed malicious, contain the host and affected account based on the process lineage and session evidence, then terminate the malicious child and descendants after recording their identifiers. Remove only the payloads, repair artifacts, or configuration changes identified during the investigation.
 </li>
 <li class="listitem">
-Restore the affected system from a known good backup if unauthorized changes or persistent threats are detected that cannot be easily remediated.
+Patch Windows Installer and the vulnerable application package involved in the repair path, verify that the affected OS has the relevant vendor security update for CVE-2024-38014, and repackage or disable repair flows that let low-privileged users reach elevated custom actions, console windows, or help-link execution.
 </li>
 <li class="listitem">
-Monitor the network for any signs of similar exploitation attempts or related suspicious activities, using enhanced detection rules and threat intelligence feeds.
-</li>
-<li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further investigation and to ensure comprehensive remediation and recovery efforts.
+Document the final evidence set, repair path, affected hosts, and any missing telemetry that limited certainty so future alerts can distinguish browser helper noise, authorized validation, and repeated exploitation.
 </li>
 </ul>
 </div>
@@ -215,7 +262,31 @@ Escalate the incident to the security operations center (SOC) or incident respon
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_996"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-escalation-via-vulnerable-msi-repair.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_626"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-escalation-via-vulnerable-msi-repair.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1017"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-escalation-via-vulnerable-msi-repair.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

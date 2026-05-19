@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="potential-execution-via-filefix-phishing-attack"></a>Potential Execution via FileFix Phishing Attack</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-execution-via-filefix-phishing-attack.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies the execution of Windows commands or downloaded files via the browser&#8217;s dialog box. Adversaries may use phishing to instruct the victim to copy and paste malicious commands for execution via crafted phsihing web pages.</p>
+<p>Identifies the execution of Windows commands or downloaded files via the browser&#8217;s dialog box. Adversaries may use phishing to instruct the victim to copy and paste malicious commands for execution via crafted phishing web pages.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -97,12 +97,6 @@ Use Case: Threat Detection
 Tactic: Execution
 </li>
 <li class="listitem">
-Tactic: Initial Access
-</li>
-<li class="listitem">
-Tactic: Defense Evasion
-</li>
-<li class="listitem">
 Data Source: Windows Security Event Logs
 </li>
 <li class="listitem">
@@ -122,7 +116,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 3</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 4</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -134,33 +128,90 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_945"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-execution-via-filefix-phishing-attack.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_966"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-execution-via-filefix-phishing-attack.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating Potential Execution via FileFix Phishing Attack</strong></span></p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the process command line and arguments to identify any malicious intent.
+Does the alert show the FileFix browser-to-Explorer execution path?
 </li>
 <li class="listitem">
-Review web activity preceeding the alert to identify the initial vector.
+Focus: alert-local <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.args</code>, <code class="literal">process.name</code>, <code class="literal">process.executable</code>, and <code class="literal">process.command_line</code>.
 </li>
 <li class="listitem">
-Investigate any files, network or child process events from the suspected process.
+Implication: escalate when a Chromium-style file-picker parent using "--message-loop-type-ui" and "--service-sandbox-type=none" launches PowerShell, curl, certutil, certreq, msiexec, mshta, rundll32, wscript, cscript, or a "?:\Users*\Downloads\*" executable; lower suspicion only when the child is a signed installer or diagnostic tool and the parent/command shape matches a recognized browser-initiated support or install flow.
 </li>
 <li class="listitem">
-Correlate the event with other security alerts or logs from the same host or user to identify patterns or additional indicators of compromise.
+Is the launched child the expected binary for that workflow?
 </li>
 <li class="listitem">
-Assess the risk and impact of the detected activity by considering the context of the environment, such as the presence of sensitive data or critical systems that might be affected.
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.pe.original_file_name</code>, <code class="literal">process.code_signature.subject_name</code>, and <code class="literal">process.code_signature.trusted</code>; recover absent values from same-process events. !{investigate{"description":"","label":"Events for the launched process on this host","providers":[[{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the path is user-writable or signer/original name mismatches the expected tool; lower identity risk when signer, original name, path, and known hash history fit, but continue command-intent checks.
+</li>
+<li class="listitem">
+Does the command line reveal pasted-command social engineering?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.command_line</code> and <code class="literal">process.name</code>.
+</li>
+<li class="listitem">
+Implication: escalate when the command hides execution before a fake path or comment, invokes PowerShell or a LOLBin to retrieve/run content, or starts a "%USERPROFILE%\Downloads" payload directly; lower suspicion only when arguments open the signed installer or diagnostic tool with no hidden command, URL, or shell operator.
+</li>
+<li class="listitem">
+Does a Downloads-path child look newly staged or renamed?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.executable</code>, <code class="literal">process.Ext.relative_file_creation_time</code>, <code class="literal">process.Ext.relative_file_name_modify_time</code>, <code class="literal">process.code_signature.thumbprint_sha256</code>, and same-process file writes/renames; recover absent process values from same-process events. !{investigate{"description":"","label":"File events for the launched process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"file","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: for the downloaded-EXE variant, process file-age is the recovery signal; absent file provenance does not make a Downloads path benign.
+</li>
+<li class="listitem">
+Implication: escalate when a Downloads or other user-profile executable runs shortly after creation or rename, especially with weak identity; lower suspicion when file age, stable signer, and path match the same recognized update or support workflow.
+</li>
+<li class="listitem">
+Did the launched child spawn follow-on tools?
+</li>
+<li class="listitem">
+Focus: child process starts from <code class="literal">process.entity_id</code>, then descendant <code class="literal">process.executable</code> and <code class="literal">process.command_line</code>. !{investigate{"description":"","label":"Child process starts from the launched process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: if entity IDs are unavailable, fall back to parent PID plus a tight alert-time window on the same host.
+</li>
+<li class="listitem">
+Implication: escalate when the chain fans out into shells, script hosts, installers, archive tools, or task/scheduler utilities; no descendants keeps scope local but does not clear suspicious command intent or identity mismatch.
+</li>
+<li class="listitem">
+Did the launched child contact retrieval or staging destinations?
+</li>
+<li class="listitem">
+Focus: same-process network events for <code class="literal">destination.ip</code>, <code class="literal">destination.port</code>, and destination ownership when available. !{investigate{"description":"","label":"Network events for the launched process","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"network","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.pid","queryType":"phrase","value":"{{process.pid}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when PowerShell, curl, certutil, certreq, mshta, or another child reaches external staging, paste, storage, or command-and-control infrastructure; missing network telemetry is unresolved, not benign.
+</li>
+<li class="listitem">
+If local evidence remains suspicious or unresolved, does the pattern recur for this user or host?
+</li>
+<li class="listitem">
+Focus: related alerts and process starts for the same <code class="literal">user.id</code> and <code class="literal">host.id</code>, comparing <code class="literal">process.parent.args</code> and child <code class="literal">process.command_line</code>.
+</li>
+<li class="listitem">
+Hint: review related user alerts with !{investigate{"description":"","label":"Alerts associated with the user","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"user.id","queryType":"phrase","value":"{{user.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: review related host alerts with !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when the same browser-parented shell, LOLBin, or Downloads-path launch repeats for this user, host, or other users; keep the case local when it is isolated and the process evidence resolves cleanly.
+</li>
+<li class="listitem">
+Escalate when ancestry, child identity, command intent, file age, descendants, network, or recurrence supports user-assisted command execution or downloaded payload launch; close only when process evidence shows a signed installer or diagnostic identity, non-hidden command shape, expected file age/path, no suspicious descendants, no suspicious network where telemetry exists, and no related spread; preserve evidence and escalate when facts conflict or remain incomplete.
 </li>
 </ul>
 </div>
@@ -168,7 +219,10 @@ Assess the risk and impact of the detected activity by considering the context o
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate administrative scripts containing the suspicious keywords such as CAPTCHA.
+Signed browser-initiated installer/diagnostic workflows or authorized security tests can trigger. Confirm exact alignment across parent flags, child path, signer, hash, command line, user, host, timing, and absence of suspicious descendants; do not close on a ticket or owner statement if process evidence conflicts.
+</li>
+<li class="listitem">
+Before creating an exception, require recurrence with stable <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.args</code>, <code class="literal">process.executable</code>, <code class="literal">process.code_signature.thumbprint_sha256</code>, command-line shape, <code class="literal">user.id</code>, and <code class="literal">host.id</code>. Avoid exceptions on browser parentage, <code class="literal">process.name</code>, or Downloads-path execution alone.
 </li>
 </ul>
 </div>
@@ -176,25 +230,22 @@ Legitimate administrative scripts containing the suspicious keywords such as CAP
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately isolate the affected system from the network to prevent further spread or communication with potential command and control servers.
+If suspicious but unconfirmed, first preserve the alert event, same-process event export, descendant process timeline, command-line text, parent context, child binary copy, hash and signature details, and the affected user/host identifiers.
 </li>
 <li class="listitem">
-Terminate any suspicious processes identified by the detection rule to halt ongoing malicious activities.
+Apply reversible containment only after preservation, such as restricting the affected browser session or account, blocking the exact child hash, or quarantining the downloaded child binary. Escalate to host isolation only when command intent, identity, or descendants indicate likely payload execution.
 </li>
 <li class="listitem">
-Conduct a thorough scan of the affected system using updated antivirus or endpoint detection and response (EDR) tools to identify and remove any malicious payloads or scripts.
+If confirmed malicious, isolate the host when the launched child or descendants executed payloads, then terminate the child and descendants after recording identifiers. Do not reset credentials from this alert alone; use identity response only when separate evidence proves credential exposure or account misuse.
 </li>
 <li class="listitem">
-Review and clean up any unauthorized changes to system configurations or scheduled tasks that may have been altered by the malicious PowerShell activity.
+Eradicate only the downloaded executables, scripts, task utilities, or secondary payloads identified in the process timeline, then remediate the phishing page access or browser session that enabled the user-assisted execution.
 </li>
 <li class="listitem">
-Restore any affected files or system components from known good backups to ensure system integrity and functionality.
+If confirmed benign, reverse temporary containment and document the exact parent flags, child identity, command shape, user, host, and outside confirmation that proved the workflow. Create an exception only after the stable bounded pattern recurs.
 </li>
 <li class="listitem">
-Escalate the incident to the security operations center (SOC) or incident response team for further analysis and to determine if additional systems are compromised.
-</li>
-<li class="listitem">
-Implement additional monitoring and logging for PowerShell activities across the network to enhance detection of similar threats in the future.
+Post-incident hardening: restrict direct execution from user download locations where feasible, warn on browser-file-picker social engineering, retain process telemetry needed for the pivots above, and document the FileFix variant observed in the case record.
 </li>
 </ul>
 </div>
@@ -202,7 +253,31 @@ Implement additional monitoring and logging for PowerShell activities across the
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1001"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-execution-via-filefix-phishing-attack.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_630"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-execution-via-filefix-phishing-attack.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+<p><span class="strong strong"><strong>Additional data sources</strong></span></p>
+<p>This rule also supports the following third-party data sources. For setup instructions, refer to the links below:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<a href="https://ela.st/m365-defender" class="ulink" target="_top">Microsoft Defender XDR</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sentinel-one-cloud-funnel" class="ulink" target="_top">SentinelOne Cloud Funnel</a>
+</li>
+<li class="listitem">
+<a href="https://ela.st/sysmon-event-1-setup" class="ulink" target="_top">Sysmon Event ID 1 - Process Creation</a>
+</li>
+</ul>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1022"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-execution-via-filefix-phishing-attack.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

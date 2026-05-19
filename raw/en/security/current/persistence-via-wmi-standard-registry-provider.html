@@ -68,7 +68,7 @@ endgame-*
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<a href="https://docs.microsoft.com/en-us/previous-versions/windows/desktop/regprov/stdregprov" class="ulink" target="_top">https://docs.microsoft.com/en-us/previous-versions/windows/desktop/regprov/stdregprov</a>
+<a href="https://learn.microsoft.com/en-us/previous-versions/windows/desktop/regprov/stdregprov" class="ulink" target="_top">https://learn.microsoft.com/en-us/previous-versions/windows/desktop/regprov/stdregprov</a>
 </li>
 <li class="listitem">
 <a href="/security-labs/hunting-for-persistence-using-elastic-security-part-1" class="ulink" target="_top">https://www.elastic.co/security-labs/hunting-for-persistence-using-elastic-security-part-1</a>
@@ -101,7 +101,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 113</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 114</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -113,77 +113,87 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_875"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/persistence-via-wmi-standard-registry-provider.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_896"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/persistence-via-wmi-standard-registry-provider.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Persistence via WMI Standard Registry Provider</strong></span></p>
-<p>The Windows Management Instrumentation (WMI) StdRegProv is a registry provider that allows users to manage registry keys and values on Windows systems. Adversaries may abuse this functionality to modify registry locations commonly used for persistence, enabling them to maintain unauthorized access to a system.</p>
-<p>This rule identifies instances where the WMI StdRegProv is used to modify specific registry paths associated with persistence mechanisms.</p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Note</strong></span>:
-This investigation guide uses the <a href="/guide/en/security/current/invest-guide-run-osquery.html" class="ulink" target="_top">Osquery Markdown Plugin</a> introduced in Elastic Stack version 8.5.0. Older Elastic Stack versions will display unrendered Markdown in this guide.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Investigate the process execution chain (parent process tree) for unknown processes. Examine their executable files for prevalence, whether they are located in expected locations, and if they are signed with valid digital signatures.
+Which StdRegProv-backed persistence value changed, and what will it run?
 </li>
 <li class="listitem">
-Investigate other alerts associated with the user/host during the past 48 hours.
+Why: StdRegProv can set logon and service ASEPs through "WmiPrvSe.exe" without a child process from the requester; registry value data is the payload clue.
 </li>
 <li class="listitem">
-Validate if the activity is not related to planned patches, updates, network administrator activity, or legitimate software installations.
+Focus: <code class="literal">registry.path</code>, <code class="literal">registry.value</code>, <code class="literal">registry.data.type</code>, and <code class="literal">registry.data.strings</code>.
 </li>
 <li class="listitem">
-Assess whether this behavior is prevalent in the environment by looking for similar occurrences across hosts.
+Implication: escalate when machine-wide Run/RunOnce, Winlogon shell, policy script, "ServiceDLL", or "ImagePath" values launch user-writable, share-hosted, script-host, shell-replacement, or unusual service content; lower suspicion only when the exact value and data match a recognized WMI-based deployment, configuration, or test workflow.
 </li>
 <li class="listitem">
-Identify which process triggered this behavior.
+Who is the logical requester behind the WMI provider host?
 </li>
 <li class="listitem">
-Verify whether the file specified in the run key is signed.
+Why: <code class="literal">process.executable</code> usually identifies the provider host; effective process fields can identify the StdRegProv requester.
 </li>
 <li class="listitem">
-Examine the host for derived artifacts that indicate suspicious activities:
+Focus: <code class="literal">Effective_process.executable</code>, <code class="literal">Effective_process.name</code>, <code class="literal">Effective_process.entity_id</code>, <code class="literal">process.executable</code>, and <code class="literal">process.entity_id</code>.
 </li>
 <li class="listitem">
-Examine the file specified in the run key using a private sandboxed analysis system.
+Hint: do not clear on the Microsoft-signed provider host alone; attacker and admin tooling can both route registry writes through "WmiPrvSe.exe".
 </li>
 <li class="listitem">
-Observe and collect information about the following activities in both the sandbox and the alert subject host:
+Implication: escalate when the requester is blank with suspicious value data, or is a script host, user-writable binary, Office/browser descendant, or unexpected remote administration tool; lower suspicion when requester path and name match the management or deployment component that owns the value.
 </li>
 <li class="listitem">
-Attempts to contact external domains and addresses.
+Does the launch and session context fit the expected WMI workflow?
 </li>
 <li class="listitem">
-Use the Elastic Defend network events to determine domains and addresses contacted by the subject process by filtering by the process' <code class="literal">process.entity_id</code>.
+Focus: <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, <code class="literal">process.Ext.session_info.logon_type</code>, and <code class="literal">user.id</code>.
 </li>
 <li class="listitem">
-Examine the DNS cache for suspicious or anomalous entries.
+Implication: escalate when WMI registry writes occur under an unexpected user, service, remote, or parent context; lower suspicion when parent chain, session type, and user scope match the same recognized management or validation workflow.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve DNS Cache","query":"SELECT * FROM dns_cache"}}
+Did the payload referenced by the modified value execute?
 </li>
 <li class="listitem">
-Use the Elastic Defend registry events to examine registry keys accessed, modified, or created by the related processes in the process tree.
+Focus: same-host process starts after <code class="literal">@timestamp</code> where <code class="literal">process.command_line</code> matches the payload from <code class="literal">registry.data.strings</code>. !{investigate{"description":"","label":"Process starts matching the modified registry payload","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"},{"excluded":false,"field":"event.type","queryType":"phrase","value":"start","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.command_line","queryType":"phrase","value":"{{registry.data.strings}}","valueType":"string"}]],"relativeFrom":"now","relativeTo":"now"}}
 </li>
 <li class="listitem">
-Examine the host services for suspicious or anomalous entries.
+Hint: empty results do not prove non-execution; quoting, environment expansion, or arguments may require manual parsing.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve All Services","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services"}}
+Implication: escalate when the payload launches after the WMI-backed registry change, especially from user-writable, share-hosted, service, shell, or script paths; keep unresolved when value data cannot be matched directly.
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Services Running on User Accounts","query":"SELECT description, display_name, name, path, pid, service_type, start_type, status, user_account FROM services WHERE\nNOT (user_account LIKE <em>%LocalSystem</em> OR user_account LIKE <em>%LocalService</em> OR user_account LIKE <em>%NetworkService</em> OR\nuser_account == null)\n"}}
+Did the same requester cluster additional persistence changes on this host?
 </li>
 <li class="listitem">
-!{osquery{"label":"Osquery - Retrieve Service Unsigned Executables with Virustotal Link","query":"SELECT concat(<em><a href="https://www.virustotal.com/gui/file/" class="ulink" target="_top">https://www.virustotal.com/gui/file/</a></em>, sha1) AS VtLink, name, description, start_type, status, pid,\nservices.path FROM services JOIN authenticode ON services.path = authenticode.path OR services.module_path =\nauthenticode.path JOIN hash ON services.path = hash.path WHERE authenticode.result != <em>trusted</em>\n"}}
+Why: clustered ASEP writes separate one managed configuration change from service-plus-logon fallback persistence.
 </li>
 <li class="listitem">
-Retrieve the files' SHA-256 hash values using the PowerShell <code class="literal">Get-FileHash</code> cmdlet and search for the existence and reputation of the hashes in resources like VirusTotal, Hybrid-Analysis, CISCO Talos, Any.run, etc.
+Focus: same-host registry changes by <code class="literal">Effective_process.entity_id</code>, or <code class="literal">process.entity_id</code> when the effective requester is blank, reviewing <code class="literal">registry.path</code>, <code class="literal">registry.value</code>, and <code class="literal">registry.data.strings</code>. !{investigate{"description":"","label":"Registry changes by the same effective requester","providers":[[{"excluded":false,"field":"event.category","queryType":"phrase","value":"registry","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"Effective_process.entity_id","queryType":"phrase","value":"{{Effective_process.entity_id}}","valueType":"string"}],[{"excluded":false,"field":"event.category","queryType":"phrase","value":"registry","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: escalate when the same requester changes multiple ASEPs, service values, shell values, or policy scripts in one timeline; lower suspicion when activity is limited to one exact value with data matching the recognized workflow.
+</li>
+<li class="listitem">
+If local evidence remains suspicious or unresolved, does the requester or host recur in recent alerts?
+</li>
+<li class="listitem">
+Focus: recent alerts for <code class="literal">Effective_process.executable</code>. !{investigate{"description":"","label":"Alerts involving the same effective requester path","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"Effective_process.executable","queryType":"phrase","value":"{{Effective_process.executable}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Hint: run the host alert view only after the registry target, requester, session, or same-host registry cluster remains suspicious or unresolved. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: broaden scope when the requester path or host shows repeated WMI abuse, persistence changes, or related execution alerts; keep local when recurrence is absent and local evidence supports a recognized workflow.
+</li>
+<li class="listitem">
+Escalate for unrecognized or blank requester with suspicious value data, unexpected remote/service context, clustered ASEP changes, execution, or alert recurrence; close only when modified ASEP, value data, requester, process/session context, cluster, and recurrence evidence bind one recognized management or test workflow with no contradictory registry data; preserve evidence and escalate if mixed or incomplete.
 </li>
 </ul>
 </div>
@@ -191,48 +201,48 @@ Retrieve the files' SHA-256 hash values using the PowerShell <code class="litera
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-This activity is unlikely to happen legitimately. Benign true positives (B-TPs) can be added as exceptions if necessary.
+Configuration managers, endpoint-management agents, installers, and hardening baselines can use StdRegProv to set Run keys, policy scripts, or service values. Confirm <code class="literal">Effective_process.executable</code>, <code class="literal">Effective_process.name</code>, parent context, registry path/value/data, and host or user scope converge on the same workflow. Use change records, owner confirmation, or tool inventory when available; otherwise require the same requester path, modified ASEP, and registry data pattern to recur across prior alerts from this rule on the same managed host cohort.
+</li>
+<li class="listitem">
+Authorized security testing or detection validation can write persistence values through StdRegProv. Confirm the expected requester, exact value, value data, parsed payload path, test scope, and engagement records when available. Without records, require recurrence only on known test assets and no appearance on unrelated production hosts. Do not exception on <code class="literal">process.name</code>, "WmiPrvSe.exe", or a broad ASEP family alone.
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Response and Remediation</strong></span></p>
+<p><span class="strong strong"><strong>Response and remediation</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+If confirmed benign:
 </li>
 <li class="listitem">
-Isolate the involved host to prevent further post-compromise behavior.
+Reverse temporary containment and document the requester identity, exact registry value and data, host or user scope, and the recurrence or records that proved the management or test workflow. Build exceptions from that minimum pattern, not from "WmiPrvSe.exe", <code class="literal">process.name</code>, or a broad registry key alone.
 </li>
 <li class="listitem">
-If the triage identified malware, search the environment for additional compromised hosts.
+If suspicious but unconfirmed:
 </li>
 <li class="listitem">
-Implement temporary network rules, procedures, and segmentation to contain the malware.
+Preserve the alert event, exact registry value and data, effective requester identifiers, parsed payload path from the value data, and same-requester registry timeline before changing host state.
 </li>
 <li class="listitem">
-Stop suspicious processes.
+Apply reversible containment tied to the evidence, such as disabling the exact Run, policy, shell, or service value, blocking the requester path, or increasing monitoring on the affected host. Use host isolation only when host criticality allows it and the registry or requester evidence shows active persistence risk.
 </li>
 <li class="listitem">
-Immediately block the identified indicators of compromise (IoCs).
+If confirmed malicious:
 </li>
 <li class="listitem">
-Inspect the affected systems for additional malware backdoors like reverse shells, reverse proxies, or droppers that attackers could use to reinfect the system.
+Isolate the host after preserving the registry evidence, requester identifiers, parsed payload paths, and same-requester registry changes that established malicious activity; contain the affected account only when process or session evidence supports account misuse.
 </li>
 <li class="listitem">
-Remove and block malicious artifacts identified during triage.
+Terminate the requester process only after recording the relevant entity or PID, then remove the malicious Run key, shell value, policy script, "ServiceDLL", or "ImagePath" change, restore the ASEP to known-good state, and remove only the payloads identified from the investigation.
 </li>
 <li class="listitem">
-Run a full antimalware scan. This may reveal additional artifacts left in the system, persistence mechanisms, and malware components.
+Review other hosts for the same requester path or registry pattern before deleting artifacts that may be needed for scoping.
 </li>
 <li class="listitem">
-Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords for these accounts and other potentially compromised credentials, such as email, business systems, and web services.
+Post-incident hardening:
 </li>
 <li class="listitem">
-Determine the initial vector abused by the attacker and take action to prevent reinfection through the same vector.
-</li>
-<li class="listitem">
-Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
+Restrict unnecessary WMI and remote administration access, monitor WMI-hosted writes to high-value ASEPs, keep endpoint process and registry telemetry enabled, and document any visibility gaps surfaced during triage.
 </li>
 </ul>
 </div>
@@ -240,7 +250,16 @@ Using the incident response data, update logging and audit policies to improve t
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_934"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/persistence-via-wmi-standard-registry-provider.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_573"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/persistence-via-wmi-standard-registry-provider.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_955"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/persistence-via-wmi-standard-registry-provider.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -312,54 +331,6 @@ ID: TA0003
 </li>
 <li class="listitem">
 Reference URL: <a href="https://attack.mitre.org/tactics/TA0003/" class="ulink" target="_top">https://attack.mitre.org/tactics/TA0003/</a>
-</li>
-</ul>
-</div>
-</li>
-<li class="listitem">
-<p>Technique:</p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-Name: Boot or Logon Initialization Scripts
-</li>
-<li class="listitem">
-ID: T1037
-</li>
-<li class="listitem">
-Reference URL: <a href="https://attack.mitre.org/techniques/T1037/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1037/</a>
-</li>
-</ul>
-</div>
-</li>
-<li class="listitem">
-<p>Sub-technique:</p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-Name: Logon Script (Windows)
-</li>
-<li class="listitem">
-ID: T1037.001
-</li>
-<li class="listitem">
-Reference URL: <a href="https://attack.mitre.org/techniques/T1037/001/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1037/001/</a>
-</li>
-</ul>
-</div>
-</li>
-<li class="listitem">
-<p>Technique:</p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-Name: Modify Registry
-</li>
-<li class="listitem">
-ID: T1112
-</li>
-<li class="listitem">
-Reference URL: <a href="https://attack.mitre.org/techniques/T1112/" class="ulink" target="_top">https://attack.mitre.org/techniques/T1112/</a>
 </li>
 </ul>
 </div>

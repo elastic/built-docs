@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="suspicious-solarwinds-web-help-desk-java-module-load-or-child-process"></a>Suspicious SolarWinds Web Help Desk Java Module Load or Child Process</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-solarwinds-web-help-desk-java-module-load-or-child-process.asciidoc">edit</a></div>
 </div></div></div>
-<p>Identifies the SolarWinds Web Help Desk Java process loading an untrusted or remote native module (DLL). This behavior is uncommon for the Web Help Desk server and may indicate successful exploitation of deserialization vulnerabilities (CVE-2025-40536, CVE-2025-40551), which allow attackers to load malicious SQLite extensions and achieve remote code execution.</p>
+<p>Identifies the SolarWinds Web Help Desk Java process loading an untrusted or remote native module (DLL) or spawning a suspicious child process such as cmd, PowerShell, or rundll32. This behavior is uncommon for the Web Help Desk server and may indicate successful exploitation of deserialization vulnerabilities (CVE-2025-40536, CVE-2025-40551), which allow attackers to load malicious SQLite extensions and achieve remote code execution.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -101,7 +101,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 2</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 3</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -113,50 +113,78 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1402"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-solarwinds-web-help-desk-java-module-load-or-child-process.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1427"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-solarwinds-web-help-desk-java-module-load-or-child-process.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, validate the guidance and adapt it to your environment and operational requirements.</p>
-</blockquote>
-</div>
-<p><span class="strong strong"><strong>Investigating Suspicious SolarWinds Web Help Desk Java Module Load or Child Process"</strong></span></p>
-<p>SolarWinds Web Help Desk is a Java-based, internet-facing application commonly deployed on Windows servers.
-Recent vulnerabilities (CVE-2025-40536, CVE-2025-40551) allow unauthenticated attackers to exploit unsafe
-deserialization and abuse SQLite extension loading to execute arbitrary native code within the Java process.</p>
-<p>This rule detects suspicious native module (DLL) loads by the Web Help Desk Java process, as well as
-post-exploitation child process execution, both of which are strong indicators of successful exploitation.</p>
+<p><span class="strong strong"><strong>Investigating Suspicious SolarWinds Web Help Desk Java Module Load or Child Process</strong></span></p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the <span class="strong strong"><strong>process executable path</strong></span> to confirm the activity originated from the Web Help Desk Java runtime (e.g., <code class="literal">WebHelpDesk\jre\bin\java.exe</code>).
+Which path fired, and what alert-local evidence defines it?
 </li>
 <li class="listitem">
-Examine the <span class="strong strong"><strong>loaded DLL path</strong></span>:
+Why: The single-event branch decides whether DLL fields or child-process fields carry the decisive evidence.
 </li>
 <li class="listitem">
-Pay special attention to DLLs loaded from UNC paths (e.g., <code class="literal"><p>Pay special attention to DLLs loaded from UNC paths (e.g., <code class="literal">\&lt;IP&gt;\share\*.dll</code>) or temporary directories.</p>lt;IP&gt;\share\*.dll</code>) or temporary directories.
+Focus: <code class="literal">event.category</code>, Java path in <code class="literal">process.executable</code> or <code class="literal">process.parent.executable</code>, <code class="literal">dll.path</code>, and child <code class="literal">process.command_line</code>.
 </li>
 <li class="listitem">
-Validate whether the DLL is unsigned or has an untrusted code signature.
+Hint: record <code class="literal">process.entity_id</code> for library alerts and <code class="literal">process.parent.entity_id</code> for child-process alerts before later pivots.
 </li>
 <li class="listitem">
-Review <span class="strong strong"><strong>network telemetry</strong></span> around the time of the alert for outbound SMB connections (TCP 445) originating from the Java process.
+Implication: Escalate quickly for Web Help Desk Java loading remote or untrusted native code, or spawning "cmd.exe", "powershell.exe", or "rundll32.exe" with payload behavior. Lower concern only when the exact branch maps to a recognized local extension, authorized validation, or vendor support action and process or DLL evidence stays consistent.
 </li>
 <li class="listitem">
-If a child process was spawned (e.g., <code class="literal">cmd.exe</code>, <code class="literal">powershell.exe</code>, <code class="literal">rundll32.exe</code>):
+Does the Java-side identity match the expected Web Help Desk service instance?
 </li>
 <li class="listitem">
-Inspect command-line arguments for evidence of payload execution, staging, or persistence.
+Focus: Java path from step 1 and Java command line: <code class="literal">process.command_line</code> for library alerts or <code class="literal">process.parent.command_line</code> for child-process alerts.
 </li>
 <li class="listitem">
-Check system logs for additional indicators of compromise, including scheduled task creation, service installation, or persistence mechanisms.
+Implication: Escalate when the Java path falls outside the WebHelpDesk install tree or the service command line is abnormal for the deployed server. Identity lowers suspicion only when exact Java path and service context match the installed server; it does not clear a remote DLL load or shell child.
 </li>
 <li class="listitem">
-Determine the Web Help Desk version in use and confirm whether security patches addressing the relevant CVEs have been applied.
+For the DLL-load path, does the module look like a remote SQLite-extension payload or unsupported native component?
+</li>
+<li class="listitem">
+Why: Malicious SQLite-extension style native loading makes DLL path and trust state the strongest branch evidence.
+</li>
+<li class="listitem">
+Focus: <code class="literal">dll.path</code>, <code class="literal">dll.hash.sha256</code>, <code class="literal">dll.code_signature.exists</code>, <code class="literal">dll.code_signature.trusted</code>, and <code class="literal">dll.code_signature.subject_name</code>.
+</li>
+<li class="listitem">
+Implication: Escalate when <code class="literal">dll.path</code> shows "\Device\Mup\", a UNC-style share, temp or unrelated writable path, unsigned or untrusted module, or signer unrelated to Web Help Desk or its controlled extension set. Lower concern only when the module is local to the Web Help Desk or JDBC layout and has a recognized hash or signer.
+</li>
+<li class="listitem">
+For the child-process path, does the Java-spawned child show post-exploitation intent?
+</li>
+<li class="listitem">
+Focus: <code class="literal">process.name</code>, <code class="literal">process.command_line</code>, and <code class="literal">process.parent.command_line</code>.
+</li>
+<li class="listitem">
+Implication: Escalate when the command line decodes or stages payloads, loads DLLs, launches scripts, performs discovery, or changes persistence. Lower concern only for exact recognized validation or vendor-support command on this server with no contradictory DLL evidence.
+</li>
+<li class="listitem">
+Did the same Web Help Desk Java instance produce more DLL loads or suspicious children around the alert?
+</li>
+<li class="listitem">
+Focus: process and library events scoped by <code class="literal">host.id</code> plus Java-side <code class="literal">process.entity_id</code> or <code class="literal">process.parent.entity_id</code>; review <code class="literal">process.command_line</code>, <code class="literal">dll.path</code>, and <code class="literal">dll.hash.sha256</code>. !{investigate{"description":"","label":"Process and DLL activity tied to the Web Help Desk Java instance","providers":[[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"library","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.parent.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"library","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}],[{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"},{"excluded":false,"field":"process.parent.entity_id","queryType":"phrase","value":"{{process.parent.entity_id}}","valueType":"string"},{"excluded":false,"field":"event.category","queryType":"phrase","value":"process","valueType":"string"}]],"relativeFrom":"now-1h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: Escalate when the same Java instance loads multiple remote or untrusted DLLs, starts multiple shell or loader children, or shows child execution after a suspicious DLL load. No surrounding process or library events narrows scope, but does not clear the original alert.
+</li>
+<li class="listitem">
+If local evidence remains suspicious or unresolved, are there related exploit or post-exploitation alerts on this server?
+</li>
+<li class="listitem">
+Focus: related alerts on <code class="literal">host.id</code>, especially Web Help Desk exploitation, suspicious Java children, DLL loads, persistence, or credential access. !{investigate{"description":"","label":"Alerts associated with the host","providers":[[{"excluded":false,"field":"event.kind","queryType":"phrase","value":"signal","valueType":"string"},{"excluded":false,"field":"host.id","queryType":"phrase","value":"{{host.id}}","valueType":"string"}]],"relativeFrom":"now-48h/h","relativeTo":"now"}}
+</li>
+<li class="listitem">
+Implication: Expand scope when related alerts align with the same Java process, DLL hash, or child command pattern. Keep the case local when related-alert review is clean, but do not use alert isolation alone to close.
+</li>
+<li class="listitem">
+Escalate on remote or untrusted DLL loading, malicious child execution, or same-Java corroboration; close only when branch evidence tightly matches a recognized local extension, authorized validation, or vendor support action on this host with no contradictory process or DLL evidence; if visibility or authorization is incomplete, preserve evidence and escalate.
 </li>
 </ul>
 </div>
@@ -164,13 +192,13 @@ Determine the Web Help Desk version in use and confirm whether security patches 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Legitimate Web Help Desk installations typically do not load arbitrary native extensions at runtime. False positives are expected to be rare.
+Local native extension, JDBC, or vendor-support testing can explain the DLL path only when the module stays local to the Web Help Desk or controlled plugin layout; <code class="literal">dll.hash.sha256</code>, <code class="literal">dll.code_signature.subject_name</code>, and <code class="literal">dll.code_signature.trusted</code> match the expected component; Java identity matches the installed server; and no Java-spawned shell or loader appears. Without support or change records, require telemetry-only alignment across <code class="literal">host.id</code>, Java <code class="literal">process.executable</code> or <code class="literal">process.parent.executable</code>, <code class="literal">dll.path</code>, and <code class="literal">dll.hash.sha256</code>; otherwise treat as unresolved.
 </li>
 <li class="listitem">
-Custom integrations or troubleshooting activities that involve native JDBC extensions could trigger this rule. Validate whether such behavior is expected in your environment.
+Java-spawned "cmd.exe", "powershell.exe", or "rundll32.exe" is a Web Help Desk operational anti-pattern. Close only for authorized validation or vendor support where <code class="literal">process.name</code>, <code class="literal">process.command_line</code>, <code class="literal">process.parent.executable</code>, and <code class="literal">host.id</code> match that exact activity and no remote or untrusted DLL evidence appears. Without exact support or validation context, treat the branch as suspicious.
 </li>
 <li class="listitem">
-Security software or backup agents interacting with Java processes may occasionally load signed native libraries; verify the DLL origin and signature before dismissing the alert.
+Before creating an exception, validate stable benign behavior for the exact workflow and host. For DLL loads, anchor on Java identity, <code class="literal">dll.path</code>, <code class="literal">dll.hash.sha256</code>, <code class="literal">dll.code_signature.subject_name</code>, and <code class="literal">host.id</code>; for child processes, anchor on Java parent identity, exact <code class="literal">process.command_line</code>, and <code class="literal">host.id</code>. Avoid exceptions on "java.exe", the WebHelpDesk path prefix, a DLL directory prefix, or the server alone.
 </li>
 </ul>
 </div>
@@ -178,25 +206,19 @@ Security software or backup agents interacting with Java processes may occasiona
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Treat this alert as a <span class="strong strong"><strong>high-confidence compromise indicator</strong></span> if the DLL is untrusted or loaded from a remote path.
+If confirmed benign, reverse temporary containment and document the Java identity, DLL hash/path or child command line, <code class="literal">host.id</code>, and support, validation, or extension evidence that proved the workflow. Create an exception only from the narrow branch-specific anchors that proved that workflow.
 </li>
 <li class="listitem">
-Isolate the affected host to prevent further lateral movement or payload staging.
+If suspicious but unconfirmed, preserve the alert export, process tree, Java and child command lines, loaded DLL file, DLL hash/signature, and any "\Device\Mup\" share path before containment. Apply reversible containment first, such as restricting Web Help Desk exposure or blocking the observed remote share path, and escalate to endpoint isolation only when DLL or child-process evidence suggests active payload execution.
 </li>
 <li class="listitem">
-Terminate suspicious child processes and capture memory artifacts if possible for forensic analysis.
+If confirmed malicious, preserve process, DLL, and case artifacts before destructive action. Isolate the endpoint when the Java process is executing payloads or reaching remote native-code staging, block the malicious share path or DLL hash, collect the loaded DLL and relevant process evidence before termination, then remove only the payloads, persistence items, and service changes identified during the investigation.
 </li>
 <li class="listitem">
-Remove any malicious files identified on disk and review persistence mechanisms.
+Remediate the entry vector by upgrading or patching Web Help Desk to the vendor-fixed release, confirming the exposed service is no longer vulnerable, and reviewing whether public access, outbound SMB from the server, or native-extension/plugin controls need tighter restrictions.
 </li>
 <li class="listitem">
-Apply the latest SolarWinds Web Help Desk security updates addressing CVE-2025-40536 and CVE-2025-40551.
-</li>
-<li class="listitem">
-Conduct a broader environment sweep to identify other potentially vulnerable or compromised Web Help Desk instances.
-</li>
-<li class="listitem">
-Escalate the incident to the security operations or incident response team for full containment and remediation.
+Post-incident hardening: retain the process and library telemetry that proved the case, document remote SQLite-extension loading or Java-spawned shell activity for future triage, and record any authorized validation or support exception with its exact branch-specific anchors.
 </li>
 </ul>
 </div>
@@ -204,14 +226,23 @@ Escalate the incident to the security operations or incident response team for f
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1453"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-solarwinds-web-help-desk-java-module-load-or-child-process.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_1034"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-solarwinds-web-help-desk-java-module-load-or-child-process.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule is designed for data generated by <a href="/security/endpoint-security" class="ulink" target="_top">Elastic Defend</a>, which provides native endpoint detection and response, along with event enrichments designed to work with our detection rules.</p>
+<p>Setup instructions: <a href="https://ela.st/install-elastic-defend" class="ulink" target="_top">https://ela.st/install-elastic-defend</a></p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1478"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-solarwinds-web-help-desk-java-module-load-or-child-process.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
 <pre class="programlisting prettyprint lang-js">any where host.os.type == "windows" and
 (
  (event.category == "library" and
-  process.executable : ("C:\\Program Files\\WebHelpDesk\\*\\java.exe", "C:\\Program Files (x86)\\WebHelpDesk\\*\\java.exe") and
+  process.executable : ("C:\\Program Files\\WebHelpDesk\\*\\java*.exe", "C:\\Program Files (x86)\\WebHelpDesk\\*\\java*.exe") and
   (dll.path : "\\Device\\Mup\\*" or dll.code_signature.trusted == false or ?dll.code_signature.exists == false)) or
 
  (event.category == "process" and process.name : ("cmd.exe", "powershell.exe", "rundll32.exe") and
