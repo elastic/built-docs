@@ -118,13 +118,13 @@
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Plugin version: v1.5.5
+Plugin version: v1.5.7
 </li>
 <li class="listitem">
-Released on: 2026-03-26
+Released on: 2026-05-26
 </li>
 <li class="listitem">
-<a href="https://github.com/logstash-plugins/logstash-input-azure_event_hubs/blob/v1.5.5/CHANGELOG.md" class="ulink" target="_top">Changelog</a>
+<a href="https://github.com/logstash-plugins/logstash-input-azure_event_hubs/blob/v1.5.7/CHANGELOG.md" class="ulink" target="_top">Changelog</a>
 </li>
 </ul>
 </div>
@@ -157,6 +157,88 @@ Monitor</a>, for example, integrates with Azure Event Hubs to provide infrastruc
 as noted in the <a href="https://learn.microsoft.com/en-us/azure/event-hubs/event-hubs-faq#what-ports-do-i-need-to-open-on-the-firewall" class="ulink" target="_top">Microsoft Event Hub documentation</a>.</p>
 </div>
 </div>
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h4 class="title"><a id="_recommended_use_the_kafka_input_plugin"></a>Recommended: Use the Kafka input plugin</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-azure_event_hubs/edit/main/docs/index.asciidoc">edit</a></div>
+</div></div></div>
+<p>Benefits of switching to the Kafka input plugin:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<span class="strong strong"><strong>Avoid upcoming GPv2 storage cost increases.</strong></span> Microsoft will <a href="https://learn.microsoft.com/en-us/azure/storage/common/general-purpose-version-1-account-migration-overview" class="ulink" target="_top">retire general-purpose v1 (GPv1) storage accounts in October 2026</a>. Accounts will be automatically migrated to GPv2, which can bring significantly higher transactional costs for checkpoint-heavy workloads (up to ~140x more expensive per write operation). Switching to the Kafka input plugin eliminates this concern entirely. No storage account means nothing to upgrade and nothing to pay for.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>No storage costs for checkpoints.</strong></span> The Kafka protocol handles offset tracking internally within the Azure Event Hubs service at no extra cost. You no longer need to provision, maintain, or pay for an Azure Blob Storage account.
+</li>
+<li class="listitem">
+<span class="strong strong"><strong>Better throughput.</strong></span> The Kafka input plugin delivers 1.7x to 2.5x higher throughput compared to this plugin under the same conditions.
+</li>
+</ul>
+</div>
+<p>Azure Event Hubs natively supports the <a href="https://learn.microsoft.com/en-us/azure/event-hubs/azure-event-hubs-kafka-overview" class="ulink" target="_top">Apache Kafka protocol</a> on Standard, Premium, and Dedicated tiers. The Basic tier does not support the Kafka interface. To use it, a subscription upgrade is needed.
+The <a href="/guide/en/logstash/current/plugins-inputs-kafka.html" class="ulink" target="_top">Kafka input plugin</a> (<code class="literal">logstash-input-kafka</code>) can connect directly to Azure Event Hubs with no extra Azure-side configuration, and is the recommended way to consume events.</p>
+<p>For the full migration guide, including multi-hub configurations, parameter mapping, proxy setup, and FAQ, see the blog post: <a href="/observability-labs/blog/migrate-logstash-pipelines-from-azure-event-hubs-to-kafka-plugin" class="ulink" target="_top">Migrate Logstash Pipelines from Azure Event Hubs to Kafka Input Plugin</a>.</p>
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h5 class="title"><a id="_quick_migration_example_single_event_hub"></a>Quick migration example (single Event Hub)</h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-azure_event_hubs/edit/main/docs/index.asciidoc">edit</a></div>
+</div></div></div>
+<p>Before (Azure Event Hubs input):</p>
+<div class="pre_wrapper lang-ruby">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-ruby">input {
+  azure_event_hubs {
+    event_hub_connections =&gt; ["Endpoint=sb://&lt;NAMESPACE&gt;.servicebus.windows.net/;SharedAccessKeyName=&lt;ACCESS_KEY_NAME&gt;;SharedAccessKey=&lt;ACCESS_KEY&gt;;EntityPath=&lt;EVENT_HUB_NAME&gt;"]
+    storage_connection =&gt; "DefaultEndpointsProtocol=https;AccountName=&lt;STORAGE_ACCOUNT_NAME&gt;;AccountKey=&lt;STORAGE_ACCOUNT_KEY&gt;;EndpointSuffix=core.windows.net"
+    consumer_group =&gt; "&lt;CONSUMER_GROUP_NAME&gt;"
+    storage_container =&gt; "&lt;STORAGE_NAME&gt;"
+  }
+}</pre>
+</div>
+<p>After (Kafka input):</p>
+<div class="pre_wrapper lang-ruby">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-ruby">input {
+  kafka {
+    bootstrap_servers =&gt; "&lt;NAMESPACE&gt;.servicebus.windows.net:9093"
+    topics =&gt; ["&lt;EVENT_HUB_NAME&gt;"]
+    group_id =&gt; "&lt;KAFKA_CONSUMER_GROUP_NAME&gt;"
+    security_protocol =&gt; "SASL_SSL"
+    sasl_mechanism =&gt; "PLAIN"
+    jaas_path =&gt; "/path/to/jaas.conf"
+  }
+}</pre>
+</div>
+<p>Where <code class="literal">jaas.conf</code> contains:</p>
+<div class="pre_wrapper lang-text">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-text">KafkaClient {
+    org.apache.kafka.common.security.plain.PlainLoginModule required
+    username="$ConnectionString"
+    password="Endpoint=sb://&lt;NAMESPACE&gt;.servicebus.windows.net/;SharedAccessKeyName=&lt;ACCESS_KEY_NAME&gt;;SharedAccessKey=&lt;ACCESS_KEY&gt;";
+};</pre>
+</div>
+<p>Alternatively, use an inline JAAS configuration instead of a file:</p>
+<div class="pre_wrapper lang-ruby">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-ruby">sasl_jaas_config =&gt; "org.apache.kafka.common.security.plain.PlainLoginModule required username='$ConnectionString' password='Endpoint=sb://&lt;NAMESPACE&gt;.servicebus.windows.net/;SharedAccessKeyName=&lt;ACCESS_KEY_NAME&gt;;SharedAccessKey=&lt;ACCESS_KEY&gt;';"</pre>
+</div>
+<div class="note admon">
+<div class="icon"></div>
+<div class="admon_content">
+<p>AMQP and Kafka consumer groups are completely independent, even if they share the same name. When the Kafka input plugin connects for the first time, it will not resume from where this plugin left off. To avoid reprocessing data, set <code class="literal">auto_offset_reset =&gt; "latest"</code> for the initial deployment.</p>
+</div>
+</div>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h5 class="title"><a id="_not_ready_to_migrate_yet"></a>Not ready to migrate yet?</h5><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-azure_event_hubs/edit/main/docs/index.asciidoc">edit</a></div>
+</div></div></div>
+<p>If you are not ready to migrate, you can reduce the impact of GPv2 transactional costs by increasing the <a class="xref" href="plugins-inputs-azure_event_hubs.html#plugins-inputs-azure_event_hubs-checkpoint_interval" title="checkpoint_interval"><code class="literal">checkpoint_interval</code></a> setting above its default of <code class="literal">5</code> seconds. This reduces write operations to the Blob Storage account and lowers costs. You can estimate the cost difference using the <a href="https://azure.microsoft.com/en-us/pricing/calculator/" class="ulink" target="_top">Azure Pricing Calculator</a>.</p>
+</div>
+
+</div>
+
 <div class="section">
 <div class="titlepage"><div><div>
 <div class="position-relative"><h4 class="title"><a id="_event_hub_connection_string"></a>Event Hub connection string</h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/logstash-plugins/logstash-input-azure_event_hubs/edit/main/docs/index.asciidoc">edit</a></div>
