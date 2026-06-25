@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="domain-added-to-google-workspace-trusted-domains"></a>Domain Added to Google Workspace Trusted Domains</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/domain-added-to-google-workspace-trusted-domains.asciidoc">edit</a></div>
 </div></div></div>
-<p>Detects when a domain is added to the list of trusted Google Workspace domains. An adversary may add a trusted domain in order to collect and exfiltrate data from their target’s organization with less restrictive security controls.</p>
+<p>Detects when an administrator adds a domain to the Google Workspace allowlisted (trusted) domains list. Adversaries with administrative access may onboard a domain they control to relax cross-organization sharing restrictions, enabling data collection and exfiltration through Drive, Chat, and other services that honor the tenant trust boundary.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -55,7 +55,7 @@
 filebeat-*
 </li>
 <li class="listitem">
-logs-google_workspace*
+logs-google_workspace.admin-*
 </li>
 </ul>
 </div>
@@ -98,7 +98,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 210</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 211</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -110,33 +110,63 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_353"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/domain-added-to-google-workspace-trusted-domains.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_386"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/domain-added-to-google-workspace-trusted-domains.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Domain Added to Google Workspace Trusted Domains</strong></span></p>
-<p>Organizations use trusted domains in Google Workspace to give external users access to resources.</p>
-<p>A threat actor with administrative privileges may be able to add a malicious domain to the trusted domain list. Based on the configuration, potentially sensitive resources may be exposed or accessible by an unintended third-party.</p>
-<p>This rule detects when a third-party domain is added to the list of trusted domains in Google Workspace.</p>
+<p>Google Workspace allowlisted domains define which external organizations users may collaborate with across services such
+as Drive, Chat, and Classroom. Adding a domain to this list expands who can receive shared content under the tenant&#8217;s
+trust policies. Threat actors with administrative access may add a domain they operate to bypass out-of-domain sharing
+controls and establish a durable path for collection or exfiltration.</p>
+<p>This rule identifies when an administrator adds a domain via the <code class="literal">ADD_TRUSTED_DOMAINS</code> event in the
+<code class="literal">google_workspace.admin</code> data stream.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Identify the associated user accounts by reviewing <code class="literal">user.name</code> or <code class="literal">user.email</code> fields in the alert.
+Identify the initiating (actor) administrator by reviewing <code class="literal">user.email</code> or <code class="literal">user.name</code>, and note <code class="literal">source.ip</code> and <code class="literal">event.ingested</code> if present in the alert.
 </li>
 <li class="listitem">
-After identifying the user, verify if the user should have administrative privileges to add external domains.
+Identify the domain added by reviewing <code class="literal">google_workspace.admin.domain.name</code>.
 </li>
 <li class="listitem">
-Check the <code class="literal">google_workspace.admin.domain.name</code> field to find the newly added domain.
+Determine whether the change is expected and authorized:
 </li>
 <li class="listitem">
-Use reputational services, such as VirusTotal, for the trusted domain&#8217;s third-party intelligence reputation.
+Validate there is an approved change request or partner onboarding record for the new domain.
 </li>
 <li class="listitem">
-Filter your data. Create a filter where <code class="literal">event.dataset</code> is <code class="literal">google_workspace.drive</code> and <code class="literal">google_workspace.drive.file.owner.email</code> is being compared to <code class="literal">user.email</code>.
+If the actor account or <code class="literal">source.ip</code> is unusual, treat the alert as higher priority until proven benign.
 </li>
 <li class="listitem">
-If mismatches are identified, this could indicate access from an external Google Workspace domain.
+Review allowlisted domains in the Google Admin console:
+</li>
+<li class="listitem">
+Navigate to Account &gt; Domains &gt; Allowlisted domains.
+</li>
+<li class="listitem">
+Confirm the domain from <code class="literal">google_workspace.admin.domain.name</code> appears on the list and whether it is appropriate for your organization&#8217;s sharing model.
+</li>
+<li class="listitem">
+Assess domain reputation and ownership using external intelligence (for example, VirusTotal or WHOIS) to determine whether the domain is associated with your organization or a known partner.
+</li>
+<li class="listitem">
+Search Kibana for related admin and sharing activity:
+</li>
+<li class="listitem">
+Find other trust or sharing policy changes by the same actor:
+```
+data_stream.dataset: "google_workspace.admin" and user.email: "&lt;ACTOR_EMAIL&gt;" and event.action: ("ADD_TRUSTED_DOMAINS" or "REMOVE_TRUSTED_DOMAINS")
+```
+</li>
+<li class="listitem">
+After the add, review Drive events for files shared to users outside your domain:
+```
+data_stream.dataset: "google_workspace.drive" and event.action: ("change_user_access" or "change_document_visibility")
+```
+</li>
+<li class="listitem">
+Scope for other security-weakening admin actions from the same <code class="literal">user.email</code> within the last 48 hours.
 </li>
 </ul>
 </div>
@@ -144,10 +174,10 @@ If mismatches are identified, this could indicate access from an external Google
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Verify that the user account should have administrative privileges that allow them to edit trusted domains in Google Workspace.
+Verify the domain belongs to an approved partner or subsidiary with a documented business need for cross-organization collaboration.
 </li>
 <li class="listitem">
-Talk to the user to evaluate why they added the third-party domain and if the domain has confidentiality risks.
+Adding test or lab domains during migrations is possible — validate timing against change windows.
 </li>
 </ul>
 </div>
@@ -155,10 +185,16 @@ Talk to the user to evaluate why they added the third-party domain and if the do
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+Initiate the incident response process based on triage findings.
 </li>
 <li class="listitem">
-Disable or limit the account during the investigation and response.
+If the add is not clearly authorized, remove the domain from Allowlisted domains while the investigation proceeds.
+</li>
+<li class="listitem">
+If the initiating admin account is suspected compromised, reset credentials, revoke active sessions, and review delegated admin roles assigned to that account.
+</li>
+<li class="listitem">
+Review recent Drive and Chat sharing to external users for sensitive data exposure tied to the newly trusted domain.
 </li>
 <li class="listitem">
 Identify the possible impact of the incident and prioritize accordingly; the following actions can help you gain context:
@@ -182,7 +218,7 @@ Identify any regulatory or legal ramifications related to this activity.
 Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords or delete API keys as needed to revoke the attacker&#8217;s access to the environment. Work with your IT teams to minimize the impact on business operations during these actions.
 </li>
 <li class="listitem">
-Review the permissions assigned to the implicated user to ensure that the least privilege principle is being followed.
+Review the permissions assigned to the implicated administrator to ensure that the least privilege principle is being followed.
 </li>
 <li class="listitem">
 Implement security best practices <a href="https://support.google.com/a/answer/7587183" class="ulink" target="_top">outlined</a> by Google.
@@ -225,18 +261,18 @@ See the following references for further information:
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_193"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/domain-added-to-google-workspace-trusted-domains.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_203"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/domain-added-to-google-workspace-trusted-domains.asciidoc">edit</a></div>
 </div></div></div>
 <p>The Google Workspace Fleet integration, Filebeat module, or similarly structured data is required to be compatible with this rule.</p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_369"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/domain-added-to-google-workspace-trusted-domains.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_402"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/domain-added-to-google-workspace-trusted-domains.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">data_stream.dataset:google_workspace.admin and event.provider:admin and event.category:iam and event.action:ADD_TRUSTED_DOMAINS</pre>
+<pre class="programlisting prettyprint lang-js">data_stream.dataset:google_workspace.admin and event.action:ADD_TRUSTED_DOMAINS</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

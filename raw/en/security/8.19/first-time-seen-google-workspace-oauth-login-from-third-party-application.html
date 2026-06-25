@@ -46,16 +46,13 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="first-time-seen-google-workspace-oauth-login-from-third-party-application"></a>First Time Seen Google Workspace OAuth Login from Third-Party Application</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/first-time-seen-google-workspace-oauth-login-from-third-party-application.asciidoc">edit</a></div>
 </div></div></div>
-<p>Detects the first time a third-party application logs in and authenticated with OAuth. OAuth is used to grant permissions to specific resources and services in Google Workspace. Compromised credentials or service accounts could allow an adversary to authenticate to Google Workspace as a valid user and inherit their privileges.</p>
+<p>Detects the first time a user authorizes a third-party Google OAuth application that requests identity or sign-in scopes. Adversaries may abuse compromised credentials or phishing-linked consent flows to register novel OAuth clients, obtain refresh tokens, and authenticate as valid users while evading password-only detections.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: new_terms</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-filebeat-*
-</li>
-<li class="listitem">
-logs-google_workspace*
+logs-google_workspace.token-*
 </li>
 </ul>
 </div>
@@ -97,11 +94,14 @@ Tactic: Defense Evasion
 Tactic: Initial Access
 </li>
 <li class="listitem">
+Tactic: Persistence
+</li>
+<li class="listitem">
 Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 11</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 12</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -113,37 +113,51 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_493"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/first-time-seen-google-workspace-oauth-login-from-third-party-application.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_531"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/first-time-seen-google-workspace-oauth-login-from-third-party-application.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<div class="quoteblock">
-<blockquote>
-<p><span class="strong strong"><strong>Disclaimer</strong></span>:
-This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
-</blockquote>
-</div>
 <p><span class="strong strong"><strong>Investigating First Time Seen Google Workspace OAuth Login from Third-Party Application</strong></span></p>
-<p>OAuth is a protocol that allows third-party applications to access user data without exposing credentials, enhancing security in Google Workspace. However, adversaries can exploit OAuth by using compromised credentials to gain unauthorized access, mimicking legitimate users. The detection rule identifies unusual OAuth logins by monitoring authorization events linked to new third-party applications, flagging potential misuse for further investigation.</p>
+<p>Threat actors may trick users into authorizing adversary-controlled OAuth applications after credential theft, AiTM
+relay, or spearphishing. A successful <code class="literal">authorize</code> grant issues tokens the application can reuse to act on behalf of the
+user. Novel third-party client IDs are a strong signal as malicious consent often appears as a first-time application in the tenant.</p>
+<p>This rule uses <code class="literal">new_terms</code> to flag the first appearance of a <code class="literal">google_workspace.token.client.id</code> when
+a user grants at least one identity or sign-in scope in <code class="literal">google_workspace.token.scope.value</code> (for example <code class="literal">openid</code>,
+<code class="literal">userinfo.email</code>, <code class="literal">userinfo.profile</code>, or <code class="literal">OAuthLogin</code>).</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Review the event details to identify the specific third-party application involved by examining the google_workspace.token.client.id field.
+Identify the user who authorized the application by reviewing <code class="literal">user.email</code> or <code class="literal">user.name</code>, and note <code class="literal">source.ip</code> and <code class="literal">event.ingested</code> if present in the alert.
 </li>
 <li class="listitem">
-Check the google_workspace.token.scope.data field to understand the scope of permissions granted to the third-party application and assess if they align with expected usage.
+Identify the application by reviewing <code class="literal">google_workspace.token.app_name</code> and <code class="literal">google_workspace.token.client.id</code>.
 </li>
 <li class="listitem">
-Investigate the user account associated with the OAuth authorization event to determine if there are any signs of compromise or unusual activity.
+Review granted scopes in <code class="literal">google_workspace.token.scope.value</code> to determine whether the app received identity-only access or additional permissions (for example calendar, drive, or mail scopes on the same grant).
 </li>
 <li class="listitem">
-Correlate the timestamp of the OAuth login event with other security logs to identify any concurrent suspicious activities or anomalies.
+Determine whether the authorization is expected and authorized:
 </li>
 <li class="listitem">
-Verify if the third-party application is known and authorized within the organization by consulting with relevant stakeholders or reviewing application whitelists.
+If <code class="literal">source.ip</code> or timing is unusual for the user, treat the alert as higher priority until proven benign.'
 </li>
 <li class="listitem">
-Assess the risk and impact of the OAuth login by considering the privileges of the user account and the sensitivity of the accessed resources.
+Search Kibana for related activity:
+</li>
+<li class="listitem">
+Find prior authorizations for the same client in the org:
+```
+data_stream.dataset: "google_workspace.token" and event.action: "authorize" and google_workspace.token.client.id: "&lt;CLIENT_ID&gt;"
+```
+</li>
+<li class="listitem">
+Correlate with sign-in anomalies for the same user:
+```
+data_stream.dataset: "google_workspace.login" and user.email: "&lt;USER_EMAIL&gt;"
+```
+</li>
+<li class="listitem">
+Scope for other OAuth or admin changes from the same <code class="literal">user.email</code> within the last 48 hours.
 </li>
 </ul>
 </div>
@@ -151,16 +165,10 @@ Assess the risk and impact of the OAuth login by considering the privileges of t
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-New legitimate third-party applications: Users may frequently integrate new third-party applications for productivity or collaboration. To manage this, maintain a whitelist of known and trusted applications and exclude them from triggering alerts.
+Internal development or QA OAuth clients may appear as new <code class="literal">client.id</code> values during testing; coordinate with engineering teams and exclude known test clients if needed.
 </li>
 <li class="listitem">
-Regular updates to existing applications: Some applications may update their OAuth client IDs during version upgrades. Monitor application update logs and adjust the detection rule to exclude these known updates.
-</li>
-<li class="listitem">
-Internal development and testing: Organizations developing their own applications may trigger this rule during testing phases. Coordinate with development teams to identify and exclude these internal applications from alerts.
-</li>
-<li class="listitem">
-Frequent use of service accounts: Service accounts used for automation or integration purposes might appear as new logins. Document and exclude these service accounts from the detection rule to prevent false positives.
+Some vendors rotate OAuth client IDs during major upgrades, which can look like a new application, confirm with the vendor or IT owner before closing as benign.
 </li>
 </ul>
 </div>
@@ -168,25 +176,49 @@ Frequent use of service accounts: Service accounts used for automation or integr
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Immediately revoke the OAuth token associated with the suspicious third-party application to prevent further unauthorized access.
+Initiate the incident response process based on triage findings.
 </li>
 <li class="listitem">
-Conduct a thorough review of the affected user&#8217;s account activity to identify any unauthorized actions or data access that may have occurred.
+If the authorization is not clearly authorized, revoke the application&#8217;s access for the affected user under Security &gt; Access and data control &gt; API controls (or remove the user token via admin OAuth reports).
 </li>
 <li class="listitem">
-Reset the credentials of the affected user and any other users who may have been compromised, ensuring that strong, unique passwords are used.
+If the user account is suspected compromised, reset credentials, revoke active sessions, and review all OAuth grants for that user.
 </li>
 <li class="listitem">
-Notify the affected user and relevant stakeholders about the incident, providing guidance on recognizing phishing attempts and securing their accounts.
+Review activity performed with the new token (Drive, Gmail, Calendar, or other services implied by <code class="literal">google_workspace.token.scope.value</code>).
 </li>
 <li class="listitem">
-Implement additional monitoring for the affected user and similar OAuth authorization events to detect any further suspicious activity.
+Identify the possible impact of the incident and prioritize accordingly; the following actions can help you gain context:
 </li>
 <li class="listitem">
-Escalate the incident to the security operations team for a deeper investigation into potential lateral movement or data exfiltration.
+Identify the account role in the cloud environment.
 </li>
 <li class="listitem">
-Review and update OAuth application permissions and policies to ensure that only trusted applications have access to sensitive data and services.
+Assess the criticality of affected services and servers.
+</li>
+<li class="listitem">
+Work with your IT team to identify and minimize the impact on users.
+</li>
+<li class="listitem">
+Identify if the attacker is moving laterally and compromising other accounts, servers, or services.
+</li>
+<li class="listitem">
+Identify any regulatory or legal ramifications related to this activity.
+</li>
+<li class="listitem">
+Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords or delete API keys as needed to revoke the attacker&#8217;s access to the environment. Work with your IT teams to minimize the impact on business operations during these actions.
+</li>
+<li class="listitem">
+Review the permissions assigned to the implicated user to ensure that the least privilege principle is being followed.
+</li>
+<li class="listitem">
+Implement security best practices <a href="https://support.google.com/a/answer/7587183" class="ulink" target="_top">outlined</a> by Google.
+</li>
+<li class="listitem">
+Determine the initial vector abused by the attacker and take action to prevent reinfection via the same vector.
+</li>
+<li class="listitem">
+Using the incident response data, update logging and audit policies to improve the mean time to detect (MTTD) and the mean time to respond (MTTR).
 </li>
 </ul>
 </div>
@@ -200,9 +232,6 @@ As per Google&#8217;s documentation, Google Workspace administrators may observe
 This rule is configured to run every 10 minutes with a lookback time of 130 minutes.
 </li>
 <li class="listitem">
-To reduce the risk of false negatives, consider reducing the interval that the Google Workspace (formerly G Suite) Filebeat module polls Google&#8217;s reporting API for new events.
-</li>
-<li class="listitem">
 By default, <code class="literal">var.interval</code> is set to 2 hours (2h). Consider changing this interval to a lower value, such as 10 minutes (10m).
 </li>
 <li class="listitem">
@@ -211,28 +240,27 @@ See the following references for further information:
 <li class="listitem">
 <a href="https://support.google.com/a/answer/7061566" class="ulink" target="_top">https://support.google.com/a/answer/7061566</a>
 </li>
-<li class="listitem">
-<a href="/guide/en/beats/filebeat/current/filebeat-module-google_workspace.html" class="ulink" target="_top">https://www.elastic.co/guide/en/beats/filebeat/current/filebeat-module-google_workspace.html</a>
-</li>
 </ul>
 </div>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_286"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/first-time-seen-google-workspace-oauth-login-from-third-party-application.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_297"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/first-time-seen-google-workspace-oauth-login-from-third-party-application.asciidoc">edit</a></div>
 </div></div></div>
 <p>The Google Workspace Fleet integration, Filebeat module, or similarly structured data is required to be compatible with this rule.</p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_529"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/first-time-seen-google-workspace-oauth-login-from-third-party-application.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_567"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/first-time-seen-google-workspace-oauth-login-from-third-party-application.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">data_stream.dataset: "google_workspace.token" and event.action: "authorize" and
-google_workspace.token.scope.data: *Login and google_workspace.token.client.id: *apps.googleusercontent.com</pre>
+<pre class="programlisting prettyprint lang-js">data_stream.dataset: "google_workspace.token"
+  and event.action: "authorize"
+  and google_workspace.token.scope.value: (*openid* or *userinfo.email* or *userinfo.profile* or *Login*)
+  and google_workspace.token.client.id: *apps.googleusercontent.com</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

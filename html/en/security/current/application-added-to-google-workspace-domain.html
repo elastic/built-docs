@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="application-added-to-google-workspace-domain"></a>Application Added to Google Workspace Domain</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/application-added-to-google-workspace-domain.asciidoc">edit</a></div>
 </div></div></div>
-<p>Detects when a Google marketplace application is added to the Google Workspace domain. An adversary may add a malicious application to an organization’s Google Workspace domain in order to maintain a presence in their target’s organization and steal data.</p>
+<p>Detects when an administrator adds a Google Workspace Marketplace application to the domain. Adversaries with administrative access may register a malicious OAuth application to establish long-lived API access to mail, drive, and other Workspace data, maintaining persistence and enabling collection without relying on a single user password alone.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -124,7 +124,7 @@
 filebeat-*
 </li>
 <li class="listitem">
-logs-google_workspace*
+logs-google_workspace.admin-*
 </li>
 </ul>
 </div>
@@ -167,7 +167,7 @@ Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 210</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 211</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -179,34 +179,60 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_176"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/application-added-to-google-workspace-domain.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_199"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/application-added-to-google-workspace-domain.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Application Added to Google Workspace Domain</strong></span></p>
-<p>Google Workspace Marketplace is an online store for free and paid web applications that work with Google Workspace services and third-party software. Listed applications are based on Google APIs or on Google Apps Script and created by both Google and third-party developers.</p>
-<p>Marketplace applications require access to specific Google Workspace resources. Applications can be installed by individual users, if they have permission, or can be installed for an entire Google Workspace domain by administrators. Consent screens typically display what permissions and privileges the application requires during installation. As a result, malicious Marketplace applications may require more permissions than necessary or have malicious intent.</p>
-<p>Google clearly states that they are not responsible for any product on the Marketplace that originates from a source other than Google.</p>
-<p>This rule checks for applications that were manually added to the Marketplace by a Google Workspace account.</p>
+<p>Google Workspace Marketplace applications can request OAuth scopes to read or modify tenant data. When an administrator
+adds an application at the domain level, users may be able to install or authorize it broadly, creating a durable
+third-party access path. Threat actors with admin rights may add an adversary-controlled app to maintain API-based
+persistence and access sensitive resources at scale.</p>
+<p>This rule identifies when an administrator adds a Marketplace application via the <code class="literal">ADD_APPLICATION</code> event in the
+<code class="literal">google_workspace.admin</code> data stream.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Identify the associated user accounts by reviewing <code class="literal">user.name</code> or <code class="literal">user.email</code> fields in the alert.
+Identify the initiating (actor) administrator by reviewing <code class="literal">user.email</code> or <code class="literal">user.name</code>, and note <code class="literal">@timestamp</code>.
 </li>
 <li class="listitem">
-This rule relies on data from <code class="literal">google_workspace.admin</code>, thus indicating the associated user has administrative privileges to the Marketplace.
+Identify the application added by reviewing <code class="literal">google_workspace.admin.application.name</code> and related application metadata in the raw event.
 </li>
 <li class="listitem">
-With access to the Google Workspace admin console, visit the <code class="literal">Security &gt; Investigation tool</code> with filters for the user email and event is <code class="literal">Assign Role</code> or <code class="literal">Update Role</code> to determine if new cloud roles were recently updated.
+Determine whether the change is expected and authorized:
 </li>
 <li class="listitem">
-With the user account, review other potentially related events within the last 48 hours.
+Validate there is an approved change request or vendor onboarding record for the application.
 </li>
 <li class="listitem">
-Re-assess the permissions and reviews of the Marketplace applications to determine if they violate organizational policies or introduce unexpected risks.
+If the actor account is unusual, treat the alert as higher priority until proven benign.
 </li>
 <li class="listitem">
-With access to the Google Workspace admin console, determine if the application was installed domain-wide or individually by visiting <code class="literal">Apps &gt; Google Workspace Marketplace Apps</code>.
+Review Marketplace apps in the Google Admin console:
+</li>
+<li class="listitem">
+Navigate to Apps &gt; Google Workspace Marketplace apps.
+</li>
+<li class="listitem">
+Confirm whether the application is allowed domain-wide or for specific organizational units, and review requested API scopes against least-privilege expectations.
+</li>
+<li class="listitem">
+Search Kibana for related admin and OAuth activity:
+</li>
+<li class="listitem">
+Find other Marketplace changes by the same actor:
+```
+data_stream.dataset: "google_workspace.admin" and user.email: "&lt;ACTOR_EMAIL&gt;" and event.action: ("ADD_APPLICATION" or "REMOVE_APPLICATION")
+```
+</li>
+<li class="listitem">
+After the add, review OAuth authorizations that may indicate users or admins granting access to the app:
+```
+data_stream.dataset: "google_workspace.token" and event.action: "authorize"
+```
+</li>
+<li class="listitem">
+Scope for other security-weakening admin actions from the same <code class="literal">user.email</code> within the last 48 hours, such as Marketplace restriction changes, blocklist removals, or role assignments.
 </li>
 </ul>
 </div>
@@ -214,13 +240,10 @@ With access to the Google Workspace admin console, determine if the application 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Google Workspace administrators might intentionally remove an application from the blocklist due to a re-assessment or a domain-wide required need for the application.
+Verify the application is an approved business tool with documented vendor risk review and scope justification.
 </li>
 <li class="listitem">
-Identify the user account associated with this action and assess their administrative privileges with Google Workspace Marketplace.
-</li>
-<li class="listitem">
-Contact the user to verify that they intentionally removed the application from the blocklist and their reasoning.
+New application rollouts during migrations or acquisitions can trigger this rule, validate timing against change windows.
 </li>
 </ul>
 </div>
@@ -228,10 +251,16 @@ Contact the user to verify that they intentionally removed the application from 
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Initiate the incident response process based on the outcome of the triage.
+Initiate the incident response process based on triage findings.
 </li>
 <li class="listitem">
-Disable or limit the account during the investigation and response.
+If the add is not clearly authorized, remove or block the application under Google Workspace Marketplace apps while the investigation proceeds.
+</li>
+<li class="listitem">
+Revoke OAuth tokens for the application client if users have already authorized it (<code class="literal">Security</code> &gt; Access and data control &gt; API controls, or user token review in admin reports).
+</li>
+<li class="listitem">
+If the initiating admin account is suspected compromised, reset credentials, revoke active sessions, and review delegated admin roles assigned to that account.
 </li>
 <li class="listitem">
 Identify the possible impact of the incident and prioritize accordingly; the following actions can help you gain context:
@@ -255,7 +284,7 @@ Identify any regulatory or legal ramifications related to this activity.
 Investigate credential exposure on systems compromised or used by the attacker to ensure all compromised accounts are identified. Reset passwords or delete API keys as needed to revoke the attacker&#8217;s access to the environment. Work with your IT teams to minimize the impact on business operations during these actions.
 </li>
 <li class="listitem">
-Review the permissions assigned to the implicated user to ensure that the least privilege principle is being followed.
+Review the permissions assigned to the implicated administrator to ensure that the least privilege principle is being followed.
 </li>
 <li class="listitem">
 Implement security best practices <a href="https://support.google.com/a/answer/7587183" class="ulink" target="_top">outlined</a> by Google.
@@ -278,10 +307,7 @@ As per Google&#8217;s documentation, Google Workspace administrators may observe
 This rule is configured to run every 10 minutes with a lookback time of 130 minutes.
 </li>
 <li class="listitem">
-To reduce the risk of false negatives, consider reducing the interval that the Google Workspace (formerly G Suite) Filebeat module polls Google&#8217;s reporting API for new events.
-</li>
-<li class="listitem">
-By default, <code class="literal">var.interval</code> is set to 2 hours (2h). Consider changing this interval to a lower value, such as 10 minutes (10m).
+To reduce the risk of false negatives, consider reducing the interval that the Google Workspace (formerly G Suite) Filebeat module polls Google&#8217;s reporting API for new events. By default, <code class="literal">var.interval</code> is set to 2 hours (2h). Consider changing this interval to a lower value, such as 10 minutes (10m).
 </li>
 <li class="listitem">
 See the following references for further information:
@@ -298,18 +324,18 @@ See the following references for further information:
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_46"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/application-added-to-google-workspace-domain.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_51"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/application-added-to-google-workspace-domain.asciidoc">edit</a></div>
 </div></div></div>
 <p>The Google Workspace Fleet integration, Filebeat module, or similarly structured data is required to be compatible with this rule.</p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_180"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/application-added-to-google-workspace-domain.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_203"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/application-added-to-google-workspace-domain.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">data_stream.dataset:google_workspace.admin and event.provider:admin and event.category:iam and event.action:ADD_APPLICATION</pre>
+<pre class="programlisting prettyprint lang-js">data_stream.dataset:google_workspace.admin and event.action:ADD_APPLICATION</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
