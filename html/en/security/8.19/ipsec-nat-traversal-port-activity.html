@@ -115,7 +115,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="ipsec-nat-traversal-port-activity"></a>IPSEC NAT Traversal Port Activity</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/ipsec-nat-traversal-port-activity.asciidoc">edit</a></div>
 </div></div></div>
-<p>This rule detects events that could be describing IPSEC NAT Traversal traffic. IPSEC is a VPN technology that allows one system to talk to another using encrypted tunnels. NAT Traversal enables these tunnels to communicate over the Internet where one of the sides is behind a NAT router gateway. This may be common on your network, but this technique is also used by threat actors to avoid detection.</p>
+<p>This rule detects outbound IPSEC NAT Traversal (NAT-T) tunnels established from an internal host to an external destination. IPSEC is a VPN technology that allows one system to talk to another using encrypted tunnels. NAT Traversal encapsulates IPSEC ESP traffic in UDP and, once a NAT device is detected, both peers float to UDP port 4500 for the tunnel data channel. The rule keys on this NAT-T signature, UDP traffic where both the source and destination port are 4500, from an internal source to an external destination, rather than on any UDP traffic to port 4500. This may be common on your network, but this technique is also used by threat actors to tunnel command and control or exfiltration traffic over the Internet to avoid detection.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: query</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -137,6 +137,9 @@ logs-panw.*
 </li>
 <li class="listitem">
 logs-pfsense.log-*
+</li>
+<li class="listitem">
+logs-zeek.*
 </li>
 </ul>
 </div>
@@ -162,14 +165,20 @@ Use Case: Threat Detection
 Data Source: PAN-OS
 </li>
 <li class="listitem">
+Data Source: Network Traffic
+</li>
+<li class="listitem">
 Data Source: pfSense
+</li>
+<li class="listitem">
+Data Source: Zeek
 </li>
 <li class="listitem">
 Resources: Investigation Guide
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 111</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 112</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -181,7 +190,7 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_639"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/ipsec-nat-traversal-port-activity.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_662"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/ipsec-nat-traversal-port-activity.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <div class="quoteblock">
@@ -191,7 +200,7 @@ This investigation guide was created using generative AI technology and has been
 </blockquote>
 </div>
 <p><span class="strong strong"><strong>Investigating IPSEC NAT Traversal Port Activity</strong></span></p>
-<p>IPSEC NAT Traversal facilitates secure VPN communication across NAT devices by encapsulating IPSEC packets in UDP, typically using port 4500. While essential for legitimate encrypted traffic, adversaries exploit this to mask malicious activities, bypassing network defenses. The detection rule identifies unusual UDP traffic on port 4500, flagging potential misuse for further investigation.</p>
+<p>IPSEC NAT Traversal facilitates secure VPN communication across NAT devices by encapsulating IPSEC packets in UDP, typically using port 4500. While essential for legitimate encrypted traffic, adversaries exploit this to mask malicious activities, bypassing network defenses. The detection rule identifies outbound NAT-T tunnels, UDP traffic where both the source and destination port are 4500, originating from an internal host to an external destination, flagging potential misuse for further investigation.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -265,11 +274,45 @@ Implement enhanced monitoring and logging for UDP traffic on port 4500 to detect
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_676"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/ipsec-nat-traversal-port-activity.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_700"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/ipsec-nat-traversal-port-activity.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">(data_stream.dataset: network_traffic.flow or (event.category: (network or network_traffic))) and network.transport:udp and destination.port:4500</pre>
+<pre class="programlisting prettyprint lang-js">(data_stream.dataset: (network_traffic.flow or zeek.connection) or (event.category: (network or network_traffic))) and
+  network.transport:udp and source.port:4500 and destination.port:4500 and
+  source.ip:(
+    10.0.0.0/8 or
+    172.16.0.0/12 or
+    192.168.0.0/16
+  ) and
+  not destination.ip:(
+    10.0.0.0/8 or
+    127.0.0.0/8 or
+    169.254.0.0/16 or
+    172.16.0.0/12 or
+    192.0.0.0/24 or
+    192.0.0.0/29 or
+    192.0.0.8/32 or
+    192.0.0.9/32 or
+    192.0.0.10/32 or
+    192.0.0.170/32 or
+    192.0.0.171/32 or
+    192.0.2.0/24 or
+    192.31.196.0/24 or
+    192.52.193.0/24 or
+    192.168.0.0/16 or
+    192.88.99.0/24 or
+    224.0.0.0/4 or
+    100.64.0.0/10 or
+    192.175.48.0/24 or
+    198.18.0.0/15 or
+    198.51.100.0/24 or
+    203.0.113.0/24 or
+    240.0.0.0/4 or
+    "::1" or
+    "FE80::/10" or
+    "FF00::/8"
+  )</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
