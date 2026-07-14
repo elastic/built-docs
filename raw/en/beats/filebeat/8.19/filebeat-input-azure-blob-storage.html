@@ -225,6 +225,9 @@ processing a certain number of files, decided by the <code class="literal">maxim
 <li class="listitem">
 <a class="xref" href="filebeat-input-azure-blob-storage.html#attrib-timestamp_epoch" title="timestamp_epoch">timestamp_epoch</a>
 </li>
+<li class="listitem">
+<a class="xref" href="filebeat-input-azure-blob-storage.html#attrib-retry" title="retry">retry</a>
+</li>
 </ol>
 </div>
 <div class="position-relative"><h4><a id="attrib-account-name"></a><code class="literal">account_name</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.19/x-pack/filebeat/docs/inputs/input-azure-blob-storage.asciidoc">edit</a></div>
@@ -433,6 +436,40 @@ you have logs that are in JSON format and events are found under the JSON object
     timestamp_epoch: 1627233600</pre>
 </div>
 <p>The Azure Blob Storage APIs don&#8217;t provide a direct way to filter files based on timestamp, so the input will download all the files and then filter them based on the timestamp. This can cause a bottleneck in processing if the number of files are very high. It is recommended to use this attribute only when the number of files are limited or ample resources are available.</p>
+<div class="position-relative"><h4><a id="attrib-retry"></a><code class="literal">retry</code></h4><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/beats/edit/8.19/x-pack/filebeat/docs/inputs/input-azure-blob-storage.asciidoc">edit</a></div>
+<p>This attribute controls how transient Azure Storage failures are retried. Azure occasionally returns throttling responses such as <code class="literal">HTTP 429</code> or <code class="literal">HTTP 503</code> (<code class="literal">ServerBusy</code>), and brief network problems can also interrupt requests. The retry settings feed the Azure SDK&#8217;s retry policy, which sits in the client request pipeline, so they apply to <span class="strong strong"><strong>every</strong></span> request the input makes — both for listing blobs (pagination) and for downloading them.</p>
+<p>The <code class="literal">retry</code> attribute contains the following sub-attributes:</p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+<code class="literal">max_retries</code>: The number of times a failed request is retried after the first attempt. A negative value disables retries. Defaults to <code class="literal">3</code>.
+</li>
+<li class="listitem">
+<code class="literal">initial_retry_delay</code>: The base delay used for the exponential backoff between attempts. Each subsequent retry waits longer, up to <code class="literal">max_retry_delay</code>. Defaults to <code class="literal">800ms</code>.
+</li>
+<li class="listitem">
+<code class="literal">max_retry_delay</code>: The upper bound on the backoff, so that during a long outage the input keeps retrying at a steady interval instead of drifting towards ever larger waits. Defaults to <code class="literal">60s</code>.
+</li>
+</ul>
+</div>
+<p>Every sub-attribute is optional. Omitting the <code class="literal">retry</code> attribute (or any of its sub-attributes) keeps the Azure SDK defaults, so existing configurations continue to behave as before. The settings are applied per storage account and, therefore, affect all configured containers.</p>
+<p>When polling is enabled, a transient blob-listing failure that outlives these retries (for example, an HTTP 503 <code class="literal">ServerBusy</code>, an HTTP 429, or a network timeout) no longer stops the input. Instead, the input is marked <code class="literal">degraded</code> and the listing is retried on the next <a class="xref" href="filebeat-input-azure-blob-storage.html#attrib-poll_interval" title="poll_interval">poll_interval</a>. This allows the input to ride out longer outages rather than exiting. Permanent failures, such as a missing container or an authentication error, still stop the input.</p>
+<div class="pre_wrapper lang-yaml">
+<div class="console_code_copy" title="Copy to clipboard"></div>
+<pre class="programlisting prettyprint lang-yaml">filebeat.inputs:
+- type: azure-blob-storage
+  id: my-azureblobstorage-id
+  enabled: true
+  account_name: some_account
+  auth.shared_credentials.account_key: some_key
+  retry:
+    max_retries: 20
+    initial_retry_delay: 1s
+    max_retry_delay: 30s
+  containers:
+  - name: container_1</pre>
+</div>
+<p>This example lets the input ride out longer bursts of Azure throttling: it retries a failed request up to <code class="literal">20</code> times, starting with a <code class="literal">1s</code> delay and backing off exponentially up to a <code class="literal">30s</code> ceiling between attempts.</p>
 <p><a id="container-overrides"></a><span class="strong strong"><strong>The sample configs below will explain the container level overriding of attributes a bit further :-</strong></span></p>
 <p><span class="strong strong"><strong>CASE - 1 :</strong></span></p>
 <p>Here <code class="literal">container_1</code> is using root level attributes while <code class="literal">container_2</code> overrides the values :</p>
