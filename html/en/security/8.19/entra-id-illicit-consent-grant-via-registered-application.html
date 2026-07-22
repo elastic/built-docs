@@ -172,7 +172,7 @@ Tactic: Credential Access
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 220</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 221</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -184,13 +184,13 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_436"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/entra-id-illicit-consent-grant-via-registered-application.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_457"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/entra-id-illicit-consent-grant-via-registered-application.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Entra ID Illicit Consent Grant via Registered Application</strong></span></p>
 <p>Adversaries may register a malicious application in Microsoft Entra ID and trick users into granting excessive permissions via OAuth consent. These applications can access sensitive data—such as mail, profiles, or files—on behalf of the user once consent is granted. This is commonly delivered via spearphishing links that prompt users to approve permissions for seemingly legitimate applications.</p>
 <p>This rule identifies a new consent grant event based on Azure audit logs where a user or admin granted consent to an application.</p>
-<p>This rule uses ES|QL aggregation-based new terms logic with a 7-day history window. It extracts the AppId from the multi-valued additional_details array using MV_EXPAND and UUID regex filtering, then alerts when the user-application pair is first seen within the last 9 minutes OR when Microsoft flags the consent as a "Risky application detected".</p>
+<p>This rule uses ES|QL aggregation-based new terms logic with a 7-day history window. It extracts the AppId from the multi-valued additional_details array using MV_EXPAND and UUID regex filtering, then alerts when the user-application pair is first seen within the last 9 minutes. Alerts are suppressed by AppId and user principal name for 6 hours. Each distinct user-application pair therefore produces a single alert, preserving per-victim visibility: an application consented to by multiple users raises one alert per user, so the spread of a consent phishing campaign remains visible in the alert list.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -216,10 +216,10 @@ ConsentContext.IsAdminConsent to determine if the application was granted tenant
 ConsentContext.OnBehalfOfAll to identify whether the app was granted permissions on behalf of all users in the tenant.
 </li>
 <li class="listitem">
-ConsentAction.Permissions to evaluate the specific scopes and data access the application requested.
+ConsentAction.Permissions to evaluate the specific scopes and data access the application requested. Scope combinations such as <code class="literal">offline_access</code> with <code class="literal">Mail.ReadWrite</code>, <code class="literal">Files.ReadWrite.All</code>, or <code class="literal">Chat.Read</code> are characteristic of mailbox and file exfiltration.
 </li>
 <li class="listitem">
-ConsentAction.Reason to understand if Microsoft flagged the activity or if any reason was recorded by the platform.
+ConsentAction.Reason to determine whether Microsoft&#8217;s own risk heuristics flagged the application. A value of <code class="literal">Risky application detected</code> means Microsoft scored the app as suspicious at the time consent was granted and should raise the priority of the review. Note this reason is only populated on admin-consent events, and its absence does not clear the application; a flagged app is also not necessarily malicious, since Microsoft&#8217;s heuristic can flag legitimate apps.
 </li>
 <li class="listitem">
 TargetId.ServicePrincipalNames to confirm the service principal associated with the granted permissions.
@@ -240,6 +240,9 @@ Some applications may request high-privilege scopes for legitimate purposes. Val
 </li>
 <li class="listitem">
 Review publisher verification, app ownership, and scope alignment with the intended business use case.
+</li>
+<li class="listitem">
+A <code class="literal">ConsentAction.Reason</code> of <code class="literal">Risky application detected</code> raises confidence that the consent is worth investigating, but Microsoft&#8217;s risk heuristic is advisory and can flag legitimate applications (including internal line-of-business apps and newly registered tenant applications). Conversely, the absence of the flag does not make the consent benign, so weigh it alongside the requested scopes, admin-consent context, and the application&#8217;s home tenant rather than in isolation.
 </li>
 </ul>
 </div>
@@ -270,7 +273,7 @@ Report any malicious applications to Microsoft to protect other tenants.
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_453"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/entra-id-illicit-consent-grant-via-registered-application.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_474"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/entra-id-illicit-consent-grant-via-registered-application.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -303,7 +306,6 @@ Report any malicious applications to Microsoft to protect other tenants.
     BY azure.auditlogs.properties.initiated_by.user.userPrincipalName, Esql.app_id
 
 | WHERE Esql.timestamp_first_seen &gt;= NOW() - 9 minutes
-    OR Esql.consent_reason_values LIKE "*Risky application detected*"
 | KEEP Esql.*, azure.*</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
