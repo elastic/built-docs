@@ -114,7 +114,7 @@ Platform: macOS
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 2</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 4</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -126,7 +126,7 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_909"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/long-base64-encoded-command-via-scripting-interpreter.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_946"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/long-base64-encoded-command-via-scripting-interpreter.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Long Base64 Encoded Command via Scripting Interpreter</strong></span></p>
@@ -183,7 +183,7 @@ Reset or revoke any credentials, tokens, or secrets exposed by the decoded paylo
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_958"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/long-base64-encoded-command-via-scripting-interpreter.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_995"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/long-base64-encoded-command-via-scripting-interpreter.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
@@ -191,49 +191,58 @@ Reset or revoke any credentials, tokens, or secrets exposed by the decoded paylo
 | MV_EXPAND _ignored
 | WHERE _ignored == "process.command_line"
 | WHERE event.category == "process" and event.type == "start"
-| EVAL command_line = TO_LOWER(process.command_line.text), pname = TO_LOWER(process.name)
+| EVAL command_line = TO_LOWER(process.command_line.text),
+       pname = TO_LOWER(process.name)
+| EVAL has_long_base64 = command_line RLIKE """.*[a-z0-9+/]{100,}={0,2}.*"""
 | WHERE
 (
     (
-        /* Python: inline exec with base64 decode or -c flag with encoded payload */
-        pname like "python*" and
+        /* Python: decode primitive + plausible Base64 payload */
+        pname LIKE "python*" AND
+        has_long_base64 AND
         (
-            command_line like "*b64decode*" or
-            (command_line like "*-c*" and command_line like "*base64*")
-        )
-    ) or
+            command_line LIKE "*b64decode*" OR
+            (command_line LIKE "*-c*" AND command_line LIKE "*base64*")
+        ) AND NOT (process.parent.name == "codex" AND (command_line LIKE "*.write(base64.*" or command_line LIKE "*.write_bytes(base64*"))
+    ) OR
     (
-        /* PowerShell: encoded command flag — require trailing space to avoid matching
-           -Encoding, -EncryptionType, -EncryptionProvider, etc. */
-        (pname like "powershell*" or pname like "pwsh*") and
+        /* PowerShell: encoded command or explicit Base64 decode + payload */
+        (pname LIKE "powershell*" OR pname LIKE "pwsh*") AND
+        has_long_base64 AND
         (
-            command_line rlike ".* -(e|en|enc|enco|encod|encode|encoded|encodedcommand) .+" or
-            command_line like "*-encodedcommand*" or
-            command_line like "*frombase64string*"
+            command_line RLIKE """.* -(e|en|enc|enco|encod|encode|encoded|encodedcommand) .+""" OR
+            command_line LIKE "*-encodedcommand*" OR
+            command_line LIKE "*frombase64string*"
         )
-    ) or
+    ) OR
     (
-        /* Node.js: buffer.from must be paired with base64 to avoid matching
-           general Buffer usage; atob is always base64 */
-        pname like "node*" and
+        /* Node.js */
+        pname LIKE "node*" AND
+        has_long_base64 AND
         (
-            (command_line like "*buffer.from*" and command_line like "*base64*") or
-            command_line like "*atob(*"
+            (command_line LIKE "*buffer.from*" AND command_line LIKE "*base64*") OR
+            command_line LIKE "*atob(*"
         )
-    ) or
+    ) OR
     (
-        /* Deno: eval( (not eval/evaluate/evaluation), atob, or buffer+base64 */
-        pname like "deno*" and
+        /* Deno */
+        pname LIKE "deno*" AND
+        has_long_base64 AND
         (
-            command_line like "*atob(*" or
-            (command_line like "*buffer.from*" and command_line like "*base64*") or
-            command_line like "*eval(*"
+            command_line LIKE "*atob(*" OR
+            (command_line LIKE "*buffer.from*" AND command_line LIKE "*base64*") OR
+            command_line LIKE "*eval(*"
         )
     )
 )
 | EVAL Esql.length_cmdline = LENGTH(command_line)
 | WHERE Esql.length_cmdline &gt;= 4000
-| KEEP *</pre>
+| DROP _ignored, pname, has_long_base64
+| KEEP @timestamp, _id, _version, _index, data_stream.namespace,
+       user.name, user.id, host.name, host.id, agent.id,
+       process.entity_id, process.executable,
+       process.parent.entity_id, process.parent.executable,
+       process.command_line.text, process.parent.command_line</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
