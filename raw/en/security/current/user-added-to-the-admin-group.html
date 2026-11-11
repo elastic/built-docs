@@ -105,12 +105,9 @@ Rule Type: Event Correlation (EQL)
 <li class="listitem">
 Platform: macOS
 </li>
-<li class="listitem">
-Data Source: Jamf Protect Event Logs
-</li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 7</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 8</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -122,31 +119,85 @@ Thijs Xhaflaire
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1959"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/user-added-to-the-admin-group.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1988"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/user-added-to-the-admin-group.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<p>To thoroughly investigate the actions that occurred <span class="strong strong"><strong>after a user was elevated to administrator</strong></span>, it&#8217;s essential to conduct a search on the Timeline. This allows you to review and understand the sequence of events that followed the elevation, helping to identify any potentially malicious or unauthorized activities that might have taken place. <span class="strong strong"><strong>Analyzing these actions is crucial for maintaining security and ensuring that the elevation was not exploited for harmful purposes.</strong></span></p>
-<p><span class="strong strong"><strong>Consider reviewing these actions:</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
+</blockquote>
+</div>
+<p><span class="strong strong"><strong>Investigating User Added to the Admin Group</strong></span></p>
+<p>Members of the macOS <code class="literal">admin</code> group can use <code class="literal">sudo</code>, install software, and change system-wide settings. Adversaries who gain a foothold may add an account they control to this group, using tools such as <code class="literal">dscl</code> or <code class="literal">dseditgroup</code>, to escalate privileges or keep privileged access. This rule uses Jamf Protect telemetry to alert when a user is added to the <code class="literal">admin</code> group.</p>
+<p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Have persistency items been added?
+Identify the account that was added to the <code class="literal">admin</code> group (<code class="literal">user.name</code>) and the account that performed the change (<code class="literal">process.user.name</code>), and confirm whether the change was requested or approved.
 </li>
 <li class="listitem">
-Is any software installed after elevation?
+Review the process that made the change (<code class="literal">process.executable</code>, for example <code class="literal">dscl</code>, <code class="literal">dseditgroup</code>, <code class="literal">sysadminctl</code>, or System Settings), its parent (<code class="literal">process.parent.executable</code>), and its responsible process (<code class="literal">process.responsible.executable</code>) to determine whether the change was interactive or scripted.
 </li>
 <li class="listitem">
-Were any additional users created after elevation?
+!{investigate{"label":"Show events having the same responsible process","providers":[[{"excluded":false,"field":"host.hostname","queryType":"phrase","value":"{{host.hostname}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.responsible.entity_id}}","valueType":"string"}]]}}
+</li>
+<li class="listitem">
+!{investigate{"label":"Show events having the same parent process","providers":[[{"excluded":false,"field":"host.hostname","queryType":"phrase","value":"{{host.hostname}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.parent.entity_id}}","valueType":"string"}]]}}
+</li>
+<li class="listitem">
+Determine whether the added account was recently created, and whether it is hidden or has an unusual name or UID.
+</li>
+<li class="listitem">
+Search the timeline for activity that followed the elevation, such as new persistence items (LaunchAgents, LaunchDaemons, login items), software installation, additional user creation, or security setting changes.
+</li>
+<li class="listitem">
+Review authentication activity for the added account, including remote logins over SSH or Screen Sharing.
+</li>
+<li class="listitem">
+Review other alerts for the same host to identify the initial access or execution activity that preceded the group change.
 </li>
 </ul>
 </div>
-<p>!{investigate{"label":"Show events having the same responsible process","providers":[[{"excluded":false,"field":"host.hostname","queryType":"phrase","value":"{{host.hostname}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.group_leader.entity_id}}","valueType":"string"}]]}}
-!{investigate{"label":"Show events having the same parent process","providers":[[{"excluded":false,"field":"host.hostname","queryType":"phrase","value":"{{host.hostname}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.parent.entity_id}}","valueType":"string"}]]}}</p>
+<p><span class="strong strong"><strong>False positive analysis</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+IT administrators, device management solutions, and privilege management tools legitimately add users to the <code class="literal">admin</code> group during provisioning or temporary elevation. Verify the change against change tickets or the expected management workflow.
+</li>
+<li class="listitem">
+When the activity is confirmed benign, create an exception for the specific management process or service account rather than for the <code class="literal">admin</code> group.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Response and remediation</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Remove the account from the <code class="literal">admin</code> group if the change was not authorized.
+</li>
+<li class="listitem">
+Disable or delete the account if it was created by the attacker, and reset the credentials of any compromised legitimate account.
+</li>
+<li class="listitem">
+Review and revert changes made with the elevated privileges, such as persistence items, installed software, and modified security settings.
+</li>
+<li class="listitem">
+Isolate the host if follow-on malicious activity is identified.
+</li>
+<li class="listitem">
+Investigate how the attacker obtained the privileges required to modify group membership and remediate the initial access vector.
+</li>
+<li class="listitem">
+Escalate to the incident response team and check other macOS hosts for similar group membership changes.
+</li>
+</ul>
+</div>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_1440"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/user-added-to-the-admin-group.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_1458"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/user-added-to-the-admin-group.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
 <p>This rule requires data coming in from Jamf Protect.</p>
@@ -187,7 +238,7 @@ Click "Save and Continue".
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1974"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/user-added-to-the-admin-group.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_2003"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/user-added-to-the-admin-group.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

@@ -162,7 +162,7 @@ Data Source: Network Packet Capture
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 17</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 18</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -174,7 +174,7 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1327"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-network-scan-detected.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1356"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-network-scan-detected.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <div class="quoteblock">
@@ -258,13 +258,55 @@ Review and enhance detection capabilities: Evaluate the effectiveness of current
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1388"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-network-scan-detected.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_908"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-network-scan-detected.asciidoc">edit</a></div>
+</div></div></div>
+<p><span class="strong strong"><strong>Setup</strong></span></p>
+<p>This rule supports connection observations from the Elastic Network Packet Capture integration, PAN-OS TRAFFIC
+session-start records, and a compatibility branch for standalone Packetbeat.</p>
+<p>Network Packet Capture 2.0.0 and later always applies ECS compatibility remapping. On earlier integration versions,
+enable <code class="literal">map_to_ecs</code> (the default since 1.31.1). The rule counts interim and final flow reports that emit
+<code class="literal">event.action:network_flow</code> and include <code class="literal">connection</code> in <code class="literal">event.type</code>. The standalone Packetbeat branch requires
+<code class="literal">agent.type:packetbeat</code> with the same ECS action and type values; verify that branch against the deployed Packetbeat
+version and configuration before relying on it.</p>
+<p>For PAN-OS, ingest TRAFFIC records through the PAN-OS integration. The rule counts session starts.</p>
+<p>The rule evaluates TCP and UDP separately. Repeated lifecycle reports for one source/destination/port tuple do not
+increase distinct-port cardinality within a one-minute bucket. Reports in later buckets can qualify again; one-hour
+alert suppression groups repeated alerts by source, destination, and transport. Create exceptions for approved
+scanners, inventory systems, and monitoring infrastructure after validating their source addresses.</p>
+</div>
+
+<div class="section">
+<div class="titlepage"><div><div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1417"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/potential-network-scan-detected.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">from logs-network_traffic.*, packetbeat-*, logs-panw.panos*
+<pre class="programlisting prettyprint lang-js">from logs-network_traffic.flow-*, packetbeat-*, logs-panw.panos*
 | mv_expand event.action
-| where event.action in ("network_flow", "flow_started") and destination.port is not null and source.ip is not null and destination.ip is not null
+| mv_expand event.type
+| where
+    (
+      (
+        event.action == "network_flow"
+        and event.type == "connection"
+        and (
+          data_stream.dataset == "network_traffic.flow"
+          or agent.type == "packetbeat"
+        )
+      )
+      or (
+        event.action == "flow_started"
+        and event.type == "connection"
+        and (
+          data_stream.dataset == "panw.panos"
+          or event.dataset == "panw.panos"
+        )
+      )
+    )
+    and destination.port is not null
+    and source.ip is not null
+    and destination.ip is not null
+    and network.transport in ("tcp", "udp")
 | eval Esql.time_window = DATE_TRUNC(1min, @timestamp)
 | where CIDR_MATCH(source.ip, "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 | eval sensitive_port = case(destination.port IN (21, 22, 23, 53, 88, 139, 389, 445, 3389, 5900, 5985, 5986, 9389), true, false)
@@ -273,9 +315,9 @@ Review and enhance detection capabilities: Evaluate the effectiveness of current
     Esql.count_distinct_sensitive_ports = COUNT_DISTINCT(destination.port) where sensitive_port == true,
     Esql.values_destination_ports = VALUES(destination.port),
     Esql.values_sensitive_ports = VALUES(destination.port) where sensitive_port == true
-  by Esql.time_window, destination.ip, source.ip
+  by Esql.time_window, destination.ip, source.ip, network.transport
 | where (Esql.count_distinct_destination_ports &gt;= 50 or Esql.count_distinct_sensitive_ports &gt;= 5)
-| keep source.ip, destination.ip, Esql.*</pre>
+| keep source.ip, destination.ip, network.transport, Esql.*</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">

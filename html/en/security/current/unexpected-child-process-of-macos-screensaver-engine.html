@@ -176,7 +176,7 @@ Platform: macOS
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 112</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 113</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -188,18 +188,74 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1850"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unexpected-child-process-of-macos-screensaver-engine.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1879"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unexpected-child-process-of-macos-screensaver-engine.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
+<div class="quoteblock">
+<blockquote>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
+</blockquote>
+</div>
+<p><span class="strong strong"><strong>Investigating Unexpected Child Process of macOS Screensaver Engine</strong></span></p>
+<p><code class="literal">ScreenSaverEngine</code> is the macOS process that starts and manages the active screensaver. Screensavers are packaged as <code class="literal">.saver</code> bundles; on macOS 10.15 and later, third-party modules are loaded by the <code class="literal">legacyScreenSaver</code> helper rather than directly inside <code class="literal">ScreenSaverEngine</code>. A malicious <code class="literal">.saver</code> bundle configured as the active screensaver can run arbitrary code every time the screensaver activates. This rule alerts on any process whose parent is <code class="literal">ScreenSaverEngine</code>, which is uncommon in normal operation.</p>
+<p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-Analyze the descendant processes of the ScreenSaverEngine process for malicious code and suspicious behavior such
-as a download of a payload from a server.
+Review the child process details (<code class="literal">process.executable</code>, <code class="literal">process.command_line</code>, <code class="literal">process.code_signature.*</code>) and determine whether it is a known component of a legitimate screensaver.
 </li>
 <li class="listitem">
-Review the installed and activated screensaver on the host. Triage the screensaver (.saver) file that was triggered to
-identify whether the file is malicious or not.
+Analyze the descendant processes of the child for suspicious behavior, such as script interpreters, downloads of payloads from remote servers, or network connections to unusual destinations.
+</li>
+<li class="listitem">
+Identify the active screensaver for the user by reviewing the <code class="literal">com.apple.screensaver.*.plist</code> files under <code class="literal">~/Library/Preferences/ByHost/</code> and the module path they reference. On macOS 14 and later, the screensaver selection may also be stored in <code class="literal">~/Library/Application Support/com.apple.wallpaper/Store/Index.plist</code>.
+</li>
+<li class="listitem">
+Review process activity of <code class="literal">legacyScreenSaver</code> on the same host around the alert time, as code from third-party screensaver modules runs under that process on recent macOS versions.
+</li>
+<li class="listitem">
+Locate the <code class="literal">.saver</code> bundle in use (commonly under <code class="literal">~/Library/Screen Savers/</code> or <code class="literal">/Library/Screen Savers/</code>) and check its code signature, creation time, origin, and contents.
+</li>
+<li class="listitem">
+Review recent file events for the creation of <code class="literal">.saver</code> bundles or modification of screensaver plist files, and identify the process that performed them.
+</li>
+<li class="listitem">
+Review other alerts for the same <code class="literal">host.id</code> and <code class="literal">user.name</code> to identify how the screensaver was delivered and whether other persistence mechanisms were added.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>False positive analysis</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Some third-party screensavers legitimately launch helper processes. Verify the screensaver is installed from a trusted source and that the child process is signed by the same vendor.
+</li>
+<li class="listitem">
+When the activity is confirmed benign, create an exception for the specific signed child executable rather than for all children of <code class="literal">ScreenSaverEngine</code>.
+</li>
+</ul>
+</div>
+<p><span class="strong strong"><strong>Response and remediation</strong></span></p>
+<div class="ulist itemizedlist">
+<ul class="itemizedlist">
+<li class="listitem">
+Isolate the affected host from the network if the child process or screensaver is determined to be malicious.
+</li>
+<li class="listitem">
+Terminate the malicious child process and its descendants.
+</li>
+<li class="listitem">
+Reset the active screensaver to a built-in Apple screensaver, and remove the malicious <code class="literal">.saver</code> bundle after preserving a copy for analysis.
+</li>
+<li class="listitem">
+Revert any unauthorized changes to the screensaver plist files.
+</li>
+<li class="listitem">
+Investigate how the malicious screensaver was delivered and remediate the initial access vector.
+</li>
+<li class="listitem">
+Escalate to the incident response team and search for the same <code class="literal">.saver</code> bundle or child process on other macOS hosts.
 </li>
 </ul>
 </div>
@@ -207,7 +263,7 @@ identify whether the file is malicious or not.
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_1343"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unexpected-child-process-of-macos-screensaver-engine.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_1361"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unexpected-child-process-of-macos-screensaver-engine.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
 <p>This rule requires data coming in from Elastic Defend.</p>
@@ -265,7 +321,7 @@ For more details on Elastic Defend refer to the <a href="/guide/en/security/curr
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1908"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unexpected-child-process-of-macos-screensaver-engine.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1937"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/unexpected-child-process-of-macos-screensaver-engine.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>

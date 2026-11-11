@@ -111,12 +111,9 @@ Rule Type: Event Correlation (EQL)
 <li class="listitem">
 Platform: macOS
 </li>
-<li class="listitem">
-Data Source: Jamf Protect Event Logs
-</li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 6</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 8</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -128,97 +125,91 @@ Thijs Xhaflaire
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1799"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-pbpaste-high-volume-activity.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_1828"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-pbpaste-high-volume-activity.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
-<p>To investigate <code class="literal">pbpaste</code> activity, focus on determining whether the binary is being used maliciously to collect clipboard data. Follow these steps:</p>
 <div class="quoteblock">
 <blockquote>
-<p><span class="strong strong"><strong>Note</strong></span>:
-This investigation guide uses the <a href="/guide/en/security/current/interactive-investigation-guides.html" class="ulink" target="_top">Investigate Markdown Plugin</a> introduced in Elastic Stack version 8.8.0. Older Elastic Stack versions will display unrendered Markdown in this guide.</p>
+<p><span class="strong strong"><strong>Disclaimer</strong></span>:
+This investigation guide was created using generative AI technology and has been reviewed to improve its accuracy and relevance. While every effort has been made to ensure its quality, we recommend validating the content and adapting it to suit your specific environment and operational needs.</p>
 </blockquote>
 </div>
-<div class="olist orderedlist">
-<ol class="orderedlist">
-<li class="listitem">
-<p><span class="strong strong"><strong>Identify Frequency and Pattern of Execution:</strong></span></p>
+<p><span class="strong strong"><strong>Investigating Suspicious pbpaste High Volume Activity</strong></span></p>
+<p><code class="literal">pbpaste</code> is a native macOS utility that writes the current contents of the general pasteboard (clipboard) to standard output. Adversaries and infostealers can call it repeatedly from a shell loop or script to harvest anything the user copies, such as passwords pasted from a password manager, tokens, or seed phrases. This rule alerts when <code class="literal">pbpaste</code> is executed at least five times on the same host within one minute, a pattern consistent with automated clipboard collection rather than interactive use.</p>
+<p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>What to check:</strong></span> Analyze the frequency and timing of <code class="literal">pbpaste</code> executions. Look for consistent intervals that might indicate a script or loop is running.
+Review the sequence of <code class="literal">pbpaste</code> executions and their timing to determine whether they occur at regular intervals, which suggests a loop or scheduled task.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Why:</strong></span> A high volume of regular <code class="literal">pbpaste</code> executions could suggest a bash loop designed to continuously capture clipboard data.
-</li>
-</ul>
-</div>
+Identify the parent and responsible process of the <code class="literal">pbpaste</code> executions to find the script, interpreter, or application driving the activity. For Elastic Defend data, review <code class="literal">process.parent.executable</code>, <code class="literal">process.parent.command_line</code>, and <code class="literal">process.group_leader.executable</code>; for Jamf Protect data, review <code class="literal">process.parent.executable</code> and <code class="literal">process.responsible.executable</code>.
 </li>
 <li class="listitem">
-<p><span class="strong strong"><strong>Examine Associated Scripts or Processes:</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-<span class="strong strong"><strong>What to check:</strong></span> Investigate the parent processes or scripts invoking <code class="literal">pbpaste</code>. Look for any cron jobs, bash scripts, or automated tasks linked to these executions.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Why:</strong></span> Understanding what is triggering <code class="literal">pbpaste</code> can help determine if this activity is legitimate or part of a malicious attempt to gather sensitive information.
+!{investigate{"label":"Show events having the same responsible process","providers":[[{"excluded":false,"field":"host.hostname","queryType":"phrase","value":"{{host.hostname}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.group_leader.entity_id}}","valueType":"string"}]]}}
 </li>
 <li class="listitem">
 !{investigate{"label":"Show events having the same parent process","providers":[[{"excluded":false,"field":"host.hostname","queryType":"phrase","value":"{{host.hostname}}","valueType":"string"},{"excluded":false,"field":"process.entity_id","queryType":"phrase","value":"{{process.parent.entity_id}}","valueType":"string"}]]}}
 </li>
 <li class="listitem">
-$investigate_2
+If the parent is a shell or script interpreter (<code class="literal">bash</code>, <code class="literal">zsh</code>, <code class="literal">sh</code>, <code class="literal">osascript</code>, <code class="literal">python</code>), recover the script content from the command line or from the script file on disk and look for redirection of output to files or network utilities.
+</li>
+<li class="listitem">
+Check whether the responsible process is signed and trusted (<code class="literal">process.code_signature.*</code>), and whether its executable lives in a user-writable or temporary location such as <code class="literal">/tmp</code>, <code class="literal">/Users/Shared</code>, or a hidden directory under the user&#8217;s home.
+</li>
+<li class="listitem">
+Look for file creation events from the same process tree that may store the collected clipboard data, and for outbound network connections (for example via <code class="literal">curl</code>, <code class="literal">nc</code>, or the interpreter itself) that may exfiltrate it.
+</li>
+<li class="listitem">
+Determine how the responsible process was established on the host, such as a recently created LaunchAgent, LaunchDaemon, login item, or a recently downloaded application.
+</li>
+<li class="listitem">
+Review other alerts for the same <code class="literal">host.id</code> and <code class="literal">user.name</code> around the alert time to identify related credential access, persistence, or exfiltration activity.
 </li>
 </ul>
 </div>
-</li>
-<li class="listitem">
-<p><span class="strong strong"><strong>Review Clipboard Contents:</strong></span></p>
+<p><span class="strong strong"><strong>False positive analysis</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>What to check:</strong></span> If possible, capture and review the clipboard contents during <code class="literal">pbpaste</code> executions to identify if sensitive data, such as user credentials, is being targeted.
+Clipboard managers, text expansion tools, and developer utilities may call <code class="literal">pbpaste</code> frequently. Verify the responsible application is a known, signed tool approved for use in the environment.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Why:</strong></span> Attackers may use <code class="literal">pbpaste</code> to harvest valuable information from the clipboard. Identifying the type of data being collected can indicate the severity of the threat.
+Users or administrators running shell scripts or automation (for example Shortcuts, Automator, or terminal workflows) can produce bursts of <code class="literal">pbpaste</code> executions. Confirm the script and its author with the user.
+</li>
+<li class="listitem">
+When the activity is confirmed benign, create an exception scoped to the specific responsible process executable or parent command line rather than to <code class="literal">pbpaste</code> itself.
 </li>
 </ul>
 </div>
-</li>
-<li class="listitem">
-<p><span class="strong strong"><strong>Check for Data Exfiltration:</strong></span></p>
+<p><span class="strong strong"><strong>Response and remediation</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
 <li class="listitem">
-<span class="strong strong"><strong>What to check:</strong></span> Investigate any output files or network activity associated with <code class="literal">pbpaste</code> usage. Look for signs that the collected data is being saved to a file, transmitted over the network, or sent to an external location.
+Isolate the affected host from the network to prevent further collection and exfiltration of clipboard data.
 </li>
 <li class="listitem">
-<span class="strong strong"><strong>Why:</strong></span> If data is being stored or transmitted, it may be part of an exfiltration attempt. Identifying this can help prevent sensitive information from being leaked.
+Terminate the process tree responsible for the <code class="literal">pbpaste</code> executions and remove the associated script or binary.
+</li>
+<li class="listitem">
+Remove any persistence mechanism that launches the collection script, such as LaunchAgents, LaunchDaemons, cron jobs, or login items.
+</li>
+<li class="listitem">
+Assume that any credentials, tokens, or secrets copied to the clipboard during the activity window are compromised: rotate them and revoke active sessions.
+</li>
+<li class="listitem">
+Review the host for additional infostealer behavior, such as access to browser credential stores or the user&#8217;s keychain.
+</li>
+<li class="listitem">
+Escalate to the incident response team if exfiltration is confirmed or if other hosts show the same responsible process or script.
 </li>
 </ul>
 </div>
-</li>
-<li class="listitem">
-<p><span class="strong strong"><strong>Correlate with User Activity:</strong></span></p>
-<div class="ulist itemizedlist">
-<ul class="itemizedlist">
-<li class="listitem">
-<span class="strong strong"><strong>What to check:</strong></span> Compare the <code class="literal">pbpaste</code> activity with the user’s normal behavior and system usage patterns.
-</li>
-<li class="listitem">
-<span class="strong strong"><strong>Why:</strong></span> If the <code class="literal">pbpaste</code> activity occurs during times when the user is not active, or if the user denies initiating such tasks, it could indicate unauthorized access or a compromised account.
-</li>
-</ul>
-</div>
-</li>
-</ol>
-</div>
-<p>By thoroughly investigating these aspects of <code class="literal">pbpaste</code> activity, you can determine whether this is part of a legitimate process or a potential security threat that needs to be addressed.</p>
 </div>
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_setup_1300"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-pbpaste-high-volume-activity.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_setup_1318"></a>Setup</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-pbpaste-high-volume-activity.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Setup</strong></span></p>
 <p>This rule requires data coming in from Jamf Protect.</p>
@@ -259,7 +250,7 @@ Click "Save and Continue".
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_1852"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-pbpaste-high-volume-activity.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_1881"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/suspicious-pbpaste-high-volume-activity.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
