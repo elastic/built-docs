@@ -46,7 +46,7 @@
 <div class="titlepage"><div><div>
 <div class="position-relative"><h2 class="title"><a id="entra-id-unusual-cloud-device-registration"></a>Entra ID Unusual Cloud Device Registration</h2><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/entra-id-unusual-cloud-device-registration.asciidoc">edit</a></div>
 </div></div></div>
-<p>Detects a sequence of events in Microsoft Entra ID indicative of suspicious cloud-based device registration via automated tooling like ROADtools or similar frameworks. This behavior involves adding a device via the Device Registration Service, followed by the assignment of registered users and owners — a pattern consistent with techniques used to establish persistence or acquire a Primary Refresh Token (PRT). ROADtools and similar tooling leave distinct telemetry signatures such as the <code class="literal">Microsoft.OData.Client</code> user agent. These sequences are uncommon in typical user behavior and may reflect abuse of device trust for session hijacking or silent token replay.</p>
+<p>Detects a sequence of Microsoft Entra ID audit events indicative of cloud device registration using the default device profile of ROADtools (roadtx). The sequence begins with an "Add device" operation from the Device Registration Service where the user agent is "Microsoft.OData.Client/*", the recorded cloud device OS build is a ROADtools default ("10.0.19041.928" or "10.0.19045.2006") and the display name follows the default "DESKTOP-" pattern, followed within the same correlation ID by "Add registered users to device" or "Add registered owner to device", which completes the registration and binds the device to a user. This flow is used to establish persistence or acquire a Primary Refresh Token (PRT). The OS build and naming are tool defaults, so this is a high-fidelity but evadable indicator.</p>
 <p><span class="strong strong"><strong>Rule type</strong></span>: eql</p>
 <p><span class="strong strong"><strong>Rule indices</strong></span>:</p>
 <div class="ulist itemizedlist">
@@ -119,7 +119,7 @@ Platform: Entra ID
 </li>
 </ul>
 </div>
-<p><span class="strong strong"><strong>Version</strong></span>: 6</p>
+<p><span class="strong strong"><strong>Version</strong></span>: 9</p>
 <p><span class="strong strong"><strong>Rule authors</strong></span>:</p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -131,25 +131,22 @@ Elastic
 <p><span class="strong strong"><strong>Rule license</strong></span>: Elastic License v2</p>
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_investigation_guide_594"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/entra-id-unusual-cloud-device-registration.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_investigation_guide_597"></a>Investigation guide</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/entra-id-unusual-cloud-device-registration.asciidoc">edit</a></div>
 </div></div></div>
 <p><span class="strong strong"><strong>Triage and analysis</strong></span></p>
 <p><span class="strong strong"><strong>Investigating Entra ID Unusual Cloud Device Registration</strong></span></p>
-<p>This rule detects a sequence of Microsoft Entra ID audit events consistent with cloud device registration abuse via ROADtools or similar automation frameworks. The activity includes three correlated events:</p>
+<p>This rule detects a sequence of Microsoft Entra ID audit events, correlated by <code class="literal">azure.correlation_id</code>, consistent with a device registered using the ROADtools (roadtx) default profile:</p>
 <div class="olist orderedlist">
 <ol class="orderedlist">
 <li class="listitem">
-Add device operation from the Device Registration Service using suspicious user-agents (<code class="literal">Dsreg/*</code>, <code class="literal">DeviceRegistrationClient</code>, or <code class="literal">Microsoft.OData.Client/*</code>).
+An <code class="literal">Add device</code> operation from the Device Registration Service where the user agent is <code class="literal">Microsoft.OData.Client/*</code>, <code class="literal">CloudDeviceOSVersion</code> is <code class="literal">10.0.19041.928</code> or <code class="literal">10.0.19045.2006</code> (ROADtools default builds) and <code class="literal">CloudDisplayName</code> matches <code class="literal">DESKTOP-*</code>.
 </li>
 <li class="listitem">
-Addition of a registered user with an <code class="literal">enterprise registration</code> URN.
-</li>
-<li class="listitem">
-Assignment of a registered owner to the device.
+An <code class="literal">Add registered users to device</code> or <code class="literal">Add registered owner to device</code> operation, which binds the new device to a user. Either one satisfies the sequence, as their order is not stable.
 </li>
 </ol>
 </div>
-<p>This pattern has been observed in OAuth phishing and PRT abuse campaigns where adversaries silently register a cloud device to obtain persistent, trusted access.</p>
+<p>Rogue device registration is typically a precursor to PRT acquisition, MFA/Conditional Access bypass, and persistent token-based access.</p>
 <p><span class="strong strong"><strong>Possible investigation steps</strong></span></p>
 <div class="ulist itemizedlist">
 <ul class="itemizedlist">
@@ -160,22 +157,10 @@ Identify the user principal associated with the device registration.
 Review the <code class="literal">azure.auditlogs.identity</code> field to confirm the Device Registration Service initiated the request.
 </li>
 <li class="listitem">
-Check the user-agent in <code class="literal">azure.auditlogs.properties.additional_details.value</code>. Known attack tooling signatures include:
+Check the user-agent in <code class="literal">azure.auditlogs.properties.additional_details.value</code>. This rule requires <code class="literal">Microsoft.OData.Client/*</code> (the roadtx Graph/OData client); native Windows joins present <code class="literal">Dsreg/*</code> instead.
 </li>
 <li class="listitem">
-<code class="literal">Dsreg/10.0 (Windows X.X.X)</code> - ROADtools Windows device registration
-</li>
-<li class="listitem">
-<code class="literal">DeviceRegistrationClient</code> - ROADtools MacOS/Android device registration
-</li>
-<li class="listitem">
-<code class="literal">Microsoft.OData.Client/*</code> - .NET-based tools or Graph SDK
-</li>
-<li class="listitem">
-Examine the OS version in the modified properties to identify potentially suspicious or outdated versions.
-</li>
-<li class="listitem">
-Verify the URN in the new value field (<code class="literal">urn:ms-drs:enterpriseregistration.windows.net</code>) is not being misused.
+Confirm <code class="literal">CloudDeviceOSVersion</code> (<code class="literal">modified_properties.3</code>) and <code class="literal">CloudDisplayName</code> (<code class="literal">modified_properties.4</code>) on the <code class="literal">Add device</code> event, and compare the device name to your naming convention.
 </li>
 <li class="listitem">
 Use <code class="literal">azure.correlation_id</code> to pivot across all three steps of the registration flow.
@@ -207,6 +192,9 @@ Some MDM, autopilot provisioning flows, or third-party device management tools m
 Investigate whether the device name, OS version, and registration details align with normal IT workflows.
 </li>
 <li class="listitem">
+Authorized red team activity using ROADtools will match; scope exceptions to the user, source IP, or device name.
+</li>
+<li class="listitem">
 Check if the user-agent corresponds to legitimate automation or tooling used by your organization.
 </li>
 </ul>
@@ -235,26 +223,22 @@ Tighten conditional access policies to restrict device registration and enforce 
 
 <div class="section">
 <div class="titlepage"><div><div>
-<div class="position-relative"><h3 class="title"><a id="_rule_query_613"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/entra-id-unusual-cloud-device-registration.asciidoc">edit</a></div>
+<div class="position-relative"><h3 class="title"><a id="_rule_query_616"></a>Rule query</h3><a class="edit_me" rel="nofollow" title="Edit this page on GitHub" href="https://github.com/elastic/security-docs/edit/8.19/docs/detections/prebuilt-rules/rule-details/entra-id-unusual-cloud-device-registration.asciidoc">edit</a></div>
 </div></div></div>
 <div class="pre_wrapper lang-js">
 <div class="console_code_copy" title="Copy to clipboard"></div>
-<pre class="programlisting prettyprint lang-js">sequence by azure.correlation_id with maxspan=5m
+<pre class="programlisting prettyprint lang-js">sequence by azure.correlation_id with maxspan=30s
 [any where data_stream.dataset == "azure.auditlogs" and
     azure.auditlogs.identity == "Device Registration Service" and
-    azure.auditlogs.operation_name == "Add device" and
+    event.action == "Add device" and
+    azure.auditlogs.properties.additional_details.value like "Microsoft.OData.Client/*" and
     (
-        azure.auditlogs.properties.additional_details.value like "Microsoft.OData.Client/*" or
-        azure.auditlogs.properties.additional_details.value like "Dsreg/*" or
-        azure.auditlogs.properties.additional_details.value == "DeviceRegistrationClient"
+        `azure.auditlogs.properties.target_resources.0.modified_properties.3.new_value` like "*10.0.19041.928*" or
+        `azure.auditlogs.properties.target_resources.0.modified_properties.3.new_value` like "*10.0.19045.2006*"
     ) and
-    `azure.auditlogs.properties.target_resources.0.modified_properties.1.display_name` == "CloudAccountEnabled" and
-    `azure.auditlogs.properties.target_resources.0.modified_properties.1.new_value` == "[true]"]
+    `azure.auditlogs.properties.target_resources.0.modified_properties.4.new_value` like "*DESKTOP-*"]
 [any where data_stream.dataset == "azure.auditlogs" and
-    azure.auditlogs.operation_name == "Add registered users to device" and
-    `azure.auditlogs.properties.target_resources.0.modified_properties.2.new_value` like "*urn:ms-drs:enterpriseregistration.windows.net*"]
-[any where data_stream.dataset == "azure.auditlogs" and
-    azure.auditlogs.operation_name == "Add registered owner to device"]</pre>
+    event.action in ("Add registered users to device", "Add registered owner to device")]</pre>
 </div>
 <p><span class="strong strong"><strong>Framework</strong></span>: MITRE ATT&amp;CK<sup>TM</sup></p>
 <div class="ulist itemizedlist">
