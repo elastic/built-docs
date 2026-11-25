@@ -1,0 +1,91 @@
+name: Deploy /guide to S3
+
+# Mirrors html/ to s3://elastic-guide-website-prod/guide/ after each docs build.
+# The bucket holds the tree at the SHA in _meta/deployed-sha, written last.
+# A missing or unfetchable SHA (or `full: true`) triggers a full sync, which is the initial upload.
+
+on:
+  push:
+    branches: [master]
+    paths: ["html/**"]
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Full sync (upload everything, delete extras)
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-guide
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  AWS_REGION: us-east-1
+  GUIDE_BUCKET: elastic-guide-website-prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment: guide-prod
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            html
+            .github/scripts
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885 # v6.1.1
+        with:
+          role-to-assume: arn:aws:iam::197730964718:role/elastic-guide-website-prod-deployer
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Test
+        run: |
+          python -m pip install --quiet boto3==1.40.*
+          python -m unittest discover -s .github/scripts -p 'test_*.py'
+
+      - name: Deploy
+        env:
+          FULL: ${{ inputs.full }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          deployed=$(aws s3 cp "s3://${GUIDE_BUCKET}/_meta/deployed-sha" - 2>/dev/null || true)
+
+          # A full sync is a diff from the empty tree, so one code path serves both modes.
+          base=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+          flags=(--full)
+          if [[ "${FULL:-false}" != "true" && "$deployed" =~ ^[0-9a-f]{40}$ ]]; then
+            if git fetch --quiet --depth=1 --filter=blob:none origin "$deployed"; then
+              base=$deployed
+              flags=()
+            else
+              echo "::warning::Deployed SHA $deployed is not fetchable, falling back to a full sync"
+            fi
+          fi
+
+          git diff -z --name-status --no-renames "$base" "$sha" -- html/ > diff.bin
+          result=$(python .github/scripts/deploy_guide.py --diff-file diff.bin "${flags[@]}")
+
+          # Last, so a run killed before this point re-diffs from the old SHA.
+          printf '%s' "$sha" | aws s3 cp - "s3://${GUIDE_BUCKET}/_meta/deployed-sha" --content-type text/plain
+
+          {
+            echo "### /guide deploy"
+            echo "- Mode: $([[ ${#flags[@]} -gt 0 ]] && echo full || echo incremental)"
+            echo "- Commit: \`$sha\`"
+            echo "- Result: \`$result\`"
+          } >> "$GITHUB_STEP_SUMMARY"
