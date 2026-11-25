@@ -10,6 +10,9 @@ import argparse
 import json
 import mimetypes
 import os
+import sys
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 PREFIX = "guide/"
@@ -30,6 +33,11 @@ CONTENT_TYPES = {
     ".js": "application/javascript; charset=utf-8",
     ".xml": "text/xml; charset=utf-8",
 }
+
+
+def log(msg):
+    # stderr, because the workflow captures stdout for the job summary.
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", file=sys.stderr, flush=True)
 
 
 def key(path):
@@ -82,20 +90,36 @@ def main():
 
     with open(args.diff_file, "rb") as f:
         uploads, deletes = plan_diff([t.decode("utf-8") for t in f.read().split(b"\0") if t])
+    log(f"mode={'full' if args.full else 'incremental'}: {len(uploads)} to upload, {len(deletes)} to delete")
     if args.full:
+        t0 = time.monotonic()
         pages = s3.get_paginator("list_objects_v2").paginate(Bucket=args.bucket, Prefix=PREFIX)
-        deletes = extras(uploads, (o["Key"] for page in pages for o in page.get("Contents", [])))
+        remote = [o["Key"] for page in pages for o in page.get("Contents", [])]
+        deletes = extras(uploads, remote)
+        log(f"listed {len(remote)} keys in the bucket in {time.monotonic() - t0:.0f}s, {len(deletes)} to delete")
+
+    lock = threading.Lock()
+    done = {"files": 0, "bytes": 0}
+    start = time.monotonic()
 
     def put(path):
         with open(path, "rb") as f:
             size = os.fstat(f.fileno()).st_size
             s3.put_object(Bucket=args.bucket, Key=key(path), Body=f, **headers(path))
+        with lock:
+            done["files"] += 1
+            done["bytes"] += size
+            if done["files"] % 10_000 == 0:
+                log(f"uploaded {done['files']}/{len(uploads)} files, {done['bytes'] / 2**30:.1f} GiB, "
+                    f"{done['files'] / (time.monotonic() - start):.0f} files/s")
         return size
 
     with ThreadPoolExecutor(max_workers=64) as pool:
         total = sum(pool.map(put, uploads))  # raises on the first failed PUT
+    log(f"upload finished: {len(uploads)} files, {total / 2**30:.1f} GiB in {time.monotonic() - start:.0f}s")
 
     keys = [key(d) for d in deletes]
+    log(f"deleting {len(keys)} keys")
     for i in range(0, len(keys), 1000):
         resp = s3.delete_objects(Bucket=args.bucket, Delete={"Objects": [{"Key": k} for k in keys[i:i + 1000]], "Quiet": True})
         if resp.get("Errors"):
